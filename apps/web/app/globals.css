@@ -201,6 +201,43 @@ button.btnDanger:disabled {
   cursor: not-allowed;
 }
 
+button.btn {
+  padding: 0.52rem 0.9rem;
+  background: var(--accent);
+  color: #fff;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.84rem;
+  line-height: 1.1;
+  transition: background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+
+button.btn:hover:not(:disabled) {
+  background: #2563eb;
+}
+
+button.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+button.btn.btnSecondary {
+  background: transparent;
+  color: var(--foreground);
+  border-color: var(--border);
+}
+
+button.btn.btnSecondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+button.btn.btnSm {
+  padding: 0.35rem 0.65rem;
+  font-size: 0.76rem;
+}
+
 .msg {
   padding: 0.75rem;
   border-radius: 6px;

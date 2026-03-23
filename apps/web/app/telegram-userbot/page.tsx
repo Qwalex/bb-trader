@@ -71,6 +71,8 @@ export default function TelegramUserbotPage() {
   const [chats, setChats] = useState<UserbotChat[]>([]);
   const [metrics, setMetrics] = useState<TodayMetrics | null>(null);
   const [search, setSearch] = useState('');
+  const [onlySignals, setOnlySignals] = useState(true);
+  const [groupByChat, setGroupByChat] = useState(true);
   const [traceModal, setTraceModal] = useState<TraceModalState | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
@@ -96,6 +98,29 @@ export default function TelegramUserbotPage() {
       );
     });
   }, [chats, normalizedSearch]);
+  const chatTitleById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of chats) {
+      m.set(c.chatId, c.title);
+    }
+    return m;
+  }, [chats]);
+  const filteredRecent = useMemo(() => {
+    const rows = metrics?.recent ?? [];
+    const byType = onlySignals
+      ? rows.filter((r) => r.classification === 'signal')
+      : rows;
+    if (!groupByChat) {
+      return byType;
+    }
+    return [...byType].sort((a, b) => {
+      const c = a.chatId.localeCompare(b.chatId);
+      if (c !== 0) return c;
+      return (
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+    });
+  }, [metrics?.recent, onlySignals, groupByChat]);
 
   async function loadAll() {
     const [s, c, m] = await Promise.all([
@@ -235,6 +260,7 @@ export default function TelegramUserbotPage() {
 
       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
         <button
+          className="btn"
           type="button"
           onClick={() =>
             void runAction('connect', async () => {
@@ -254,6 +280,7 @@ export default function TelegramUserbotPage() {
           {busy === 'connect' ? 'Подключение…' : 'Подключить по сохраненной сессии'}
         </button>
         <button
+          className="btn"
           type="button"
           onClick={() =>
             void runAction('qr', async () => {
@@ -273,6 +300,7 @@ export default function TelegramUserbotPage() {
           {busy === 'qr' ? 'Запуск…' : 'Войти по QR'}
         </button>
         <button
+          className="btn btnSecondary"
           type="button"
           onClick={() =>
             void runAction('disconnect', async () => {
@@ -286,6 +314,7 @@ export default function TelegramUserbotPage() {
           Отключить
         </button>
         <button
+          className="btn btnSecondary"
           type="button"
           onClick={() =>
             void runAction('scan', async () => {
@@ -315,6 +344,7 @@ export default function TelegramUserbotPage() {
           {busy === 'scan' ? 'Сканирование…' : 'Сканировать сообщения за сегодня'}
         </button>
         <button
+          className="btn btnSecondary"
           type="button"
           onClick={() =>
             void runAction('sync', async () => {
@@ -357,6 +387,24 @@ export default function TelegramUserbotPage() {
 
       <div className="card" style={{ marginBottom: '1rem' }}>
         <h3 style={{ marginBottom: '0.5rem' }}>Последние сообщения</h3>
+        <div className="filters" style={{ marginBottom: '0.75rem' }}>
+          <label style={{ flexDirection: 'row', alignItems: 'center', gap: '0.45rem' }}>
+            <input
+              type="checkbox"
+              checked={onlySignals}
+              onChange={(e) => setOnlySignals(e.target.checked)}
+            />
+            Показывать только сигналы
+          </label>
+          <label style={{ flexDirection: 'row', alignItems: 'center', gap: '0.45rem' }}>
+            <input
+              type="checkbox"
+              checked={groupByChat}
+              onChange={(e) => setGroupByChat(e.target.checked)}
+            />
+            Разбивать по группам
+          </label>
+        </div>
         <div className="tableWrap" style={{ maxHeight: 500, overflowY: 'auto' }}>
           <table>
             <thead>
@@ -371,21 +419,35 @@ export default function TelegramUserbotPage() {
               </tr>
             </thead>
             <tbody>
-              {(metrics?.recent?.length ?? 0) === 0 && (
+              {filteredRecent.length === 0 && (
                 <tr>
                   <td colSpan={7} style={{ color: 'var(--muted)' }}>
-                    За сегодня пока нет обработанных сообщений.
+                    Сообщения по текущему фильтру не найдены.
                   </td>
                 </tr>
               )}
-              {(metrics?.recent ?? []).map((row, idx, arr) => {
+              {filteredRecent.map((row, idx, arr) => {
                 const prev = idx > 0 ? arr[idx - 1] : null;
-                const showTodayDivider = !prev && row.isToday;
+                const showChatDivider =
+                  groupByChat && (!prev || prev.chatId !== row.chatId);
+                const showTodayDivider = (!prev || showChatDivider) && row.isToday;
                 const showOldDivider =
-                  (prev?.isToday ?? false) && row.isToday === false;
+                  !showChatDivider &&
+                  (prev?.isToday ?? false) &&
+                  row.isToday === false;
 
                 return (
                   <Fragment key={row.id}>
+                    {showChatDivider && (
+                      <tr>
+                        <td colSpan={7} style={{ background: 'var(--card)' }}>
+                          <strong>{chatTitleById.get(row.chatId) ?? row.chatId}</strong>
+                          <span style={{ color: 'var(--muted)', marginLeft: '0.5rem' }}>
+                            {row.chatId}
+                          </span>
+                        </td>
+                      </tr>
+                    )}
                     {(showTodayDivider || showOldDivider) && (
                       <tr>
                         <td colSpan={7} style={{ background: 'var(--card)' }}>
@@ -435,6 +497,7 @@ export default function TelegramUserbotPage() {
                       </td>
                       <td>
                         <button
+                          className="btn btnSecondary btnSm"
                           type="button"
                           onClick={() =>
                             setTraceModal({
@@ -450,6 +513,7 @@ export default function TelegramUserbotPage() {
                           Trace
                         </button>
                         <button
+                          className="btn btnSm"
                           type="button"
                           onClick={() =>
                             void runAction(`reread-${row.id}`, async () => {
@@ -525,7 +589,11 @@ export default function TelegramUserbotPage() {
               <h3 style={{ margin: 0 }}>
                 OpenRouter trace: {traceModal.chatId} / {traceModal.messageId}
               </h3>
-              <button type="button" onClick={() => setTraceModal(null)}>
+              <button
+                className="btn btnSecondary btnSm"
+                type="button"
+                onClick={() => setTraceModal(null)}
+              >
                 Закрыть
               </button>
             </div>
@@ -613,7 +681,7 @@ export default function TelegramUserbotPage() {
         </p>
       )}
 
-      <div className="tableWrap">
+      <div className="tableWrap" style={{ maxHeight: 500, overflowY: 'auto' }}>
         <table>
           <thead>
             <tr>
