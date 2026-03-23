@@ -133,6 +133,127 @@ export class TranscriptService {
     private readonly appLog: AppLogService,
   ) {}
 
+  async classifyTradingMessage(text: string): Promise<{
+    kind: 'signal' | 'result' | 'other';
+    reason?: string;
+    debug?: {
+      model?: string;
+      request: string;
+      response: string;
+      usedFallback: boolean;
+    };
+  }> {
+    const classifierPrompt = `You classify trading-related Telegram messages.
+Return ONLY strict JSON:
+{
+  "kind": "signal" | "result" | "other",
+  "reason": "short reason in Russian"
+}
+Rules:
+- signal: contains actionable trade setup (pair, direction, entry/SL/TP/leverage or equivalent).
+- result: reports past outcome/performance/closed trade/TP/SL hit without actionable new setup.
+- other: anything else.
+Be conservative: if unsure, return "other".`;
+    const requestPayload = {
+      operation: 'classifyTradingMessage',
+      text,
+      prompt: classifierPrompt,
+    };
+
+    const apiKey = await this.settings.get('OPENROUTER_API_KEY');
+    if (!apiKey) {
+      return {
+        kind: this.classifyHeuristic(text),
+        reason: 'OPENROUTER_API_KEY is missing, fallback to heuristic',
+        debug: {
+          request: JSON.stringify(requestPayload),
+          response: 'OPENROUTER_API_KEY is missing',
+          usedFallback: true,
+        },
+      };
+    }
+    const model =
+      (await this.resolveModelKeyWithDefault('OPENROUTER_MODEL_TEXT')) ??
+      (await this.settings.get('OPENROUTER_MODEL_DEFAULT'));
+    if (!model) {
+      return {
+        kind: this.classifyHeuristic(text),
+        reason: 'OpenRouter model is missing, fallback to heuristic',
+        debug: {
+          request: JSON.stringify(requestPayload),
+          response: 'OPENROUTER model is missing',
+          usedFallback: true,
+        },
+      };
+    }
+
+    try {
+      const messages = [
+        { role: 'system', content: classifierPrompt },
+        { role: 'user', content: text },
+      ];
+      const content = await this.callOpenRouter(
+        apiKey,
+        model,
+        messages,
+        { operation: 'classifyTradingMessage', kind: 'text' },
+      );
+      const responseRaw =
+        typeof content === 'string' ? content : JSON.stringify(content);
+      const parsed = this.tryParseModelContent(content);
+      if (!parsed.ok) {
+        const reason =
+          parsed.result.ok === false
+            ? parsed.result.error
+            : 'Classifier parse returned non-error result';
+        return {
+          kind: this.classifyHeuristic(text),
+          reason,
+          debug: {
+            model,
+            request: JSON.stringify({ ...requestPayload, model, messages }),
+            response: responseRaw,
+            usedFallback: true,
+          },
+        };
+      }
+      const root = parsed.value as { kind?: string; reason?: string };
+      if (root.kind === 'signal' || root.kind === 'result' || root.kind === 'other') {
+        return {
+          kind: root.kind,
+          reason: root.reason,
+          debug: {
+            model,
+            request: JSON.stringify({ ...requestPayload, model, messages }),
+            response: responseRaw,
+            usedFallback: false,
+          },
+        };
+      }
+      return {
+        kind: this.classifyHeuristic(text),
+        reason: 'Classifier returned unknown kind',
+        debug: {
+          model,
+          request: JSON.stringify({ ...requestPayload, model, messages }),
+          response: responseRaw,
+          usedFallback: true,
+        },
+      };
+    } catch (e) {
+      return {
+        kind: this.classifyHeuristic(text),
+        reason: this.formatOpenRouterError(e),
+        debug: {
+          model,
+          request: JSON.stringify(requestPayload),
+          response: this.formatOpenRouterError(e),
+          usedFallback: true,
+        },
+      };
+    }
+  }
+
   /**
    * Уточнение сигнала по комментарию пользователя (контекст: текущий JSON + правка).
    */
@@ -795,5 +916,20 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     await new Promise<void>((resolve) => {
       setTimeout(() => resolve(), ms);
     });
+  }
+
+  private classifyHeuristic(text: string): 'signal' | 'result' | 'other' {
+    const t = text.toLowerCase();
+    const signalish =
+      /\b(entry|entries|вход|входы|sl|stop loss|tp|take profit|long|short|leverage|плечо)\b/.test(
+        t,
+      ) && /\b(usdt|usd|btc|eth|xrp|sol)\b/.test(t);
+    if (signalish) {
+      return 'signal';
+    }
+    if (/\b(result|результат|прибыль|убыток|закрыт|tp hit|sl hit|closed)\b/.test(t)) {
+      return 'result';
+    }
+    return 'other';
   }
 }

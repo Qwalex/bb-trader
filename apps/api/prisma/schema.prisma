@@ -63,3 +63,37 @@ model AppLog {
   @@index([createdAt])
   @@index([category, createdAt])
 }
+
+model TgUserbotChat {
+  id        String   @id @default(cuid())
+  chatId    String   @unique
+  title     String
+  username  String?
+  enabled   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model TgUserbotIngest {
+  id             String   @id @default(cuid())
+  chatId         String
+  messageId      String
+  dedupMessageKey String  @unique
+  text           String?
+  aiRequest      String?
+  aiResponse     String?
+  classification String // signal | result | other
+  signalHash     String?
+  status         String // ignored | duplicate_message | duplicate_signal | placed | parse_incomplete | parse_error | blocked_by_setting | place_error
+  error          String?
+  createdAt      DateTime @default(now())
+
+  @@index([chatId, messageId])
+  @@index([signalHash])
+  @@index([createdAt])
+}
+
+model TgUserbotSignalHash {
+  hash      String   @id
+  createdAt DateTime @default(now())
+}

@@ -9,5 +9,6 @@ import { TelegramService } from './telegram.service';
 @Module({
   imports: [SettingsModule, TranscriptModule, BybitModule, AppLogModule],
   providers: [TelegramService],
+  exports: [TelegramService],
 })
 export class TelegramModule {}

@@ -5,6 +5,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { Context, Markup, Telegraf } from 'telegraf';
+import { randomUUID } from 'node:crypto';
 
 import type { SignalDto } from '@repo/shared';
 
@@ -30,6 +31,23 @@ type DraftSession = {
   partial?: Partial<SignalDto>;
 };
 
+type ExternalConfirmationResult = {
+  decision: 'confirmed' | 'rejected';
+  ok: boolean;
+  error?: string;
+  signalId?: string;
+  bybitOrderIds?: string[];
+  actorUserId?: number;
+};
+
+type ExternalConfirmationRequest = {
+  id: string;
+  signal: SignalDto;
+  rawMessage?: string;
+  createdAt: number;
+  onResult?: (result: ExternalConfirmationResult) => Promise<void> | void;
+};
+
 @Injectable()
 export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TelegramService.name);
@@ -38,6 +56,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private readonly drafts = new Map<number, DraftSession>();
   /** Переопределение «канал/приложение» для сигналов (важнее настройки SIGNAL_SOURCE). */
   private readonly sourceOverrideByUser = new Map<number, string>();
+  /** Подтверждения сигналов, пришедших из userbot (группы). */
+  private readonly externalConfirmations = new Map<string, ExternalConfirmationRequest>();
 
   constructor(
     private readonly settings: SettingsService,
@@ -183,14 +203,21 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async isAllowed(userId: number): Promise<boolean> {
+    const ids = await this.getWhitelistUserIds();
+    return ids.includes(userId);
+  }
+
+  private async getWhitelistUserIds(): Promise<number[]> {
     const raw =
       (await this.settings.get('TELEGRAM_WHITELIST')) ??
       process.env.TELEGRAM_WHITELIST;
     if (!raw?.trim()) {
-      return false;
+      return [];
     }
-    const ids = raw.split(/[,\s]+/).map((s) => parseInt(s.trim(), 10));
-    return ids.includes(userId);
+    return raw
+      .split(/[,\s]+/)
+      .map((s) => parseInt(s.trim(), 10))
+      .filter((n) => Number.isFinite(n));
   }
 
   private formatSignalTable(s: SignalDto): string {
@@ -251,6 +278,82 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     return Markup.inlineKeyboard([
       [Markup.button.callback('❌ Отмена', 'sig_cancel')],
     ]);
+  }
+
+  private externalConfirmKeyboard(requestId: string) {
+    return Markup.inlineKeyboard([
+      [
+        Markup.button.callback('✅ Подтвердить', `ub_confirm:${requestId}`),
+        Markup.button.callback('❌ Отклонить', `ub_reject:${requestId}`),
+      ],
+    ]);
+  }
+
+  private formatExternalSignalTable(s: SignalDto): string {
+    const src = s.source ? `\nИсточник: ${s.source}` : '';
+    const sizing =
+      s.orderUsd > 0
+        ? `Сумма: $${s.orderUsd} USDT (номинал)`
+        : s.capitalPercent > 0
+          ? `Капитал: ${s.capitalPercent}% от депозита`
+          : `Сумма: $10 USDT (по умолчанию)`;
+    return (
+      `Новый сигнал из Telegram Userbot\n` +
+      `Пара: ${s.pair}\n` +
+      `Сторона: ${s.direction.toUpperCase()}\n` +
+      `Входы: ${s.entries.join(', ')}\n` +
+      `SL: ${s.stopLoss}\n` +
+      `TP: ${s.takeProfits.join(', ')}\n` +
+      `Плечо: ${s.leverage}x\n` +
+      `${sizing}${src}\n\n` +
+      `Подтвердите или отклоните сигнал.`
+    );
+  }
+
+  async requestExternalSignalConfirmation(params: {
+    signal: SignalDto;
+    rawMessage?: string;
+    onResult?: (result: ExternalConfirmationResult) => Promise<void> | void;
+  }): Promise<{ ok: boolean; requestId?: string; deliveredTo: number; error?: string }> {
+    if (!this.bot) {
+      return { ok: false, deliveredTo: 0, error: 'Telegram bot не запущен' };
+    }
+    const ids = await this.getWhitelistUserIds();
+    if (ids.length === 0) {
+      return { ok: false, deliveredTo: 0, error: 'TELEGRAM_WHITELIST пуст' };
+    }
+    const requestId = randomUUID();
+    this.externalConfirmations.set(requestId, {
+      id: requestId,
+      signal: params.signal,
+      rawMessage: params.rawMessage,
+      createdAt: Date.now(),
+      onResult: params.onResult,
+    });
+
+    let deliveredTo = 0;
+    const msg = this.formatExternalSignalTable(params.signal);
+    for (const uid of ids) {
+      try {
+        await this.bot.telegram.sendMessage(
+          uid,
+          msg,
+          this.externalConfirmKeyboard(requestId),
+        );
+        deliveredTo += 1;
+      } catch (e) {
+        this.logger.warn(`requestExternalSignalConfirmation -> ${uid}: ${formatError(e)}`);
+      }
+    }
+    if (deliveredTo === 0) {
+      this.externalConfirmations.delete(requestId);
+      return {
+        ok: false,
+        deliveredTo: 0,
+        error: 'Не удалось доставить подтверждение ни одному пользователю',
+      };
+    }
+    return { ok: true, requestId, deliveredTo };
   }
 
   private registerHandlers(): void {
@@ -342,6 +445,67 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       this.drafts.delete(uid);
       await ctx.answerCbQuery('Черновик отменён');
       await ctx.reply('Черновик сигнала отменён.');
+    });
+
+    this.bot.action(/^ub_confirm:(.+)$/i, async (ctx) => {
+      const uid = ctx.from?.id;
+      const requestId = ctx.match?.[1];
+      if (!uid || !requestId) {
+        await ctx.answerCbQuery();
+        return;
+      }
+      const req = this.externalConfirmations.get(requestId);
+      if (!req) {
+        await ctx.answerCbQuery('Заявка не найдена или уже обработана', {
+          show_alert: true,
+        });
+        return;
+      }
+      await ctx.answerCbQuery('Подтверждаю сигнал...');
+      const place = await this.bybit.placeSignalOrders(req.signal, req.rawMessage);
+      if (place.ok) {
+        this.externalConfirmations.delete(requestId);
+        await req.onResult?.({
+          decision: 'confirmed',
+          ok: true,
+          signalId: place.signalId,
+          bybitOrderIds: place.bybitOrderIds,
+          actorUserId: uid,
+        });
+        await ctx.reply(`Сигнал подтверждён. Ордера выставлены. signalId=${place.signalId ?? ''}`);
+      } else {
+        await req.onResult?.({
+          decision: 'confirmed',
+          ok: false,
+          error: formatError(place.error),
+          actorUserId: uid,
+        });
+        await ctx.reply(`Подтверждение получено, но выставление не удалось: ${formatError(place.error)}`);
+      }
+    });
+
+    this.bot.action(/^ub_reject:(.+)$/i, async (ctx) => {
+      const uid = ctx.from?.id;
+      const requestId = ctx.match?.[1];
+      if (!uid || !requestId) {
+        await ctx.answerCbQuery();
+        return;
+      }
+      const req = this.externalConfirmations.get(requestId);
+      if (!req) {
+        await ctx.answerCbQuery('Заявка не найдена или уже обработана', {
+          show_alert: true,
+        });
+        return;
+      }
+      this.externalConfirmations.delete(requestId);
+      await ctx.answerCbQuery('Сигнал отклонён');
+      await req.onResult?.({
+        decision: 'rejected',
+        ok: true,
+        actorUserId: uid,
+      });
+      await ctx.reply('Сигнал отклонён.');
     });
 
     this.bot.on('text', async (ctx) => {

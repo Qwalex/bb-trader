@@ -1,0 +1,17 @@
+import { Module } from '@nestjs/common';
+
+import { AppLogModule } from '../app-log/app-log.module';
+import { BybitModule } from '../bybit/bybit.module';
+import { SettingsModule } from '../settings/settings.module';
+import { TelegramModule } from '../telegram/telegram.module';
+import { TranscriptModule } from '../transcript/transcript.module';
+import { TelegramUserbotController } from './telegram-userbot.controller';
+import { TelegramUserbotService } from './telegram-userbot.service';
+
+@Module({
+  imports: [SettingsModule, TranscriptModule, BybitModule, AppLogModule, TelegramModule],
+  controllers: [TelegramUserbotController],
+  providers: [TelegramUserbotService],
+  exports: [TelegramUserbotService],
+})
+export class TelegramUserbotModule {}
