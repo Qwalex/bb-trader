@@ -67,6 +67,49 @@ export interface CloseSignalResult {
   details?: string;
 }
 
+export interface SignalExecutionDebugSnapshot {
+  ok: boolean;
+  signalId: string;
+  bybitConnected: boolean;
+  symbol?: string;
+  signal?: {
+    id: string;
+    pair: string;
+    direction: string;
+    status: string;
+    source: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+  };
+  dbOrders?: {
+    id: string;
+    orderKind: string;
+    side: string;
+    status: string;
+    price: number | null;
+    qty: number | null;
+    bybitOrderId: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }[];
+  exchange?: {
+    activeOrders: LiveExposureOrder[];
+    positions: LiveExposurePosition[];
+    bybitOrderStatuses: {
+      dbOrderId: string;
+      bybitOrderId: string;
+      exchangeStatus?: string;
+      execQty: number;
+      execValue: number;
+      execCount: number;
+      firstExecAt?: string;
+      lastExecAt?: string;
+      fetchError?: string;
+    }[];
+  };
+  error?: string;
+}
+
 @Injectable()
 export class BybitService {
   private readonly logger = new Logger(BybitService.name);
@@ -186,6 +229,25 @@ export class BybitService {
     return { qtyStep: f.qtyStep, minQty: f.minQty };
   }
 
+  /** Последняя цена инструмента (best-effort). */
+  private async getLastPrice(
+    client: RestClientV5,
+    symbol: string,
+  ): Promise<number | undefined> {
+    try {
+      const t = await client.getTickers({
+        category: 'linear',
+        symbol,
+      });
+      if (t.retCode !== 0) return undefined;
+      const row = t.result?.list?.[0];
+      const v = Number(row?.lastPrice ?? row?.markPrice ?? row?.indexPrice);
+      return Number.isFinite(v) && v > 0 ? v : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   /** Округление количества к шагу лота (без подмешивания min на каждый кусок — это ломало split). */
   private formatQtyToStep(qty: number, qtyStep: string): string {
     const stepNum = parseFloat(qtyStep);
@@ -211,10 +273,40 @@ export class BybitService {
   private roundQty(qty: number, step: string, minQty: string): string {
     const stepNum = parseFloat(step);
     const min = parseFloat(minQty);
-    const rounded = Math.round(qty / stepNum) * stepNum;
-    const q = Math.max(rounded, min);
+    // Входы считаем с округлением вниз, чтобы не превышать доступный бюджет/маржу.
+    const roundedDown = Math.floor(qty / stepNum) * stepNum;
+    const q = Math.max(roundedDown, min);
     const decimals = (step.split('.')[1] ?? '').length;
     return q.toFixed(decimals);
+  }
+
+  /** Базовая валидация направления/уровней сигнала. */
+  private validateSignalLevels(signal: SignalDto): string | undefined {
+    const entries = signal.entries;
+    if (!entries.length) {
+      return 'Не заданы входы';
+    }
+    const minEntry = Math.min(...entries);
+    const maxEntry = Math.max(...entries);
+    const sl = signal.stopLoss;
+    const tps = signal.takeProfits;
+
+    if (signal.direction === 'long') {
+      if (!(sl < minEntry)) {
+        return `Некорректный SL для LONG: SL (${sl}) должен быть ниже входа (${minEntry}).`;
+      }
+      if (tps.some((tp) => tp <= minEntry)) {
+        return `Некорректный TP для LONG: TP должен быть выше входа (${minEntry}).`;
+      }
+    } else {
+      if (!(sl > maxEntry)) {
+        return `Некорректный SL для SHORT: SL (${sl}) должен быть выше входа (${maxEntry}).`;
+      }
+      if (tps.some((tp) => tp >= maxEntry)) {
+        return `Некорректный TP для SHORT: TP должен быть ниже входа (${maxEntry}).`;
+      }
+    }
+    return undefined;
   }
 
   /**
@@ -231,9 +323,9 @@ export class BybitService {
   }
 
   /**
-   * Равное деление объёма позиции на n TP по шагу qtyStep.
-   * Раньше на каждый кусок вызывался roundQty(..., minQty) — из‑за min позиция «раздувалась»
-   * и reduce-only / trading-stop отклонялись биржей.
+   * Деление объёма позиции на n TP по шагу qtyStep.
+   * Базово делим поровну, а "остаток" шагов отдаём в ближайшие TP (первые уровни),
+   * чтобы крупнейшие части закрывались раньше.
    */
   private splitPositionQtyForTps(
     totalQtyBase: number,
@@ -243,42 +335,32 @@ export class BybitService {
   ): string[] {
     const stepNum = parseFloat(qtyStep);
     const min = parseFloat(minQty);
-    if (tpCount <= 0 || totalQtyBase <= 0) {
+    if (
+      tpCount <= 0 ||
+      totalQtyBase <= 0 ||
+      !Number.isFinite(stepNum) ||
+      stepNum <= 0
+    ) {
       return [];
     }
-    const totalFloored = Math.floor(totalQtyBase / stepNum) * stepNum;
-    if (totalFloored < min) {
+    const totalUnits = Math.floor(totalQtyBase / stepNum);
+    const totalFloored = totalUnits * stepNum;
+    if (!Number.isFinite(totalFloored) || totalFloored < min) {
       return [];
     }
-    const per = Math.floor((totalFloored / tpCount) / stepNum) * stepNum;
-    if (per < min) {
+    const baseUnits = Math.floor(totalUnits / tpCount);
+    const baseQty = baseUnits * stepNum;
+    if (!Number.isFinite(baseQty) || baseQty < min) {
       return [];
     }
-    const out: string[] = [];
-    let used = 0;
-    for (let i = 0; i < tpCount - 1; i++) {
-      out.push(this.formatQtyToStep(per, qtyStep));
-      used += per;
+    const outUnits = Array.from({ length: tpCount }, () => baseUnits);
+    let remainderUnits = totalUnits - baseUnits * tpCount;
+    // Остаток уходит в ближайшие TP (индексы с начала списка).
+    for (let i = 0; i < tpCount && remainderUnits > 0; i++) {
+      outUnits[i] = (outUnits[i] ?? 0) + 1;
+      remainderUnits -= 1;
     }
-    let lastRaw = totalFloored - used;
-    if (lastRaw > 1e-12 && lastRaw < min) {
-      this.logger.warn(
-        `split TP: остаток ${lastRaw} < minQty ${min}, объединяем с предыдущим уровнем`,
-      );
-      if (out.length > 0) {
-        const li = out.length - 1;
-        const merged = parseFloat(out[li]!) + lastRaw;
-        out[li] = this.formatQtyToStep(merged, qtyStep);
-      }
-      lastRaw = 0;
-    }
-    if (lastRaw > 1e-12) {
-      out.push(this.formatQtyToStep(lastRaw, qtyStep));
-    }
-    while (out.length < tpCount) {
-      out.push(this.formatQtyToStep(0, qtyStep));
-    }
-    return out;
+    return outUnits.map((u) => this.formatQtyToStep(u * stepNum, qtyStep));
   }
 
   /**
@@ -597,6 +679,181 @@ export class BybitService {
     return { bybitConnected, items };
   }
 
+  async getSignalExecutionDebugSnapshot(
+    signalId: string,
+  ): Promise<SignalExecutionDebugSnapshot> {
+    const signal = await this.orders.getSignalWithOrders(signalId);
+    if (!signal) {
+      return {
+        ok: false,
+        signalId,
+        bybitConnected: false,
+        error: 'Сигнал не найден',
+      };
+    }
+
+    const symbol = normalizeTradingPair(signal.pair);
+    const client = await this.getClient();
+    const bybitConnected = Boolean(client);
+    const dbOrders = signal.orders.map((o) => ({
+      id: o.id,
+      orderKind: o.orderKind,
+      side: o.side,
+      status: o.status,
+      price: o.price,
+      qty: o.qty,
+      bybitOrderId: o.bybitOrderId,
+      createdAt: o.createdAt,
+      updatedAt: o.updatedAt,
+    }));
+
+    const base: SignalExecutionDebugSnapshot = {
+      ok: true,
+      signalId: signal.id,
+      bybitConnected,
+      symbol,
+      signal: {
+        id: signal.id,
+        pair: symbol,
+        direction: signal.direction,
+        status: signal.status,
+        source: signal.source ?? null,
+        createdAt: signal.createdAt,
+        updatedAt: signal.updatedAt,
+      },
+      dbOrders,
+    };
+
+    if (!client) {
+      return base;
+    }
+
+    let activeOrders: LiveExposureOrder[] = [];
+    let positions: LiveExposurePosition[] = [];
+    try {
+      [activeOrders, positions] = await Promise.all([
+        this.getExchangeActiveOrders(client, symbol),
+        this.getExchangePositions(client, symbol),
+      ]);
+    } catch (e) {
+      return {
+        ...base,
+        exchange: {
+          activeOrders: [],
+          positions: [],
+          bybitOrderStatuses: [],
+        },
+        error: `Не удалось получить live-снимок биржи: ${formatError(e)}`,
+      };
+    }
+
+    const bybitOrderStatuses: {
+      dbOrderId: string;
+      bybitOrderId: string;
+      exchangeStatus?: string;
+      execQty: number;
+      execValue: number;
+      execCount: number;
+      firstExecAt?: string;
+      lastExecAt?: string;
+      fetchError?: string;
+    }[] = [];
+
+    for (const db of signal.orders) {
+      const bybitOrderId = db.bybitOrderId?.trim();
+      if (!bybitOrderId) continue;
+      try {
+        const [exchangeStatus, execSummary] = await Promise.all([
+          this.fetchOrderStatusFromExchange(
+            client,
+            symbol,
+            bybitOrderId,
+            db.qty ?? undefined,
+          ),
+          this.getExecutionSummary(client, symbol, bybitOrderId),
+        ]);
+        bybitOrderStatuses.push({
+          dbOrderId: db.id,
+          bybitOrderId,
+          exchangeStatus,
+          execQty: execSummary.execQty,
+          execValue: execSummary.execValue,
+          execCount: execSummary.execCount,
+          firstExecAt: execSummary.firstExecAt,
+          lastExecAt: execSummary.lastExecAt,
+        });
+      } catch (e) {
+        bybitOrderStatuses.push({
+          dbOrderId: db.id,
+          bybitOrderId,
+          execQty: 0,
+          execValue: 0,
+          execCount: 0,
+          fetchError: formatError(e),
+        });
+      }
+    }
+
+    return {
+      ...base,
+      exchange: {
+        activeOrders,
+        positions,
+        bybitOrderStatuses,
+      },
+    };
+  }
+
+  private async getExecutionSummary(
+    client: RestClientV5,
+    pair: string,
+    orderId: string,
+  ): Promise<{
+    execQty: number;
+    execValue: number;
+    execCount: number;
+    firstExecAt?: string;
+    lastExecAt?: string;
+  }> {
+    const sym = normalizeTradingPair(pair);
+    const res = await client.getExecutionList({
+      category: 'linear',
+      symbol: sym,
+      orderId,
+      limit: 50,
+    });
+    if (res.retCode !== 0) {
+      return { execQty: 0, execValue: 0, execCount: 0 };
+    }
+
+    let execQty = 0;
+    let execValue = 0;
+    let firstExecAt: number | undefined;
+    let lastExecAt: number | undefined;
+    let execCount = 0;
+    for (const ex of res.result?.list ?? []) {
+      execCount += 1;
+      execQty += parseFloat(String(ex.execQty ?? 0)) || 0;
+      execValue += parseFloat(String(ex.execValue ?? 0)) || 0;
+      const ms = Number(ex.execTime);
+      if (Number.isFinite(ms) && ms > 0) {
+        if (firstExecAt === undefined || ms < firstExecAt) {
+          firstExecAt = ms;
+        }
+        if (lastExecAt === undefined || ms > lastExecAt) {
+          lastExecAt = ms;
+        }
+      }
+    }
+    return {
+      execQty,
+      execValue,
+      execCount,
+      firstExecAt: firstExecAt ? new Date(firstExecAt).toISOString() : undefined,
+      lastExecAt: lastExecAt ? new Date(lastExecAt).toISOString() : undefined,
+    };
+  }
+
   async closeSignalManually(signalId: string): Promise<CloseSignalResult> {
     const signal = await this.orders.getSignalWithOrders(signalId);
     if (!signal) {
@@ -789,9 +1046,22 @@ export class BybitService {
       };
     }
 
-    const side = signal.direction === 'long' ? 'Buy' : 'Sell';
+    const side: 'Buy' | 'Sell' = signal.direction === 'long' ? 'Buy' : 'Sell';
 
     try {
+      const validationErr = this.validateSignalLevels(signal);
+      if (validationErr) {
+        void this.appLog.append('warn', 'bybit', 'placeSignalOrders: signal validation failed', {
+          symbol,
+          direction: signal.direction,
+          entries: signal.entries,
+          stopLoss: signal.stopLoss,
+          takeProfits: signal.takeProfits,
+          validationErr,
+        });
+        return { ok: false, error: validationErr };
+      }
+
       void this.appLog.append('info', 'bybit', 'placeSignalOrders: старт', {
         symbol,
         side,
@@ -844,6 +1114,12 @@ export class BybitService {
       });
 
       const { qtyStep, minQty } = await this.getLotStep(client, symbol);
+      const lastPrice = await this.getLastPrice(client, symbol);
+      if (!lastPrice) {
+        void this.appLog.append('warn', 'bybit', 'placeSignalOrders: last price unavailable, fallback to limit entries', {
+          symbol,
+        });
+      }
       const minQtyNum = parseFloat(minQty);
       const requestedEntries = signal.entries;
       let effectiveEntries = requestedEntries;
@@ -900,17 +1176,33 @@ export class BybitService {
         const notionalSlice = leveragedNotional * share;
         const qtyNum = notionalSlice / price;
         const qty = this.roundQty(qtyNum, qtyStep, minQty);
+        const shouldUseStop =
+          lastPrice !== undefined
+            ? signal.direction === 'short'
+              ? price <= lastPrice
+              : price >= lastPrice
+            : false;
 
-        const orderRes = await client.submitOrder({
-          category: 'linear',
+        const orderReq = {
+          category: 'linear' as const,
           symbol,
           side,
-          orderType: 'Limit',
+          orderType: 'Limit' as const,
           qty,
           price: String(price),
-          timeInForce: 'GTC',
-          positionIdx: 0,
-        });
+          timeInForce: 'GTC' as const,
+          positionIdx: 0 as const,
+          ...(shouldUseStop
+            ? {
+                orderFilter: 'StopOrder' as const,
+                triggerPrice: String(price),
+                triggerBy: 'LastPrice' as const,
+                triggerDirection: (signal.direction === 'short' ? 2 : 1) as 1 | 2,
+              }
+            : {}),
+        };
+
+        const orderRes = await client.submitOrder(orderReq);
 
         const oid = orderRes.result?.orderId;
         if (oid) {
@@ -929,6 +1221,28 @@ export class BybitService {
 
         if (orderRes.retCode !== 0) {
           const errText = formatError(orderRes.retMsg ?? 'submitOrder failed');
+          const isDca = i > 0;
+          const insufficient = BybitService.isInsufficientBalanceError(errText);
+
+          if (isDca && insufficient) {
+            this.logger.warn(
+              `DCA skipped due to insufficient balance ${symbol} index=${i}: ${errText}`,
+            );
+            void this.appLog.append(
+              'warn',
+              'bybit',
+              'DCA пропущен: недостаточно маржи/баланса',
+              {
+                symbol,
+                signalId: signalRow.id,
+                entryIndex: i,
+                retCode: orderRes.retCode,
+                retMsg: errText,
+              },
+            );
+            continue;
+          }
+
           void this.appLog.append('error', 'bybit', 'submitOrder отклонён', {
             symbol,
             entryIndex: i,
@@ -972,6 +1286,19 @@ export class BybitService {
     return (status ?? '').trim().toLowerCase() === 'filled';
   }
 
+  /**
+   * Распознаём ошибки нехватки доступной маржи/баланса.
+   * Пример Bybit: "ab not enough for new order".
+   */
+  private static isInsufficientBalanceError(msg: string | null | undefined): boolean {
+    const t = (msg ?? '').trim().toLowerCase();
+    return (
+      t.includes('ab not enough for new order') ||
+      t.includes('insufficient') ||
+      (t.includes('not enough') && t.includes('order'))
+    );
+  }
+
   /** NEW/New/Created и т.п. считаем ещё живыми ордерами. */
   private static isOpenOrderStatus(status: string | null | undefined): boolean {
     const normalized = (status ?? '').trim().toLowerCase();
@@ -992,6 +1319,21 @@ export class BybitService {
         return false;
       }
       return BybitService.isOpenOrderStatus(o.status);
+    });
+  }
+
+  /** Есть ли уже исполненный вход (ENTRY/DCA). */
+  private hasFilledEntryOrders(
+    orders: {
+      orderKind: string;
+      status: string | null;
+    }[],
+  ): boolean {
+    return orders.some((o) => {
+      if (o.orderKind !== 'ENTRY' && o.orderKind !== 'DCA') {
+        return false;
+      }
+      return BybitService.isFilledOrderStatus(o.status);
     });
   }
 
@@ -1024,6 +1366,42 @@ export class BybitService {
     positionIdx: 0 | 1 | 2 = 0,
   ): Promise<boolean> {
     try {
+      // Если SL заведомо по неверную сторону от цены позиции, не долбим биржу повторно.
+      try {
+        const pos = await client.getPositionInfo({
+          category: 'linear',
+          symbol,
+        });
+        if (pos.retCode === 0) {
+          const rows = pos.result?.list ?? [];
+          const row =
+            rows.find((r) => {
+              const idx = Number(r.positionIdx ?? 0);
+              const sz = r?.size ? Math.abs(parseFloat(String(r.size))) : 0;
+              return idx === positionIdx && sz > 1e-12;
+            }) ??
+            rows.find((r) => {
+              const sz = r?.size ? Math.abs(parseFloat(String(r.size))) : 0;
+              return sz > 1e-12;
+            });
+
+          const side = String(row?.side ?? '');
+          const basePrice = Number(row?.avgPrice ?? 0);
+          if (Number.isFinite(basePrice) && basePrice > 0) {
+            const invalidForShort = side === 'Sell' && !(stopLoss > basePrice);
+            const invalidForLong = side === 'Buy' && !(stopLoss < basePrice);
+            if (invalidForShort || invalidForLong) {
+              this.logger.debug(
+                `skip setTradingStop (${context}) ${symbol}: SL=${stopLoss} invalid for side=${side} base=${basePrice}`,
+              );
+              return false;
+            }
+          }
+        }
+      } catch {
+        // ignore pre-check errors; main call below will provide final result
+      }
+
       const res = await client.setTradingStop({
         category: 'linear',
         symbol,
@@ -1314,6 +1692,14 @@ export class BybitService {
       return;
     }
 
+    // Если ещё нет ни одного исполненного входа, TP/SL ставить рано.
+    if (!this.hasFilledEntryOrders(s2.orders)) {
+      this.logger.debug(
+        `placeTpSplitIfNeeded: skip ${normalizeTradingPair(s2.pair)} — no filled entries yet`,
+      );
+      return;
+    }
+
     const symbol = normalizeTradingPair(s2.pair);
     const posRes = await client.getPositionInfo({
       category: 'linear',
@@ -1352,16 +1738,7 @@ export class BybitService {
       positionIdx,
     );
 
-    let configuredEntryCount = entryOrders.length;
-    try {
-      const rawEntries = JSON.parse(s2.entries) as unknown;
-      if (Array.isArray(rawEntries) && rawEntries.length > 0) {
-        configuredEntryCount = rawEntries.length;
-      }
-    } catch {
-      // ignore malformed historical value and fallback to order rows
-    }
-    const tpChildrenPerLevel = Math.max(1, configuredEntryCount);
+    const tpChildrenPerLevel = 1;
 
     let n = takeProfits.length;
     let qtyParts: string[] = [];
@@ -1400,15 +1777,20 @@ export class BybitService {
     }
 
     const liveTpByPrice = new Map<string, number>();
+    const filledTpByPrice = new Map<string, number>();
     for (const o of s2.orders) {
-      if (o.orderKind !== 'TP' || !BybitService.isOpenOrderStatus(o.status)) {
+      if (o.orderKind !== 'TP') {
         continue;
       }
       if (o.price === null || o.price === undefined) {
         continue;
       }
       const p = this.formatPriceToTick(Number(o.price), tickSize);
-      liveTpByPrice.set(p, (liveTpByPrice.get(p) ?? 0) + 1);
+      if (BybitService.isOpenOrderStatus(o.status)) {
+        liveTpByPrice.set(p, (liveTpByPrice.get(p) ?? 0) + 1);
+      } else if (BybitService.isFilledOrderStatus(o.status)) {
+        filledTpByPrice.set(p, (filledTpByPrice.get(p) ?? 0) + 1);
+      }
     }
 
     for (let ti = 0; ti < activeTpPrices.length; ti++) {
@@ -1430,7 +1812,8 @@ export class BybitService {
       }
       const priceStr = this.formatPriceToTick(tpPrice, tickSize);
       const existingAtPrice = liveTpByPrice.get(priceStr) ?? 0;
-      const targetAtPrice = childQtyParts.length;
+      const alreadyFilledAtPrice = filledTpByPrice.get(priceStr) ?? 0;
+      const targetAtPrice = Math.max(0, childQtyParts.length - alreadyFilledAtPrice);
       let missingAtPrice = Math.max(0, targetAtPrice - existingAtPrice);
       if (missingAtPrice <= 0) {
         continue;

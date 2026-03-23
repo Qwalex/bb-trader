@@ -56,6 +56,8 @@ export function LiveExposurePanel() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [closingId, setClosingId] = useState<string | null>(null);
+  const [jsonLoadingId, setJsonLoadingId] = useState<string | null>(null);
+  const [jsonBySignalId, setJsonBySignalId] = useState<Record<string, string>>({});
   const [lastMsg, setLastMsg] = useState<string | null>(null);
 
   const apiBase = useMemo(() => getApiBase(), []);
@@ -111,6 +113,31 @@ export function LiveExposurePanel() {
       }
     },
     [apiBase, load],
+  );
+
+  const loadSignalJson = useCallback(
+    async (signalId: string) => {
+      setJsonLoadingId(signalId);
+      setError(null);
+      try {
+        const res = await fetch(`${apiBase}/bybit/signal/${signalId}`, {
+          cache: 'no-store',
+        });
+        if (!res.ok) {
+          throw new Error(`${res.status} ${res.statusText}`);
+        }
+        const body = (await res.json()) as unknown;
+        setJsonBySignalId((prev) => ({
+          ...prev,
+          [signalId]: JSON.stringify(body, null, 2),
+        }));
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Ошибка загрузки JSON');
+      } finally {
+        setJsonLoadingId(null);
+      }
+    },
+    [apiBase],
   );
 
   useEffect(() => {
@@ -177,14 +204,31 @@ export function LiveExposurePanel() {
                 Источник: {item.source ?? '—'} · {new Date(item.createdAt).toLocaleString('ru-RU')}
               </div>
             </div>
-            <button
-              type="button"
-              className="btnDanger"
-              disabled={closingId === item.signalId}
-              onClick={() => void closeSignal(item.signalId, item.pair)}
-            >
-              {closingId === item.signalId ? 'Закрытие...' : 'Закрыть сигнал'}
-            </button>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button
+                type="button"
+                onClick={() => void loadSignalJson(item.signalId)}
+                disabled={jsonLoadingId === item.signalId}
+                style={{
+                  padding: '0.45rem 0.9rem',
+                  background: 'var(--card)',
+                  color: 'var(--text)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                }}
+              >
+                {jsonLoadingId === item.signalId ? 'Загрузка JSON...' : 'JSON'}
+              </button>
+              <button
+                type="button"
+                className="btnDanger"
+                disabled={closingId === item.signalId}
+                onClick={() => void closeSignal(item.signalId, item.pair)}
+              >
+                {closingId === item.signalId ? 'Закрытие...' : 'Закрыть сигнал'}
+              </button>
+            </div>
           </div>
 
           <div className="tableWrap" style={{ marginBottom: '0.6rem' }}>
@@ -260,6 +304,30 @@ export function LiveExposurePanel() {
               </tbody>
             </table>
           </div>
+
+          {jsonBySignalId[item.signalId] && (
+            <div style={{ marginTop: '0.6rem' }}>
+              <div style={{ fontSize: '0.85rem', color: 'var(--muted)', marginBottom: '0.35rem' }}>
+                JSON-снимок (БД + биржа)
+              </div>
+              <pre
+                style={{
+                  margin: 0,
+                  padding: '0.75rem',
+                  borderRadius: 8,
+                  border: '1px solid var(--border)',
+                  background: '#0f172a',
+                  color: '#e2e8f0',
+                  overflowX: 'auto',
+                  whiteSpace: 'pre',
+                  fontSize: '0.78rem',
+                  lineHeight: 1.4,
+                }}
+              >
+                {jsonBySignalId[item.signalId]}
+              </pre>
+            </div>
+          )}
         </div>
       ))}
     </section>

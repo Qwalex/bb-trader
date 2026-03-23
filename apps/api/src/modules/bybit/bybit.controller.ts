@@ -11,6 +11,11 @@ export class BybitController {
     return this.bybit.getLiveExposureSnapshot();
   }
 
+  @Get('signal/:signalId')
+  async signalSnapshot(@Param('signalId') signalId: string) {
+    return this.bybit.getSignalExecutionDebugSnapshot(signalId);
+  }
+
   @Post('close/:signalId')
   async closeSignal(
     @Param('signalId') signalId: string,
