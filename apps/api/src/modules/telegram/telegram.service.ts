@@ -5,11 +5,11 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { Context, Markup, Telegraf } from 'telegraf';
-import { randomUUID } from 'node:crypto';
 
 import type { SignalDto } from '@repo/shared';
 
 import { formatError } from '../../common/format-error';
+import { PrismaService } from '../../prisma/prisma.service';
 import { AppLogService } from '../app-log/app-log.service';
 import { BybitService } from '../bybit/bybit.service';
 import { SettingsService } from '../settings/settings.service';
@@ -41,7 +41,7 @@ type ExternalConfirmationResult = {
 };
 
 type ExternalConfirmationRequest = {
-  id: string;
+  ingestId: string;
   signal: SignalDto;
   rawMessage?: string;
   createdAt: number;
@@ -56,7 +56,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private readonly drafts = new Map<number, DraftSession>();
   /** Переопределение «канал/приложение» для сигналов (важнее настройки SIGNAL_SOURCE). */
   private readonly sourceOverrideByUser = new Map<number, string>();
-  /** Подтверждения сигналов, пришедших из userbot (группы). */
+  /** Подтверждения сигналов, пришедших из userbot (группы), ключ = ingestId. */
   private readonly externalConfirmations = new Map<string, ExternalConfirmationRequest>();
 
   constructor(
@@ -64,6 +64,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     private readonly transcript: TranscriptService,
     private readonly bybit: BybitService,
     private readonly appLog: AppLogService,
+    private readonly prisma: PrismaService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -280,11 +281,11 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     ]);
   }
 
-  private externalConfirmKeyboard(requestId: string) {
+  private externalConfirmKeyboard(ingestId: string) {
     return Markup.inlineKeyboard([
       [
-        Markup.button.callback('✅ Подтвердить', `ub_confirm:${requestId}`),
-        Markup.button.callback('❌ Отклонить', `ub_reject:${requestId}`),
+        Markup.button.callback('✅ Подтвердить', `ub_confirm:${ingestId}`),
+        Markup.button.callback('❌ Отклонить', `ub_reject:${ingestId}`),
       ],
     ]);
   }
@@ -311,6 +312,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   async requestExternalSignalConfirmation(params: {
+    ingestId: string;
     signal: SignalDto;
     rawMessage?: string;
     onResult?: (result: ExternalConfirmationResult) => Promise<void> | void;
@@ -322,9 +324,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (ids.length === 0) {
       return { ok: false, deliveredTo: 0, error: 'TELEGRAM_WHITELIST пуст' };
     }
-    const requestId = randomUUID();
+    const requestId = params.ingestId;
     this.externalConfirmations.set(requestId, {
-      id: requestId,
+      ingestId: requestId,
       signal: params.signal,
       rawMessage: params.rawMessage,
       createdAt: Date.now(),
@@ -449,62 +451,62 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     this.bot.action(/^ub_confirm:(.+)$/i, async (ctx) => {
       const uid = ctx.from?.id;
-      const requestId = ctx.match?.[1];
-      if (!uid || !requestId) {
+      const ingestId = ctx.match?.[1];
+      if (!uid || !ingestId) {
         await ctx.answerCbQuery();
         return;
       }
-      const req = this.externalConfirmations.get(requestId);
-      if (!req) {
-        await ctx.answerCbQuery('Заявка не найдена или уже обработана', {
-          show_alert: true,
-        });
-        return;
-      }
+      const req = this.externalConfirmations.get(ingestId);
       await ctx.answerCbQuery('Подтверждаю сигнал...');
-      const place = await this.bybit.placeSignalOrders(req.signal, req.rawMessage);
-      if (place.ok) {
-        this.externalConfirmations.delete(requestId);
-        await req.onResult?.({
-          decision: 'confirmed',
-          ok: true,
-          signalId: place.signalId,
-          bybitOrderIds: place.bybitOrderIds,
-          actorUserId: uid,
-        });
-        await ctx.reply(`Сигнал подтверждён. Ордера выставлены. signalId=${place.signalId ?? ''}`);
-      } else {
-        await req.onResult?.({
+
+      const fallback = await this.confirmFromIngestId(ingestId);
+      if (!fallback.ok) {
+        await req?.onResult?.({
           decision: 'confirmed',
           ok: false,
-          error: formatError(place.error),
+          error: fallback.error,
           actorUserId: uid,
         });
-        await ctx.reply(`Подтверждение получено, но выставление не удалось: ${formatError(place.error)}`);
+        await ctx.reply(`Подтверждение не выполнено: ${fallback.error}`);
+        return;
       }
+      this.externalConfirmations.delete(ingestId);
+      await req?.onResult?.({
+        decision: 'confirmed',
+        ok: true,
+        signalId: fallback.signalId,
+        bybitOrderIds: fallback.bybitOrderIds,
+        actorUserId: uid,
+      });
+      await ctx.reply(
+        `Сигнал подтверждён. Ордера выставлены. signalId=${fallback.signalId ?? ''}`,
+      );
     });
 
     this.bot.action(/^ub_reject:(.+)$/i, async (ctx) => {
       const uid = ctx.from?.id;
-      const requestId = ctx.match?.[1];
-      if (!uid || !requestId) {
+      const ingestId = ctx.match?.[1];
+      if (!uid || !ingestId) {
         await ctx.answerCbQuery();
         return;
       }
-      const req = this.externalConfirmations.get(requestId);
-      if (!req) {
-        await ctx.answerCbQuery('Заявка не найдена или уже обработана', {
-          show_alert: true,
-        });
-        return;
-      }
-      this.externalConfirmations.delete(requestId);
+      const req = this.externalConfirmations.get(ingestId);
+      this.externalConfirmations.delete(ingestId);
       await ctx.answerCbQuery('Сигнал отклонён');
-      await req.onResult?.({
+      await req?.onResult?.({
         decision: 'rejected',
         ok: true,
         actorUserId: uid,
       });
+      await this.prisma.tgUserbotIngest
+        .update({
+          where: { id: ingestId },
+          data: {
+            status: 'cancelled_by_confirmation',
+            error: `Отклонено пользователем ${uid}`,
+          },
+        })
+        .catch(() => undefined);
       await ctx.reply('Сигнал отклонён.');
     });
 
@@ -757,5 +759,55 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     await ctx.reply(this.formatSignalTable(res.signal), {
       ...this.confirmKeyboard(),
     });
+  }
+
+  private async confirmFromIngestId(ingestId: string): Promise<{
+    ok: boolean;
+    error?: string;
+    signalId?: string;
+    bybitOrderIds?: string[];
+  }> {
+    const row = await this.prisma.tgUserbotIngest.findUnique({
+      where: { id: ingestId },
+      select: { text: true, chatId: true },
+    });
+    const text = row?.text?.trim();
+    if (!text) {
+      return { ok: false, error: 'Текст сообщения для подтверждения не найден' };
+    }
+    const parsed = await this.transcript.parse('text', { text });
+    if (parsed.ok !== true) {
+      return {
+        ok: false,
+        error:
+          parsed.ok === false
+            ? parsed.error
+            : `Сигнал неполный: ${parsed.prompt}`,
+      };
+    }
+    const chat = row?.chatId
+      ? await this.prisma.tgUserbotChat.findUnique({
+          where: { chatId: row.chatId },
+          select: { title: true },
+        })
+      : null;
+    if (chat?.title) {
+      parsed.signal.source = chat.title;
+    }
+    const place = await this.bybit.placeSignalOrders(parsed.signal, text);
+    if (!place.ok) {
+      return { ok: false, error: formatError(place.error) };
+    }
+    await this.prisma.tgUserbotIngest
+      .update({
+        where: { id: ingestId },
+        data: { status: 'placed', error: null },
+      })
+      .catch(() => undefined);
+    return {
+      ok: true,
+      signalId: place.signalId,
+      bybitOrderIds: place.bybitOrderIds,
+    };
   }
 }

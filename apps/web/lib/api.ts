@@ -1,7 +1,13 @@
 export function getApiBase(): string {
-  return (
-    process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? 'http://localhost:3001'
-  );
+  const isServer = typeof window === 'undefined';
+  if (isServer) {
+    return (
+      process.env.API_INTERNAL_URL?.replace(/\/$/, '') ??
+      process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ??
+      'http://api:3001'
+    );
+  }
+  return process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? 'http://localhost:3001';
 }
 
 export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {

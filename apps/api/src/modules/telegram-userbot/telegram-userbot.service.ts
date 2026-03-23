@@ -652,6 +652,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           aiResponse,
         });
         const req = await this.telegramBot.requestExternalSignalConfirmation({
+          ingestId: ingest.id,
           signal,
           rawMessage: text,
           onResult: async (result) => {
