@@ -1,0 +1,10 @@
+node_modules
+.git
+.turbo
+.next
+**/dist
+**/.env
+**/*.db
+**/*.db-journal
+apps/api/prisma/dev.db
+apps/api/prisma/test-e2e.db

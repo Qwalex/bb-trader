@@ -1,0 +1,117 @@
+import type { SignalDto } from '@repo/shared';
+
+/** Значения, которые LLM ошибочно кладёт в source вместо канала/приложения. */
+const INVALID_SOURCE_TOKENS = new Set(['text', 'image', 'audio']);
+
+/**
+ * Убирает из source ошибочные значения (тип сообщения вместо канала).
+ * Возвращает undefined, если строка пустая или недопустима.
+ */
+export function sanitizeSignalSource(raw: string | undefined): string | undefined {
+  if (raw == null || typeof raw !== 'string') return undefined;
+  const t = raw.trim();
+  if (!t) return undefined;
+  if (INVALID_SOURCE_TOKENS.has(t.toLowerCase())) return undefined;
+  return t;
+}
+
+/** Нормализует произвольный объект из LLM в Partial<SignalDto>. */
+export function normalizePartialSignal(raw: unknown): Partial<SignalDto> {
+  if (!raw || typeof raw !== 'object') {
+    return {};
+  }
+  const o = raw as Record<string, unknown>;
+  const out: Partial<SignalDto> = {};
+
+  if (typeof o.pair === 'string' && o.pair.trim()) {
+    out.pair = o.pair.trim().toUpperCase();
+  }
+  if (o.direction === 'long' || o.direction === 'short') {
+    out.direction = o.direction;
+  }
+  if (Array.isArray(o.entries)) {
+    const nums = o.entries
+      .map((x) => (typeof x === 'number' ? x : parseFloat(String(x))))
+      .filter((n) => !Number.isNaN(n));
+    if (nums.length) out.entries = nums;
+  }
+  if (typeof o.stopLoss === 'number' && !Number.isNaN(o.stopLoss)) {
+    out.stopLoss = o.stopLoss;
+  } else if (o.stopLoss != null) {
+    const n = parseFloat(String(o.stopLoss));
+    if (!Number.isNaN(n)) out.stopLoss = n;
+  }
+  if (Array.isArray(o.takeProfits)) {
+    const nums = o.takeProfits
+      .map((x) => (typeof x === 'number' ? x : parseFloat(String(x))))
+      .filter((n) => !Number.isNaN(n));
+    if (nums.length) out.takeProfits = nums;
+  }
+  if (typeof o.leverage === 'number' && !Number.isNaN(o.leverage)) {
+    out.leverage = o.leverage;
+  } else if (o.leverage != null) {
+    const n = parseFloat(String(o.leverage));
+    if (!Number.isNaN(n)) out.leverage = n;
+  }
+  if (typeof o.capitalPercent === 'number' && !Number.isNaN(o.capitalPercent)) {
+    out.capitalPercent = o.capitalPercent;
+  } else if (o.capitalPercent != null) {
+    const n = parseFloat(String(o.capitalPercent));
+    if (!Number.isNaN(n)) out.capitalPercent = n;
+  }
+  if (typeof o.orderUsd === 'number' && !Number.isNaN(o.orderUsd)) {
+    out.orderUsd = o.orderUsd;
+  } else if (o.orderUsd != null) {
+    const n = parseFloat(String(o.orderUsd));
+    if (!Number.isNaN(n)) out.orderUsd = n;
+  }
+  const src = sanitizeSignalSource(
+    typeof o.source === 'string' ? o.source : undefined,
+  );
+  if (src) out.source = src;
+
+  return out;
+}
+
+export function mergePartialSignals(
+  a: Partial<SignalDto> | undefined,
+  b: Partial<SignalDto> | undefined,
+): Partial<SignalDto> {
+  return { ...a, ...b };
+}
+
+/** Какие поля ещё нужны для полного SignalDto. */
+export function listMissingRequiredFields(p: Partial<SignalDto>): string[] {
+  const missing: string[] = [];
+  if (!p.pair?.trim()) missing.push('pair');
+  if (!p.direction) missing.push('direction');
+  if (!p.entries?.length) missing.push('entries');
+  if (p.stopLoss === undefined || Number.isNaN(Number(p.stopLoss))) {
+    missing.push('stopLoss');
+  }
+  if (!p.takeProfits?.length) missing.push('takeProfits');
+  if (p.leverage === undefined || p.leverage < 1) missing.push('leverage');
+  return missing;
+}
+
+export function isCompletePartial(p: Partial<SignalDto>): p is SignalDto {
+  if (listMissingRequiredFields(p).length > 0) {
+    return false;
+  }
+  return true;
+}
+
+/** Человекочитаемые подписи полей (для подсказок). */
+export function fieldLabelRu(key: string): string {
+  const map: Record<string, string> = {
+    pair: 'торговая пара (например BTCUSDT)',
+    direction: 'направление long или short',
+    entries: 'цены входа (одна или несколько для DCA)',
+    stopLoss: 'стоп-лосс (цена)',
+    takeProfits: 'тейк-профиты (одна или несколько цен)',
+    leverage: 'плечо (число, например 10)',
+    orderUsd: 'сумма позиции в USDT (номинал), по умолчанию 10',
+    capitalPercent: 'доля депозита в % (только если не задаёте сумму в USDT)',
+  };
+  return map[key] ?? key;
+}

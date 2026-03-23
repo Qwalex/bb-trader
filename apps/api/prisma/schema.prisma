@@ -1,0 +1,65 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Signal {
+  id             String   @id @default(cuid())
+  pair           String
+  direction      String
+  entries        String // JSON number[]
+  stopLoss       Float
+  takeProfits    String // JSON number[]
+  leverage       Int
+  /** Номинал в USDT (по умолчанию 10) */
+  orderUsd       Float    @default(10)
+  capitalPercent Float    @default(0)
+  source         String?
+  rawMessage     String?
+  status         String // OPEN, ORDERS_PLACED, CLOSED_WIN, CLOSED_LOSS, CLOSED_MIXED, FAILED
+  realizedPnl    Float?
+  closedAt       DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  orders         Order[]
+}
+
+model Order {
+  id           String    @id @default(cuid())
+  signalId     String
+  signal       Signal    @relation(fields: [signalId], references: [id], onDelete: Cascade)
+  bybitOrderId String?
+  orderKind    String // ENTRY, DCA, TP, SL
+  side         String
+  price        Float?
+  qty          Float?
+  status       String
+  pnl          Float?
+  filledAt     DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([signalId])
+}
+
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+model AppLog {
+  id        String   @id @default(cuid())
+  level     String // info | warn | error | debug
+  category  String // openrouter | telegram | bybit | orders | system
+  message   String
+  payload   String? // JSON
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([category, createdAt])
+}
