@@ -9,13 +9,10 @@ const KEYS = [
   { key: 'OPENROUTER_MODEL_DEFAULT', label: 'Модель по умолчанию' },
   { key: 'OPENROUTER_MODEL_TEXT', label: 'Модель (текст)' },
   { key: 'OPENROUTER_MODEL_TEXT_FALLBACK_1', label: 'Fallback модель (текст) #1' },
-  { key: 'OPENROUTER_MODEL_TEXT_FALLBACK_2', label: 'Fallback модель (текст) #2' },
   { key: 'OPENROUTER_MODEL_IMAGE', label: 'Модель (изображение)' },
   { key: 'OPENROUTER_MODEL_IMAGE_FALLBACK_1', label: 'Fallback модель (изображение) #1' },
-  { key: 'OPENROUTER_MODEL_IMAGE_FALLBACK_2', label: 'Fallback модель (изображение) #2' },
   { key: 'OPENROUTER_MODEL_AUDIO', label: 'Модель (аудио)' },
   { key: 'OPENROUTER_MODEL_AUDIO_FALLBACK_1', label: 'Fallback модель (аудио) #1' },
-  { key: 'OPENROUTER_MODEL_AUDIO_FALLBACK_2', label: 'Fallback модель (аудио) #2' },
   {
     key: 'BYBIT_TESTNET',
     label:

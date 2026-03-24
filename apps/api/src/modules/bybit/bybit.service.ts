@@ -449,6 +449,44 @@ export class BybitService {
   ]);
 
   /**
+   * TP/SL/трейлинг и т.п. — закрывают позицию, не считаются «входом» в противоположную сторону.
+   * Bybit часто отдаёт reduceOnly как 1 или true; иногда только stopOrderType.
+   */
+  private static isReduceOnlyOrClosingOrder(o: {
+    reduceOnly?: unknown;
+    closeOnTrigger?: unknown;
+    stopOrderType?: unknown;
+  }): boolean {
+    const ro = o.reduceOnly;
+    if (
+      ro === true ||
+      ro === 1 ||
+      ro === '1' ||
+      String(ro ?? '').toLowerCase() === 'true'
+    ) {
+      return true;
+    }
+    const cot = o.closeOnTrigger;
+    if (cot === true || cot === 1 || cot === '1') {
+      return true;
+    }
+    const st = String(o.stopOrderType ?? '').toLowerCase();
+    if (!st) {
+      return false;
+    }
+    if (
+      st.includes('takeprofit') ||
+      st.includes('stoploss') ||
+      st.includes('partialtakeprofit') ||
+      st.includes('trailing') ||
+      st.includes('tpsl')
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
    * Активность на бирже по символу в заданную сторону (long=Buy, short=Sell).
    * Учитываются ненулевая позиция на этой стороне и открытые не-reduce-only ордера на этой стороне.
    */
@@ -484,10 +522,7 @@ export class BybitService {
             if (!BybitService.OPEN_ORDER_STATUSES.has(o.orderStatus)) {
               continue;
             }
-            const reduceOnly =
-              o.reduceOnly === true ||
-              String(o.reduceOnly ?? '').toLowerCase() === 'true';
-            if (reduceOnly) {
+            if (BybitService.isReduceOnlyOrClosingOrder(o)) {
               continue;
             }
             const side = String(o.side ?? '').toLowerCase();
