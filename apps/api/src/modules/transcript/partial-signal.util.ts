@@ -80,8 +80,19 @@ export function mergePartialSignals(
   return { ...a, ...b };
 }
 
+/** Политика поля leverage: обязательно из сообщения или подстановка из настроек. */
+export type LeverageFieldOptions = {
+  /** true — плечо должно быть в сигнале; false — при отсутствии подставляется defaultLeverage */
+  requireLeverage: boolean;
+  /** Используется при requireLeverage === false, если в partial нет валидного плеча (>= 1) */
+  defaultLeverage?: number;
+};
+
 /** Какие поля ещё нужны для полного SignalDto. */
-export function listMissingRequiredFields(p: Partial<SignalDto>): string[] {
+export function listMissingRequiredFields(
+  p: Partial<SignalDto>,
+  leverageOpts?: LeverageFieldOptions,
+): string[] {
   const missing: string[] = [];
   if (!p.pair?.trim()) missing.push('pair');
   if (!p.direction) missing.push('direction');
@@ -90,12 +101,26 @@ export function listMissingRequiredFields(p: Partial<SignalDto>): string[] {
     missing.push('stopLoss');
   }
   if (!p.takeProfits?.length) missing.push('takeProfits');
-  if (p.leverage === undefined || p.leverage < 1) missing.push('leverage');
+
+  const requireLev = leverageOpts?.requireLeverage ?? true;
+  if (requireLev) {
+    if (p.leverage === undefined || p.leverage < 1) missing.push('leverage');
+  } else {
+    const def = leverageOpts?.defaultLeverage;
+    const hasValidLeverage =
+      p.leverage !== undefined && !Number.isNaN(Number(p.leverage)) && p.leverage >= 1;
+    if (!hasValidLeverage && (def === undefined || def < 1)) {
+      missing.push('leverage');
+    }
+  }
   return missing;
 }
 
-export function isCompletePartial(p: Partial<SignalDto>): p is SignalDto {
-  if (listMissingRequiredFields(p).length > 0) {
+export function isCompletePartial(
+  p: Partial<SignalDto>,
+  leverageOpts?: LeverageFieldOptions,
+): p is SignalDto {
+  if (listMissingRequiredFields(p, leverageOpts).length > 0) {
     return false;
   }
   return true;

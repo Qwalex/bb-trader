@@ -360,6 +360,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
   async notifyUserbotSignalFailure(params: {
     ingestId: string;
+    /** ID чата в Telegram (для трассировки, если название неизвестно) */
+    chatId: string;
+    /** Название группы/канала из userbot (TgUserbotChat.title), если есть */
+    groupTitle?: string;
     token: string;
     stage: 'transcript' | 'bybit';
     error: string;
@@ -379,8 +383,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       params.missingData && params.missingData.length > 0
         ? `\nНе хватило данных: ${params.missingData.join(', ')}`
         : '';
+    const sourceLine =
+      params.groupTitle && params.groupTitle.trim().length > 0
+        ? `Группа / канал: ${params.groupTitle.trim()}\n`
+        : `Источник (chatId): ${params.chatId}\n`;
     const msg =
       `Ошибка обработки сигнала из группы\n` +
+      sourceLine +
       `Токен: ${params.token}\n` +
       `Этап: ${stageText}\n` +
       `Причина: ${params.error}${missing}\n\n` +
@@ -773,18 +782,22 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    const dup = await this.bybit.wouldDuplicateActivePair(res.signal.pair);
+    const dup = await this.bybit.wouldDuplicateActivePairDirection(
+      res.signal.pair,
+      res.signal.direction,
+    );
     if (dup) {
       this.logger.warn(
-        `handleParseResult: duplicate pair ${res.signal.pair} userId=${uid}`,
+        `handleParseResult: duplicate pair+direction ${res.signal.pair} ${res.signal.direction} userId=${uid}`,
       );
-      void this.appLog.append('warn', 'telegram', 'отклонено: дубликат пары', {
+      void this.appLog.append('warn', 'telegram', 'отклонено: дубликат пары и стороны', {
         userId: uid,
         pair: res.signal.pair,
+        direction: res.signal.direction,
       });
       this.drafts.delete(uid);
       await ctx.reply(
-        `По паре ${res.signal.pair.toUpperCase()} уже есть активный сигнал или открытая позиция на бирже. Новый вход недоступен, пока сделка не закрыта.`,
+        `По паре ${res.signal.pair.toUpperCase()} уже есть активный сигнал ${res.signal.direction.toUpperCase()} или открытая позиция/ордера в эту сторону. Повторный вход в ту же сторону недоступен.`,
       );
       return;
     }

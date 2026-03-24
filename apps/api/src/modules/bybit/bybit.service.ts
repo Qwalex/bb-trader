@@ -391,33 +391,49 @@ export class BybitService {
   }
 
   /**
-   * Проверка до подтверждения в Telegram: нельзя начать новый сигнал по той же паре.
-   * Источник истины — Bybit API (ордера любого типа + позиции); при «чистой» бирже
-   * зависшие ORDERS_PLACED в БД снимаются.
+   * Проверка до подтверждения: нельзя второй раз открыть ту же сторону (long/short) по паре.
+   * Long и short по одной паре допускаются. Источник истины — Bybit API по стороне сделки;
+   * при «чистой» бирже по этой стороне зависшие ORDERS_PLACED в БД снимаются.
    */
-  async wouldDuplicateActivePair(pair: string): Promise<boolean> {
+  async wouldDuplicateActivePairDirection(
+    pair: string,
+    direction: 'long' | 'short',
+  ): Promise<boolean> {
     const symbol = normalizeTradingPair(pair);
     const client = await this.getClient();
     if (client) {
       try {
-        const busy = await this.hasExchangeExposure(client, symbol);
+        const busy = await this.hasExchangeExposureForDirection(
+          client,
+          symbol,
+          direction,
+        );
         if (busy) {
           return true;
         }
-        const n = await this.orders.reconcileStaleOpenSignalsForPair(symbol);
+        const n = await this.orders.reconcileStaleOpenSignalsForPairAndDirection(
+          symbol,
+          direction,
+        );
         if (n > 0) {
-          void this.appLog.append('info', 'bybit', 'reconcile: биржа чиста, сняты зависшие ORDERS_PLACED в БД', {
-            symbol,
-            signalsUpdated: n,
-          });
+          void this.appLog.append(
+            'info',
+            'bybit',
+            'reconcile: по стороне биржа чиста, сняты зависшие ORDERS_PLACED в БД',
+            {
+              symbol,
+              direction,
+              signalsUpdated: n,
+            },
+          );
         }
         return false;
       } catch (e) {
-        this.logger.warn(`wouldDuplicateActivePair: ${formatError(e)}`);
+        this.logger.warn(`wouldDuplicateActivePairDirection: ${formatError(e)}`);
         // без API — остаёмся на записи БД
       }
     }
-    return this.orders.hasActiveSignalForPair(pair);
+    return this.orders.hasActiveSignalForPairAndDirection(pair, direction);
   }
 
   /**
@@ -433,13 +449,16 @@ export class BybitService {
   ]);
 
   /**
-   * Есть ли по символу активность на бирже: лимит/рынок, стопы, TP/SL-ордера, ненулевая позиция (все positionIdx).
+   * Активность на бирже по символу в заданную сторону (long=Buy, short=Sell).
+   * Учитываются ненулевая позиция на этой стороне и открытые не-reduce-only ордера на этой стороне.
    */
-  private async hasExchangeExposure(
+  private async hasExchangeExposureForDirection(
     client: RestClientV5,
     symbol: string,
+    direction: 'long' | 'short',
   ): Promise<boolean> {
     const MIN_POS = 1e-12;
+    const wantBuy = direction === 'long';
 
     const orderFilters = ['Order', 'StopOrder'] as const;
     for (const orderFilter of orderFilters) {
@@ -462,9 +481,20 @@ export class BybitService {
           }
           const list = ao.result?.list ?? [];
           for (const o of list) {
-            if (BybitService.OPEN_ORDER_STATUSES.has(o.orderStatus)) {
+            if (!BybitService.OPEN_ORDER_STATUSES.has(o.orderStatus)) {
+              continue;
+            }
+            const reduceOnly =
+              o.reduceOnly === true ||
+              String(o.reduceOnly ?? '').toLowerCase() === 'true';
+            if (reduceOnly) {
+              continue;
+            }
+            const side = String(o.side ?? '').toLowerCase();
+            const isBuy = side === 'buy';
+            if (wantBuy === isBuy) {
               this.logger.debug(
-                `hasExchangeExposure: open order ${o.orderId} status=${o.orderStatus} filter=${orderFilter}`,
+                `hasExchangeExposureForDirection(${direction}): open order ${o.orderId} status=${o.orderStatus} filter=${orderFilter}`,
               );
               return true;
             }
@@ -487,9 +517,14 @@ export class BybitService {
         const rows = pos.result?.list ?? [];
         for (const row of rows) {
           const size = row?.size ? Math.abs(parseFloat(String(row.size))) : 0;
-          if (size > MIN_POS) {
+          if (size <= MIN_POS) {
+            continue;
+          }
+          const side = String(row.side ?? '').toLowerCase();
+          const isBuy = side === 'buy';
+          if (wantBuy === isBuy) {
             this.logger.debug(
-              `hasExchangeExposure: position idx=${row.positionIdx} size=${row.size}`,
+              `hasExchangeExposureForDirection(${direction}): position idx=${row.positionIdx} size=${row.size}`,
             );
             return true;
           }
@@ -522,9 +557,14 @@ export class BybitService {
             continue;
           }
           const size = row?.size ? Math.abs(parseFloat(String(row.size))) : 0;
-          if (size > MIN_POS) {
+          if (size <= MIN_POS) {
+            continue;
+          }
+          const side = String(row.side ?? '').toLowerCase();
+          const isBuy = side === 'buy';
+          if (wantBuy === isBuy) {
             this.logger.debug(
-              `hasExchangeExposure: USDT scan match ${row.symbol} size=${row.size}`,
+              `hasExchangeExposureForDirection(${direction}): USDT scan match ${row.symbol} size=${row.size}`,
             );
             return true;
           }
@@ -1004,45 +1044,67 @@ export class BybitService {
     }
 
     try {
-      if (await this.hasExchangeExposure(client, symbol)) {
-        void this.appLog.append('warn', 'bybit', 'placeSignalOrders: отказ (ордера/позиция на бирже)', {
+      if (
+        await this.hasExchangeExposureForDirection(
+          client,
           symbol,
+          signal.direction,
+        )
+      ) {
+        void this.appLog.append('warn', 'bybit', 'placeSignalOrders: отказ (ордера/позиция на бирже по этой стороне)', {
+          symbol,
+          direction: signal.direction,
         });
         return {
           ok: false,
-          error: `На Bybit по ${symbol} уже есть открытые ордера или ненулевая позиция.`,
+          error: `На Bybit по ${symbol} уже есть открытые ордера или позиция по стороне ${signal.direction.toUpperCase()}. Повторный вход в ту же сторону недоступен.`,
         };
       }
-      const reconciled = await this.orders.reconcileStaleOpenSignalsForPair(
-        symbol,
-      );
+      const reconciled =
+        await this.orders.reconcileStaleOpenSignalsForPairAndDirection(
+          symbol,
+          signal.direction,
+        );
       if (reconciled > 0) {
         void this.appLog.append('info', 'bybit', 'placeSignalOrders: reconcile зависших ORDERS_PLACED', {
           symbol,
+          direction: signal.direction,
           signalsUpdated: reconciled,
         });
       }
     } catch (e) {
       const msg = formatError(e);
       this.logger.warn(`Exchange activity check failed: ${msg}`);
-      if (await this.orders.hasActiveSignalForPair(signal.pair)) {
+      if (
+        await this.orders.hasActiveSignalForPairAndDirection(
+          signal.pair,
+          signal.direction,
+        )
+      ) {
         void this.appLog.append('warn', 'bybit', 'placeSignalOrders: отказ (БД: ORDERS_PLACED, проверка биржи не удалась)', {
           symbol,
+          direction: signal.direction,
         });
         return {
           ok: false,
-          error: `По паре ${symbol} уже есть активный сигнал (ордера в работе). Дождитесь закрытия сделки.`,
+          error: `По паре ${symbol} уже есть активный сигнал ${signal.direction.toUpperCase()} (ордера в работе). Дождитесь закрытия сделки.`,
         };
       }
     }
 
-    if (await this.orders.hasActiveSignalForPair(signal.pair)) {
+    if (
+      await this.orders.hasActiveSignalForPairAndDirection(
+        signal.pair,
+        signal.direction,
+      )
+    ) {
       void this.appLog.append('warn', 'bybit', 'placeSignalOrders: отказ (активный сигнал в БД)', {
         symbol,
+        direction: signal.direction,
       });
       return {
         ok: false,
-        error: `По паре ${symbol} уже есть активный сигнал (ордера в работе). Дождитесь закрытия сделки.`,
+        error: `По паре ${symbol} уже есть активный сигнал ${signal.direction.toUpperCase()} (ордера в работе). Дождитесь закрытия сделки.`,
       };
     }
 

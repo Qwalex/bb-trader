@@ -26,6 +26,14 @@ const KEYS = [
     label:
       'Минимальный номинал (USDT) для режима % депозита, если расчёт ниже минимума',
   },
+  {
+    key: 'DEFAULT_LEVERAGE_ENABLED',
+    label: 'Включить кредитное плечо по умолчанию',
+  },
+  {
+    key: 'DEFAULT_LEVERAGE',
+    label: 'Кредитное плечо по умолчанию (целое число, например 10)',
+  },
   { key: 'BYBIT_API_KEY_TESTNET', label: 'Bybit API key (testnet)' },
   { key: 'BYBIT_API_SECRET_TESTNET', label: 'Bybit API secret (testnet)' },
   { key: 'BYBIT_API_KEY_MAINNET', label: 'Bybit API key (основной / боевой)' },
@@ -56,6 +64,7 @@ const KEYS = [
 
 const BOOLEAN_KEYS = new Set<string>([
   'BYBIT_TESTNET',
+  'DEFAULT_LEVERAGE_ENABLED',
   'TELEGRAM_USERBOT_ENABLED',
   'TELEGRAM_USERBOT_USE_AI_CLASSIFIER',
   'TELEGRAM_USERBOT_REQUIRE_CONFIRMATION',

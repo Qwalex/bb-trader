@@ -658,6 +658,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         });
         await this.notifySignalFailureToBot({
           ingestId: ingest.id,
+          chatId: ingest.chatId,
           token: this.extractTokenHint(text),
           stage: 'transcript',
           error: parseError,
@@ -675,11 +676,16 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       });
       signal.source = chatMeta?.title;
 
-      if (await this.bybit.wouldDuplicateActivePair(signal.pair)) {
+      if (
+        await this.bybit.wouldDuplicateActivePairDirection(
+          signal.pair,
+          signal.direction,
+        )
+      ) {
         await this.updateIngest(ingest.id, {
           classification: 'signal',
           status: 'duplicate_signal',
-          error: `Активная позиция/сигнал по паре ${signal.pair}`,
+          error: `Активная позиция/сигнал по паре ${signal.pair} (${signal.direction})`,
           aiRequest,
           aiResponse,
         });
@@ -770,6 +776,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         });
         await this.notifySignalFailureToBot({
           ingestId: ingest.id,
+          chatId: ingest.chatId,
           token: signal.pair,
           stage: 'bybit',
           error: placeError,
@@ -798,6 +805,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       });
       await this.notifySignalFailureToBot({
         ingestId: ingest.id,
+        chatId: ingest.chatId,
         token: this.extractTokenHint(text),
         stage: 'transcript',
         error: err,
@@ -835,6 +843,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
   private async notifySignalFailureToBot(params: {
     ingestId: string;
+    chatId: string;
     token: string;
     stage: 'transcript' | 'bybit';
     error: string;
@@ -847,7 +856,14 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     if (!enabled) {
       return;
     }
-    const notify = await this.telegramBot.notifyUserbotSignalFailure(params);
+    const chatMeta = await this.prisma.tgUserbotChat.findUnique({
+      where: { chatId: params.chatId },
+    });
+    const groupTitle = chatMeta?.title?.trim();
+    const notify = await this.telegramBot.notifyUserbotSignalFailure({
+      ...params,
+      groupTitle: groupTitle && groupTitle.length > 0 ? groupTitle : undefined,
+    });
     if (!notify.ok) {
       this.logger.warn(
         `Failed to notify bot about signal error ingestId=${params.ingestId}: ${notify.error ?? 'unknown'}`,

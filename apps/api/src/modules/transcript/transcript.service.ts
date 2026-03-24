@@ -16,9 +16,14 @@ import { sanitizeForOpenRouterLog } from '../app-log/log-sanitize';
 import { SettingsService } from '../settings/settings.service';
 import { SignalParseDto } from './dto/signal-parse.dto';
 import {
+  collapseEntriesIfEntryRangeText,
+  normalizeEntryRangeInMessageText,
+} from './entry-range-normalize';
+import {
   fieldLabelRu,
   isCompletePartial,
   listMissingRequiredFields,
+  type LeverageFieldOptions,
   normalizePartialSignal,
   sanitizeSignalSource,
 } from './partial-signal.util';
@@ -112,6 +117,7 @@ Rules:
 - pair must be uppercase like BTCUSDT, ETHUSDT.
 - direction must be long or short.
 - entries: first price is main entry, following are DCA levels.
+- If the message gives an entry as a range between two prices (e.g. "entry range 1 - 2"), use a single entry equal to the midpoint (average), not two DCA levels.
 - takeProfits: one or more take-profit prices; several TPs mean equal split of position size at each level (e.g. 4 TPs → 25% each).
 - leverage: integer >= 1.
 - orderUsd: total position notional in USDT (e.g. 10, 50, 100). If user gives percent of balance instead, set orderUsd to 0 and set capitalPercent (1-100).
@@ -303,7 +309,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       { role: 'system', content: correctionPrompt },
       {
         role: 'user',
-        content: `Current signal JSON:\n${JSON.stringify({ signal: current })}\n\nUser correction / comment:\n${userComment}`,
+        content: `Current signal JSON:\n${JSON.stringify({ signal: current })}\n\nUser correction / comment:\n${normalizeEntryRangeInMessageText(userComment)}`,
       },
     ];
 
@@ -317,7 +323,13 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       });
       const ms = Date.now() - t0;
       this.logger.log(`applyCorrection: OpenRouter ok in ${ms}ms`);
-      return this.finishTranscriptResult(this.parseModelContent(content));
+      const levOpts = await this.getLeverageFieldOptions();
+      let result = this.finishTranscriptResult(
+        this.parseModelContent(content, levOpts),
+        levOpts,
+      );
+      result = this.applyEntryRangeCollapseToResult(result, userComment);
+      return result;
     } catch (e) {
       const ms = Date.now() - t0;
       const msg = e instanceof Error ? e.message : String(e);
@@ -357,14 +369,15 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       ? `Previous user messages (in order):\n${userTurns.map((t, i) => `${i + 1}. ${t}`).join('\n')}\n\n`
       : '';
 
+    const userBlock =
+      `${historyBlock}Current known partial signal (JSON):\n${JSON.stringify({ signal: partial })}\n\n` +
+      `Latest user message:\n${newMessage}\n\n` +
+      `Update the signal. If everything required is present, set status to "complete".`;
     const messages: { role: string; content: string }[] = [
       { role: 'system', content: SYSTEM_PROMPT },
       {
         role: 'user',
-        content:
-          `${historyBlock}Current known partial signal (JSON):\n${JSON.stringify({ signal: partial })}\n\n` +
-          `Latest user message:\n${newMessage}\n\n` +
-          `Update the signal. If everything required is present, set status to "complete".`,
+        content: normalizeEntryRangeInMessageText(userBlock),
       },
     ];
 
@@ -378,7 +391,14 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       });
       const ms = Date.now() - t0;
       this.logger.log(`continueSignalDraft: OpenRouter ok in ${ms}ms`);
-      return this.finishTranscriptResult(this.parseModelContent(content));
+      const levOpts = await this.getLeverageFieldOptions();
+      let result = this.finishTranscriptResult(
+        this.parseModelContent(content, levOpts),
+        levOpts,
+      );
+      const rangeHint = [userTurns.join('\n'), newMessage].filter(Boolean).join('\n');
+      result = this.applyEntryRangeCollapseToResult(result, rangeHint);
+      return result;
     } catch (e) {
       const ms = Date.now() - t0;
       const msg = e instanceof Error ? e.message : String(e);
@@ -432,62 +452,40 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       `parse: kind=${kind} model=${model} (textLen=${payload.text?.length ?? 0})`,
     );
     const modelChain = await this.getModelChainForKind(kind, model);
-    let lastError: unknown;
+    const fallbackModels = modelChain.slice(1);
 
-    for (let mi = 0; mi < modelChain.length; mi++) {
-      const candidateModel = modelChain[mi]!;
-      const attempts = candidateModel === model ? 1 : 2;
-      for (let attempt = 1; attempt <= attempts; attempt++) {
-        try {
-          const content = await this.callOpenRouter(
-            apiKey,
-            candidateModel,
-            messages,
-            {
-              operation:
-                candidateModel === model ? 'parse' : `parse-fallback-${mi + 1}`,
-              kind,
-            },
-          );
-          const ms = Date.now() - t0;
-          this.logger.log(`parse: OpenRouter ok in ${ms}ms (model=${candidateModel})`);
-          const parsed = this.finishTranscriptResult(this.parseModelContent(content));
-          if (!parsed.ok) {
-            this.logger.warn(
-              `parse: validation/json failed: ${parsed.error} ${parsed.details ?? ''}`,
-            );
-          }
-          return parsed;
-        } catch (e) {
-          lastError = e;
-          if (attempt < attempts && this.isRateLimitError(e)) {
-            const waitMs = 1200 * attempt;
-            this.logger.warn(
-              `parse: model=${candidateModel} rate-limited, retry in ${waitMs}ms (attempt ${attempt + 1}/${attempts})`,
-            );
-            await this.sleep(waitMs);
-            continue;
-          }
-          break;
-        }
-      }
-
-      if (mi < modelChain.length - 1 && this.shouldRetryWithFallback(lastError)) {
+    try {
+      const content = await this.callOpenRouter(apiKey, model, messages, {
+        operation: 'parse',
+        kind,
+        fallbackModels,
+      });
+      const ms = Date.now() - t0;
+      this.logger.log(
+        `parse: OpenRouter ok in ${ms}ms (primary=${model}${fallbackModels[0] ? `, fallback=${fallbackModels[0]}` : ''})`,
+      );
+      const levOpts = await this.getLeverageFieldOptions();
+      let parsed = this.finishTranscriptResult(
+        this.parseModelContent(content, levOpts),
+        levOpts,
+      );
+      const originalText = payload.text ?? '';
+      parsed = this.applyEntryRangeCollapseToResult(parsed, originalText);
+      if (!parsed.ok) {
         this.logger.warn(
-          `parse: model failed (${candidateModel}), switching to fallback=${modelChain[mi + 1]}`,
+          `parse: validation/json failed: ${parsed.error} ${parsed.details ?? ''}`,
         );
-        continue;
       }
-      break;
+      return parsed;
+    } catch (e) {
+      const ms = Date.now() - t0;
+      const msg = this.formatOpenRouterError(e);
+      this.logger.error(
+        `parse: OpenRouter failed after ${ms}ms: ${msg}`,
+        e instanceof Error ? e.stack : undefined,
+      );
+      return { ok: false, error: 'OpenRouter request failed', details: msg };
     }
-
-    const ms = Date.now() - t0;
-    const msg = this.formatOpenRouterError(lastError);
-    this.logger.error(
-      `parse: OpenRouter failed after ${ms}ms: ${msg}`,
-      lastError instanceof Error ? lastError.stack : undefined,
-    );
-    return { ok: false, error: 'OpenRouter request failed', details: msg };
   }
 
   private buildMessages(
@@ -516,7 +514,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
         : '';
 
     if (kind === 'text') {
-      const text = payload.text ?? '';
+      const text = normalizeEntryRangeInMessageText(payload.text ?? '');
       return [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: contPrefix + text },
@@ -552,7 +550,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
         : 'Parse the voice message content.';
     const userContent =
       payload.text
-        ? `${contPrefix}${audioNote}\n${payload.text}`
+        ? `${contPrefix}${audioNote}\n${normalizeEntryRangeInMessageText(payload.text)}`
         : `${contPrefix}${audioNote}\n[binary audio omitted — ensure text was transcribed upstream]`;
     return [
       { role: 'system', content: SYSTEM_PROMPT },
@@ -564,7 +562,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     apiKey: string,
     model: string,
     messages: { role: string; content: unknown }[],
-    ctx: { operation: string; kind?: ContentKind },
+    ctx: { operation: string; kind?: ContentKind; fallbackModels?: string[] },
   ): Promise<unknown> {
     const client = new OpenRouter({
       apiKey,
@@ -592,6 +590,10 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
 
     const requestBody = {
       model,
+      models:
+        ctx.fallbackModels && ctx.fallbackModels.length > 0
+          ? [model, ...ctx.fallbackModels]
+          : undefined,
       messages: sanitizeForOpenRouterLog(messages) as unknown[],
       responseFormat,
     };
@@ -610,6 +612,10 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
         xTitle: OPENROUTER_APP_TITLE,
         chatGenerationParams: {
           model,
+          models:
+            ctx.fallbackModels && ctx.fallbackModels.length > 0
+              ? [model, ...ctx.fallbackModels]
+              : undefined,
           messages: messages as never,
           responseFormat,
           provider: { requireParameters: true },
@@ -681,10 +687,102 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     return 10;
   }
 
+  /**
+   * После парсинга: если в исходном тексте был «entry range A - B», а модель вернула два числа на границах —
+   * сводим entries к среднему (дублирует логику normalizeEntryRangeInMessageText на уровне JSON).
+   */
+  private applyEntryRangeCollapseToResult(
+    result: TranscriptResult,
+    originalText: string,
+  ): TranscriptResult {
+    const t = originalText.trim();
+    if (!t) {
+      return result;
+    }
+    if (result.ok === true) {
+      const next = collapseEntriesIfEntryRangeText(t, result.signal.entries);
+      if (next === result.signal.entries) {
+        return result;
+      }
+      return { ...result, signal: { ...result.signal, entries: next } };
+    }
+    if (result.ok === 'incomplete' && result.partial.entries?.length === 2) {
+      const next = collapseEntriesIfEntryRangeText(t, result.partial.entries);
+      if (next.length === 1) {
+        return {
+          ...result,
+          partial: { ...result.partial, entries: next },
+        };
+      }
+    }
+    return result;
+  }
+
+  /** Настройки плеча из SQLite / env: опциональная подстановка или обязательное поле в сигнале. */
+  private async getLeverageFieldOptions(): Promise<LeverageFieldOptions> {
+    const enabledRaw = await this.settings.get('DEFAULT_LEVERAGE_ENABLED');
+    const enabled =
+      String(enabledRaw ?? '').trim().toLowerCase() === 'true';
+    const defRaw = await this.settings.get('DEFAULT_LEVERAGE');
+    const parsed =
+      defRaw != null && String(defRaw).trim() !== ''
+        ? Number(String(defRaw).trim().replace(',', '.'))
+        : NaN;
+    const defaultLeverage =
+      Number.isFinite(parsed) && parsed >= 1 ? Math.round(parsed) : undefined;
+
+    if (enabled && defaultLeverage === undefined) {
+      this.logger.warn(
+        'DEFAULT_LEVERAGE_ENABLED is true but DEFAULT_LEVERAGE is missing or invalid (<1); leverage stays required',
+      );
+    }
+
+    return {
+      requireLeverage: !enabled || defaultLeverage === undefined,
+      defaultLeverage,
+    };
+  }
+
+  /**
+   * Перед валидацией DTO: если разрешена подстановка и в raw нет валидного плеча — подставить default.
+   */
+  private applyDefaultLeverageToSignalRaw(
+    signalRaw: unknown,
+    leverageOpts: LeverageFieldOptions,
+  ): unknown {
+    if (
+      leverageOpts.requireLeverage ||
+      signalRaw == null ||
+      typeof signalRaw !== 'object' ||
+      Array.isArray(signalRaw)
+    ) {
+      return signalRaw;
+    }
+    const def = leverageOpts.defaultLeverage;
+    if (def === undefined || def < 1) {
+      return signalRaw;
+    }
+    const o = { ...(signalRaw as Record<string, unknown>) };
+    const lev = o.leverage;
+    const n =
+      typeof lev === 'number'
+        ? lev
+        : lev != null
+          ? parseFloat(String(lev))
+          : NaN;
+    if (!Number.isFinite(n) || n < 1) {
+      o.leverage = def;
+    }
+    return o;
+  }
+
   /** Если partial уже полный — завершаем без повторного запроса. */
-  private finishTranscriptResult(result: TranscriptResult): TranscriptResult {
-    if (result.ok === 'incomplete' && isCompletePartial(result.partial)) {
-      const full = this.tryCompleteSignal(result.partial);
+  private finishTranscriptResult(
+    result: TranscriptResult,
+    leverageOpts: LeverageFieldOptions,
+  ): TranscriptResult {
+    if (result.ok === 'incomplete' && isCompletePartial(result.partial, leverageOpts)) {
+      const full = this.tryCompleteSignal(result.partial, leverageOpts);
       if (full.ok === true) {
         return full;
       }
@@ -692,8 +790,12 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     return result;
   }
 
-  private tryCompleteSignal(signalRaw: unknown): TranscriptResult {
-    const dto = plainToInstance(SignalParseDto, signalRaw);
+  private tryCompleteSignal(
+    signalRaw: unknown,
+    leverageOpts: LeverageFieldOptions,
+  ): TranscriptResult {
+    const prepared = this.applyDefaultLeverageToSignalRaw(signalRaw, leverageOpts);
+    const dto = plainToInstance(SignalParseDto, prepared);
     const errors = validateSync(dto);
     if (errors.length > 0) {
       return {
@@ -727,8 +829,11 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     return `Нужно ещё: ${labels}. Ответьте одним сообщением.`;
   }
 
-  private toIncomplete(partial: Partial<SignalDto>): TranscriptIncomplete {
-    const missing = listMissingRequiredFields(partial);
+  private toIncomplete(
+    partial: Partial<SignalDto>,
+    leverageOpts: LeverageFieldOptions,
+  ): TranscriptIncomplete {
+    const missing = listMissingRequiredFields(partial, leverageOpts);
     return {
       ok: 'incomplete',
       partial,
@@ -737,7 +842,10 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     };
   }
 
-  private parseModelContent(content: unknown): TranscriptResult {
+  private parseModelContent(
+    content: unknown,
+    leverageOpts: LeverageFieldOptions,
+  ): TranscriptResult {
     const parsed = this.tryParseModelContent(content);
     if (!parsed.ok) {
       return parsed.result;
@@ -761,9 +869,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     // Новый формат со статусом
     if (root.status === 'incomplete') {
       const partial = normalizePartialSignal(root.signal);
-      const mergedMissing = Array.isArray(root.missing)
-        ? root.missing.map(String)
-        : listMissingRequiredFields(partial);
+      const mergedMissing = listMissingRequiredFields(partial, leverageOpts);
       const prompt =
         typeof root.prompt === 'string' && root.prompt.trim().length > 0
           ? root.prompt.trim()
@@ -777,21 +883,21 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     }
 
     if (root.status === 'complete') {
-      const full = this.tryCompleteSignal(root.signal);
+      const full = this.tryCompleteSignal(root.signal, leverageOpts);
       if (full.ok === true) {
         return full;
       }
       const partial = normalizePartialSignal(root.signal);
-      return this.toIncomplete(partial);
+      return this.toIncomplete(partial, leverageOpts);
     }
 
     // Legacy / без поля status: сначала полный валидный сигнал, иначе — черновик
-    const full = this.tryCompleteSignal(root.signal);
+    const full = this.tryCompleteSignal(root.signal, leverageOpts);
     if (full.ok === true) {
       return full;
     }
     const partial = normalizePartialSignal(root.signal);
-    return this.toIncomplete(partial);
+    return this.toIncomplete(partial, leverageOpts);
   }
 
   private tryParseModelContent(
@@ -858,18 +964,15 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     primaryModel: string,
   ): Promise<string[]> {
     const chain: string[] = [primaryModel];
-    const fallbackKeys =
+    const fallbackKey =
       kind === 'image'
-        ? ['OPENROUTER_MODEL_IMAGE_FALLBACK_1', 'OPENROUTER_MODEL_IMAGE_FALLBACK_2']
+        ? 'OPENROUTER_MODEL_IMAGE_FALLBACK_1'
         : kind === 'audio'
-          ? ['OPENROUTER_MODEL_AUDIO_FALLBACK_1', 'OPENROUTER_MODEL_AUDIO_FALLBACK_2']
-          : ['OPENROUTER_MODEL_TEXT_FALLBACK_1', 'OPENROUTER_MODEL_TEXT_FALLBACK_2'];
-    for (const key of fallbackKeys) {
-      const value = await this.settings.get(key);
-      const model = this.normalizeModelName(value);
-      if (model) {
-        chain.push(model);
-      }
+          ? 'OPENROUTER_MODEL_AUDIO_FALLBACK_1'
+          : 'OPENROUTER_MODEL_TEXT_FALLBACK_1';
+    const fallbackModel = this.normalizeModelName(await this.settings.get(fallbackKey));
+    if (fallbackModel) {
+      chain.push(fallbackModel);
     }
     const deduped: string[] = [];
     for (const m of chain) {
@@ -896,33 +999,6 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     return this.normalizeModelName(await this.settings.get('OPENROUTER_MODEL_DEFAULT'));
   }
 
-  private isRateLimitError(error: unknown): boolean {
-    const statusCode = (error as { status?: number; statusCode?: number } | null)
-      ?.status ??
-      (error as { status?: number; statusCode?: number } | null)?.statusCode;
-    if (statusCode === 429) {
-      return true;
-    }
-    const msg = this.formatOpenRouterError(error).toLowerCase();
-    return msg.includes('rate-limit') || msg.includes('too many requests');
-  }
-
-  private shouldRetryWithFallback(error: unknown): boolean {
-    const msg = this.formatOpenRouterError(error).toLowerCase();
-    const statusCode = (error as { status?: number; statusCode?: number } | null)
-      ?.status ??
-      (error as { status?: number; statusCode?: number } | null)?.statusCode;
-    return (
-      statusCode === 404 ||
-      msg.includes('no endpoints found') ||
-      msg.includes('provider returned error') ||
-      msg.includes('does not support') ||
-      msg.includes('unsupported') ||
-      msg.includes('invalid request') ||
-      msg.includes('unprocessable')
-    );
-  }
-
   private formatOpenRouterError(error: unknown): string {
     if (error == null) {
       return 'Unknown OpenRouter error';
@@ -936,12 +1012,6 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       return error.message;
     }
     return String(error);
-  }
-
-  private async sleep(ms: number): Promise<void> {
-    await new Promise<void>((resolve) => {
-      setTimeout(() => resolve(), ms);
-    });
   }
 
   private classifyHeuristic(text: string): 'signal' | 'result' | 'other' {

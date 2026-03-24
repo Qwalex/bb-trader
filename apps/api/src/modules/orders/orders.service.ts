@@ -98,25 +98,31 @@ export class OrdersService {
   }
 
   /**
-   * Есть ли незакрытый сигнал по этой паре (ордера уже выставлены, сделка в работе).
+   * Есть ли незакрытый сигнал по паре и направлению (long/short раздельно).
    * Сравнение по нормализованной паре — в БД могли остаться старые записи с дефисами/регистром.
    */
-  async hasActiveSignalForPair(pair: string): Promise<boolean> {
+  async hasActiveSignalForPairAndDirection(
+    pair: string,
+    direction: 'long' | 'short',
+  ): Promise<boolean> {
     const want = normalizeTradingPair(pair);
     const open = await this.prisma.signal.findMany({
-      where: { status: 'ORDERS_PLACED' },
+      where: { status: 'ORDERS_PLACED', direction },
       select: { pair: true },
     });
     return open.some((r) => normalizeTradingPair(r.pair) === want);
   }
 
   /**
-   * Биржа по API «чистая», а в БД остался ORDERS_PLACED — помечаем закрытыми (ручное закрытие на бирже).
+   * Биржа по API «чиста» по этой стороне, а в БД остался ORDERS_PLACED — помечаем закрытыми (ручное закрытие на бирже).
    */
-  async reconcileStaleOpenSignalsForPair(pair: string): Promise<number> {
+  async reconcileStaleOpenSignalsForPairAndDirection(
+    pair: string,
+    direction: 'long' | 'short',
+  ): Promise<number> {
     const want = normalizeTradingPair(pair);
     const open = await this.prisma.signal.findMany({
-      where: { status: 'ORDERS_PLACED' },
+      where: { status: 'ORDERS_PLACED', direction },
       select: { id: true, pair: true },
     });
     const ids = open
