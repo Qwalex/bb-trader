@@ -11,7 +11,7 @@ services:
     volumes:
       - sqlite-data:/app/data
     ports:
-      - "3001:3004"
+      - "3002:3001"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3001/health || exit 1"]
       interval: 10s
@@ -26,15 +26,15 @@ services:
     restart: unless-stopped
     environment:
       NEXT_BASE_PATH: /trade
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3002}
       API_INTERNAL_URL: http://api:3001
     ports:
-      - "3000:3003"
+      - "3003:3003"
     depends_on:
       api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/trade || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3003/trade || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 10
