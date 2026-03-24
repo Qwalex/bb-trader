@@ -2057,7 +2057,7 @@ export class BybitService {
             return oid.length > 0 && ourIds.has(oid);
           });
           if (matchedRow) {
-            const cp = (matchedRow as Record<string, unknown>).closedPnl;
+            const cp = (matchedRow as unknown as { closedPnl?: string }).closedPnl;
             if (cp != null && String(cp) !== '') {
               const num = parseFloat(String(cp));
               if (Number.isFinite(num)) {
