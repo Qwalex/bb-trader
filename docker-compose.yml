@@ -26,7 +26,7 @@ services:
     restart: unless-stopped
     environment:
       NEXT_BASE_PATH: /trade
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3002}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://dev.qwalex.ru/trade}
       API_INTERNAL_URL: http://api:3001
     ports:
       - "3003:3000"

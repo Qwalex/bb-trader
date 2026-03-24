@@ -7,7 +7,10 @@ export function getApiBase(): string {
       'http://api:3001'
     );
   }
-  return process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? 'http://localhost:3001';
+  return (
+    process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ??
+    `${window.location.origin}/trade`
+  );
 }
 
 export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
