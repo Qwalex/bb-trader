@@ -378,9 +378,14 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     return { ok: true };
   }
 
-  async rereadAllIngestMessages() {
+  async rereadAllIngestMessages(limitRaw?: number) {
+    const limit =
+      typeof limitRaw === 'number' && Number.isFinite(limitRaw)
+        ? Math.max(1, Math.min(500, Math.floor(limitRaw)))
+        : 80;
     const rows = await this.prisma.tgUserbotIngest.findMany({
       orderBy: { createdAt: 'desc' },
+      take: limit,
       select: {
         id: true,
         chatId: true,
@@ -413,10 +418,12 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     return {
       ok: true,
       total: rows.length,
+      limit,
       processed,
       skippedWithoutText,
       failed,
       errors: errors.slice(0, 20),
+      hasMore: rows.length >= limit,
     };
   }
 

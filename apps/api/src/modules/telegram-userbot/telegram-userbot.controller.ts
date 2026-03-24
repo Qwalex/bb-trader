@@ -62,8 +62,8 @@ export class TelegramUserbotController {
   }
 
   @Post('reread-all')
-  async rereadAll() {
-    return this.userbot.rereadAllIngestMessages();
+  async rereadAll(@Body() body?: { limit?: number }) {
+    return this.userbot.rereadAllIngestMessages(body?.limit);
   }
 
   @Put('chats/:chatId')

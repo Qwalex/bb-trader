@@ -355,9 +355,11 @@ export default function TelegramUserbotPage() {
                 ok?: boolean;
                 error?: string;
                 total?: number;
+                limit?: number;
                 processed?: number;
                 skippedWithoutText?: number;
                 failed?: number;
+                hasMore?: boolean;
               };
               if (!j.ok) {
                 throw new Error(j.error ?? 'Не удалось перечитать все сообщения');
@@ -368,7 +370,10 @@ export default function TelegramUserbotPage() {
                 text:
                   `Перечитано: ${j.processed ?? 0} из ${j.total ?? 0}` +
                   `, пропущено без текста: ${j.skippedWithoutText ?? 0}` +
-                  `, ошибок: ${j.failed ?? 0}`,
+                  `, ошибок: ${j.failed ?? 0}` +
+                  (j.hasMore
+                    ? ` (есть ещё сообщения, запустите снова; текущий лимит: ${j.limit ?? 'n/a'})`
+                    : ''),
               });
             })
           }
