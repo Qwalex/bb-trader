@@ -2086,22 +2086,28 @@ export class BybitService {
             limit: 50,
           });
           const rows = pnlRes.result?.list ?? [];
-          const matchedRow = rows.find((row) => {
+          const matchedRows = rows.filter((row) => {
             const oid = BybitService.extractClosedPnlOrderId(row);
             return oid.length > 0 && ourIds.has(oid);
           });
-          if (matchedRow) {
-            const cp = (matchedRow as unknown as { closedPnl?: string }).closedPnl;
+          let totalPnl = 0;
+          let hadParsedPnl = false;
+          for (const row of matchedRows) {
+            const cp = (row as unknown as { closedPnl?: string }).closedPnl;
             if (cp != null && String(cp) !== '') {
               const num = parseFloat(String(cp));
               if (Number.isFinite(num)) {
-                await this.orders.updateSignalStatus(fresh.id, {
-                  status: num >= 0 ? 'CLOSED_WIN' : 'CLOSED_LOSS',
-                  realizedPnl: num,
-                  closedAt: new Date(),
-                });
+                totalPnl += num;
+                hadParsedPnl = true;
               }
             }
+          }
+          if (hadParsedPnl) {
+            await this.orders.updateSignalStatus(fresh.id, {
+              status: totalPnl >= 0 ? 'CLOSED_WIN' : 'CLOSED_LOSS',
+              realizedPnl: totalPnl,
+              closedAt: new Date(),
+            });
           } else if (ourIds.size > 0) {
             const sibling =
               await this.orders.findOlderClosedSiblingAfterNewerCreated(

@@ -13,7 +13,7 @@ type LogRow = {
   createdAt: string;
 };
 
-type TpSyncFilterMode = 'all' | 'hide' | 'only';
+type TpLogFilterMode = 'all' | 'hide' | 'only';
 
 const CATEGORIES = [
   { id: 'all', label: 'Все' },
@@ -24,10 +24,9 @@ const CATEGORIES = [
   { id: 'system', label: 'System' },
 ] as const;
 
-const TP_SYNC_MESSAGE = 'tp: ордера синхронизированы';
-
-function isTpSyncEvent(message: string): boolean {
-  return message.trim().toLowerCase().includes(TP_SYNC_MESSAGE);
+function isTpLogEvent(message: string): boolean {
+  const msg = message.trim().toLowerCase();
+  return msg.includes('placetpsplit') || msg.includes('tp:');
 }
 
 export default function LogsPage() {
@@ -36,7 +35,7 @@ export default function LogsPage() {
   const [error, setError] = useState<string | null>(null);
   const [category, setCategory] = useState<string>('all');
   const [limit, setLimit] = useState(300);
-  const [tpSyncFilter, setTpSyncFilter] = useState<TpSyncFilterMode>('hide');
+  const [tpLogFilter, setTpLogFilter] = useState<TpLogFilterMode>('hide');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   const load = useCallback(async () => {
@@ -77,12 +76,15 @@ export default function LogsPage() {
     }
   }
 
-  const tpSyncCount = useMemo(() => rows.filter((row) => isTpSyncEvent(row.message)).length, [rows]);
+  const tpLogCount = useMemo(
+    () => rows.filter((row) => isTpLogEvent(row.message)).length,
+    [rows],
+  );
   const visibleRows = useMemo(() => {
-    if (tpSyncFilter === 'all') return rows;
-    if (tpSyncFilter === 'hide') return rows.filter((row) => !isTpSyncEvent(row.message));
-    return rows.filter((row) => isTpSyncEvent(row.message));
-  }, [rows, tpSyncFilter]);
+    if (tpLogFilter === 'all') return rows;
+    if (tpLogFilter === 'hide') return rows.filter((row) => !isTpLogEvent(row.message));
+    return rows.filter((row) => isTpLogEvent(row.message));
+  }, [rows, tpLogFilter]);
 
   return (
     <div>
@@ -142,10 +144,10 @@ export default function LogsPage() {
           />
         </label>
         <label>
-          TP-синхронизация:{' '}
+          TP-логи:{' '}
           <select
-            value={tpSyncFilter}
-            onChange={(e) => setTpSyncFilter(e.target.value as TpSyncFilterMode)}
+            value={tpLogFilter}
+            onChange={(e) => setTpLogFilter(e.target.value as TpLogFilterMode)}
             style={{
               marginLeft: 4,
               padding: '0.35rem 0.5rem',
@@ -155,9 +157,9 @@ export default function LogsPage() {
               borderRadius: 6,
             }}
           >
-            <option value="hide">Скрыть «TP: ордера синхронизированы»</option>
+            <option value="hide">Скрыть TP/placeTpSplit</option>
             <option value="all">Показать все</option>
-            <option value="only">Только «TP: ордера синхронизированы»</option>
+            <option value="only">Только TP/placeTpSplit</option>
           </select>
         </label>
         <button
@@ -176,7 +178,7 @@ export default function LogsPage() {
         </button>
       </div>
       <p style={{ color: 'var(--muted)', marginBottom: '0.75rem', fontSize: '0.8rem' }}>
-        Событий «TP: ордера синхронизированы» в текущей выборке: {tpSyncCount}
+        TP/placeTpSplit событий в текущей выборке: {tpLogCount}
       </p>
 
       {loading && <p style={{ color: 'var(--muted)' }}>Загрузка…</p>}
@@ -190,7 +192,7 @@ export default function LogsPage() {
         <p style={{ color: 'var(--muted)' }}>
           {rows.length === 0
             ? 'Записей пока нет.'
-            : 'Нет записей для текущего фильтра TP-синхронизации.'}
+            : 'Нет записей для текущего фильтра TP-логов.'}
         </p>
       )}
 
