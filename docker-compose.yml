@@ -25,12 +25,12 @@ services:
       dockerfile: Dockerfile.web
       args:
         NEXT_BASE_PATH: ${WEB_NEXT_BASE_PATH:-/trade}
-        NEXT_PUBLIC_API_URL: ${WEB_NEXT_PUBLIC_API_URL:-/api}
+        NEXT_PUBLIC_API_URL: ${WEB_NEXT_PUBLIC_API_URL:-/trade-api}
         API_INTERNAL_URL: ${WEB_API_INTERNAL_URL:-http://api:3001}
     restart: unless-stopped
     environment:
       NEXT_BASE_PATH: ${WEB_NEXT_BASE_PATH:-/trade}
-      NEXT_PUBLIC_API_URL: ${WEB_NEXT_PUBLIC_API_URL:-/api}
+      NEXT_PUBLIC_API_URL: ${WEB_NEXT_PUBLIC_API_URL:-/trade-api}
       API_INTERNAL_URL: ${WEB_API_INTERNAL_URL:-http://api:3001}
     ports:
       - "127.0.0.1:3003:3000"
