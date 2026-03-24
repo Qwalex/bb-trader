@@ -9,7 +9,7 @@ export function getApiBase(): string {
   }
   return (
     process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ??
-    `${window.location.origin}/trade`
+    `${window.location.origin}/api`
   );
 }
 

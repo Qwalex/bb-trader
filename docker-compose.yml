@@ -11,7 +11,7 @@ services:
     volumes:
       - sqlite-data:/app/data
     ports:
-      - "3001:3001"
+      - "127.0.0.1:3001:3001"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3001/health || exit 1"]
       interval: 10s
@@ -25,15 +25,15 @@ services:
       dockerfile: Dockerfile.web
       args:
         NEXT_BASE_PATH: ${WEB_NEXT_BASE_PATH:-/trade}
-        NEXT_PUBLIC_API_URL: ${WEB_NEXT_PUBLIC_API_URL:-/trade}
+        NEXT_PUBLIC_API_URL: ${WEB_NEXT_PUBLIC_API_URL:-/api}
         API_INTERNAL_URL: ${WEB_API_INTERNAL_URL:-http://api:3001}
     restart: unless-stopped
     environment:
       NEXT_BASE_PATH: ${WEB_NEXT_BASE_PATH:-/trade}
-      NEXT_PUBLIC_API_URL: ${WEB_NEXT_PUBLIC_API_URL:-/trade}
+      NEXT_PUBLIC_API_URL: ${WEB_NEXT_PUBLIC_API_URL:-/api}
       API_INTERNAL_URL: ${WEB_API_INTERNAL_URL:-http://api:3001}
     ports:
-      - "3003:3000"
+      - "127.0.0.1:3003:3000"
     depends_on:
       api:
         condition: service_healthy
