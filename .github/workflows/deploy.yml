@@ -6,13 +6,19 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      - name: Validate deploy secrets
+        run: |
+          [ -n "${{ secrets.VPS_HOST }}" ] || { echo "Missing secret: VPS_HOST"; exit 1; }
+          [ -n "${{ secrets.VPS_USER }}" ] || { echo "Missing secret: VPS_USER"; exit 1; }
+          [ -n "${{ secrets.VPS_SSH_KEY }}" ] || { echo "Missing secret: VPS_SSH_KEY"; exit 1; }
+
       - name: Run restart.sh on VPS
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          port: ${{ secrets.VPS_PORT }}
+          port: ${{ secrets.VPS_PORT || '22' }}
           script: |
             cd /opt/signals-bot
             chmod +x ./restart.sh
