@@ -140,6 +140,21 @@ type TranscriptMessage = {
   content: string | TranscriptMessagePart[];
 };
 
+function normalizeOpenRouterAudioFormat(
+  audioMime: string | undefined,
+): string | undefined {
+  if (!audioMime) return undefined;
+  const mime = audioMime.trim().toLowerCase();
+  if (!mime) return undefined;
+  if (mime === 'audio/mpeg') return 'mp3';
+  if (mime === 'audio/x-wav') return 'wav';
+  if (mime.includes('/')) {
+    const suffix = mime.split('/')[1]?.trim();
+    return suffix || undefined;
+  }
+  return mime;
+}
+
 @Injectable()
 export class TranscriptService {
   private readonly logger = new Logger(TranscriptService.name);
@@ -548,6 +563,29 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       payload.audioBase64 && payload.audioMime
         ? `Audio attached (${payload.audioMime}). Transcribe and parse signal as JSON.`
         : 'Parse the voice message content.';
+    const audioFormat = normalizeOpenRouterAudioFormat(payload.audioMime);
+    if (payload.audioBase64 && audioFormat) {
+      const parts: TranscriptMessagePart[] = [
+        {
+          type: 'text',
+          text:
+            payload.text && payload.text.trim().length > 0
+              ? `${contPrefix}${audioNote}\n${normalizeEntryRangeInMessageText(payload.text)}`
+              : `${contPrefix}${audioNote}`,
+        },
+        {
+          type: 'input_audio',
+          inputAudio: {
+            data: payload.audioBase64,
+            format: audioFormat,
+          },
+        },
+      ];
+      return [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: parts },
+      ];
+    }
     const userContent =
       payload.text
         ? `${contPrefix}${audioNote}\n${normalizeEntryRangeInMessageText(payload.text)}`
