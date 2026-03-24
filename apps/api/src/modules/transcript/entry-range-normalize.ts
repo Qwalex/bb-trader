@@ -68,7 +68,11 @@ export function collapseEntriesIfEntryRangeText(
     return entries;
   }
   const { lo, hi } = bounds;
-  const [e0, e1] = entries;
+  const e0 = entries[0];
+  const e1 = entries[1];
+  if (e0 === undefined || e1 === undefined) {
+    return entries;
+  }
   const span = hi - lo;
   const tol = Math.max(1e-8, span * 0.002);
   const matchesOrdered =

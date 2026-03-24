@@ -1972,6 +1972,16 @@ export class BybitService {
     });
   }
 
+  /** orderId в строке getClosedPnL — для привязки PnL к нашим ордерам, а не к list[0] для всех. */
+  private static extractClosedPnlOrderId(row: unknown): string {
+    if (!row || typeof row !== 'object') {
+      return '';
+    }
+    const r = row as Record<string, unknown>;
+    const v = r.orderId ?? r.orderID;
+    return v != null && String(v).length > 0 ? String(v) : '';
+  }
+
   async pollOpenOrders(): Promise<void> {
     const client = await this.getClient();
     if (!client) {
@@ -2031,19 +2041,58 @@ export class BybitService {
           BybitService.isFilledOrderStatus(o.status),
         );
         if (hadFill && posSize === 0 && fresh.status === 'ORDERS_PLACED') {
+          const ourIds = new Set(
+            fresh.orders
+              .map((o) => (o.bybitOrderId ? String(o.bybitOrderId) : ''))
+              .filter(Boolean),
+          );
           const pnlRes = await client.getClosedPnL({
             category: 'linear',
             symbol: symNorm,
-            limit: 5,
+            limit: 50,
           });
-          const last = pnlRes.result?.list?.[0];
-          if (last?.closedPnl) {
-            const num = parseFloat(last.closedPnl);
-            await this.orders.updateSignalStatus(fresh.id, {
-              status: num >= 0 ? 'CLOSED_WIN' : 'CLOSED_LOSS',
-              realizedPnl: num,
-              closedAt: new Date(),
-            });
+          const rows = pnlRes.result?.list ?? [];
+          const matchedRow = rows.find((row) => {
+            const oid = BybitService.extractClosedPnlOrderId(row);
+            return oid.length > 0 && ourIds.has(oid);
+          });
+          if (matchedRow) {
+            const cp = (matchedRow as Record<string, unknown>).closedPnl;
+            if (cp != null && String(cp) !== '') {
+              const num = parseFloat(String(cp));
+              if (Number.isFinite(num)) {
+                await this.orders.updateSignalStatus(fresh.id, {
+                  status: num >= 0 ? 'CLOSED_WIN' : 'CLOSED_LOSS',
+                  realizedPnl: num,
+                  closedAt: new Date(),
+                });
+              }
+            }
+          } else if (ourIds.size > 0) {
+            const sibling =
+              await this.orders.findOlderClosedSiblingAfterNewerCreated(
+                symNorm,
+                fresh.direction,
+                fresh.id,
+                fresh.createdAt,
+              );
+            if (sibling) {
+              await this.orders.updateSignalStatus(fresh.id, {
+                status: 'CLOSED_MIXED',
+                realizedPnl: null,
+                closedAt: new Date(),
+              });
+              void this.appLog.append(
+                'info',
+                'bybit',
+                'poll: дубликат сигнала без orderId в closed PnL — CLOSED_MIXED',
+                {
+                  signalId: fresh.id,
+                  pair: symNorm,
+                  siblingId: sibling.id,
+                },
+              );
+            }
           }
         }
       } catch (err) {

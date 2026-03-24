@@ -94,6 +94,31 @@ export class OrdersService {
         status: { in: ['ORDERS_PLACED', 'OPEN'] },
       },
       include: { orders: true },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  /**
+   * Более ранний сигнал по той же паре/стороне уже закрыт с PnL после создания этого сигнала —
+   * типичный дубликат записи на одну биржевую сделку.
+   */
+  async findOlderClosedSiblingAfterNewerCreated(
+    pair: string,
+    direction: string,
+    excludeId: string,
+    newerCreatedAt: Date,
+  ) {
+    const want = normalizeTradingPair(pair);
+    return this.prisma.signal.findFirst({
+      where: {
+        pair: want,
+        direction,
+        id: { not: excludeId },
+        status: { in: ['CLOSED_WIN', 'CLOSED_LOSS'] },
+        closedAt: { not: null, gte: newerCreatedAt },
+        createdAt: { lt: newerCreatedAt },
+      },
+      orderBy: { closedAt: 'desc' },
     });
   }
 
