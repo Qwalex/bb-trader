@@ -23,18 +23,22 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.web
+      args:
+        NEXT_BASE_PATH: ${WEB_NEXT_BASE_PATH:-/trade}
+        NEXT_PUBLIC_API_URL: ${WEB_NEXT_PUBLIC_API_URL:-/trade}
+        API_INTERNAL_URL: ${WEB_API_INTERNAL_URL:-http://api:3001}
     restart: unless-stopped
     environment:
-      NEXT_BASE_PATH: /trade
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://dev.qwalex.ru/trade}
-      API_INTERNAL_URL: http://api:3001
+      NEXT_BASE_PATH: ${WEB_NEXT_BASE_PATH:-/trade}
+      NEXT_PUBLIC_API_URL: ${WEB_NEXT_PUBLIC_API_URL:-/trade}
+      API_INTERNAL_URL: ${WEB_API_INTERNAL_URL:-http://api:3001}
     ports:
       - "3003:3000"
     depends_on:
       api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3003/trade || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/trade || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 10
