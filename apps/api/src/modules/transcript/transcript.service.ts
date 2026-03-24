@@ -150,8 +150,16 @@ Return ONLY strict JSON:
   "reason": "short reason in Russian"
 }
 Rules:
-- signal: contains actionable trade setup (pair, direction, entry/SL/TP/leverage or equivalent).
+- signal: ONLY if the message contains ALL required fields for order placement:
+  1) pair/token (e.g. BTCUSDT),
+  2) side (long/short),
+  3) entry price/zone,
+  4) stop-loss,
+  5) at least one take-profit.
+- If ANY required field is missing or ambiguous, do NOT return "signal" (return "other" unless it is clearly a result).
+- Leverage and position size/order amount are optional and are NOT required for "signal".
 - result: reports past outcome/performance/closed trade/TP/SL hit without actionable new setup.
+- If message contains profit/loss info with percentages (e.g. "+12%", "Profit: 22.3%", "-5%"), treat it as "result" unless there is a full new setup with all required fields above.
 - other: anything else.
 Be conservative: if unsure, return "other".`;
     const requestPayload = {

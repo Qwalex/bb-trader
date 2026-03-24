@@ -35,6 +35,7 @@ type QrState = {
 };
 
 const USERBOT_POLL_INTERVAL_MS = 2000;
+const USERBOT_MAX_MESSAGE_AGE_MINUTES_DEFAULT = 10;
 
 @Injectable()
 export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
@@ -409,6 +410,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           if (!createdAt || createdAt < start) {
             continue;
           }
+          if (!(await this.isMessageRecent(createdAt))) {
+            continue;
+          }
           readMessages += 1;
           const text = this.readString(m.message);
           const messageId = this.readNumericString(m.id);
@@ -513,6 +517,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       if (!this.isToday(createdAt)) {
         return;
       }
+      if (!(await this.isMessageRecent(createdAt))) {
+        return;
+      }
       if (!this.enabledChatIds.has(chatId)) {
         return;
       }
@@ -593,8 +600,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       const parsed = await this.transcript.parse('text', { text });
       if (parsed.ok !== true) {
         await this.updateIngest(ingest.id, {
-          classification: 'signal',
-          status: parsed.ok === 'incomplete' ? 'parse_incomplete' : 'parse_error',
+          classification: parsed.ok === 'incomplete' ? 'other' : 'signal',
+          status: parsed.ok === 'incomplete' ? 'ignored' : 'parse_error',
           error: parsed.ok === false ? parsed.error : parsed.prompt,
           aiRequest,
           aiResponse,
@@ -728,9 +735,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     text: string,
     useAiClassifier: boolean,
   ): Promise<{ kind: MessageKind; aiRequest?: string; aiResponse?: string }> {
-    const heuristic = this.classifyMessageHeuristic(text);
     if (!useAiClassifier) {
-      return { kind: heuristic };
+      return { kind: 'other' };
     }
     const ai = await this.transcript.classifyTradingMessage(text);
     const aiRequest = this.limitTrace(
@@ -746,34 +752,20 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         aiReason: ai.reason,
         usedFallback: ai.debug?.usedFallback ?? false,
         rawResponse: ai.debug?.response,
-        heuristicKind: heuristic,
       }),
     );
-
-    /**
-     * Важнее не пропустить сигнал, чем лишний раз отправить "подозрительное" сообщение в парсер.
-     * Если AI сомневается/ошибается, но эвристика видит полноценный trading setup — считаем сигналом.
-     */
-    if (heuristic === 'signal' && ai.kind !== 'signal') {
-      return { kind: 'signal', aiRequest, aiResponse };
-    }
     return { kind: ai.kind, aiRequest, aiResponse };
   }
 
-  private classifyMessageHeuristic(text: string): MessageKind {
-    const t = text.toLowerCase();
-    const hasPair = /\b[A-Z0-9]{2,}USDT\b/i.test(text);
-    const hasDirection = /\b(long|short)\b/i.test(text);
-    const hasLeverage = /\b(leverage|плечо)\b/i.test(text) || /\b\d+\s*x\b/i.test(text);
-    const hasEntry = /\b(entry|entries|entry range|вход|входы)\b/i.test(text);
-    const hasRisk = /\b(stop loss|sl|targets|tp|тейк|стоп)\b/i.test(text);
-    if ((hasPair && hasDirection && hasLeverage && hasEntry) || (hasPair && hasRisk && hasEntry)) {
-      return 'signal';
-    }
-    if (/\b(result|результат|закрыт|closed|tp hit|sl hit|profit|убыток)\b/.test(t)) {
-      return 'result';
-    }
-    return 'other';
+  private async isMessageRecent(createdAt: Date): Promise<boolean> {
+    const maxAgeMinutes = await this.getNumberSetting(
+      'TELEGRAM_USERBOT_MAX_MESSAGE_AGE_MINUTES',
+      USERBOT_MAX_MESSAGE_AGE_MINUTES_DEFAULT,
+      1,
+      1440,
+    );
+    const maxAgeMs = maxAgeMinutes * 60_000;
+    return Date.now() - createdAt.getTime() <= maxAgeMs;
   }
 
   private async tryCreateSignalHash(hash: string): Promise<boolean> {
@@ -891,6 +883,29 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       return fallback;
     }
     return raw.trim().toLowerCase() === 'true';
+  }
+
+  private async getNumberSetting(
+    key: string,
+    fallback: number,
+    min?: number,
+    max?: number,
+  ): Promise<number> {
+    const raw = await this.settings.get(key);
+    if (raw == null || raw.trim() === '') {
+      return fallback;
+    }
+    const n = Number(raw.trim());
+    if (!Number.isFinite(n)) {
+      return fallback;
+    }
+    if (min != null && n < min) {
+      return min;
+    }
+    if (max != null && n > max) {
+      return max;
+    }
+    return n;
   }
 
   private readString(value: unknown): string | undefined {
