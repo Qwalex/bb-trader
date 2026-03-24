@@ -618,7 +618,6 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
               : undefined,
           messages: messages as never,
           responseFormat,
-          provider: { requireParameters: true },
           stream: false,
         },
       });
