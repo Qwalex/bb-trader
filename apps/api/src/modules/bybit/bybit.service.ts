@@ -437,6 +437,39 @@ export class BybitService {
   }
 
   /**
+   * Hedge: по символу две строки позиции (Buy / Sell). Берём ту, что соответствует сигналу.
+   * One-way: обычно одна строка с ненулевым size.
+   */
+  private static pickPositionRowForSignalDirection(
+    rows: Array<{
+      size?: string;
+      side?: string;
+      positionIdx?: number;
+      stopLoss?: string;
+    }>,
+    direction: 'long' | 'short',
+  ):
+    | {
+        size?: string;
+        side?: string;
+        positionIdx?: number;
+        stopLoss?: string;
+      }
+    | undefined {
+    const wantBuy = direction === 'long';
+    const withSize = rows.filter((r) => {
+      const sz = r?.size ? Math.abs(parseFloat(String(r.size))) : 0;
+      return sz > 1e-12;
+    });
+    const matched = withSize.find((r) => {
+      const side = String(r.side ?? '').toLowerCase();
+      const isBuy = side === 'buy';
+      return wantBuy === isBuy;
+    });
+    return matched ?? withSize[0];
+  }
+
+  /**
    * Статусы ордеров Bybit, которые считаем «ещё открытыми» (не Filled/Cancelled/Deactivated).
    */
   private static readonly OPEN_ORDER_STATUSES = new Set([
@@ -1667,6 +1700,7 @@ export class BybitService {
     sig: {
       id: string;
       pair: string;
+      direction: string;
       stopLoss: number;
       takeProfits: string;
       orders: { orderKind: string }[];
@@ -1694,15 +1728,14 @@ export class BybitService {
       return;
     }
     const rows = posRes.result?.list ?? [];
-    let posSize = 0;
-    let mainRow = rows[0];
-    for (const row of rows) {
-      const s = row?.size ? Math.abs(parseFloat(String(row.size))) : 0;
-      if (s > posSize) {
-        posSize = s;
-        mainRow = row;
-      }
+    const dir = sig.direction === 'short' ? 'short' : 'long';
+    const mainRow = BybitService.pickPositionRowForSignalDirection(rows, dir);
+    if (!mainRow) {
+      return;
     }
+    const posSize = mainRow?.size
+      ? Math.abs(parseFloat(String(mainRow.size)))
+      : 0;
     if (posSize <= 1e-12) {
       return;
     }
@@ -1811,11 +1844,12 @@ export class BybitService {
       return;
     }
     const rows = posRes.result?.list ?? [];
+    const dir = s2.direction === 'short' ? 'short' : 'long';
     const rowWithPos =
-      rows.find((r) => {
-        const sz = r?.size ? Math.abs(parseFloat(String(r.size))) : 0;
-        return sz > 1e-12;
-      }) ?? rows[0];
+      BybitService.pickPositionRowForSignalDirection(rows, dir);
+    if (!rowWithPos) {
+      return;
+    }
     const sizeStr = rowWithPos?.size;
     const posSize = sizeStr ? Math.abs(parseFloat(String(sizeStr))) : 0;
     if (posSize <= 0) {
