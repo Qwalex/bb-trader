@@ -17,7 +17,7 @@ const nextConfig = {
   turbopack: {
     root: path.join(__dirname, '../..'),
   },
-  allowedDevOrigins: ['http://localhost:3000'],
+  allowedDevOrigins: ['http://localhost:3003'],
   basePath,
 };
 
