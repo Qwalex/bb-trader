@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 
 import { normalizeTradingPair, type SignalDto } from '@repo/shared';
@@ -18,6 +18,12 @@ export interface TradesFilter {
 @Injectable()
 export class OrdersService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private static readonly ACTIVE_SIGNAL_STATUSES = new Set([
+    'ORDERS_PLACED',
+    'OPEN',
+    'PARSED',
+  ]);
 
   async createSignalRecord(
     signal: SignalDto,
@@ -86,6 +92,22 @@ export class OrdersService {
       where: { id: signalId },
       include: { orders: true },
     });
+  }
+
+  async deleteTrade(id: string): Promise<void> {
+    const row = await this.prisma.signal.findUnique({
+      where: { id },
+      select: { id: true, status: true },
+    });
+    if (!row) {
+      throw new NotFoundException('Сделка не найдена');
+    }
+    if (OrdersService.ACTIVE_SIGNAL_STATUSES.has(row.status)) {
+      throw new BadRequestException(
+        'Нельзя удалить активную сделку: сначала закройте позицию/ордера на бирже',
+      );
+    }
+    await this.prisma.signal.delete({ where: { id } });
   }
 
   async listOpenSignals() {

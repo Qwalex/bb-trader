@@ -1,4 +1,4 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Delete, Get, Param, Query } from '@nestjs/common';
 
 import { OrdersService } from './orders.service';
 
@@ -36,6 +36,12 @@ export class OrdersController {
       page: page ? parseInt(page, 10) : 1,
       pageSize: pageSize ? parseInt(pageSize, 10) : 20,
     });
+  }
+
+  @Delete('trades/:id')
+  async deleteTrade(@Param('id') id: string) {
+    await this.orders.deleteTrade(id);
+    return { ok: true };
   }
 
   @Get('by-source')

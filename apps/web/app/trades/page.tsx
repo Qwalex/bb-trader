@@ -1,6 +1,7 @@
 import Link from 'next/link';
 
 import { fetchJson } from '../../lib/api';
+import { DeleteTradeButton } from './delete-trade-button';
 
 type Order = {
   id: string;
@@ -116,6 +117,7 @@ export default async function TradesPage({
                   <th>Источник</th>
                   <th>PnL</th>
                   <th>Дата</th>
+                  <th>Действие</th>
                 </tr>
               </thead>
               <tbody>
@@ -131,6 +133,13 @@ export default async function TradesPage({
                         : '—'}
                     </td>
                     <td>{new Date(s.createdAt).toLocaleString('ru-RU')}</td>
+                    <td>
+                      <DeleteTradeButton
+                        tradeId={s.id}
+                        pair={s.pair}
+                        status={s.status}
+                      />
+                    </td>
                   </tr>
                 ))}
               </tbody>
