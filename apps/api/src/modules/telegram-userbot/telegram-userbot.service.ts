@@ -378,6 +378,48 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     return { ok: true };
   }
 
+  async rereadAllIngestMessages() {
+    const rows = await this.prisma.tgUserbotIngest.findMany({
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        chatId: true,
+        messageId: true,
+        text: true,
+        signalHash: true,
+        status: true,
+      },
+    });
+    let processed = 0;
+    let skippedWithoutText = 0;
+    let failed = 0;
+    const errors: Array<{ ingestId: string; error: string }> = [];
+
+    for (const row of rows) {
+      const text = this.readString(row.text);
+      if (!text) {
+        skippedWithoutText += 1;
+        continue;
+      }
+      try {
+        await this.processIngestRecord(row, text);
+        processed += 1;
+      } catch (e) {
+        failed += 1;
+        errors.push({ ingestId: row.id, error: formatError(e) });
+      }
+    }
+
+    return {
+      ok: true,
+      total: rows.length,
+      processed,
+      skippedWithoutText,
+      failed,
+      errors: errors.slice(0, 20),
+    };
+  }
+
   private async scanTodayMessagesCore(
     limitPerChatRaw?: number,
     includeTodayMetrics = false,

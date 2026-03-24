@@ -77,6 +77,16 @@ const TRANSCRIPT_RESPONSE_JSON_SCHEMA = {
   additionalProperties: false,
 } as const;
 
+const CLASSIFIER_RESPONSE_JSON_SCHEMA = {
+  type: 'object',
+  properties: {
+    kind: { type: 'string', enum: ['signal', 'result', 'other'] },
+    reason: { type: 'string' },
+  },
+  required: ['kind', 'reason'],
+  additionalProperties: false,
+} as const;
+
 /** Общая схема ответа модели (с явным статусом). */
 const JSON_SCHEMA_RULES = `
 Return ONLY valid JSON (no markdown, no commentary) with this exact shape:
@@ -563,12 +573,20 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       timeoutMs: 180_000,
     });
 
+    const schemaName =
+      ctx.operation === 'classifyTradingMessage'
+        ? 'transcript_classifier_result'
+        : 'transcript_signal_result';
+    const schema =
+      ctx.operation === 'classifyTradingMessage'
+        ? CLASSIFIER_RESPONSE_JSON_SCHEMA
+        : TRANSCRIPT_RESPONSE_JSON_SCHEMA;
     const responseFormat = {
       type: 'json_schema' as const,
       jsonSchema: {
-        name: 'transcript_signal_result',
+        name: schemaName,
         strict: true,
-        schema: TRANSCRIPT_RESPONSE_JSON_SCHEMA,
+        schema,
       },
     };
 

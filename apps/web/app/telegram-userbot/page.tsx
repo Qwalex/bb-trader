@@ -347,6 +347,39 @@ export default function TelegramUserbotPage() {
           className="btn btnSecondary"
           type="button"
           onClick={() =>
+            void runAction('reread-all', async () => {
+              const res = await fetch(`${getApiBase()}/telegram-userbot/reread-all`, {
+                method: 'POST',
+              });
+              const j = (await res.json()) as {
+                ok?: boolean;
+                error?: string;
+                total?: number;
+                processed?: number;
+                skippedWithoutText?: number;
+                failed?: number;
+              };
+              if (!j.ok) {
+                throw new Error(j.error ?? 'Не удалось перечитать все сообщения');
+              }
+              await loadAll();
+              setMsg({
+                type: 'ok',
+                text:
+                  `Перечитано: ${j.processed ?? 0} из ${j.total ?? 0}` +
+                  `, пропущено без текста: ${j.skippedWithoutText ?? 0}` +
+                  `, ошибок: ${j.failed ?? 0}`,
+              });
+            })
+          }
+          disabled={busy !== null}
+        >
+          {busy === 'reread-all' ? 'Перечитывание…' : 'Перечитать все сообщения'}
+        </button>
+        <button
+          className="btn btnSecondary"
+          type="button"
+          onClick={() =>
             void runAction('sync', async () => {
               const res = await fetch(`${getApiBase()}/telegram-userbot/chats/sync`, {
                 method: 'POST',

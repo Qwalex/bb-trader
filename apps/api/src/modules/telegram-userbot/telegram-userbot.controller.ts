@@ -61,6 +61,11 @@ export class TelegramUserbotController {
     return this.userbot.rereadIngestMessage(ingestId);
   }
 
+  @Post('reread-all')
+  async rereadAll() {
+    return this.userbot.rereadAllIngestMessages();
+  }
+
   @Put('chats/:chatId')
   async setChatEnabled(
     @Param('chatId') chatId: string,
