@@ -358,6 +358,54 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     return { ok: true, requestId, deliveredTo };
   }
 
+  async notifyUserbotSignalFailure(params: {
+    ingestId: string;
+    token: string;
+    stage: 'transcript' | 'bybit';
+    error: string;
+    missingData?: string[];
+  }): Promise<{ ok: boolean; deliveredTo: number; error?: string }> {
+    if (!this.bot) {
+      return { ok: false, deliveredTo: 0, error: 'Telegram bot не запущен' };
+    }
+    const ids = await this.getWhitelistUserIds();
+    if (ids.length === 0) {
+      return { ok: false, deliveredTo: 0, error: 'TELEGRAM_WHITELIST пуст' };
+    }
+
+    const stageText =
+      params.stage === 'transcript' ? 'транскрибации/разбора' : 'установки ордеров на Bybit';
+    const missing =
+      params.missingData && params.missingData.length > 0
+        ? `\nНе хватило данных: ${params.missingData.join(', ')}`
+        : '';
+    const msg =
+      `Ошибка обработки сигнала из группы\n` +
+      `Токен: ${params.token}\n` +
+      `Этап: ${stageText}\n` +
+      `Причина: ${params.error}${missing}\n\n` +
+      `ingestId: ${params.ingestId}`;
+
+    let deliveredTo = 0;
+    for (const uid of ids) {
+      try {
+        await this.bot.telegram.sendMessage(uid, msg);
+        deliveredTo += 1;
+      } catch (e) {
+        this.logger.warn(`notifyUserbotSignalFailure -> ${uid}: ${formatError(e)}`);
+      }
+    }
+
+    if (deliveredTo === 0) {
+      return {
+        ok: false,
+        deliveredTo: 0,
+        error: 'Не удалось доставить ошибку ни одному пользователю',
+      };
+    }
+    return { ok: true, deliveredTo };
+  }
+
   private registerHandlers(): void {
     if (!this.bot) return;
 

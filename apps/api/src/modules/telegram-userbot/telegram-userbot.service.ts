@@ -648,12 +648,23 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
       const parsed = await this.transcript.parse('text', { text });
       if (parsed.ok !== true) {
+        const parseError = parsed.ok === false ? parsed.error : parsed.prompt;
         await this.updateIngest(ingest.id, {
           classification: parsed.ok === 'incomplete' ? 'other' : 'signal',
           status: parsed.ok === 'incomplete' ? 'ignored' : 'parse_error',
-          error: parsed.ok === false ? parsed.error : parsed.prompt,
+          error: parseError,
           aiRequest,
           aiResponse,
+        });
+        await this.notifySignalFailureToBot({
+          ingestId: ingest.id,
+          token: this.extractTokenHint(text),
+          stage: 'transcript',
+          error: parseError,
+          missingData:
+            parsed.ok === 'incomplete'
+              ? this.extractMissingFieldsFromPrompt(parsed.prompt)
+              : undefined,
         });
         return;
       }
@@ -748,13 +759,20 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
       const place = await this.bybit.placeSignalOrders(signal, text);
       if (!place.ok) {
+        const placeError = formatError(place.error);
         await this.updateIngest(ingest.id, {
           classification: 'signal',
           status: 'place_error',
           signalHash,
-          error: formatError(place.error),
+          error: placeError,
           aiRequest,
           aiResponse,
+        });
+        await this.notifySignalFailureToBot({
+          ingestId: ingest.id,
+          token: signal.pair,
+          stage: 'bybit',
+          error: placeError,
         });
         return;
       }
@@ -773,10 +791,67 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         source: signal.source,
       });
     } catch (e) {
+      const err = formatError(e);
       await this.updateIngest(ingest.id, {
         status: 'parse_error',
-        error: formatError(e),
+        error: err,
       });
+      await this.notifySignalFailureToBot({
+        ingestId: ingest.id,
+        token: this.extractTokenHint(text),
+        stage: 'transcript',
+        error: err,
+      });
+    }
+  }
+
+  private extractTokenHint(text: string): string {
+    const m = text.match(/\b([A-Z0-9]{2,15}USDT)\b/i);
+    if (m?.[1]) {
+      return m[1].toUpperCase();
+    }
+    const firstWord = text
+      .trim()
+      .split(/\s+/)[0]
+      ?.replace(/[^a-zA-Z0-9]/g, '')
+      .toUpperCase();
+    return firstWord || 'UNKNOWN';
+  }
+
+  private extractMissingFieldsFromPrompt(prompt?: string): string[] | undefined {
+    if (!prompt) {
+      return undefined;
+    }
+    const parts = prompt
+      .split(/[,\n;]+/)
+      .map((x) => x.trim())
+      .filter(Boolean)
+      .filter((x) => x.length <= 64);
+    if (parts.length === 0) {
+      return undefined;
+    }
+    return Array.from(new Set(parts)).slice(0, 8);
+  }
+
+  private async notifySignalFailureToBot(params: {
+    ingestId: string;
+    token: string;
+    stage: 'transcript' | 'bybit';
+    error: string;
+    missingData?: string[];
+  }): Promise<void> {
+    const enabled = await this.getBoolSetting(
+      'TELEGRAM_USERBOT_NOTIFY_FAILURES',
+      true,
+    );
+    if (!enabled) {
+      return;
+    }
+    const notify = await this.telegramBot.notifyUserbotSignalFailure(params);
+    if (!notify.ok) {
+      this.logger.warn(
+        `Failed to notify bot about signal error ingestId=${params.ingestId}: ${notify.error ?? 'unknown'}`,
+      );
     }
   }
 

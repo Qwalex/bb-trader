@@ -41,6 +41,11 @@ const KEYS = [
   { key: 'TELEGRAM_USERBOT_USE_AI_CLASSIFIER', label: 'Userbot: AI-классификация сообщений (true/false)' },
   { key: 'TELEGRAM_USERBOT_REQUIRE_CONFIRMATION', label: 'Userbot: требовать подтверждение перед размещением (true/false)' },
   {
+    key: 'TELEGRAM_USERBOT_NOTIFY_FAILURES',
+    label:
+      'Userbot: присылать ошибки обработки сигнала в бота (true/false)',
+  },
+  {
     key: 'SIGNAL_SOURCE',
     label:
       'Источник сигналов (канал / приложение, для статистики: Binance Killers, Crypto Signals, …)',
@@ -48,6 +53,14 @@ const KEYS = [
   { key: 'TELEGRAM_WHITELIST', label: 'Telegram user IDs (через запятую)' },
   { key: 'POLLING_INTERVAL_MS', label: 'Polling (0 = отключить опрос Bybit)' },
 ] as const;
+
+const BOOLEAN_KEYS = new Set<string>([
+  'BYBIT_TESTNET',
+  'TELEGRAM_USERBOT_ENABLED',
+  'TELEGRAM_USERBOT_USE_AI_CLASSIFIER',
+  'TELEGRAM_USERBOT_REQUIRE_CONFIRMATION',
+  'TELEGRAM_USERBOT_NOTIFY_FAILURES',
+]);
 
 export default function SettingsPage() {
   const [rows, setRows] = useState<{ key: string; value: string }[]>([]);
@@ -76,6 +89,7 @@ export default function SettingsPage() {
   }, []);
 
   const valueFor = (key: string) => rows.find((r) => r.key === key)?.value ?? '';
+  const boolValueFor = (key: string) => valueFor(key).toLowerCase() === 'true';
 
   async function save(key: string, value: string) {
     setSaving(key);
@@ -154,25 +168,45 @@ export default function SettingsPage() {
         </p>
       )}
       <div className="settingsForm">
-        {KEYS.map(({ key, label }) => (
-          <label key={key}>
-            {label}
-            <input
-              defaultValue={valueFor(key)}
-              name={key}
-              autoComplete="off"
-              onBlur={(e) => {
-                const v = e.target.value.trim();
-                if (v !== valueFor(key)) void save(key, v);
-              }}
-            />
-            {saving === key && (
-              <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
-                сохранение…
-              </span>
-            )}
-          </label>
-        ))}
+        {KEYS.map(({ key, label }) => {
+          const isBoolean = BOOLEAN_KEYS.has(key);
+          return (
+            <label key={key} className={isBoolean ? 'settingRowSwitch' : undefined}>
+              <span>{label}</span>
+              {isBoolean ? (
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={boolValueFor(key)}
+                  aria-label={label}
+                  className={`switch ${boolValueFor(key) ? 'on' : 'off'}`}
+                  disabled={saving === key}
+                  onClick={() => {
+                    const next = boolValueFor(key) ? 'false' : 'true';
+                    void save(key, next);
+                  }}
+                >
+                  <span className="switchThumb" />
+                </button>
+              ) : (
+                <input
+                  defaultValue={valueFor(key)}
+                  name={key}
+                  autoComplete="off"
+                  onBlur={(e) => {
+                    const v = e.target.value.trim();
+                    if (v !== valueFor(key)) void save(key, v);
+                  }}
+                />
+              )}
+              {saving === key && (
+                <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
+                  сохранение…
+                </span>
+              )}
+            </label>
+          );
+        })}
       </div>
       <div
         style={{
