@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 
 import { getApiBase } from '../../lib/api';
 
+const MODEL_HISTORY_KEY = 'OPENROUTER_MODEL_HISTORY';
 const KEYS = [
   { key: 'OPENROUTER_API_KEY', label: 'OpenRouter API key' },
   { key: 'OPENROUTER_MODEL_DEFAULT', label: 'Модель по умолчанию' },
@@ -67,6 +68,29 @@ const BOOLEAN_KEYS = new Set<string>([
   'TELEGRAM_USERBOT_REQUIRE_CONFIRMATION',
   'TELEGRAM_USERBOT_NOTIFY_FAILURES',
 ]);
+const MODEL_KEYS = new Set<string>(
+  KEYS.map(({ key }) => key).filter((key) => key.startsWith('OPENROUTER_MODEL_')),
+);
+
+function parseModelHistory(raw: string): string[] {
+  if (!raw.trim()) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((v) => (typeof v === 'string' ? v.trim() : ''))
+      .filter(Boolean)
+      .slice(0, 50);
+  } catch {
+    return [];
+  }
+}
+
+function mergeModelHistory(current: string[], value: string): string[] {
+  const v = value.trim();
+  if (!v) return current;
+  return [v, ...current.filter((item) => item !== v)].slice(0, 50);
+}
 
 export default function SettingsPage() {
   const [rows, setRows] = useState<{ key: string; value: string }[]>([]);
@@ -96,6 +120,21 @@ export default function SettingsPage() {
 
   const valueFor = (key: string) => rows.find((r) => r.key === key)?.value ?? '';
   const boolValueFor = (key: string) => valueFor(key).toLowerCase() === 'true';
+  const modelHistory = parseModelHistory(valueFor(MODEL_HISTORY_KEY));
+
+  function upsertRow(
+    list: { key: string; value: string }[],
+    key: string,
+    value: string,
+  ) {
+    const i = list.findIndex((r) => r.key === key);
+    if (i >= 0) {
+      const next = [...list];
+      next[i] = { key, value };
+      return next;
+    }
+    return [...list, { key, value }];
+  }
 
   async function save(key: string, value: string) {
     setSaving(key);
@@ -107,15 +146,26 @@ export default function SettingsPage() {
         body: JSON.stringify({ key, value }),
       });
       if (!res.ok) throw new Error(String(res.status));
-      setRows((prev) => {
-        const i = prev.findIndex((r) => r.key === key);
-        if (i >= 0) {
-          const next = [...prev];
-          next[i] = { key, value };
-          return next;
+      let nextRows = upsertRow(rows, key, value);
+
+      if (MODEL_KEYS.has(key) && value.trim()) {
+        const nextHistory = mergeModelHistory(modelHistory, value);
+        const nextHistoryRaw = JSON.stringify(nextHistory);
+        if (nextHistoryRaw !== valueFor(MODEL_HISTORY_KEY)) {
+          const historyRes = await fetch(`${getApiBase()}/settings`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              key: MODEL_HISTORY_KEY,
+              value: nextHistoryRaw,
+            }),
+          });
+          if (!historyRes.ok) throw new Error(String(historyRes.status));
+          nextRows = upsertRow(nextRows, MODEL_HISTORY_KEY, nextHistoryRaw);
         }
-        return [...prev, { key, value }];
-      });
+      }
+
+      setRows(nextRows);
       setMessage({ type: 'ok', text: 'Сохранено' });
     } catch {
       setMessage({ type: 'err', text: 'Ошибка сохранения' });
@@ -176,6 +226,7 @@ export default function SettingsPage() {
       <div className="settingsForm">
         {KEYS.map(({ key, label }) => {
           const isBoolean = BOOLEAN_KEYS.has(key);
+          const isModel = MODEL_KEYS.has(key);
           return (
             <label key={key} className={isBoolean ? 'settingRowSwitch' : undefined}>
               <span>{label}</span>
@@ -196,14 +247,53 @@ export default function SettingsPage() {
                 </button>
               ) : (
                 <input
+                  key={`${key}:${valueFor(key)}`}
                   defaultValue={valueFor(key)}
                   name={key}
+                  list={isModel ? `${key}-history` : undefined}
                   autoComplete="off"
                   onBlur={(e) => {
                     const v = e.target.value.trim();
                     if (v !== valueFor(key)) void save(key, v);
                   }}
                 />
+              )}
+              {isModel && modelHistory.length > 0 && (
+                <>
+                  <datalist id={`${key}-history`}>
+                    {modelHistory.map((model) => (
+                      <option key={`${key}-${model}`} value={model} />
+                    ))}
+                  </datalist>
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: '0.4rem',
+                      marginTop: '0.35rem',
+                    }}
+                  >
+                    {modelHistory.slice(0, 8).map((model) => (
+                      <button
+                        key={`${key}-chip-${model}`}
+                        type="button"
+                        disabled={saving === key}
+                        onClick={() => void save(key, model)}
+                        style={{
+                          padding: '0.2rem 0.45rem',
+                          fontSize: '0.75rem',
+                          borderRadius: 999,
+                          border: '1px solid var(--border, #444)',
+                          background: 'transparent',
+                          color: 'var(--muted)',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {model}
+                      </button>
+                    ))}
+                  </div>
+                </>
               )}
               {saving === key && (
                 <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
