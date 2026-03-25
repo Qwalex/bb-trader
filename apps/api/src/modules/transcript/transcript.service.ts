@@ -315,7 +315,7 @@ Be conservative: if unsure, return "other".`;
       };
     }
 
-    const defaultOrderUsd = await this.settings.getDefaultOrderUsd();
+    const defaultOrderUsd: number = await this.settings.getDefaultOrderUsd();
     const correctionPrompt = `You are editing a trading signal. The user provides the current signal as JSON and a correction in natural language (possibly Russian).
 ${buildJsonSchemaRules(defaultOrderUsd)}
 Merge the user's correction into the signal. Keep fields unchanged if the user did not ask to change them.`;
@@ -339,7 +339,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       const ms = Date.now() - t0;
       this.logger.log(`applyCorrection: OpenRouter ok in ${ms}ms`);
       const levOpts = await this.getLeverageFieldOptions();
-      let result = this.finishTranscriptResult(
+      const result = this.finishTranscriptResult(
         this.parseModelContent(content, levOpts, defaultOrderUsd),
         levOpts,
         defaultOrderUsd,
@@ -388,7 +388,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       ? `Previous user messages (in order):\n${userTurns.map((t, i) => `${i + 1}. ${t}`).join('\n')}\n\n`
       : '';
 
-    const defaultOrderUsd = await this.settings.getDefaultOrderUsd();
+    const defaultOrderUsd: number = await this.settings.getDefaultOrderUsd();
     const userBlock =
       `${historyBlock}Current known partial signal (JSON):\n${JSON.stringify({ signal: partial })}\n\n` +
       `Latest user message:\n${newMessage}\n\n` +
@@ -412,7 +412,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       const ms = Date.now() - t0;
       this.logger.log(`continueSignalDraft: OpenRouter ok in ${ms}ms`);
       const levOpts = await this.getLeverageFieldOptions();
-      let result = this.finishTranscriptResult(
+      const result = this.finishTranscriptResult(
         this.parseModelContent(content, levOpts, defaultOrderUsd),
         levOpts,
         defaultOrderUsd,
@@ -469,7 +469,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       };
     }
 
-    const defaultOrderUsd = await this.settings.getDefaultOrderUsd();
+    const defaultOrderUsd: number = await this.settings.getDefaultOrderUsd();
     const messages = this.buildMessages(kind, payload, defaultOrderUsd);
     const t0 = Date.now();
     this.logger.log(
