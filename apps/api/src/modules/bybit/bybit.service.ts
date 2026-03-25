@@ -294,6 +294,15 @@ export class BybitService {
     return rounded.toFixed(decimals);
   }
 
+  /** Цена на сетке тика — для сравнения с LastPrice (Rising/Falling требуют строгого неравенства). */
+  private snapPriceToTickNum(price: number, tickSize: string): number {
+    const tick = parseFloat(tickSize);
+    if (!Number.isFinite(tick) || tick <= 0) {
+      return price;
+    }
+    return Math.round(price / tick) * tick;
+  }
+
   private roundQty(qty: number, step: string, minQty: string): string {
     const stepNum = parseFloat(step);
     const min = parseFloat(minQty);
@@ -1267,7 +1276,10 @@ export class BybitService {
         sellLeverage: String(signal.leverage),
       });
 
-      const { qtyStep, minQty } = await this.getLotStep(client, symbol);
+      const { qtyStep, minQty, tickSize } = await this.getLinearInstrumentFilters(
+        client,
+        symbol,
+      );
       const lastPrice = await this.getLastPrice(client, symbol);
       if (!lastPrice) {
         void this.appLog.append('warn', 'bybit', 'placeSignalOrders: last price unavailable, fallback to limit entries', {
@@ -1333,8 +1345,10 @@ export class BybitService {
         const shouldUseStop =
           lastPrice !== undefined
             ? signal.direction === 'short'
-              ? price <= lastPrice
-              : price >= lastPrice
+              ? this.snapPriceToTickNum(price, tickSize) <
+                this.snapPriceToTickNum(lastPrice, tickSize)
+              : this.snapPriceToTickNum(price, tickSize) >
+                this.snapPriceToTickNum(lastPrice, tickSize)
             : false;
 
         const orderReq = {
