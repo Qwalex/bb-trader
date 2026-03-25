@@ -1,4 +1,4 @@
-import { Controller, Delete, Get, Param, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 
 import { OrdersService } from './orders.service';
 
@@ -24,6 +24,7 @@ export class OrdersController {
     @Query('status') status?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
+    @Query('includeDeleted') includeDeleted?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
   ) {
@@ -33,6 +34,7 @@ export class OrdersController {
       status,
       from: from ? new Date(from) : undefined,
       to: to ? new Date(to) : undefined,
+      includeDeleted: includeDeleted === '1' || includeDeleted === 'true',
       page: page ? parseInt(page, 10) : 1,
       pageSize: pageSize ? parseInt(pageSize, 10) : 20,
     });
@@ -42,6 +44,23 @@ export class OrdersController {
   async deleteTrade(@Param('id') id: string) {
     await this.orders.deleteTrade(id);
     return { ok: true };
+  }
+
+  @Post('trades/:id/restore')
+  async restoreTrade(@Param('id') id: string) {
+    await this.orders.restoreTrade(id);
+    return { ok: true };
+  }
+
+  @Patch('trades/:id/source')
+  async updateTradeSource(
+    @Param('id') id: string,
+    @Body() body: { source?: string | null },
+  ) {
+    return this.orders.updateSignalSourceWithPropagation(
+      id,
+      body.source === undefined ? null : body.source,
+    );
   }
 
   @Get('by-source')

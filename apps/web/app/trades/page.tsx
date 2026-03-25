@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { fetchJson } from '../../lib/api';
 import { DeleteTradeButton } from './delete-trade-button';
 import { RecalcClosedPnlButton } from './recalc-closed-pnl-button';
+import { SourceSelect } from './source-select';
 
 type Order = {
   id: string;
@@ -49,11 +50,42 @@ export default async function TradesPage({
 
   let data: TradesRes | null = null;
   let err: string | null = null;
+  let sourceOptions: string[] = [];
   try {
+    // 1) Список источников (не должен ломать загрузку таблицы)
+    try {
+      const settingsRaw = await fetchJson<{
+        settings: { key: string; value: string }[];
+      }>(`/settings/raw`);
+
+      const raw = settingsRaw.settings.find((r) => r.key === 'SOURCE_LIST')
+        ?.value;
+
+      if (raw && raw.trim()) {
+        try {
+          const parsed = JSON.parse(raw) as unknown;
+          if (Array.isArray(parsed)) {
+            sourceOptions = parsed
+              .map((v) => (typeof v === 'string' ? v.trim() : ''))
+              .filter((v) => v.length > 0);
+          }
+        } catch {
+          // ignore malformed SOURCE_LIST
+        }
+      }
+    } catch {
+      // ignore SOURCE_LIST load errors
+    }
+
+    // 2) Таблица сделок
     data = await fetchJson<TradesRes>(`/orders/trades?${q.toString()}`);
   } catch (e) {
     err = e instanceof Error ? e.message : 'Ошибка';
   }
+
+  // Варианты для dropdown берём строго из настройки `SOURCE_LIST`.
+  // Если у конкретной сделки source отличается и отсутствует в списке,
+  // он всё равно будет виден как текущее значение (в `SourceSelect` добавляем его как опцию).
 
   const buildPageLink = (p: number) => {
     const nq = new URLSearchParams(q);
@@ -134,7 +166,14 @@ export default async function TradesPage({
                     <td>{s.pair}</td>
                     <td>{s.direction}</td>
                     <td>{s.status}</td>
-                    <td>{s.source ?? '—'}</td>
+                    <td style={{ minWidth: 220 }}>
+                      <SourceSelect
+                        signalId={s.id}
+                        status={s.status}
+                        currentSource={s.source}
+                        options={sourceOptions}
+                      />
+                    </td>
                     <td>
                       {s.realizedPnl !== null && s.realizedPnl !== undefined
                         ? s.realizedPnl.toFixed(4)

@@ -100,6 +100,7 @@ export default function SettingsPage() {
     null,
   );
   const [resetting, setResetting] = useState(false);
+  const [newSource, setNewSource] = useState('');
 
   useEffect(() => {
     void (async () => {
@@ -121,6 +122,31 @@ export default function SettingsPage() {
   const valueFor = (key: string) => rows.find((r) => r.key === key)?.value ?? '';
   const boolValueFor = (key: string) => valueFor(key).toLowerCase() === 'true';
   const modelHistory = parseModelHistory(valueFor(MODEL_HISTORY_KEY));
+
+  function parseStringList(raw: string): string[] {
+    const t = raw.trim();
+    if (!t) return [];
+    try {
+      const parsed = JSON.parse(t) as unknown;
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map((v) => (typeof v === 'string' ? v.trim() : ''))
+          .filter((v) => v.length > 0);
+      }
+    } catch {
+      // ignore
+    }
+    // Fallback: split by newline/comma
+    return t
+      .split(/[\n,]/g)
+      .map((v) => v.trim())
+      .filter((v) => v.length > 0);
+  }
+
+  const sourceList = parseStringList(valueFor('SOURCE_LIST'));
+  const sourceListSorted = Array.from(new Set(sourceList)).sort((a, b) =>
+    a.localeCompare(b, 'ru'),
+  );
 
   function upsertRow(
     list: { key: string; value: string }[],
@@ -209,6 +235,21 @@ export default function SettingsPage() {
 
   if (loading) {
     return <p style={{ color: 'var(--muted)' }}>Загрузка…</p>;
+  }
+
+  async function addSource() {
+    const v = newSource.trim();
+    if (!v) return;
+    const next = Array.from(new Set([...sourceListSorted, v]));
+    const raw = JSON.stringify(next);
+    setNewSource('');
+    await save('SOURCE_LIST', raw);
+  }
+
+  async function removeSource(v: string) {
+    const next = sourceListSorted.filter((x) => x !== v);
+    const raw = JSON.stringify(next);
+    await save('SOURCE_LIST', raw);
   }
 
   return (
@@ -312,6 +353,61 @@ export default function SettingsPage() {
         }}
       >
         <h2 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>
+          Источники для dropdown
+        </h2>
+        <p style={{ color: 'var(--muted)', marginBottom: '0.75rem', fontSize: '0.9rem' }}>
+          Управляет списком `source`, который доступен для редактирования в таблице
+          сделок (`/trades`).
+        </p>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <input
+            value={newSource}
+            placeholder="добавить source, например Binance Killers"
+            onChange={(e) => setNewSource(e.target.value)}
+            style={{ flex: '1 1 260px' }}
+          />
+          <button
+            type="button"
+            onClick={() => void addSource()}
+            disabled={saving === 'SOURCE_LIST' || !newSource.trim()}
+          >
+            {saving === 'SOURCE_LIST' ? 'Добавление…' : 'Добавить'}
+          </button>
+        </div>
+        {sourceListSorted.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.85rem' }}>
+            {sourceListSorted.map((v) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => void removeSource(v)}
+                style={{
+                  padding: '0.2rem 0.45rem',
+                  borderRadius: 999,
+                  border: '1px solid var(--border, #444)',
+                  background: 'transparent',
+                  color: 'var(--muted)',
+                  cursor: saving === 'SOURCE_LIST' ? 'not-allowed' : 'pointer',
+                  opacity: saving === 'SOURCE_LIST' ? 0.7 : 1,
+                  fontSize: '0.85rem',
+                }}
+                disabled={saving === 'SOURCE_LIST'}
+                title="Удалить из списка"
+              >
+                {v} ×
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div
+          style={{
+            marginTop: '2rem',
+            paddingTop: '1.5rem',
+            borderTop: '1px solid var(--border, #333)',
+          }}
+        >
+        <h2 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>
           Опасная зона
         </h2>
         <p style={{ color: 'var(--muted)', marginBottom: '0.75rem', fontSize: '0.9rem' }}>
@@ -326,6 +422,7 @@ export default function SettingsPage() {
         >
           {resetting ? 'Сброс…' : 'Сбросить базу данных'}
         </button>
+        </div>
       </div>
     </>
   );

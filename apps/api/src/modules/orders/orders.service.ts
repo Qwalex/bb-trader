@@ -25,6 +25,17 @@ export class OrdersService {
     'PARSED',
   ]);
 
+  private static readonly CLOSED_SIGNAL_STATUSES = new Set([
+    'CLOSED_WIN',
+    'CLOSED_LOSS',
+    'CLOSED_MIXED',
+  ]);
+
+  private static readonly SOURCE_EDIT_ALLOWED_STATUSES = new Set([
+    ...Array.from(OrdersService.ACTIVE_SIGNAL_STATUSES),
+    ...Array.from(OrdersService.CLOSED_SIGNAL_STATUSES),
+  ]);
+
   async createSignalRecord(
     signal: SignalDto,
     rawMessage: string | undefined,
@@ -52,6 +63,69 @@ export class OrdersService {
     data: Prisma.SignalUpdateInput,
   ) {
     return this.prisma.signal.update({ where: { id }, data });
+  }
+
+  /**
+   * Обновляет source для сигнала и (если есть) для связанных сигналов.
+   * "Связанные" определяем через общий набор `orders.bybitOrderId`.
+   */
+  async updateSignalSourceWithPropagation(signalId: string, source: string | null) {
+    const signal = await this.prisma.signal.findUnique({
+      where: { id: signalId },
+      select: {
+        id: true,
+        status: true,
+        orders: { select: { bybitOrderId: true } },
+      },
+    });
+
+    if (!signal) {
+      throw new NotFoundException('Сделка не найдена');
+    }
+
+    if (!OrdersService.SOURCE_EDIT_ALLOWED_STATUSES.has(signal.status)) {
+      throw new BadRequestException(
+        `Нельзя менять source для статуса: ${signal.status}`,
+      );
+    }
+
+    const bybitOrderIds = Array.from(
+      new Set(
+        (signal.orders ?? [])
+          .map((o) => (o.bybitOrderId ? String(o.bybitOrderId).trim() : ''))
+          .filter((id) => id.length > 0),
+      ),
+    );
+
+    // Если у сигнала нет привязанных bybitOrderId — обновляем только его.
+    if (bybitOrderIds.length === 0) {
+      await this.prisma.signal.update({
+        where: { id: signalId },
+        data: { source },
+      });
+      return { ok: true, affectedSignals: 1 };
+    }
+
+    const connected = await this.prisma.signal.findMany({
+      where: {
+        status: { in: Array.from(OrdersService.SOURCE_EDIT_ALLOWED_STATUSES) },
+        orders: {
+          some: {
+            bybitOrderId: { in: bybitOrderIds },
+          },
+        },
+      },
+      select: { id: true },
+    });
+
+    const connectedIds = connected.map((r) => r.id);
+
+    const res = await this.prisma.signal.updateMany({
+      where: { id: { in: connectedIds } },
+      data: { source },
+    });
+
+    return { ok: true, affectedSignals: res.count };
   }
 
   async createOrderRecord(data: {
