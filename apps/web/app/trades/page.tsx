@@ -1,6 +1,7 @@
 import Link from 'next/link';
 
 import { fetchJson } from '../../lib/api';
+import { formatDateTimeRu } from '../../lib/datetime';
 import { DeleteTradeButton } from './delete-trade-button';
 import { RecalcClosedPnlButton } from './recalc-closed-pnl-button';
 import { RestoreTradeButton } from './restore-trade-button';
@@ -234,7 +235,7 @@ export default async function TradesPage({
                         '—'
                       )}
                     </td>
-                    <td>{new Date(s.createdAt).toLocaleString('ru-RU')}</td>
+                    <td>{formatDateTimeRu(s.createdAt)}</td>
                     <td>
                       {s.deletedAt ? (
                         <RestoreTradeButton tradeId={s.id} pair={s.pair} />

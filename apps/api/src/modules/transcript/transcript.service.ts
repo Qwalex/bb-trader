@@ -12,6 +12,7 @@ import {
 } from '@repo/shared';
 
 import { AppLogService } from '../app-log/app-log.service';
+import { BybitService } from '../bybit/bybit.service';
 import { sanitizeForOpenRouterLog } from '../app-log/log-sanitize';
 import { SettingsService } from '../settings/settings.service';
 import { SignalParseDto } from './dto/signal-parse.dto';
@@ -117,6 +118,7 @@ Rules:
 - pair must be uppercase like BTCUSDT, ETHUSDT.
 - direction must be long or short.
 - entries: first price is main entry, following are DCA levels.
+- If the user gives no entry price but wants to enter at market / "по рынку" / immediately, set entries to null and put only "entries" in missing when everything else is known — the system can suggest the current exchange price.
 - If the message gives an entry as a range between two prices (e.g. "entry range 1 - 2"), use a single entry equal to the midpoint (average), not two DCA levels.
 - takeProfits: one or more take-profit prices; several TPs mean equal split of position size at each level (e.g. 4 TPs → 25% each).
 - leverage: integer >= 1.
@@ -162,6 +164,7 @@ export class TranscriptService {
   constructor(
     private readonly settings: SettingsService,
     private readonly appLog: AppLogService,
+    private readonly bybit: BybitService,
   ) {}
 
   async classifyTradingMessage(text: string): Promise<{
@@ -181,13 +184,8 @@ Return ONLY strict JSON:
   "reason": "short reason in Russian"
 }
 Rules:
-- signal: ONLY if the message contains ALL required fields for order placement:
-  1) pair/token (e.g. BTCUSDT),
-  2) side (long/short),
-  3) entry price/zone,
-  4) stop-loss,
-  5) at least one take-profit.
-- If ANY required field is missing or ambiguous, do NOT return "signal" (return "other" unless it is clearly a result).
+- signal: the message describes a new trade setup with pair, side, stop-loss, at least one take-profit, and either an entry price/zone OR explicit intent to enter at market / immediately without a limit entry (entry may be omitted).
+- If ANY of pair, side, stop-loss, take-profit is missing or ambiguous, do NOT return "signal" (return "other" unless it is clearly a result).
 - Leverage and position size/order amount are optional and are NOT required for "signal".
 - result: reports past outcome/performance/closed trade/TP/SL hit without actionable new setup.
 - If message contains profit/loss info with percentages (e.g. "+12%", "Profit: 22.3%", "-5%"), treat it as "result" unless there is a full new setup with all required fields above.
@@ -344,7 +342,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
         levOpts,
       );
       result = this.applyEntryRangeCollapseToResult(result, userComment);
-      return result;
+      return await this.tryFillMissingEntryFromMarket(result, levOpts);
     } catch (e) {
       const ms = Date.now() - t0;
       const msg = e instanceof Error ? e.message : String(e);
@@ -413,7 +411,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       );
       const rangeHint = [userTurns.join('\n'), newMessage].filter(Boolean).join('\n');
       result = this.applyEntryRangeCollapseToResult(result, rangeHint);
-      return result;
+      return await this.tryFillMissingEntryFromMarket(result, levOpts);
     } catch (e) {
       const ms = Date.now() - t0;
       const msg = e instanceof Error ? e.message : String(e);
@@ -486,6 +484,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       );
       const originalText = payload.text ?? '';
       parsed = this.applyEntryRangeCollapseToResult(parsed, originalText);
+      parsed = await this.tryFillMissingEntryFromMarket(parsed, levOpts);
       if (!parsed.ok) {
         this.logger.warn(
           `parse: validation/json failed: ${parsed.error} ${parsed.details ?? ''}`,
@@ -753,6 +752,68 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       }
     }
     return result;
+  }
+
+  /**
+   * Если не хватает только цены входа, но пара уже известна — берём last/mark с Bybit
+   * и завершаем сигнал (лимит по текущей котировке ≈ вход «по рынку»).
+   */
+  private async tryFillMissingEntryFromMarket(
+    result: TranscriptResult,
+    leverageOpts: LeverageFieldOptions,
+  ): Promise<TranscriptResult> {
+    if (result.ok !== 'incomplete') {
+      return result;
+    }
+    const missing = listMissingRequiredFields(result.partial, leverageOpts);
+    if (missing.length !== 1 || missing[0] !== 'entries') {
+      return result;
+    }
+    const pair = result.partial.pair?.trim();
+    if (!pair) {
+      return result;
+    }
+    const price = await this.bybit.getLastPriceForPair(normalizeTradingPair(pair));
+    if (price == null) {
+      return result;
+    }
+    const merged: Partial<SignalDto> = {
+      ...result.partial,
+      entries: [price],
+    };
+    const stillMissing = listMissingRequiredFields(merged, leverageOpts);
+    if (stillMissing.length > 0) {
+      return {
+        ok: 'incomplete',
+        partial: merged,
+        missing: stillMissing,
+        prompt: this.defaultPromptForMissing(stillMissing),
+      };
+    }
+    const completed = this.tryCompleteSignal(merged, leverageOpts);
+    if (completed.ok === true) {
+      void this.appLog.append('info', 'transcript', 'цена входа подставлена с рынка (Bybit)', {
+        pair: completed.signal.pair,
+        suggestedEntry: price,
+      });
+      return completed;
+    }
+    return {
+      ok: 'incomplete',
+      partial: merged,
+      missing: listMissingRequiredFields(merged, leverageOpts),
+      prompt:
+        `Цена входа не указана; с биржи получена котировка ≈ ${this.formatPriceForUser(price)}, но сигнал всё ещё не проходит проверку. Уточните параметры одним сообщением.`,
+    };
+  }
+
+  private formatPriceForUser(price: number): string {
+    const abs = Math.abs(price);
+    const maxFrac = abs >= 1 ? 4 : 8;
+    return price.toLocaleString('ru-RU', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: maxFrac,
+    });
   }
 
   /** Настройки плеча из SQLite / env: опциональная подстановка или обязательное поле в сигнале. */

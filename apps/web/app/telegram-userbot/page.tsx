@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 
 import { getApiBase } from '../../lib/api';
+import { formatTimeRu } from '../../lib/datetime';
 
 type BotStatus = {
   connected: boolean;
@@ -496,7 +497,7 @@ export default function TelegramUserbotPage() {
                       </tr>
                     )}
                     <tr>
-                      <td>{new Date(row.createdAt).toLocaleTimeString('ru-RU')}</td>
+                      <td>{formatTimeRu(row.createdAt)}</td>
                       <td>{row.chatId}</td>
                       <td>{row.messageId}</td>
                       <td style={{ maxWidth: 380 }}>

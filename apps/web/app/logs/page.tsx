@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { getApiBase } from '../../lib/api';
+import { formatDateTimeRu } from '../../lib/datetime';
 
 type LogRow = {
   id: string;
@@ -213,7 +214,7 @@ export default function LogsPage() {
               }}
             >
               <span style={{ color: 'var(--muted)', fontSize: '0.75rem' }}>
-                {new Date(row.createdAt).toLocaleString('ru-RU')}
+                {formatDateTimeRu(row.createdAt)}
               </span>
               <span
                 style={{

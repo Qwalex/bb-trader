@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { getApiBase } from '../../lib/api';
+import { formatDateTimeRu } from '../../lib/datetime';
 
 type LiveExposureOrder = {
   orderId: string;
@@ -201,7 +202,7 @@ export function LiveExposurePanel() {
             <div>
               <strong>{item.pair}</strong> · {item.direction} · {item.status}
               <div style={{ color: 'var(--muted)', fontSize: '0.8rem', marginTop: '0.2rem' }}>
-                Источник: {item.source ?? '—'} · {new Date(item.createdAt).toLocaleString('ru-RU')}
+                Источник: {item.source ?? '—'} · {formatDateTimeRu(item.createdAt)}
               </div>
             </div>
             <div style={{ display: 'flex', gap: '0.5rem' }}>

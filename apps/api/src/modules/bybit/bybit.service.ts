@@ -240,6 +240,19 @@ export class BybitService {
     return { qtyStep: f.qtyStep, minQty: f.minQty };
   }
 
+  /**
+   * Last/mark/index для линейного контракта (котировка с биржи).
+   * Используется для подстановки цены входа «по рынку», когда в сигнале не указан вход.
+   */
+  async getLastPriceForPair(pair: string): Promise<number | undefined> {
+    const client = await this.getClient();
+    if (!client) {
+      return undefined;
+    }
+    const symbol = normalizeTradingPair(pair);
+    return this.getLastPrice(client, symbol);
+  }
+
   /** Последняя цена инструмента (best-effort). */
   private async getLastPrice(
     client: RestClientV5,
