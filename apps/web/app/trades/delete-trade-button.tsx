@@ -22,7 +22,7 @@ export function DeleteTradeButton(props: {
   async function onDelete() {
     if (isDisabled) return;
     const ok = window.confirm(
-      `Удалить сделку ${props.pair} из базы данных?\n\nСвязанные ордера в БД тоже будут удалены.`,
+      `Удалить сделку ${props.pair} из базы данных?\n\nСделка будет скрыта из статистики и таблиц (можно восстановить).`,
     );
     if (!ok) return;
 
@@ -52,7 +52,7 @@ export function DeleteTradeButton(props: {
       title={
         isDisabled
           ? 'Активные сделки удалять нельзя'
-          : 'Полностью удалить сделку из БД'
+          : 'Скрыть сделку (soft-delete)'
       }
       style={{
         padding: '0.3rem 0.55rem',

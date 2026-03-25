@@ -11,6 +11,7 @@ export interface TradesFilter {
   from?: Date;
   to?: Date;
   status?: string;
+  includeDeleted?: boolean;
   page?: number;
   pageSize?: number;
 }
@@ -62,7 +63,14 @@ export class OrdersService {
     id: string,
     data: Prisma.SignalUpdateInput,
   ) {
-    return this.prisma.signal.update({ where: { id }, data });
+    const res = await this.prisma.signal.updateMany({
+      where: { id, deletedAt: null },
+      data,
+    });
+    if (res.count === 0) {
+      throw new NotFoundException('Сделка не найдена');
+    }
+    return res;
   }
 
   /**
@@ -75,12 +83,17 @@ export class OrdersService {
       select: {
         id: true,
         status: true,
+        deletedAt: true,
         orders: { select: { bybitOrderId: true } },
       },
     });
 
     if (!signal) {
       throw new NotFoundException('Сделка не найдена');
+    }
+
+    if (signal.deletedAt) {
+      throw new NotFoundException('Сделка удалена');
     }
 
     if (!OrdersService.SOURCE_EDIT_ALLOWED_STATUSES.has(signal.status)) {
@@ -108,6 +121,7 @@ export class OrdersService {
 
     const connected = await this.prisma.signal.findMany({
       where: {
+        deletedAt: null,
         status: { in: Array.from(OrdersService.SOURCE_EDIT_ALLOWED_STATUSES) },
         orders: {
           some: {
@@ -162,8 +176,8 @@ export class OrdersService {
   }
 
   async getSignalWithOrders(signalId: string) {
-    return this.prisma.signal.findUnique({
-      where: { id: signalId },
+    return this.prisma.signal.findFirst({
+      where: { id: signalId, deletedAt: null },
       include: { orders: true },
     });
   }
@@ -171,22 +185,46 @@ export class OrdersService {
   async deleteTrade(id: string): Promise<void> {
     const row = await this.prisma.signal.findUnique({
       where: { id },
-      select: { id: true, status: true },
+      select: { id: true, status: true, deletedAt: true },
     });
     if (!row) {
       throw new NotFoundException('Сделка не найдена');
+    }
+    if (row.deletedAt) {
+      return;
     }
     if (OrdersService.ACTIVE_SIGNAL_STATUSES.has(row.status)) {
       throw new BadRequestException(
         'Нельзя удалить активную сделку: сначала закройте позицию/ордера на бирже',
       );
     }
-    await this.prisma.signal.delete({ where: { id } });
+    await this.prisma.signal.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    });
+  }
+
+  async restoreTrade(id: string): Promise<void> {
+    const row = await this.prisma.signal.findUnique({
+      where: { id },
+      select: { id: true, deletedAt: true },
+    });
+    if (!row) {
+      throw new NotFoundException('Сделка не найдена');
+    }
+    if (!row.deletedAt) {
+      return;
+    }
+    await this.prisma.signal.update({
+      where: { id },
+      data: { deletedAt: null },
+    });
   }
 
   async listOpenSignals() {
     return this.prisma.signal.findMany({
       where: {
+        deletedAt: null,
         status: { in: ['ORDERS_PLACED', 'OPEN'] },
       },
       include: { orders: true },
@@ -198,6 +236,7 @@ export class OrdersService {
     const limit = Math.min(Math.max(params?.limit ?? 200, 1), 2000);
     return this.prisma.signal.findMany({
       where: {
+        deletedAt: null,
         status: { in: ['CLOSED_WIN', 'CLOSED_LOSS', 'CLOSED_MIXED'] },
       },
       include: { orders: true },
@@ -222,6 +261,7 @@ export class OrdersService {
         pair: want,
         direction,
         id: { not: excludeId },
+        deletedAt: null,
         status: { in: ['CLOSED_WIN', 'CLOSED_LOSS'] },
         closedAt: { not: null, gte: newerCreatedAt },
         createdAt: { lt: newerCreatedAt },
@@ -240,7 +280,7 @@ export class OrdersService {
   ): Promise<boolean> {
     const want = normalizeTradingPair(pair);
     const open = await this.prisma.signal.findMany({
-      where: { status: 'ORDERS_PLACED', direction },
+      where: { deletedAt: null, status: 'ORDERS_PLACED', direction },
       select: { pair: true },
     });
     return open.some((r) => normalizeTradingPair(r.pair) === want);
@@ -255,7 +295,7 @@ export class OrdersService {
   ): Promise<number> {
     const want = normalizeTradingPair(pair);
     const open = await this.prisma.signal.findMany({
-      where: { status: 'ORDERS_PLACED', direction },
+      where: { deletedAt: null, status: 'ORDERS_PLACED', direction },
       select: { id: true, pair: true },
     });
     const ids = open
@@ -265,7 +305,7 @@ export class OrdersService {
       return 0;
     }
     const res = await this.prisma.signal.updateMany({
-      where: { id: { in: ids } },
+      where: { id: { in: ids }, deletedAt: null },
       data: {
         status: 'CLOSED_MIXED',
         closedAt: new Date(),
@@ -278,6 +318,7 @@ export class OrdersService {
   async getDashboardStats() {
     const closed = await this.prisma.signal.findMany({
       where: {
+        deletedAt: null,
         status: { in: ['CLOSED_WIN', 'CLOSED_LOSS', 'CLOSED_MIXED'] },
       },
     });
@@ -290,7 +331,10 @@ export class OrdersService {
       0,
     );
     const open = await this.prisma.signal.count({
-      where: { status: { in: ['ORDERS_PLACED', 'OPEN', 'PARSED'] } },
+      where: {
+        deletedAt: null,
+        status: { in: ['ORDERS_PLACED', 'OPEN', 'PARSED'] },
+      },
     });
     return {
       winrate,
@@ -305,6 +349,7 @@ export class OrdersService {
   async getPnlSeries(bucket: 'day' | 'week') {
     const closed = await this.prisma.signal.findMany({
       where: {
+        deletedAt: null,
         closedAt: { not: null },
         realizedPnl: { not: null },
       },
@@ -327,6 +372,9 @@ export class OrdersService {
     const page = f.page ?? 1;
     const pageSize = Math.min(f.pageSize ?? 20, 100);
     const where: Prisma.SignalWhereInput = {};
+    if (!f.includeDeleted) {
+      where.deletedAt = null;
+    }
     if (f.source) {
       where.source = f.source;
     }
@@ -362,6 +410,7 @@ export class OrdersService {
     const rows = await this.prisma.signal.groupBy({
       by: ['source', 'status'],
       _count: { id: true },
+      where: { deletedAt: null },
     });
     return rows;
   }
@@ -370,6 +419,7 @@ export class OrdersService {
     const rows = await this.prisma.signal.groupBy({
       by: ['pair', 'status'],
       _count: { id: true },
+      where: { deletedAt: null },
     });
     return rows;
   }

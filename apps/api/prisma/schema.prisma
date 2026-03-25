@@ -15,7 +15,7 @@ model Signal {
   stopLoss       Float
   takeProfits    String // JSON number[]
   leverage       Int
-  /** Номинал в USDT (по умолчанию 10) */
+  /// Номинал в USDT (по умолчанию 10)
   orderUsd       Float    @default(10)
   capitalPercent Float    @default(0)
   source         String?
@@ -25,6 +25,7 @@ model Signal {
   closedAt       DateTime?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+  deletedAt      DateTime?
   orders         Order[]
 }
 

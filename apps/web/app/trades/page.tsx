@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { fetchJson } from '../../lib/api';
 import { DeleteTradeButton } from './delete-trade-button';
 import { RecalcClosedPnlButton } from './recalc-closed-pnl-button';
+import { RestoreTradeButton } from './restore-trade-button';
 import { SourceSelect } from './source-select';
 
 type Order = {
@@ -22,6 +23,7 @@ type Signal = {
   source: string | null;
   realizedPnl: number | null;
   createdAt: string;
+  deletedAt?: string | null;
   orders: Order[];
 };
 
@@ -42,10 +44,15 @@ export default async function TradesPage({
   const source = typeof sp.source === 'string' ? sp.source : '';
   const pair = typeof sp.pair === 'string' ? sp.pair : '';
   const status = typeof sp.status === 'string' ? sp.status : '';
+  const includeDeleted =
+    typeof sp.includeDeleted === 'string'
+      ? sp.includeDeleted === '1' || sp.includeDeleted === 'true'
+      : false;
   const page = typeof sp.page === 'string' ? sp.page : '1';
   if (source) q.set('source', source);
   if (pair) q.set('pair', pair);
   if (status) q.set('status', status);
+  if (includeDeleted) q.set('includeDeleted', '1');
   q.set('page', page);
 
   let data: TradesRes | null = null;
@@ -120,6 +127,15 @@ export default async function TradesPage({
             <option value="FAILED">FAILED</option>
           </select>
         </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <input
+            type="checkbox"
+            name="includeDeleted"
+            value="1"
+            defaultChecked={includeDeleted}
+          />
+          Показать удалённые
+        </label>
         <button
           type="submit"
           style={{
@@ -162,17 +178,21 @@ export default async function TradesPage({
               </thead>
               <tbody>
                 {data.items.map((s) => (
-                  <tr key={s.id}>
+                  <tr key={s.id} style={s.deletedAt ? { opacity: 0.6 } : undefined}>
                     <td>{s.pair}</td>
                     <td>{s.direction}</td>
                     <td>{s.status}</td>
                     <td style={{ minWidth: 220 }}>
-                      <SourceSelect
-                        signalId={s.id}
-                        status={s.status}
-                        currentSource={s.source}
-                        options={sourceOptions}
-                      />
+                      {s.deletedAt ? (
+                        <span style={{ color: 'var(--muted)' }}>{s.source ?? '—'}</span>
+                      ) : (
+                        <SourceSelect
+                          signalId={s.id}
+                          status={s.status}
+                          currentSource={s.source}
+                          options={sourceOptions}
+                        />
+                      )}
                     </td>
                     <td>
                       {s.realizedPnl !== null && s.realizedPnl !== undefined
@@ -181,11 +201,15 @@ export default async function TradesPage({
                     </td>
                     <td>{new Date(s.createdAt).toLocaleString('ru-RU')}</td>
                     <td>
-                      <DeleteTradeButton
-                        tradeId={s.id}
-                        pair={s.pair}
-                        status={s.status}
-                      />
+                      {s.deletedAt ? (
+                        <RestoreTradeButton tradeId={s.id} pair={s.pair} />
+                      ) : (
+                        <DeleteTradeButton
+                          tradeId={s.id}
+                          pair={s.pair}
+                          status={s.status}
+                        />
+                      )}
                     </td>
                   </tr>
                 ))}
