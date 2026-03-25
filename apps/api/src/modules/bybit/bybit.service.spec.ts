@@ -137,4 +137,33 @@ describe('BybitService TP coverage helpers', () => {
     const parts = bybit.splitQtyForChildOrders(1.5, 2, '0.1', '1');
     expect(parts).toEqual(['1.5']);
   });
+
+  it('sums signal pnl even when SL orderId is not in db orders', () => {
+    const bybit = new BybitService(
+      {} as never,
+      {} as never,
+      {} as never,
+    ) as unknown as {
+      sumClosedPnlForSignal: (
+        rows: unknown[],
+        ourIds: Set<string>,
+        signalCreatedAt: Date,
+      ) => { totalPnl: number; hadParsedPnl: boolean };
+    };
+
+    const rows = [
+      // TP attached to tracked order id
+      { orderId: 'tp-order-1', closedPnl: '0.0060', createdTime: '1710000001000' },
+      // SL from trading stop can have another order id
+      { orderId: 'sl-exchange-order', closedPnl: '-0.0875', createdTime: '1710000002000' },
+    ];
+    const result = bybit.sumClosedPnlForSignal(
+      rows,
+      new Set(['tp-order-1']),
+      new Date(1710000000000),
+    );
+
+    expect(result.hadParsedPnl).toBe(true);
+    expect(result.totalPnl).toBeCloseTo(-0.0815, 10);
+  });
 });

@@ -67,6 +67,17 @@ export interface CloseSignalResult {
   details?: string;
 }
 
+export interface RecalcClosedPnlResult {
+  ok: boolean;
+  dryRun: boolean;
+  scanned: number;
+  updated: number;
+  unchanged: number;
+  skippedNoBybitOrders: number;
+  skippedNoClosedPnl: number;
+  errors: { signalId: string; error: string }[];
+}
+
 export interface SignalExecutionDebugSnapshot {
   ok: boolean;
   signalId: string;
@@ -2016,6 +2027,245 @@ export class BybitService {
     return v != null && String(v).length > 0 ? String(v) : '';
   }
 
+  /** В разных эндпоинтах Bybit время приходит в разных полях/форматах. */
+  private static extractClosedPnlTimestampMs(
+    row: unknown,
+  ): number | undefined {
+    if (!row || typeof row !== 'object') {
+      return undefined;
+    }
+    const r = row as Record<string, unknown>;
+    const raw =
+      r.createdTime ??
+      r.updatedTime ??
+      r.execTime ??
+      r.createdAt ??
+      r.updatedAt;
+    if (raw == null || String(raw).trim() === '') {
+      return undefined;
+    }
+    const asNumber = Number(raw);
+    if (Number.isFinite(asNumber) && asNumber > 0) {
+      return asNumber;
+    }
+    const parsed = Date.parse(String(raw));
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+  }
+
+  /**
+   * Closed PnL у TP/SL одной позиции может иметь разные orderId
+   * (например, SL из setTradingStop). Поэтому:
+   * 1) всегда берём строки с нашими orderId;
+   * 2) если у нас уже есть совпадения по orderId — добираем строки по тому же символу
+   *    после старта сигнала (буфер -60с на задержки времени от биржи).
+   */
+  private sumClosedPnlForSignal(
+    rows: unknown[],
+    ourIds: Set<string>,
+    signalCreatedAt: Date,
+  ): { totalPnl: number; hadParsedPnl: boolean } {
+    const createdAtMs = signalCreatedAt.getTime();
+    const createdFloorMs = createdAtMs - 60_000;
+
+    const parsedRows = rows.map((row) => {
+      const orderId = BybitService.extractClosedPnlOrderId(row);
+      const ts = BybitService.extractClosedPnlTimestampMs(row);
+      const cp = (row as { closedPnl?: unknown }).closedPnl;
+      const pnl =
+        cp != null && String(cp).trim() !== ''
+          ? Number.parseFloat(String(cp))
+          : Number.NaN;
+      return { orderId, ts, pnl };
+    });
+
+    const hasTrackedRows = parsedRows.some(
+      (r) => r.orderId.length > 0 && ourIds.has(r.orderId),
+    );
+
+    const candidates = parsedRows.filter((r) => {
+      if (r.orderId.length > 0 && ourIds.has(r.orderId)) {
+        return true;
+      }
+      if (!hasTrackedRows) {
+        return false;
+      }
+      return r.ts !== undefined && r.ts >= createdFloorMs;
+    });
+
+    let totalPnl = 0;
+    let hadParsedPnl = false;
+    for (const row of candidates) {
+      if (!Number.isFinite(row.pnl)) {
+        continue;
+      }
+      totalPnl += row.pnl;
+      hadParsedPnl = true;
+    }
+
+    return { totalPnl, hadParsedPnl };
+  }
+
+  private async fetchClosedPnlRowsForSymbol(
+    client: RestClientV5,
+    symbol: string,
+    createdAt: Date,
+  ): Promise<unknown[]> {
+    const createdFloorMs = createdAt.getTime() - 60_000;
+    const rows: unknown[] = [];
+    let cursor: string | undefined;
+    const MAX_PAGES = 20;
+
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const res = await client.getClosedPnL({
+        category: 'linear',
+        symbol,
+        limit: 50,
+        cursor,
+      });
+      if (res.retCode !== 0) {
+        break;
+      }
+
+      const list = res.result?.list ?? [];
+      rows.push(...list);
+      cursor = res.result?.nextPageCursor || undefined;
+
+      if (!cursor || list.length === 0) {
+        break;
+      }
+
+      const oldestInPage = list.reduce<number | undefined>((acc, row) => {
+        const ts = BybitService.extractClosedPnlTimestampMs(row);
+        if (ts === undefined) {
+          return acc;
+        }
+        return acc === undefined ? ts : Math.min(acc, ts);
+      }, undefined);
+
+      if (oldestInPage !== undefined && oldestInPage < createdFloorMs) {
+        break;
+      }
+    }
+
+    return rows;
+  }
+
+  async recalcClosedSignalsPnl(params?: {
+    limit?: number;
+    dryRun?: boolean;
+  }): Promise<RecalcClosedPnlResult> {
+    const dryRun = params?.dryRun ?? true;
+    const limit = params?.limit ?? 200;
+    const client = await this.getClient();
+    if (!client) {
+      return {
+        ok: false,
+        dryRun,
+        scanned: 0,
+        updated: 0,
+        unchanged: 0,
+        skippedNoBybitOrders: 0,
+        skippedNoClosedPnl: 0,
+        errors: [
+          {
+            signalId: '-',
+            error:
+              'Нет подключенных ключей Bybit. Пересчет closed PnL невозможен.',
+          },
+        ],
+      };
+    }
+
+    const closed = await this.orders.listClosedSignalsForPnlRecalc({ limit });
+    let updated = 0;
+    let unchanged = 0;
+    let skippedNoBybitOrders = 0;
+    let skippedNoClosedPnl = 0;
+    const errors: { signalId: string; error: string }[] = [];
+
+    for (const sig of closed) {
+      const ourIds = new Set<string>(
+        sig.orders
+          .map((o) => (o.bybitOrderId ? String(o.bybitOrderId) : ''))
+          .filter((id): id is string => id.length > 0),
+      );
+      if (ourIds.size === 0) {
+        skippedNoBybitOrders += 1;
+        continue;
+      }
+
+      try {
+        const symbol = normalizeTradingPair(sig.pair);
+        const rows = await this.fetchClosedPnlRowsForSymbol(
+          client,
+          symbol,
+          sig.createdAt,
+        );
+        const { totalPnl, hadParsedPnl } = this.sumClosedPnlForSignal(
+          rows,
+          ourIds,
+          sig.createdAt,
+        );
+
+        if (!hadParsedPnl) {
+          skippedNoClosedPnl += 1;
+          continue;
+        }
+
+        const nextStatus = totalPnl >= 0 ? 'CLOSED_WIN' : 'CLOSED_LOSS';
+        const prevPnl = sig.realizedPnl;
+        const pnlChanged =
+          prevPnl === null ||
+          prevPnl === undefined ||
+          Math.abs(prevPnl - totalPnl) > 1e-9;
+        const statusChanged = sig.status !== nextStatus;
+
+        if (!pnlChanged && !statusChanged) {
+          unchanged += 1;
+          continue;
+        }
+
+        if (!dryRun) {
+          await this.orders.updateSignalStatus(sig.id, {
+            status: nextStatus,
+            realizedPnl: totalPnl,
+            closedAt: sig.closedAt ?? new Date(),
+          });
+        }
+        updated += 1;
+      } catch (e) {
+        errors.push({ signalId: sig.id, error: formatError(e) });
+      }
+    }
+
+    if (!dryRun) {
+      void this.appLog.append(
+        'info',
+        'bybit',
+        'recalc closed pnl completed',
+        {
+          scanned: closed.length,
+          updated,
+          unchanged,
+          skippedNoBybitOrders,
+          skippedNoClosedPnl,
+          errors: errors.length,
+        },
+      );
+    }
+
+    return {
+      ok: errors.length === 0,
+      dryRun,
+      scanned: closed.length,
+      updated,
+      unchanged,
+      skippedNoBybitOrders,
+      skippedNoClosedPnl,
+      errors,
+    };
+  }
+
   async pollOpenOrders(): Promise<void> {
     const client = await this.getClient();
     if (!client) {
@@ -2075,10 +2325,10 @@ export class BybitService {
           BybitService.isFilledOrderStatus(o.status),
         );
         if (hadFill && posSize === 0 && fresh.status === 'ORDERS_PLACED') {
-          const ourIds = new Set(
+          const ourIds = new Set<string>(
             fresh.orders
               .map((o) => (o.bybitOrderId ? String(o.bybitOrderId) : ''))
-              .filter(Boolean),
+              .filter((id): id is string => id.length > 0),
           );
           const pnlRes = await client.getClosedPnL({
             category: 'linear',
@@ -2086,22 +2336,11 @@ export class BybitService {
             limit: 50,
           });
           const rows = pnlRes.result?.list ?? [];
-          const matchedRows = rows.filter((row) => {
-            const oid = BybitService.extractClosedPnlOrderId(row);
-            return oid.length > 0 && ourIds.has(oid);
-          });
-          let totalPnl = 0;
-          let hadParsedPnl = false;
-          for (const row of matchedRows) {
-            const cp = (row as unknown as { closedPnl?: string }).closedPnl;
-            if (cp != null && String(cp) !== '') {
-              const num = parseFloat(String(cp));
-              if (Number.isFinite(num)) {
-                totalPnl += num;
-                hadParsedPnl = true;
-              }
-            }
-          }
+          const { totalPnl, hadParsedPnl } = this.sumClosedPnlForSignal(
+            rows,
+            ourIds,
+            fresh.createdAt,
+          );
           if (hadParsedPnl) {
             await this.orders.updateSignalStatus(fresh.id, {
               status: totalPnl >= 0 ? 'CLOSED_WIN' : 'CLOSED_LOSS',

@@ -120,6 +120,18 @@ export class OrdersService {
     });
   }
 
+  async listClosedSignalsForPnlRecalc(params?: { limit?: number }) {
+    const limit = Math.min(Math.max(params?.limit ?? 200, 1), 2000);
+    return this.prisma.signal.findMany({
+      where: {
+        status: { in: ['CLOSED_WIN', 'CLOSED_LOSS', 'CLOSED_MIXED'] },
+      },
+      include: { orders: true },
+      orderBy: { closedAt: 'desc' },
+      take: limit,
+    });
+  }
+
   /**
    * Более ранний сигнал по той же паре/стороне уже закрыт с PnL после создания этого сигнала —
    * типичный дубликат записи на одну биржевую сделку.

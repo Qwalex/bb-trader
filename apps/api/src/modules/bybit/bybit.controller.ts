@@ -23,4 +23,14 @@ export class BybitController {
   ) {
     return this.bybit.closeSignalManually(signalId);
   }
+
+  @Post('recalc-closed-pnl')
+  async recalcClosedPnl(
+    @Body() body?: { limit?: number; dryRun?: boolean },
+  ) {
+    return this.bybit.recalcClosedSignalsPnl({
+      limit: body?.limit,
+      dryRun: body?.dryRun ?? true,
+    });
+  }
 }
