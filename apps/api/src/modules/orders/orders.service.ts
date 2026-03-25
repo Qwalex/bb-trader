@@ -415,6 +415,22 @@ export class OrdersService {
     return rows;
   }
 
+  async listDistinctSources(): Promise<string[]> {
+    const rows = await this.prisma.signal.groupBy({
+      by: ['source'],
+      _count: { id: true },
+      where: {
+        deletedAt: null,
+        source: { not: null },
+      },
+    });
+
+    return rows
+      .map((r) => r.source)
+      .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+      .sort((a, b) => a.localeCompare(b, 'ru'));
+  }
+
   async statsByPair() {
     const rows = await this.prisma.signal.groupBy({
       by: ['pair', 'status'],

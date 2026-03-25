@@ -364,12 +364,20 @@ export default function SettingsPage() {
             value={newSource}
             placeholder="добавить source, например Binance Killers"
             onChange={(e) => setNewSource(e.target.value)}
-            style={{ flex: '1 1 260px' }}
+            style={{
+              flex: '1 1 260px',
+              padding: '0.5rem',
+              borderRadius: 4,
+              border: '1px solid var(--border)',
+              background: 'var(--card)',
+              color: 'var(--foreground)',
+            }}
           />
           <button
             type="button"
             onClick={() => void addSource()}
             disabled={saving === 'SOURCE_LIST' || !newSource.trim()}
+            className="btn"
           >
             {saving === 'SOURCE_LIST' ? 'Добавление…' : 'Добавить'}
           </button>

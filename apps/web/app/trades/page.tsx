@@ -59,20 +59,24 @@ export default async function TradesPage({
   let err: string | null = null;
   let sourceOptions: string[] = [];
   try {
-    // 1) Список источников (не должен ломать загрузку таблицы)
+    // 1) Список источников (нужно для dropdown и не должен ломать таблицу)
     try {
-      const settingsRaw = await fetchJson<{
-        settings: { key: string; value: string }[];
-      }>(`/settings/raw`);
+      const [sourcesFromDb, settingsRaw] = await Promise.all([
+        fetchJson<string[]>(`/orders/sources`),
+        fetchJson<{
+          settings: { key: string; value: string }[];
+        }>(`/settings/raw`),
+      ]);
 
       const raw = settingsRaw.settings.find((r) => r.key === 'SOURCE_LIST')
         ?.value;
 
+      let sourcesFromSettings: string[] = [];
       if (raw && raw.trim()) {
         try {
           const parsed = JSON.parse(raw) as unknown;
           if (Array.isArray(parsed)) {
-            sourceOptions = parsed
+            sourcesFromSettings = parsed
               .map((v) => (typeof v === 'string' ? v.trim() : ''))
               .filter((v) => v.length > 0);
           }
@@ -80,8 +84,12 @@ export default async function TradesPage({
           // ignore malformed SOURCE_LIST
         }
       }
+
+      sourceOptions = Array.from(
+        new Set([...sourcesFromDb, ...sourcesFromSettings]),
+      ).sort((a, b) => a.localeCompare(b, 'ru'));
     } catch {
-      // ignore SOURCE_LIST load errors
+      sourceOptions = [];
     }
 
     // 2) Таблица сделок
@@ -89,10 +97,6 @@ export default async function TradesPage({
   } catch (e) {
     err = e instanceof Error ? e.message : 'Ошибка';
   }
-
-  // Варианты для dropdown берём строго из настройки `SOURCE_LIST`.
-  // Если у конкретной сделки source отличается и отсутствует в списке,
-  // он всё равно будет виден как текущее значение (в `SourceSelect` добавляем его как опцию).
 
   const buildPageLink = (p: number) => {
     const nq = new URLSearchParams(q);

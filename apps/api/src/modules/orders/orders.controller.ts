@@ -68,6 +68,11 @@ export class OrdersController {
     return this.orders.statsBySource();
   }
 
+  @Get('sources')
+  async sources() {
+    return this.orders.listDistinctSources();
+  }
+
   @Get('by-pair')
   async byPair() {
     return this.orders.statsByPair();
