@@ -3,7 +3,10 @@ import { ConfigService } from '@nestjs/config';
 
 import { PrismaService } from '../../prisma/prisma.service';
 
-const ENV_FALLBACK: Record<string, string> = {};
+const ENV_FALLBACK: Record<string, string> = {
+  /** Номинал по умолчанию, если в БД и .env ключ не задан */
+  DEFAULT_ORDER_USD: '10',
+};
 
 @Injectable()
 export class SettingsService {
@@ -26,6 +29,19 @@ export class SettingsService {
       return fromProcess;
     }
     return ENV_FALLBACK[key];
+  }
+
+  /**
+   * Номинал позиции в USDT, если в сигнале не заданы ни сумма, ни % депозита.
+   * Берётся из SQLite → env → 10.
+   */
+  async getDefaultOrderUsd(): Promise<number> {
+    const raw = await this.get('DEFAULT_ORDER_USD');
+    const n =
+      raw != null && String(raw).trim() !== ''
+        ? Number(String(raw).trim().replace(',', '.'))
+        : Number.NaN;
+    return Number.isFinite(n) && n > 0 ? n : 10;
   }
 
   async set(key: string, value: string): Promise<void> {

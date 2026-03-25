@@ -32,7 +32,7 @@ export class SignalParseDto {
   @Min(1)
   leverage!: number;
 
-  /** Номинал в USDT; 0 = не задано в USDT (тогда % или дефолт 10) */
+  /** Номинал в USDT; 0 = не задано в USDT (тогда % или дефолт из DEFAULT_ORDER_USD) */
   @IsOptional()
   @IsNumber()
   @Min(0)

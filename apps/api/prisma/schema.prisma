@@ -15,7 +15,7 @@ model Signal {
   stopLoss       Float
   takeProfits    String // JSON number[]
   leverage       Int
-  /// Номинал в USDT (по умолчанию 10)
+  /// Номинал в USDT (fallback в БД 10; фактический дефолт — настройка DEFAULT_ORDER_USD)
   orderUsd       Float    @default(10)
   capitalPercent Float    @default(0)
   source         String?

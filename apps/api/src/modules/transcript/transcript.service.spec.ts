@@ -19,6 +19,7 @@ describe('TranscriptService audio messages', () => {
             userTurns: string[];
           };
         },
+        _defaultOrderUsd: number,
       ) => Array<{
         role: 'system' | 'user';
         content: unknown;
@@ -28,7 +29,7 @@ describe('TranscriptService audio messages', () => {
     const messages = service.buildMessages('audio', {
       audioBase64: 'ZmFrZS1hdWRpby1iYXNlNjQ=',
       audioMime: 'audio/ogg',
-    });
+    }, 10);
 
     expect(messages).toHaveLength(2);
     expect(messages[1]?.role).toBe('user');

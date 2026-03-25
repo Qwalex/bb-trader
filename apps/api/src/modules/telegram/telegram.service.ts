@@ -221,14 +221,14 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       .filter((n) => Number.isFinite(n));
   }
 
-  private formatSignalTable(s: SignalDto): string {
+  private formatSignalTable(s: SignalDto, defaultOrderUsd: number): string {
     const src = s.source ? `\nИсточник: ${s.source}` : '';
     const sizing =
       s.orderUsd > 0
         ? `Сумма: $${s.orderUsd} USDT (номинал)`
         : s.capitalPercent > 0
           ? `Капитал: ${s.capitalPercent}% от депозита (номинал с плечом)`
-          : `Сумма: $10 USDT (по умолчанию)`;
+          : `Сумма: $${defaultOrderUsd} USDT (по умолчанию)`;
     const tpExtra =
       s.takeProfits.length > 1
         ? `\n(несколько TP: объём позиции делится поровну между уровнями — при 4 TP по 25% каждый)`
@@ -290,14 +290,14 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     ]);
   }
 
-  private formatExternalSignalTable(s: SignalDto): string {
+  private formatExternalSignalTable(s: SignalDto, defaultOrderUsd: number): string {
     const src = s.source ? `\nИсточник: ${s.source}` : '';
     const sizing =
       s.orderUsd > 0
         ? `Сумма: $${s.orderUsd} USDT (номинал)`
         : s.capitalPercent > 0
           ? `Капитал: ${s.capitalPercent}% от депозита`
-          : `Сумма: $10 USDT (по умолчанию)`;
+          : `Сумма: $${defaultOrderUsd} USDT (по умолчанию)`;
     return (
       `Новый сигнал из Telegram Userbot\n` +
       `Пара: ${s.pair}\n` +
@@ -334,7 +334,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     });
 
     let deliveredTo = 0;
-    const msg = this.formatExternalSignalTable(params.signal);
+    const defaultOrderUsd = await this.settings.getDefaultOrderUsd();
+    const msg = this.formatExternalSignalTable(params.signal, defaultOrderUsd);
     for (const uid of ids) {
       try {
         await this.bot.telegram.sendMessage(
@@ -817,7 +818,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       direction: res.signal.direction,
       orderUsd: res.signal.orderUsd,
     });
-    await ctx.reply(this.formatSignalTable(res.signal), {
+    const defaultOrderUsd = await this.settings.getDefaultOrderUsd();
+    await ctx.reply(this.formatSignalTable(res.signal, defaultOrderUsd), {
       ...this.confirmKeyboard(),
     });
   }

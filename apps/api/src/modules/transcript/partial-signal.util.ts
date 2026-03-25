@@ -135,7 +135,8 @@ export function fieldLabelRu(key: string): string {
     stopLoss: 'стоп-лосс (цена)',
     takeProfits: 'тейк-профиты (одна или несколько цен)',
     leverage: 'плечо (число, например 10)',
-    orderUsd: 'сумма позиции в USDT (номинал), по умолчанию 10',
+    orderUsd:
+      'сумма позиции в USDT (номинал); если не задана — значение из настроек DEFAULT_ORDER_USD',
     capitalPercent: 'доля депозита в % (только если не задаёте сумму в USDT)',
   };
   return map[key] ?? key;

@@ -17,10 +17,6 @@ import { sanitizeForOpenRouterLog } from '../app-log/log-sanitize';
 import { SettingsService } from '../settings/settings.service';
 import { SignalParseDto } from './dto/signal-parse.dto';
 import {
-  collapseEntriesIfEntryRangeText,
-  normalizeEntryRangeInMessageText,
-} from './entry-range-normalize';
-import {
   fieldLabelRu,
   isCompletePartial,
   listMissingRequiredFields,
@@ -42,7 +38,8 @@ const TRANSCRIPT_RESPONSE_JSON_SCHEMA = {
       properties: {
         pair: {
           type: ['string', 'null'],
-          description: 'Trading pair, e.g. BTCUSDT; null if unknown',
+          description:
+            'Trading pair as in the message (any case/separator); null if unknown — normalized server-side',
         },
         direction: { type: ['string', 'null'], enum: ['long', 'short', null] },
         entries: { type: ['array', 'null'], items: { type: 'number' }, minItems: 1 },
@@ -93,8 +90,9 @@ const CLASSIFIER_RESPONSE_JSON_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-/** Общая схема ответа модели (с явным статусом). */
-const JSON_SCHEMA_RULES = `
+/** Общая схема ответа модели (с явным статусом); defaultOrderUsd — из настроек DEFAULT_ORDER_USD. */
+function buildJsonSchemaRules(defaultOrderUsd: number): string {
+  return `
 Return ONLY valid JSON (no markdown, no commentary) with this exact shape:
 {
   "status": "complete" | "incomplete",
@@ -115,22 +113,25 @@ Return ONLY valid JSON (no markdown, no commentary) with this exact shape:
 Rules:
 - If you have ALL required fields with reasonable values, set status to "complete" and fill signal fully.
 - If ANY required field is unknown or ambiguous, set status to "incomplete", put known values in signal and put null for unknown fields, list missing field keys in "missing", and ask ONE clear question in Russian in "prompt".
-- pair must be uppercase like BTCUSDT, ETHUSDT.
+- pair: symbol as written in the message (e.g. BTCUSDT, ethusdt, ETH/USDT, BTC-USDT); casing and separators do not matter — the system normalizes to the exchange form.
 - direction must be long or short.
 - entries: first price is main entry, following are DCA levels.
 - If the user gives no entry price but wants to enter at market / "по рынку" / immediately, set entries to null and put only "entries" in missing when everything else is known — the system can suggest the current exchange price.
-- If the message gives an entry as a range between two prices (e.g. "entry range 1 - 2"), use a single entry equal to the midpoint (average), not two DCA levels.
+- If the message describes ONE entry zone as a range between two prices for the SAME purpose (e.g. "entry range 1 - 2", "buy zone 1–2", "диапазон входа 1 - 2"), use a single entry equal to the midpoint (average), not two DCA levels.- Extract prices from explicit labels (Entry, Stop loss, SL, Targets/TP, etc.); do not blend or average numbers that belong to different fields.
 - takeProfits: one or more take-profit prices; several TPs mean equal split of position size at each level (e.g. 4 TPs → 25% each).
 - leverage: integer >= 1.
 - orderUsd: total position notional in USDT (e.g. 10, 50, 100). If user gives percent of balance instead, set orderUsd to 0 and set capitalPercent (1-100).
 - capitalPercent: only when sizing by balance percent; otherwise 0.
-- Default sizing: if user does not specify size, set orderUsd to 10 and capitalPercent to 0.
+- Default sizing: if user does not specify size, set orderUsd to ${defaultOrderUsd} and capitalPercent to 0.
 - source: ONLY if the user text explicitly names the signal provider (Telegram channel, app, group), e.g. "Binance Killers", "Crypto Signals". If unknown, set source to null. NEVER set source to "text", "image", "audio", or any word describing input format — those are not signal sources.
 `;
+}
 
-const SYSTEM_PROMPT = `You are a trading signal parser. Extract structured data from the user message.
-${JSON_SCHEMA_RULES}
+function buildSystemPrompt(defaultOrderUsd: number): string {
+  return `You are a trading signal parser. Extract structured data from the user message.
+${buildJsonSchemaRules(defaultOrderUsd)}
 `;
+}
 
 type TranscriptMessagePart =
   | { type: 'text'; text: string }
@@ -314,15 +315,16 @@ Be conservative: if unsure, return "other".`;
       };
     }
 
+    const defaultOrderUsd = await this.settings.getDefaultOrderUsd();
     const correctionPrompt = `You are editing a trading signal. The user provides the current signal as JSON and a correction in natural language (possibly Russian).
-${JSON_SCHEMA_RULES}
+${buildJsonSchemaRules(defaultOrderUsd)}
 Merge the user's correction into the signal. Keep fields unchanged if the user did not ask to change them.`;
 
     const messages: { role: string; content: string }[] = [
       { role: 'system', content: correctionPrompt },
       {
         role: 'user',
-        content: `Current signal JSON:\n${JSON.stringify({ signal: current })}\n\nUser correction / comment:\n${normalizeEntryRangeInMessageText(userComment)}`,
+        content: `Current signal JSON:\n${JSON.stringify({ signal: current })}\n\nUser correction / comment:\n${userComment}`,
       },
     ];
 
@@ -338,11 +340,15 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       this.logger.log(`applyCorrection: OpenRouter ok in ${ms}ms`);
       const levOpts = await this.getLeverageFieldOptions();
       let result = this.finishTranscriptResult(
-        this.parseModelContent(content, levOpts),
+        this.parseModelContent(content, levOpts, defaultOrderUsd),
         levOpts,
+        defaultOrderUsd,
       );
-      result = this.applyEntryRangeCollapseToResult(result, userComment);
-      return await this.tryFillMissingEntryFromMarket(result, levOpts);
+      return await this.tryFillMissingEntryFromMarket(
+        result,
+        levOpts,
+        defaultOrderUsd,
+      );
     } catch (e) {
       const ms = Date.now() - t0;
       const msg = e instanceof Error ? e.message : String(e);
@@ -382,15 +388,16 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       ? `Previous user messages (in order):\n${userTurns.map((t, i) => `${i + 1}. ${t}`).join('\n')}\n\n`
       : '';
 
+    const defaultOrderUsd = await this.settings.getDefaultOrderUsd();
     const userBlock =
       `${historyBlock}Current known partial signal (JSON):\n${JSON.stringify({ signal: partial })}\n\n` +
       `Latest user message:\n${newMessage}\n\n` +
       `Update the signal. If everything required is present, set status to "complete".`;
     const messages: { role: string; content: string }[] = [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: buildSystemPrompt(defaultOrderUsd) },
       {
         role: 'user',
-        content: normalizeEntryRangeInMessageText(userBlock),
+        content: userBlock,
       },
     ];
 
@@ -406,12 +413,15 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       this.logger.log(`continueSignalDraft: OpenRouter ok in ${ms}ms`);
       const levOpts = await this.getLeverageFieldOptions();
       let result = this.finishTranscriptResult(
-        this.parseModelContent(content, levOpts),
+        this.parseModelContent(content, levOpts, defaultOrderUsd),
         levOpts,
+        defaultOrderUsd,
       );
-      const rangeHint = [userTurns.join('\n'), newMessage].filter(Boolean).join('\n');
-      result = this.applyEntryRangeCollapseToResult(result, rangeHint);
-      return await this.tryFillMissingEntryFromMarket(result, levOpts);
+      return await this.tryFillMissingEntryFromMarket(
+        result,
+        levOpts,
+        defaultOrderUsd,
+      );
     } catch (e) {
       const ms = Date.now() - t0;
       const msg = e instanceof Error ? e.message : String(e);
@@ -459,7 +469,8 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       };
     }
 
-    const messages = this.buildMessages(kind, payload);
+    const defaultOrderUsd = await this.settings.getDefaultOrderUsd();
+    const messages = this.buildMessages(kind, payload, defaultOrderUsd);
     const t0 = Date.now();
     this.logger.log(
       `parse: kind=${kind} model=${model} (textLen=${payload.text?.length ?? 0})`,
@@ -479,12 +490,15 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       );
       const levOpts = await this.getLeverageFieldOptions();
       let parsed = this.finishTranscriptResult(
-        this.parseModelContent(content, levOpts),
+        this.parseModelContent(content, levOpts, defaultOrderUsd),
         levOpts,
+        defaultOrderUsd,
       );
-      const originalText = payload.text ?? '';
-      parsed = this.applyEntryRangeCollapseToResult(parsed, originalText);
-      parsed = await this.tryFillMissingEntryFromMarket(parsed, levOpts);
+      parsed = await this.tryFillMissingEntryFromMarket(
+        parsed,
+        levOpts,
+        defaultOrderUsd,
+      );
       if (!parsed.ok) {
         this.logger.warn(
           `parse: validation/json failed: ${parsed.error} ${parsed.details ?? ''}`,
@@ -515,6 +529,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
         userTurns: string[];
       };
     },
+    defaultOrderUsd: number,
   ): TranscriptMessage[] {
     const cont = payload.continuationContext;
     const hasContinuationContext =
@@ -528,9 +543,9 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
         : '';
 
     if (kind === 'text') {
-      const text = normalizeEntryRangeInMessageText(payload.text ?? '');
+      const text = payload.text ?? '';
       return [
-        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'system', content: buildSystemPrompt(defaultOrderUsd) },
         { role: 'user', content: contPrefix + text },
       ];
     }
@@ -553,7 +568,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
         });
       }
       return [
-        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'system', content: buildSystemPrompt(defaultOrderUsd) },
         { role: 'user', content: parts },
       ];
     }
@@ -569,7 +584,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
           type: 'text',
           text:
             payload.text && payload.text.trim().length > 0
-              ? `${contPrefix}${audioNote}\n${normalizeEntryRangeInMessageText(payload.text)}`
+              ? `${contPrefix}${audioNote}\n${payload.text}`
               : `${contPrefix}${audioNote}`,
         },
         {
@@ -581,16 +596,16 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
         },
       ];
       return [
-        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'system', content: buildSystemPrompt(defaultOrderUsd) },
         { role: 'user', content: parts },
       ];
     }
     const userContent =
       payload.text
-        ? `${contPrefix}${audioNote}\n${normalizeEntryRangeInMessageText(payload.text)}`
+        ? `${contPrefix}${audioNote}\n${payload.text}`
         : `${contPrefix}${audioNote}\n[binary audio omitted — ensure text was transcribed upstream]`;
     return [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: buildSystemPrompt(defaultOrderUsd) },
       { role: 'user', content: userContent },
     ];
   }
@@ -711,47 +726,16 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
   }
 
   /**
-   * Размер позиции: явный USDT, иначе (legacy) только % от депозита, иначе 10 USDT по умолчанию.
+   * Размер позиции: явный USDT, иначе (legacy) только % от депозита, иначе номинал из настроек DEFAULT_ORDER_USD.
    */
-  private resolveOrderUsd(dto: SignalParseDto): number {
+  private resolveOrderUsd(dto: SignalParseDto, defaultOrderUsd: number): number {
     if (dto.orderUsd != null && dto.orderUsd > 0) {
       return dto.orderUsd;
     }
     if ((dto.capitalPercent ?? 0) > 0) {
       return 0;
     }
-    return 10;
-  }
-
-  /**
-   * После парсинга: если в исходном тексте был «entry range A - B», а модель вернула два числа на границах —
-   * сводим entries к среднему (дублирует логику normalizeEntryRangeInMessageText на уровне JSON).
-   */
-  private applyEntryRangeCollapseToResult(
-    result: TranscriptResult,
-    originalText: string,
-  ): TranscriptResult {
-    const t = originalText.trim();
-    if (!t) {
-      return result;
-    }
-    if (result.ok === true) {
-      const next = collapseEntriesIfEntryRangeText(t, result.signal.entries);
-      if (next === result.signal.entries) {
-        return result;
-      }
-      return { ...result, signal: { ...result.signal, entries: next } };
-    }
-    if (result.ok === 'incomplete' && result.partial.entries?.length === 2) {
-      const next = collapseEntriesIfEntryRangeText(t, result.partial.entries);
-      if (next.length === 1) {
-        return {
-          ...result,
-          partial: { ...result.partial, entries: next },
-        };
-      }
-    }
-    return result;
+    return defaultOrderUsd;
   }
 
   /**
@@ -761,6 +745,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
   private async tryFillMissingEntryFromMarket(
     result: TranscriptResult,
     leverageOpts: LeverageFieldOptions,
+    defaultOrderUsd: number,
   ): Promise<TranscriptResult> {
     if (result.ok !== 'incomplete') {
       return result;
@@ -790,7 +775,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
         prompt: this.defaultPromptForMissing(stillMissing),
       };
     }
-    const completed = this.tryCompleteSignal(merged, leverageOpts);
+    const completed = this.tryCompleteSignal(merged, leverageOpts, defaultOrderUsd);
     if (completed.ok === true) {
       void this.appLog.append('info', 'system', 'transcript: цена входа подставлена с рынка (Bybit)', {
         pair: completed.signal.pair,
@@ -878,9 +863,10 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
   private finishTranscriptResult(
     result: TranscriptResult,
     leverageOpts: LeverageFieldOptions,
+    defaultOrderUsd: number,
   ): TranscriptResult {
     if (result.ok === 'incomplete' && isCompletePartial(result.partial, leverageOpts)) {
-      const full = this.tryCompleteSignal(result.partial, leverageOpts);
+      const full = this.tryCompleteSignal(result.partial, leverageOpts, defaultOrderUsd);
       if (full.ok === true) {
         return full;
       }
@@ -891,6 +877,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
   private tryCompleteSignal(
     signalRaw: unknown,
     leverageOpts: LeverageFieldOptions,
+    defaultOrderUsd: number,
   ): TranscriptResult {
     const prepared = this.applyDefaultLeverageToSignalRaw(signalRaw, leverageOpts);
     const dto = plainToInstance(SignalParseDto, prepared);
@@ -903,7 +890,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       };
     }
 
-    const orderUsd = this.resolveOrderUsd(dto);
+    const orderUsd = this.resolveOrderUsd(dto, defaultOrderUsd);
     const signal: SignalDto = {
       pair: normalizeTradingPair(dto.pair),
       direction: dto.direction,
@@ -943,6 +930,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
   private parseModelContent(
     content: unknown,
     leverageOpts: LeverageFieldOptions,
+    defaultOrderUsd: number,
   ): TranscriptResult {
     const parsed = this.tryParseModelContent(content);
     if (!parsed.ok) {
@@ -981,7 +969,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     }
 
     if (root.status === 'complete') {
-      const full = this.tryCompleteSignal(root.signal, leverageOpts);
+      const full = this.tryCompleteSignal(root.signal, leverageOpts, defaultOrderUsd);
       if (full.ok === true) {
         return full;
       }
@@ -990,7 +978,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     }
 
     // Legacy / без поля status: сначала полный валидный сигнал, иначе — черновик
-    const full = this.tryCompleteSignal(root.signal, leverageOpts);
+    const full = this.tryCompleteSignal(root.signal, leverageOpts, defaultOrderUsd);
     if (full.ok === true) {
       return full;
     }

@@ -1234,7 +1234,7 @@ export class BybitService {
         leverage: signal.leverage,
       });
       const balance = await this.getUsdtBalance(client);
-      const DEFAULT_ORDER_USD = 10;
+      const defaultOrderUsd = await this.settings.getDefaultOrderUsd();
       const minCapitalRaw = await this.settings.get('MIN_CAPITAL_AMOUNT');
       const minCapitalParsed =
         minCapitalRaw != null && minCapitalRaw.trim() !== ''
@@ -1267,7 +1267,7 @@ export class BybitService {
           leveragedNotional = MIN_PERCENT_NOTIONAL_USD;
         }
       } else {
-        leveragedNotional = DEFAULT_ORDER_USD;
+        leveragedNotional = defaultOrderUsd;
       }
       await client.setLeverage({
         category: 'linear',
