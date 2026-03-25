@@ -478,11 +478,11 @@ export default function TelegramUserbotPage() {
                   <Fragment key={row.id}>
                     {showChatDivider && (
                       <tr>
-                        <td colSpan={7} style={{ background: 'var(--card)' }}>
-                          <strong>{chatTitleById.get(row.chatId) ?? row.chatId}</strong>
-                          <span style={{ color: 'var(--muted)', marginLeft: '0.5rem' }}>
-                            {row.chatId}
+                        <td colSpan={7} className="chatDividerCell">
+                          <span className="chatDividerTitle">
+                            {chatTitleById.get(row.chatId) ?? row.chatId}
                           </span>
+                          <span className="chatDividerMeta">{row.chatId}</span>
                         </td>
                       </tr>
                     )}
@@ -784,7 +784,9 @@ export default function TelegramUserbotPage() {
                     }}
                   />
                 </td>
-                <td>{chat.title}</td>
+                <td>
+                  <span className="chatName">{chat.title}</span>
+                </td>
                 <td>{chat.username ? `@${chat.username}` : '-'}</td>
                 <td>{chat.chatId}</td>
               </tr>

@@ -119,6 +119,113 @@ th {
   font-weight: 500;
 }
 
+.pnl {
+  font-weight: 700;
+  font-size: 1rem;
+  letter-spacing: 0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+.pnlPos {
+  color: #22c55e;
+}
+
+.pnlNeg {
+  color: #f87171;
+}
+
+.pnlZero {
+  color: var(--muted);
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.02);
+  user-select: none;
+}
+
+.toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+
+.toggleTrack {
+  width: 44px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #2b3340;
+  position: relative;
+  flex: 0 0 auto;
+  transition: background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+
+.toggleThumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  transition: left 0.15s ease;
+}
+
+.toggleLabel {
+  font-size: 0.82rem;
+  color: var(--muted);
+  line-height: 1.1;
+}
+
+.toggle input:checked + .toggleTrack {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.toggle input:checked + .toggleTrack .toggleThumb {
+  left: 22px;
+}
+
+.toggle input:disabled + .toggleTrack {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.toggle input:disabled ~ .toggleLabel {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.chatDividerCell {
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+}
+
+.chatDividerTitle {
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+.chatDividerMeta {
+  color: var(--muted);
+  margin-left: 0.65rem;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.chatName {
+  font-weight: 700;
+}
+
 .filters {
   display: flex;
   flex-wrap: wrap;

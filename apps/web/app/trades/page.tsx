@@ -131,14 +131,17 @@ export default async function TradesPage({
             <option value="FAILED">FAILED</option>
           </select>
         </label>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <label className="toggle">
           <input
             type="checkbox"
             name="includeDeleted"
             value="1"
             defaultChecked={includeDeleted}
           />
-          Показать удалённые
+          <span className="toggleTrack" aria-hidden="true">
+            <span className="toggleThumb" />
+          </span>
+          <span className="toggleLabel">Показать удалённые</span>
         </label>
         <button
           type="submit"
@@ -199,9 +202,23 @@ export default async function TradesPage({
                       )}
                     </td>
                     <td>
-                      {s.realizedPnl !== null && s.realizedPnl !== undefined
-                        ? s.realizedPnl.toFixed(4)
-                        : '—'}
+                      {s.realizedPnl !== null && s.realizedPnl !== undefined ? (
+                        <span
+                          className={[
+                            'pnl',
+                            s.realizedPnl > 0
+                              ? 'pnlPos'
+                              : s.realizedPnl < 0
+                                ? 'pnlNeg'
+                                : 'pnlZero',
+                          ].join(' ')}
+                          title={`PnL: ${s.realizedPnl}`}
+                        >
+                          {s.realizedPnl.toFixed(4)}
+                        </span>
+                      ) : (
+                        '—'
+                      )}
                     </td>
                     <td>{new Date(s.createdAt).toLocaleString('ru-RU')}</td>
                     <td>
