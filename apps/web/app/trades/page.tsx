@@ -1,12 +1,8 @@
 import Link from 'next/link';
 
 import { fetchJson } from '../../lib/api';
-import { formatDateTimeRu } from '../../lib/datetime';
-import { DeleteTradeButton } from './delete-trade-button';
 import { RecalcClosedPnlButton } from './recalc-closed-pnl-button';
-import { RestoreTradeButton } from './restore-trade-button';
-import { SourceSelect } from './source-select';
-import { TradeParamsBlock } from './trade-params-block';
+import { TradesList } from './trades-list';
 
 type Order = {
   id: string;
@@ -181,77 +177,7 @@ export default async function TradesPage({
             Всего: {data.total} (стр. {data.page} из{' '}
             {Math.max(1, Math.ceil(data.total / data.pageSize))})
           </p>
-          <div className="tableWrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Пара</th>
-                  <th>Сторона</th>
-                  <th>Параметры</th>
-                  <th>Статус</th>
-                  <th>Источник</th>
-                  <th>PnL</th>
-                  <th>Дата</th>
-                  <th>Действие</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.items.map((s) => (
-                  <tr key={s.id} style={s.deletedAt ? { opacity: 0.6 } : undefined}>
-                    <td>{s.pair}</td>
-                    <td>{s.direction}</td>
-                    <td className="tradeParamsCell">
-                      <TradeParamsBlock signal={s} />
-                    </td>
-                    <td>{s.status}</td>
-                    <td style={{ minWidth: 220 }}>
-                      {s.deletedAt ? (
-                        <span style={{ color: 'var(--muted)' }}>{s.source ?? '—'}</span>
-                      ) : (
-                        <SourceSelect
-                          signalId={s.id}
-                          status={s.status}
-                          currentSource={s.source}
-                          options={sourceOptions}
-                        />
-                      )}
-                    </td>
-                    <td>
-                      {s.realizedPnl !== null && s.realizedPnl !== undefined ? (
-                        <span
-                          className={[
-                            'pnl',
-                            s.realizedPnl > 0
-                              ? 'pnlPos'
-                              : s.realizedPnl < 0
-                                ? 'pnlNeg'
-                                : 'pnlZero',
-                          ].join(' ')}
-                          title={`PnL: ${s.realizedPnl}`}
-                        >
-                          {s.realizedPnl.toFixed(4)}
-                        </span>
-                      ) : (
-                        '—'
-                      )}
-                    </td>
-                    <td>{formatDateTimeRu(s.createdAt)}</td>
-                    <td>
-                      {s.deletedAt ? (
-                        <RestoreTradeButton tradeId={s.id} pair={s.pair} />
-                      ) : (
-                        <DeleteTradeButton
-                          tradeId={s.id}
-                          pair={s.pair}
-                          status={s.status}
-                        />
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <TradesList items={data.items} sourceOptions={sourceOptions} />
           <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem' }}>
             {data.page > 1 && (
               <Link href={buildPageLink(data.page - 1)}>← Назад</Link>
