@@ -792,7 +792,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     }
     const completed = this.tryCompleteSignal(merged, leverageOpts);
     if (completed.ok === true) {
-      void this.appLog.append('info', 'transcript', 'цена входа подставлена с рынка (Bybit)', {
+      void this.appLog.append('info', 'system', 'transcript: цена входа подставлена с рынка (Bybit)', {
         pair: completed.signal.pair,
         suggestedEntry: price,
       });
