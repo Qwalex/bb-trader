@@ -5,6 +5,7 @@ import { DeleteTradeButton } from './delete-trade-button';
 import { RecalcClosedPnlButton } from './recalc-closed-pnl-button';
 import { RestoreTradeButton } from './restore-trade-button';
 import { SourceSelect } from './source-select';
+import { TradeParamsBlock } from './trade-params-block';
 
 type Order = {
   id: string;
@@ -25,6 +26,15 @@ type Signal = {
   createdAt: string;
   deletedAt?: string | null;
   orders: Order[];
+  /** JSON number[] в БД */
+  entries: string | number[];
+  stopLoss: number;
+  /** JSON number[] в БД */
+  takeProfits: string | number[];
+  leverage: number;
+  /** Номинал в USDT */
+  orderUsd: number;
+  capitalPercent: number;
 };
 
 type TradesRes = {
@@ -176,6 +186,7 @@ export default async function TradesPage({
                 <tr>
                   <th>Пара</th>
                   <th>Сторона</th>
+                  <th>Параметры</th>
                   <th>Статус</th>
                   <th>Источник</th>
                   <th>PnL</th>
@@ -188,6 +199,9 @@ export default async function TradesPage({
                   <tr key={s.id} style={s.deletedAt ? { opacity: 0.6 } : undefined}>
                     <td>{s.pair}</td>
                     <td>{s.direction}</td>
+                    <td className="tradeParamsCell">
+                      <TradeParamsBlock signal={s} />
+                    </td>
                     <td>{s.status}</td>
                     <td style={{ minWidth: 220 }}>
                       {s.deletedAt ? (
