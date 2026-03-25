@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import localFont from 'next/font/local';
 import Link from 'next/link';
 
@@ -16,6 +16,12 @@ const geistMono = localFont({
 export const metadata: Metadata = {
   title: 'SignalsBot',
   description: 'Полуавтоматическая торговля по сигналам',
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  themeColor: '#0f1419',
 };
 
 export default function RootLayout({

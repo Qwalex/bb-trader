@@ -147,7 +147,15 @@ export function LiveExposurePanel() {
 
   return (
     <section style={{ marginBottom: '2rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '0.5rem',
+        }}
+      >
         <h2 className="pageTitle" style={{ fontSize: '1.1rem', marginBottom: '0.75rem' }}>
           Текущие ордера и позиции
         </h2>
@@ -205,7 +213,7 @@ export function LiveExposurePanel() {
                 Источник: {item.source ?? '—'} · {formatDateTimeRu(item.createdAt)}
               </div>
             </div>
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
               <button
                 type="button"
                 onClick={() => void loadSignalJson(item.signalId)}

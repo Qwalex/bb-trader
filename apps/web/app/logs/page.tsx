@@ -95,15 +95,7 @@ export default function LogsPage() {
         только в заголовке Authorization на стороне сервера).
       </p>
 
-      <div
-        style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: '0.75rem',
-          alignItems: 'center',
-          marginBottom: '1rem',
-        }}
-      >
+      <div className="filters" style={{ marginBottom: '1rem' }}>
         <label>
           Категория:{' '}
           <select

@@ -20,10 +20,14 @@ export function PnlChart({ data }: { data: Point[] }) {
   }
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <LineChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+      <LineChart data={data} margin={{ top: 8, right: 4, left: 0, bottom: 4 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#30363d" />
-        <XAxis dataKey="date" tick={{ fill: '#8b949e', fontSize: 11 }} />
-        <YAxis tick={{ fill: '#8b949e', fontSize: 11 }} />
+        <XAxis
+          dataKey="date"
+          tick={{ fill: '#8b949e', fontSize: 10 }}
+          interval="preserveStartEnd"
+        />
+        <YAxis width={44} tick={{ fill: '#8b949e', fontSize: 10 }} />
         <Tooltip
           contentStyle={{
             background: '#1a2332',
