@@ -1208,6 +1208,7 @@ export class BybitService {
   async placeSignalOrders(
     signal: SignalDto,
     rawMessage: string | undefined,
+    origin?: { chatId?: string; messageId?: string },
   ): Promise<PlaceOrdersResult> {
     const symbol = normalizeTradingPair(signal.pair);
 
@@ -1410,6 +1411,7 @@ export class BybitService {
         },
         rawMessage,
         'ORDERS_PLACED',
+        origin,
       );
 
       const bybitIds: string[] = [];

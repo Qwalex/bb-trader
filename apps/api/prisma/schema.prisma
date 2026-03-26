@@ -19,6 +19,8 @@ model Signal {
   orderUsd       Float    @default(10)
   capitalPercent Float    @default(0)
   source         String?
+  sourceChatId   String?
+  sourceMessageId String?
   rawMessage     String?
   status         String // OPEN, ORDERS_PLACED, CLOSED_WIN, CLOSED_LOSS, CLOSED_MIXED, FAILED
   realizedPnl    Float?
@@ -27,6 +29,8 @@ model Signal {
   updatedAt      DateTime @updatedAt
   deletedAt      DateTime?
   orders         Order[]
+
+  @@index([sourceChatId, sourceMessageId])
 }
 
 model Order {

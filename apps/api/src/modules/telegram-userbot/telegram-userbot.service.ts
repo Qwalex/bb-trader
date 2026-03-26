@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
-import type { SignalDto } from '@repo/shared';
+import { normalizeTradingPair, type SignalDto } from '@repo/shared';
 import { NewMessage } from 'telegram/events';
 import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions';
@@ -478,8 +478,13 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           if (!text || !messageId) {
             continue;
           }
+          const replyToMessageId = this.extractReplyToMessageId(
+            m.replyTo ?? m.reply_to ?? m.replyToMsgId ?? m.reply_to_msg_id,
+          );
           readTextMessages += 1;
-          await this.ingestChatMessage(chat.chatId, messageId, text);
+          await this.ingestChatMessage(chat.chatId, messageId, text, {
+            replyToMessageId,
+          });
         }
       } catch (e) {
         errors.push({ chatId: chat.chatId, error: formatError(e) });
@@ -569,6 +574,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       const messageId = this.readNumber(msg?.id);
       const chatId = this.resolveChatIdFromEvent(rawEvent, msg);
       const text = this.readString(msg?.message);
+      const replyToMessageId = this.extractReplyToMessageId(
+        msg?.replyTo ?? msg?.reply_to ?? msg?.replyToMsgId ?? msg?.reply_to_msg_id,
+      );
       const createdAt = this.extractMessageDate(msg?.date);
       if (!chatId || messageId == null || !text?.trim() || !createdAt) {
         return;
@@ -582,7 +590,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       if (!this.enabledChatIds.has(chatId)) {
         return;
       }
-      await this.ingestChatMessage(chatId, String(messageId), text.trim());
+      await this.ingestChatMessage(chatId, String(messageId), text.trim(), {
+        replyToMessageId,
+      });
     } catch (e) {
       const msg = formatError(e);
       this.logger.error(`handleIncomingMessage failed: ${msg}`);
@@ -593,6 +603,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     chatId: string,
     messageId: string,
     text: string,
+    meta?: { replyToMessageId?: string },
   ): Promise<void> {
     const dedupMessageKey = `${chatId}:${messageId}`;
     const ingest = await this.tryCreateIngestRow({
@@ -616,6 +627,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         status: ingest.status,
       },
       text,
+      meta,
       { enforceBalanceGuard: true },
     );
   }
@@ -629,6 +641,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       status: string;
     },
     text: string,
+    meta?: { replyToMessageId?: string },
     options?: { enforceBalanceGuard?: boolean },
   ): Promise<void> {
     try {
@@ -652,6 +665,21 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           });
           return;
         }
+      }
+
+      if (this.isManualCloseCancellationText(text)) {
+        const closeResult = await this.tryCloseSignalFromReply({
+          chatId: ingest.chatId,
+          messageId: ingest.messageId,
+          text,
+          replyToMessageId: meta?.replyToMessageId,
+        });
+        await this.updateIngest(ingest.id, {
+          classification: 'result',
+          status: closeResult.ok ? 'closed_by_reply' : 'ignored',
+          error: closeResult.ok ? null : closeResult.error,
+        });
+        return;
       }
 
       const useAiClassifier = await this.getBoolSetting(
@@ -789,7 +817,10 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
-      const place = await this.bybit.placeSignalOrders(signal, text);
+      const place = await this.bybit.placeSignalOrders(signal, text, {
+        chatId: ingest.chatId,
+        messageId: ingest.messageId,
+      });
       if (!place.ok) {
         const placeError = formatError(place.error);
         await this.updateIngest(ingest.id, {
@@ -837,6 +868,155 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         error: err,
       });
     }
+  }
+
+  private isManualCloseCancellationText(text: string): boolean {
+    const t = text.toLowerCase();
+    const hasClosedWord =
+      /\b(closed|close)\b/.test(t) ||
+      /\b(закрыт|закрыта|закрыто|закрыли|закрываем|отменен|отмена)\b/u.test(t);
+    if (!hasClosedWord) {
+      return false;
+    }
+    const hasTpOrSl =
+      /\b(tp|take[\s-]?profit|sl|stop[\s-]?loss|стоп|тейк|стоп-лосс)\b/u.test(t) ||
+      /✅|❌|🟢|🔴/.test(text);
+    return !hasTpOrSl;
+  }
+
+  private async tryCloseSignalFromReply(params: {
+    chatId: string;
+    messageId: string;
+    text: string;
+    replyToMessageId?: string;
+  }): Promise<{ ok: true } | { ok: false; error: string }> {
+    const replyToMessageId = params.replyToMessageId?.trim();
+    if (!replyToMessageId) {
+      return { ok: false, error: 'Сообщение о закрытии без цитаты исходного сигнала' };
+    }
+
+    const signal = await this.prisma.signal.findFirst({
+      where: {
+        deletedAt: null,
+        sourceChatId: params.chatId,
+        sourceMessageId: replyToMessageId,
+        status: { in: ['ORDERS_PLACED', 'OPEN', 'PARSED'] },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        pair: true,
+        direction: true,
+        entries: true,
+      },
+    });
+    if (!signal) {
+      return {
+        ok: false,
+        error: `Для цитаты ${params.chatId}:${replyToMessageId} активный сигнал не найден`,
+      };
+    }
+
+    const repliedText = await this.fetchChatMessageText(params.chatId, replyToMessageId);
+    if (!repliedText) {
+      return {
+        ok: false,
+        error: 'Не удалось прочитать текст сообщения из цитаты для сверки',
+      };
+    }
+
+    const parsedQuoted = await this.transcript.parse('text', { text: repliedText });
+    if (parsedQuoted.ok !== true) {
+      return {
+        ok: false,
+        error: 'Не удалось распарсить сообщение из цитаты для сверки сигнала',
+      };
+    }
+
+    const parsedEntry = parsedQuoted.signal.entries[0];
+    const dbEntries = this.parseEntriesJson(signal.entries);
+    const dbEntry = dbEntries[0];
+    if (
+      !this.isEntryCloseEnough(parsedEntry, dbEntry) ||
+      normalizeTradingPair(parsedQuoted.signal.pair) !== normalizeTradingPair(signal.pair) ||
+      parsedQuoted.signal.direction !== signal.direction
+    ) {
+      return {
+        ok: false,
+        error: 'Сверка token/side/entry с цитируемым сигналом не прошла',
+      };
+    }
+
+    const closed = await this.bybit.closeSignalManually(signal.id);
+    if (!closed.ok) {
+      return {
+        ok: false,
+        error: closed.error ?? closed.details ?? 'Не удалось закрыть сделку на Bybit',
+      };
+    }
+
+    void this.appLog.append(
+      'info',
+      'telegram',
+      'Сделка закрыта по сообщению closed с цитатой',
+      {
+        sourceChatId: params.chatId,
+        sourceMessageId: replyToMessageId,
+        closeMessageId: params.messageId,
+        signalId: signal.id,
+      },
+    );
+    return { ok: true };
+  }
+
+  private async fetchChatMessageText(
+    chatId: string,
+    messageId: string,
+  ): Promise<string | undefined> {
+    if (!this.client || !(await this.isClientAuthorized(this.client))) {
+      return undefined;
+    }
+    try {
+      const list = (await this.client.getMessages(chatId, {
+        ids: [Number(messageId)],
+        limit: 1,
+      })) as unknown as Array<Record<string, unknown>>;
+      const msg = list[0];
+      return this.readString(msg?.message);
+    } catch (e) {
+      this.logger.warn(
+        `fetchChatMessageText failed chat=${chatId} msg=${messageId}: ${formatError(e)}`,
+      );
+      return undefined;
+    }
+  }
+
+  private parseEntriesJson(raw: string): number[] {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
+      return parsed
+        .map((x) => Number(x))
+        .filter((x) => Number.isFinite(x) && x > 0);
+    } catch {
+      return [];
+    }
+  }
+
+  private isEntryCloseEnough(
+    fromQuoted: number | undefined,
+    fromDb: number | undefined,
+  ): boolean {
+    if (!Number.isFinite(fromQuoted) || !Number.isFinite(fromDb)) {
+      return false;
+    }
+    const q = Number(fromQuoted);
+    const d = Number(fromDb);
+    const diff = Math.abs(q - d);
+    const base = Math.max(Math.abs(d), 1);
+    return diff / base <= 0.01;
   }
 
   private extractTokenHint(text: string): string {
@@ -1188,6 +1368,22 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       }
     }
     return undefined;
+  }
+
+  private extractReplyToMessageId(value: unknown): string | undefined {
+    if (value == null) {
+      return undefined;
+    }
+    if (typeof value === 'object') {
+      const obj = value as Record<string, unknown>;
+      return (
+        this.readNumericString(obj.replyToMsgId ?? obj.reply_to_msg_id) ??
+        this.readNumericString(obj.replyToTopId ?? obj.reply_to_top_id) ??
+        this.readNumericString(obj.msgId ?? obj.msg_id) ??
+        this.readNumericString(obj.id)
+      );
+    }
+    return this.readNumericString(value);
   }
 
   private readBooleanish(value: unknown): boolean {

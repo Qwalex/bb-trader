@@ -44,6 +44,7 @@ export class OrdersService {
     signal: SignalDto,
     rawMessage: string | undefined,
     status: string,
+    origin?: { chatId?: string; messageId?: string },
   ) {
     return this.prisma.signal.create({
       data: {
@@ -56,6 +57,8 @@ export class OrdersService {
         orderUsd: signal.orderUsd,
         capitalPercent: signal.capitalPercent,
         source: signal.source ?? null,
+        sourceChatId: origin?.chatId ?? null,
+        sourceMessageId: origin?.messageId ?? null,
         rawMessage: rawMessage ?? null,
         status,
       },
