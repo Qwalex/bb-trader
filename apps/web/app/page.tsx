@@ -29,6 +29,8 @@ type SourceStatsItem = {
 type TopSources = {
   byPnl: SourceStatsItem[];
   byWinrate: SourceStatsItem[];
+  byWorstPnl: SourceStatsItem[];
+  byWorstWinrate: SourceStatsItem[];
   worstWinrate: SourceStatsItem | null;
 };
 type SettingsRaw = {
@@ -252,6 +254,64 @@ export default async function Home({
                 <tbody>
                   {top.byWinrate.map((r) => (
                     <tr key={`wr-${r.source ?? '—'}`}>
+                      <td>{r.source ?? '—'}</td>
+                      <td>{r.winrate.toFixed(1)}%</td>
+                      <td>{r.wL}</td>
+                      <td>{r.totalPnl.toFixed(2)}</td>
+                      <td>{r.totalClosed}</td>
+                      <td>{r.openSignals}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div className="card" style={{ gridColumn: 'span 5' }}>
+            <h3>Топ источников по худшему PnL</h3>
+            <div className="tableWrap" style={{ marginTop: '0.5rem' }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Источник</th>
+                    <th>PnL</th>
+                    <th>Winrate</th>
+                    <th>W / L</th>
+                    <th>Закрыто</th>
+                    <th>Открыто</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {top.byWorstPnl.map((r) => (
+                    <tr key={`worst-pnl-${r.source ?? '—'}`}>
+                      <td>{r.source ?? '—'}</td>
+                      <td>{r.totalPnl.toFixed(2)}</td>
+                      <td>{r.winrate.toFixed(1)}%</td>
+                      <td>{r.wL}</td>
+                      <td>{r.totalClosed}</td>
+                      <td>{r.openSignals}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div className="card" style={{ gridColumn: 'span 5' }}>
+            <h3>Топ источников по худшему Winrate</h3>
+            <div className="tableWrap" style={{ marginTop: '0.5rem' }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Источник</th>
+                    <th>Winrate</th>
+                    <th>W / L</th>
+                    <th>PnL</th>
+                    <th>Закрыто</th>
+                    <th>Открыто</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {top.byWorstWinrate.map((r) => (
+                    <tr key={`worst-wr-${r.source ?? '—'}`}>
                       <td>{r.source ?? '—'}</td>
                       <td>{r.winrate.toFixed(1)}%</td>
                       <td>{r.wL}</td>

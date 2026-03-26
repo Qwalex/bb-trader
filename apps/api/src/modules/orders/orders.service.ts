@@ -520,6 +520,7 @@ export class OrdersService {
     const limit = Math.min(Math.max(params?.limit ?? 5, 1), 50);
     const all = await this.getSourceStats();
     const byPnl = [...all].sort((a, b) => b.totalPnl - a.totalPnl).slice(0, limit);
+    const byWorstPnl = [...all].sort((a, b) => a.totalPnl - b.totalPnl).slice(0, limit);
     const byWinrate = [...all]
       .sort((a, b) => {
         if (b.winrate !== a.winrate) return b.winrate - a.winrate;
@@ -532,18 +533,19 @@ export class OrdersService {
       .slice(0, limit);
 
     const decided = all.filter((r) => r.wins + r.losses > 0);
+    const byWorstWinrate = [...decided]
+      .sort((a, b) => {
+        if (a.winrate !== b.winrate) return a.winrate - b.winrate;
+        const aDec = a.wins + a.losses;
+        const bDec = b.wins + b.losses;
+        if (bDec !== aDec) return bDec - aDec;
+        return a.totalPnl - b.totalPnl;
+      })
+      .slice(0, limit);
     const worstWinrate =
-      decided.length > 0
-        ? [...decided].sort((a, b) => {
-            if (a.winrate !== b.winrate) return a.winrate - b.winrate;
-            const aDec = a.wins + a.losses;
-            const bDec = b.wins + b.losses;
-            if (bDec !== aDec) return bDec - aDec;
-            return a.totalPnl - b.totalPnl;
-          })[0] ?? null
-        : null;
+      byWorstWinrate.length > 0 ? (byWorstWinrate[0] ?? null) : null;
 
-    return { byPnl, byWinrate, worstWinrate };
+    return { byPnl, byWinrate, byWorstPnl, byWorstWinrate, worstWinrate };
   }
 
   async listTrades(f: TradesFilter) {
