@@ -111,8 +111,10 @@ Return ONLY valid JSON (no markdown, no commentary) with this exact shape:
   "prompt": "Краткий вопрос пользователю на русском: каких данных не хватает" | null
 }
 Rules:
-- If you have ALL required fields with reasonable values, set status to "complete" and fill signal fully.
-- If ANY required field is unknown or ambiguous, set status to "incomplete", put known values in signal and put null for unknown fields, list missing field keys in "missing", and ask ONE clear question in Russian in "prompt".
+- If values for ALL required fields are known and unambiguous, this is definitely a signal: set status to "complete" and fill signal fully.
+- If values for ONE or TWO required fields are unknown or ambiguous, clarification is required: set status to "incomplete", put known values in signal and put null for unknown fields, list missing field keys in "missing", and ask ONE clear clarifying question in Russian in "prompt".
+- If values for ALL required fields are unknown, this is NOT a signal: set status to "incomplete", keep required signal fields as null, set missing to [], and set prompt to null (do not ask a clarifying question).
+- Field labels without actual values (e.g. "Entry:", "SL:", "TP1:" with no number after them) do NOT count as known values. If required fields are listed but have no actual values, treat them as unknown; if this results in all required fields being unknown, this is NOT a signal.
 - pair: symbol as written in the message (e.g. BTCUSDT, ethusdt, ETH/USDT, BTC-USDT); casing and separators do not matter — the system normalizes to the exchange form.
 - direction must be long or short.
 - entries: first price is main entry, following are DCA levels.
