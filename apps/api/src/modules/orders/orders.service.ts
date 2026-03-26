@@ -531,7 +531,19 @@ export class OrdersService {
       })
       .slice(0, limit);
 
-    return { byPnl, byWinrate };
+    const decided = all.filter((r) => r.wins + r.losses > 0);
+    const worstWinrate =
+      decided.length > 0
+        ? [...decided].sort((a, b) => {
+            if (a.winrate !== b.winrate) return a.winrate - b.winrate;
+            const aDec = a.wins + a.losses;
+            const bDec = b.wins + b.losses;
+            if (bDec !== aDec) return bDec - aDec;
+            return a.totalPnl - b.totalPnl;
+          })[0] ?? null
+        : null;
+
+    return { byPnl, byWinrate, worstWinrate };
   }
 
   async listTrades(f: TradesFilter) {

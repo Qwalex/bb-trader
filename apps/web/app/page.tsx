@@ -29,6 +29,7 @@ type SourceStatsItem = {
 type TopSources = {
   byPnl: SourceStatsItem[];
   byWinrate: SourceStatsItem[];
+  worstWinrate: SourceStatsItem | null;
 };
 type SettingsRaw = {
   settings: { key: string; value: string }[];
@@ -165,6 +166,15 @@ export default async function Home({
             <h3>Winrate{source ? ' (источник)' : ''}</h3>
             <div className="value">{stats.winrate.toFixed(1)}%</div>
           </div>
+          {top?.worstWinrate && (
+            <div className="card">
+              <h3>Худший winrate</h3>
+              <div className="value">{top.worstWinrate.winrate.toFixed(1)}%</div>
+              <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
+                {top.worstWinrate.source ?? '—'} | W/L: {top.worstWinrate.wL}
+              </p>
+            </div>
+          )}
           <div className="card">
             <h3>Всего PnL{source ? ' (источник)' : ''}</h3>
             <div className="value">{stats.totalPnl.toFixed(2)}</div>
