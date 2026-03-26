@@ -219,13 +219,38 @@ export class BybitService {
 
   /** USDT balance in unified derivatives wallet (best-effort). */
   private async getUsdtBalance(client: RestClientV5): Promise<number> {
-    const res = await client.getWalletBalance({
-      accountType: 'UNIFIED',
-    });
-    const list = res.result?.list?.[0];
-    const coin = list?.coin?.find((c) => c.coin === 'USDT');
-    const avail = coin?.walletBalance ?? coin?.equity ?? '0';
-    return parseFloat(String(avail));
+    const accountTypes: Array<'UNIFIED' | 'CONTRACT'> = ['UNIFIED', 'CONTRACT'];
+    const parseFinite = (v: unknown): number | undefined => {
+      if (v == null || String(v).trim() === '') return undefined;
+      const n = Number.parseFloat(String(v));
+      return Number.isFinite(n) ? n : undefined;
+    };
+
+    for (const accountType of accountTypes) {
+      const res = await client.getWalletBalance({ accountType });
+      const list = res.result?.list?.[0];
+      const coin = list?.coin?.find((c) => c.coin === 'USDT');
+
+      // Приоритет: баланс USDT-кошелька, затем equity/доступный баланс по монете,
+      // затем агрегированные account-level поля.
+      const candidates: unknown[] = [
+        coin?.walletBalance,
+        coin?.equity,
+        coin?.availableToWithdraw,
+        coin?.availableToBorrow,
+        list?.totalWalletBalance,
+        list?.totalEquity,
+        list?.totalAvailableBalance,
+      ];
+      for (const candidate of candidates) {
+        const parsed = parseFinite(candidate);
+        if (parsed !== undefined) {
+          return parsed;
+        }
+      }
+    }
+
+    throw new Error('USDT balance is unavailable for current Bybit account');
   }
 
   /** Лот, мин. объём и шаг цены (для TP limit / trading-stop). */
