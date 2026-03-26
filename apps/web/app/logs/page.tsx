@@ -15,6 +15,7 @@ type LogRow = {
 };
 
 type TpLogFilterMode = 'all' | 'hide' | 'only';
+type NoiseLogFilterMode = 'all' | 'hide' | 'only';
 
 const CATEGORIES = [
   { id: 'all', label: 'Все' },
@@ -30,6 +31,15 @@ function isTpLogEvent(message: string): boolean {
   return msg.includes('placetpsplit') || msg.includes('tp:');
 }
 
+function isNoiseLogEvent(message: string): boolean {
+  const msg = message.trim();
+  return (
+    msg === 'poll: stale signal kept because exchange exposure still exists' ||
+    msg === 'poll: reconcile stale pass started' ||
+    msg === 'Userbot: duplicate ingest skipped'
+  );
+}
+
 export default function LogsPage() {
   const [rows, setRows] = useState<LogRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -37,6 +47,7 @@ export default function LogsPage() {
   const [category, setCategory] = useState<string>('all');
   const [limit, setLimit] = useState(300);
   const [tpLogFilter, setTpLogFilter] = useState<TpLogFilterMode>('hide');
+  const [noiseLogFilter, setNoiseLogFilter] = useState<NoiseLogFilterMode>('hide');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   const load = useCallback(async () => {
@@ -81,11 +92,26 @@ export default function LogsPage() {
     () => rows.filter((row) => isTpLogEvent(row.message)).length,
     [rows],
   );
+  const noiseLogCount = useMemo(
+    () => rows.filter((row) => isNoiseLogEvent(row.message)).length,
+    [rows],
+  );
   const visibleRows = useMemo(() => {
-    if (tpLogFilter === 'all') return rows;
-    if (tpLogFilter === 'hide') return rows.filter((row) => !isTpLogEvent(row.message));
-    return rows.filter((row) => isTpLogEvent(row.message));
-  }, [rows, tpLogFilter]);
+    let next = rows;
+    if (tpLogFilter === 'hide') {
+      next = next.filter((row) => !isTpLogEvent(row.message));
+    } else if (tpLogFilter === 'only') {
+      next = next.filter((row) => isTpLogEvent(row.message));
+    }
+
+    if (noiseLogFilter === 'hide') {
+      next = next.filter((row) => !isNoiseLogEvent(row.message));
+    } else if (noiseLogFilter === 'only') {
+      next = next.filter((row) => isNoiseLogEvent(row.message));
+    }
+
+    return next;
+  }, [rows, tpLogFilter, noiseLogFilter]);
 
   return (
     <div>
@@ -155,6 +181,25 @@ export default function LogsPage() {
             <option value="only">Только TP/placeTpSplit</option>
           </select>
         </label>
+        <label>
+          Шумные логи:{' '}
+          <select
+            value={noiseLogFilter}
+            onChange={(e) => setNoiseLogFilter(e.target.value as NoiseLogFilterMode)}
+            style={{
+              marginLeft: 4,
+              padding: '0.35rem 0.5rem',
+              background: 'var(--card)',
+              color: 'var(--foreground)',
+              border: '1px solid var(--border)',
+              borderRadius: 6,
+            }}
+          >
+            <option value="hide">Скрыть шумные</option>
+            <option value="all">Показать все</option>
+            <option value="only">Только шумные</option>
+          </select>
+        </label>
         <button
           type="button"
           onClick={() => void load()}
@@ -173,6 +218,9 @@ export default function LogsPage() {
       <p style={{ color: 'var(--muted)', marginBottom: '0.75rem', fontSize: '0.8rem' }}>
         TP/placeTpSplit событий в текущей выборке: {tpLogCount}
       </p>
+      <p style={{ color: 'var(--muted)', marginBottom: '0.75rem', fontSize: '0.8rem' }}>
+        Шумных событий в текущей выборке: {noiseLogCount}
+      </p>
 
       {loading && <p style={{ color: 'var(--muted)' }}>Загрузка…</p>}
       {error && (
@@ -185,7 +233,7 @@ export default function LogsPage() {
         <p style={{ color: 'var(--muted)' }}>
           {rows.length === 0
             ? 'Записей пока нет.'
-            : 'Нет записей для текущего фильтра TP-логов.'}
+            : 'Нет записей для текущих фильтров.'}
         </p>
       )}
 
