@@ -124,6 +124,8 @@ export interface SignalExecutionDebugSnapshot {
 @Injectable()
 export class BybitService {
   private readonly logger = new Logger(BybitService.name);
+  private readonly staleFlatPollCounts = new Map<string, number>();
+  private static readonly STALE_RECONCILE_REQUIRED_CLEAN_POLLS = 3;
 
   constructor(
     private readonly settings: SettingsService,
@@ -521,22 +523,6 @@ export class BybitService {
         );
         if (busy) {
           return true;
-        }
-        const n = await this.orders.reconcileStaleOpenSignalsForPairAndDirection(
-          symbol,
-          direction,
-        );
-        if (n > 0) {
-          void this.appLog.append(
-            'info',
-            'bybit',
-            'reconcile: по стороне биржа чиста, сняты зависшие ORDERS_PLACED в БД',
-            {
-              symbol,
-              direction,
-              signalsUpdated: n,
-            },
-          );
         }
         return false;
       } catch (e) {
@@ -1300,18 +1286,6 @@ export class BybitService {
           ok: false,
           error: `На Bybit по ${symbol} уже есть открытые ордера или позиция по стороне ${signal.direction.toUpperCase()}. Повторный вход в ту же сторону недоступен.`,
         };
-      }
-      const reconciled =
-        await this.orders.reconcileStaleOpenSignalsForPairAndDirection(
-          symbol,
-          signal.direction,
-        );
-      if (reconciled > 0) {
-        void this.appLog.append('info', 'bybit', 'placeSignalOrders: reconcile зависших ORDERS_PLACED', {
-          symbol,
-          direction: signal.direction,
-          signalsUpdated: reconciled,
-        });
       }
     } catch (e) {
       const msg = formatError(e);
@@ -2603,12 +2577,18 @@ export class BybitService {
     const uniquePairDirections = new Map<string, { pair: string; direction: 'long' | 'short' }>();
     for (const sig of staleCandidates) {
       const symbol = normalizeTradingPair(sig.pair);
-      const key = `${symbol}:${sig.direction}`;
+      const key = this.stalePairDirectionKey(symbol, sig.direction as 'long' | 'short');
       if (!uniquePairDirections.has(key)) {
         uniquePairDirections.set(key, {
           pair: symbol,
           direction: sig.direction as 'long' | 'short',
         });
+      }
+    }
+
+    for (const existingKey of Array.from(this.staleFlatPollCounts.keys())) {
+      if (!uniquePairDirections.has(existingKey)) {
+        this.staleFlatPollCounts.delete(existingKey);
       }
     }
 
@@ -2625,9 +2605,11 @@ export class BybitService {
     }
 
     for (const { pair, direction } of uniquePairDirections.values()) {
+      const reconcileKey = this.stalePairDirectionKey(pair, direction);
       try {
         const busy = await this.hasExchangeExposureForDirection(client, pair, direction);
         if (busy) {
+          this.staleFlatPollCounts.delete(reconcileKey);
           void this.appLog.append(
             'debug',
             'bybit',
@@ -2639,8 +2621,27 @@ export class BybitService {
           );
           continue;
         }
+
+        const cleanCount = (this.staleFlatPollCounts.get(reconcileKey) ?? 0) + 1;
+        this.staleFlatPollCounts.set(reconcileKey, cleanCount);
+        if (cleanCount < BybitService.STALE_RECONCILE_REQUIRED_CLEAN_POLLS) {
+          void this.appLog.append(
+            'debug',
+            'bybit',
+            'poll: stale reconcile postponed until clean state repeats',
+            {
+              symbol: pair,
+              direction,
+              cleanPollsObserved: cleanCount,
+              cleanPollsRequired: BybitService.STALE_RECONCILE_REQUIRED_CLEAN_POLLS,
+            },
+          );
+          continue;
+        }
+
         const reconciled =
           await this.orders.reconcileStaleOpenSignalsForPairAndDirection(pair, direction);
+        this.staleFlatPollCounts.delete(reconcileKey);
         if (reconciled > 0) {
           void this.appLog.append(
             'info',
@@ -2664,6 +2665,7 @@ export class BybitService {
           );
         }
       } catch (err) {
+        this.staleFlatPollCounts.delete(reconcileKey);
         void this.appLog.append(
           'warn',
           'bybit',
@@ -2828,5 +2830,12 @@ export class BybitService {
         this.logger.debug(`poll position ${fresh.pair}: ${String(err)}`);
       }
     }
+  }
+
+  private stalePairDirectionKey(
+    pair: string,
+    direction: 'long' | 'short',
+  ): string {
+    return `${normalizeTradingPair(pair)}:${direction}`;
   }
 }
