@@ -756,9 +756,17 @@ h1.pageTitle {
   }
 
   .mobileStackTable table {
+    display: block;
     width: 100%;
+    max-width: 100%;
+    min-width: 0;
     border-collapse: separate;
     border-spacing: 0;
+    table-layout: fixed;
+  }
+
+  .mobileStackTable {
+    overflow-x: hidden;
   }
 
   .mobileStackTable thead {
@@ -769,11 +777,15 @@ h1.pageTitle {
     display: flex;
     flex-direction: column;
     gap: 0.7rem;
+    width: 100%;
+    max-width: 100%;
     padding: 0.5rem;
   }
 
   .mobileStackTable .mobileStackDataRow {
     display: block;
+    width: 100%;
+    max-width: 100%;
     border: 1px solid var(--border);
     border-radius: 10px;
     overflow: hidden;
@@ -788,6 +800,8 @@ h1.pageTitle {
     border-bottom: 1px solid var(--border);
     padding: 0.5rem 0.6rem;
     min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .mobileStackTable .mobileStackDataRow td:last-child {

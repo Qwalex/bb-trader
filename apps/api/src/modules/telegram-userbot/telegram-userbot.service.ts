@@ -36,6 +36,8 @@ type QrState = {
 
 const USERBOT_POLL_INTERVAL_MS = 2000;
 const USERBOT_MAX_MESSAGE_AGE_MINUTES_DEFAULT = 10;
+const USERBOT_MIN_BALANCE_USD_DEFAULT = 3;
+const USERBOT_BALANCE_CHECK_CACHE_MS = 30_000;
 
 @Injectable()
 export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
@@ -50,6 +52,13 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   private qrState: QrState = { phase: 'idle' };
   private pollTimer: NodeJS.Timeout | null = null;
   private pollInFlight = false;
+  private balanceCheckCache:
+    | {
+        checkedAtMs: number;
+        balanceUsd: number | undefined;
+        minBalanceUsd: number;
+      }
+    | undefined;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -110,6 +119,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       pollMs: USERBOT_POLL_INTERVAL_MS,
       pollingInFlight: this.pollInFlight,
       qr: this.qrState,
+      balanceGuard: await this.getBalanceGuardSnapshot(),
     };
   }
 
@@ -606,6 +616,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         status: ingest.status,
       },
       text,
+      { enforceBalanceGuard: true },
     );
   }
 
@@ -618,6 +629,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       status: string;
     },
     text: string,
+    options?: { enforceBalanceGuard?: boolean },
   ): Promise<void> {
     try {
       await this.updateIngest(ingest.id, {
@@ -627,6 +639,20 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         aiRequest: null,
         aiResponse: null,
       });
+
+      if (options?.enforceBalanceGuard) {
+        const lowBalance = await this.getLowBalanceGuardState();
+        if (lowBalance.ignore) {
+          await this.updateIngest(ingest.id, {
+            classification: 'other',
+            status: 'ignored',
+            error: lowBalance.reason,
+            aiRequest: null,
+            aiResponse: null,
+          });
+          return;
+        }
+      }
 
       const useAiClassifier = await this.getBoolSetting(
         'TELEGRAM_USERBOT_USE_AI_CLASSIFIER',
@@ -895,6 +921,61 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       }),
     );
     return { kind: ai.kind, aiRequest, aiResponse };
+  }
+
+  private async getLowBalanceGuardState(): Promise<{
+    ignore: boolean;
+    reason?: string;
+  }> {
+    const snapshot = await this.getBalanceGuardSnapshot();
+    if (snapshot.paused) {
+      return {
+        ignore: true,
+        reason:
+          snapshot.reason ??
+          `Баланс USDT ниже порога ${snapshot.minBalanceUsd.toFixed(2)} — сообщение пропущено`,
+      };
+    }
+    return { ignore: false };
+  }
+
+  private async getBalanceGuardSnapshot(): Promise<{
+    minBalanceUsd: number;
+    balanceUsd: number | null;
+    paused: boolean;
+    reason?: string;
+  }> {
+    const minBalanceUsd = await this.getNumberSetting(
+      'TELEGRAM_USERBOT_MIN_BALANCE_USD',
+      USERBOT_MIN_BALANCE_USD_DEFAULT,
+      0,
+    );
+    const now = Date.now();
+    let balanceUsd: number | undefined;
+    if (
+      this.balanceCheckCache &&
+      now - this.balanceCheckCache.checkedAtMs < USERBOT_BALANCE_CHECK_CACHE_MS &&
+      this.balanceCheckCache.minBalanceUsd === minBalanceUsd
+    ) {
+      balanceUsd = this.balanceCheckCache.balanceUsd;
+    } else {
+      balanceUsd = await this.bybit.getUnifiedUsdtBalance();
+      this.balanceCheckCache = { checkedAtMs: now, balanceUsd, minBalanceUsd };
+    }
+
+    const paused =
+      balanceUsd !== undefined &&
+      Number.isFinite(balanceUsd) &&
+      balanceUsd < minBalanceUsd;
+    const reason = paused
+      ? `Автоматическая установка ордеров приостановлена: баланс ${balanceUsd.toFixed(2)}$ ниже допустимого порога ${minBalanceUsd.toFixed(2)}$`
+      : undefined;
+    return {
+      minBalanceUsd,
+      balanceUsd: balanceUsd ?? null,
+      paused,
+      reason,
+    };
   }
 
   private async isMessageRecent(createdAt: Date): Promise<boolean> {

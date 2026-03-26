@@ -202,6 +202,21 @@ export class BybitService {
     });
   }
 
+  /** Текущий USDT-баланс (best-effort) для внешних guard-проверок. */
+  async getUnifiedUsdtBalance(): Promise<number | undefined> {
+    const client = await this.getClient();
+    if (!client) {
+      return undefined;
+    }
+    try {
+      const balance = await this.getUsdtBalance(client);
+      return Number.isFinite(balance) ? balance : undefined;
+    } catch (e) {
+      this.logger.warn(`getUnifiedUsdtBalance failed: ${formatError(e)}`);
+      return undefined;
+    }
+  }
+
   /** USDT balance in unified derivatives wallet (best-effort). */
   private async getUsdtBalance(client: RestClientV5): Promise<number> {
     const res = await client.getWalletBalance({
