@@ -129,6 +129,24 @@ export default function TelegramUserbotPage() {
     });
   }, [metrics?.recent, onlySignals, groupByChat]);
 
+  const recentByChatAccordion = useMemo(() => {
+    if (!groupByChat) return null;
+    const map = new Map<string, TodayMetrics['recent'][number][]>();
+    for (const row of filteredRecent) {
+      const list = map.get(row.chatId) ?? [];
+      list.push(row);
+      map.set(row.chatId, list);
+    }
+    return Array.from(map.entries())
+      .map(([chatId, rows]) => ({
+        chatId,
+        rows: [...rows].sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        ),
+      }))
+      .sort((a, b) => a.chatId.localeCompare(b.chatId));
+  }, [filteredRecent, groupByChat]);
+
   async function loadAll() {
     const [s, c, m] = await Promise.all([
       fetch(`${getApiBase()}/telegram-userbot/status`).then((r) => r.json()),
@@ -480,151 +498,331 @@ export default function TelegramUserbotPage() {
             Разбивать по группам
           </label>
         </div>
-        <div
-          className="tableWrap mobileStackTable userbotRecentTable"
-          style={{ maxHeight: 500, overflowY: 'auto' }}
-        >
-          <table>
-            <thead>
-              <tr>
-                <th>Время</th>
-                <th>Chat ID</th>
-                <th>Message ID</th>
-                <th>Сообщение</th>
-                <th>Класс</th>
-                <th>Статус обработки</th>
-                <th>Действия</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredRecent.length === 0 && (
-                <tr>
-                  <td colSpan={7} style={{ color: 'var(--muted)' }}>
-                    Сообщения по текущему фильтру не найдены.
-                  </td>
-                </tr>
-              )}
-              {filteredRecent.map((row, idx, arr) => {
-                const prev = idx > 0 ? arr[idx - 1] : null;
-                const showChatDivider =
-                  groupByChat && (!prev || prev.chatId !== row.chatId);
-                const showTodayDivider = (!prev || showChatDivider) && row.isToday;
-                const showOldDivider =
-                  !showChatDivider &&
-                  (prev?.isToday ?? false) &&
-                  row.isToday === false;
+        {groupByChat && recentByChatAccordion ? (
+          <div style={{ maxHeight: 500, overflowY: 'auto' }}>
+            {recentByChatAccordion.map((group) => {
+              const chatTitle = chatTitleById.get(group.chatId) ?? group.chatId;
+              const rows = group.rows;
+              return (
+                <details
+                  key={group.chatId}
+                  style={{
+                    marginBottom: '0.75rem',
+                    borderRadius: 8,
+                  }}
+                >
+                  <summary
+                    style={{
+                      cursor: 'pointer',
+                      userSelect: 'none',
+                      padding: '0.5rem 0.6rem',
+                      border: '1px solid var(--border)',
+                      borderRadius: 8,
+                      background: 'var(--card)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '0.75rem',
+                    }}
+                    title={group.chatId}
+                  >
+                    <span style={{ fontWeight: 700 }}>{chatTitle}</span>
+                    <span style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>
+                      {rows.length} msg
+                    </span>
+                  </summary>
+                  <div style={{ padding: '0.6rem 0.15rem' }}>
+                    <table className="userbotRecentTable" style={{ width: '100%' }}>
+                      <thead>
+                        <tr>
+                          <th>Время</th>
+                          <th>Message ID</th>
+                          <th>Сообщение</th>
+                          <th>Класс</th>
+                          <th>Статус обработки</th>
+                          <th>Действия</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((row, idx) => {
+                          const prev = idx > 0 ? rows[idx - 1] : null;
+                          const showTodayDivider =
+                            row.isToday && (!prev || prev.isToday === false);
+                          const showOldDivider =
+                            !row.isToday && prev?.isToday === true;
 
-                return (
-                  <Fragment key={row.id}>
-                    {showChatDivider && (
-                      <tr className="mobileStackStaticRow">
-                        <td colSpan={7} className="chatDividerCell">
-                          <span className="chatDividerTitle">
-                            {chatTitleById.get(row.chatId) ?? row.chatId}
-                          </span>
-                          <span className="chatDividerMeta">{row.chatId}</span>
+                          return (
+                            <Fragment key={row.id}>
+                              {(showTodayDivider || showOldDivider) && (
+                                <tr className="mobileStackStaticRow">
+                                  <td colSpan={6} style={{ background: 'var(--card)' }}>
+                                    <strong>
+                                      {showTodayDivider
+                                        ? 'Сегодня'
+                                        : 'Старые сообщения'}
+                                    </strong>
+                                  </td>
+                                </tr>
+                              )}
+                              <tr className="mobileStackDataRow">
+                                <td data-label="Время">
+                                  {formatTimeRu(row.createdAt)}
+                                </td>
+                                <td data-label="Message ID">{row.messageId}</td>
+                                <td data-label="Сообщение" style={{ maxWidth: 380 }}>
+                                  {row.text ? (
+                                    <details>
+                                      <summary
+                                        style={{
+                                          cursor: 'pointer',
+                                          whiteSpace: 'nowrap',
+                                          overflow: 'hidden',
+                                          textOverflow: 'ellipsis',
+                                          maxWidth: 360,
+                                        }}
+                                        title={row.text}
+                                      >
+                                        {row.text}
+                                      </summary>
+                                      <div
+                                        style={{
+                                          marginTop: '0.35rem',
+                                          whiteSpace: 'pre-wrap',
+                                          lineHeight: 1.35,
+                                          color: 'var(--muted)',
+                                        }}
+                                      >
+                                        {row.text}
+                                      </div>
+                                    </details>
+                                  ) : (
+                                    <span style={{ color: 'var(--muted)' }}>—</span>
+                                  )}
+                                </td>
+                                <td data-label="Класс">{row.classification}</td>
+                                <td
+                                  data-label="Статус обработки"
+                                  title={row.error ?? undefined}
+                                >
+                                  {renderPipelineStatus(row)}
+                                </td>
+                                <td data-label="Действия" className="userbotActionsCell">
+                                  <button
+                                    className="btn btnSecondary btnSm"
+                                    type="button"
+                                    onClick={() =>
+                                      setTraceModal({
+                                        chatId: row.chatId,
+                                        messageId: row.messageId,
+                                        request: row.aiRequest,
+                                        response: row.aiResponse,
+                                      })
+                                    }
+                                    disabled={busy !== null}
+                                    style={{ marginRight: '0.35rem' }}
+                                  >
+                                    Trace
+                                  </button>
+                                  <button
+                                    className="btn btnSm"
+                                    type="button"
+                                    onClick={() =>
+                                      void runAction(`reread-${row.id}`, async () => {
+                                        const res = await fetch(
+                                          `${getApiBase()}/telegram-userbot/reread/${encodeURIComponent(
+                                            row.id,
+                                          )}`,
+                                          { method: 'POST' },
+                                        );
+                                        const j = (await res.json()) as {
+                                          ok?: boolean;
+                                          error?: string;
+                                        };
+                                        if (!j.ok) {
+                                          throw new Error(
+                                            j.error ?? 'Не удалось перечитать сообщение',
+                                          );
+                                        }
+                                        await loadAll();
+                                        setMsg({
+                                          type: 'ok',
+                                          text: `Сообщение ${row.messageId} перечитано`,
+                                        });
+                                      })
+                                    }
+                                    disabled={busy !== null}
+                                  >
+                                    {busy === `reread-${row.id}`
+                                      ? 'Перечитывание…'
+                                      : 'Перечитать'}
+                                  </button>
+                                </td>
+                              </tr>
+                            </Fragment>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </details>
+              );
+            })}
+          </div>
+        ) : (
+          <div
+            className="tableWrap mobileStackTable userbotRecentTable"
+            style={{ maxHeight: 500, overflowY: 'auto' }}
+          >
+            <table>
+              <thead>
+                <tr>
+                  <th>Время</th>
+                  <th>Chat ID</th>
+                  <th>Message ID</th>
+                  <th>Сообщение</th>
+                  <th>Класс</th>
+                  <th>Статус обработки</th>
+                  <th>Действия</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredRecent.length === 0 && (
+                  <tr>
+                    <td colSpan={7} style={{ color: 'var(--muted)' }}>
+                      Сообщения по текущему фильтру не найдены.
+                    </td>
+                  </tr>
+                )}
+                {filteredRecent.map((row, idx, arr) => {
+                  const prev = idx > 0 ? arr[idx - 1] : null;
+                  const showChatDivider =
+                    groupByChat && (!prev || prev.chatId !== row.chatId);
+                  const showTodayDivider =
+                    (!prev || showChatDivider) && row.isToday;
+                  const showOldDivider =
+                    !showChatDivider &&
+                    (prev?.isToday ?? false) &&
+                    row.isToday === false;
+
+                  return (
+                    <Fragment key={row.id}>
+                      {showChatDivider && (
+                        <tr className="mobileStackStaticRow">
+                          <td colSpan={7} className="chatDividerCell">
+                            <span className="chatDividerTitle">
+                              {chatTitleById.get(row.chatId) ?? row.chatId}
+                            </span>
+                            <span className="chatDividerMeta">{row.chatId}</span>
+                          </td>
+                        </tr>
+                      )}
+                      {(showTodayDivider || showOldDivider) && (
+                        <tr className="mobileStackStaticRow">
+                          <td colSpan={7} style={{ background: 'var(--card)' }}>
+                            <strong>
+                              {showTodayDivider ? 'Сегодня' : 'Старые сообщения'}
+                            </strong>
+                          </td>
+                        </tr>
+                      )}
+                      <tr className="mobileStackDataRow">
+                        <td data-label="Время">{formatTimeRu(row.createdAt)}</td>
+                        <td data-label="Chat ID">{row.chatId}</td>
+                        <td data-label="Message ID">{row.messageId}</td>
+                        <td data-label="Сообщение" style={{ maxWidth: 380 }}>
+                          {row.text ? (
+                            <details>
+                              <summary
+                                style={{
+                                  cursor: 'pointer',
+                                  whiteSpace: 'nowrap',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  maxWidth: 360,
+                                }}
+                                title={row.text}
+                              >
+                                {row.text}
+                              </summary>
+                              <div
+                                style={{
+                                  marginTop: '0.35rem',
+                                  whiteSpace: 'pre-wrap',
+                                  lineHeight: 1.35,
+                                  color: 'var(--muted)',
+                                }}
+                              >
+                                {row.text}
+                              </div>
+                            </details>
+                          ) : (
+                            <span style={{ color: 'var(--muted)' }}>—</span>
+                          )}
+                        </td>
+                        <td data-label="Класс">{row.classification}</td>
+                        <td
+                          data-label="Статус обработки"
+                          title={row.error ?? undefined}
+                        >
+                          {renderPipelineStatus(row)}
+                        </td>
+                        <td data-label="Действия" className="userbotActionsCell">
+                          <button
+                            className="btn btnSecondary btnSm"
+                            type="button"
+                            onClick={() =>
+                              setTraceModal({
+                                chatId: row.chatId,
+                                messageId: row.messageId,
+                                request: row.aiRequest,
+                                response: row.aiResponse,
+                              })
+                            }
+                            disabled={busy !== null}
+                            style={{ marginRight: '0.35rem' }}
+                          >
+                            Trace
+                          </button>
+                          <button
+                            className="btn btnSm"
+                            type="button"
+                            onClick={() =>
+                              void runAction(`reread-${row.id}`, async () => {
+                                const res = await fetch(
+                                  `${getApiBase()}/telegram-userbot/reread/${encodeURIComponent(row.id)}`,
+                                  { method: 'POST' },
+                                );
+                                const j = (await res.json()) as {
+                                  ok?: boolean;
+                                  error?: string;
+                                };
+                                if (!j.ok) {
+                                  throw new Error(
+                                    j.error ?? 'Не удалось перечитать сообщение',
+                                  );
+                                }
+                                await loadAll();
+                                setMsg({
+                                  type: 'ok',
+                                  text: `Сообщение ${row.messageId} перечитано`,
+                                });
+                              })
+                            }
+                            disabled={busy !== null}
+                          >
+                            {busy === `reread-${row.id}`
+                              ? 'Перечитывание…'
+                              : 'Перечитать'}
+                          </button>
                         </td>
                       </tr>
-                    )}
-                    {(showTodayDivider || showOldDivider) && (
-                      <tr className="mobileStackStaticRow">
-                        <td colSpan={7} style={{ background: 'var(--card)' }}>
-                          <strong>
-                            {showTodayDivider ? 'Сегодня' : 'Старые сообщения'}
-                          </strong>
-                        </td>
-                      </tr>
-                    )}
-                    <tr className="mobileStackDataRow">
-                      <td data-label="Время">{formatTimeRu(row.createdAt)}</td>
-                      <td data-label="Chat ID">{row.chatId}</td>
-                      <td data-label="Message ID">{row.messageId}</td>
-                      <td data-label="Сообщение" style={{ maxWidth: 380 }}>
-                        {row.text ? (
-                          <details>
-                            <summary
-                              style={{
-                                cursor: 'pointer',
-                                whiteSpace: 'nowrap',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                maxWidth: 360,
-                              }}
-                              title={row.text}
-                            >
-                              {row.text}
-                            </summary>
-                            <div
-                              style={{
-                                marginTop: '0.35rem',
-                                whiteSpace: 'pre-wrap',
-                                lineHeight: 1.35,
-                                color: 'var(--muted)',
-                              }}
-                            >
-                              {row.text}
-                            </div>
-                          </details>
-                        ) : (
-                          <span style={{ color: 'var(--muted)' }}>—</span>
-                        )}
-                      </td>
-                      <td data-label="Класс">{row.classification}</td>
-                      <td data-label="Статус обработки" title={row.error ?? undefined}>
-                        {renderPipelineStatus(row)}
-                      </td>
-                      <td data-label="Действия" className="userbotActionsCell">
-                        <button
-                          className="btn btnSecondary btnSm"
-                          type="button"
-                          onClick={() =>
-                            setTraceModal({
-                              chatId: row.chatId,
-                              messageId: row.messageId,
-                              request: row.aiRequest,
-                              response: row.aiResponse,
-                            })
-                          }
-                          disabled={busy !== null}
-                          style={{ marginRight: '0.35rem' }}
-                        >
-                          Trace
-                        </button>
-                        <button
-                          className="btn btnSm"
-                          type="button"
-                          onClick={() =>
-                            void runAction(`reread-${row.id}`, async () => {
-                              const res = await fetch(
-                                `${getApiBase()}/telegram-userbot/reread/${encodeURIComponent(row.id)}`,
-                                { method: 'POST' },
-                              );
-                              const j = (await res.json()) as {
-                                ok?: boolean;
-                                error?: string;
-                              };
-                              if (!j.ok) {
-                                throw new Error(j.error ?? 'Не удалось перечитать сообщение');
-                              }
-                              await loadAll();
-                              setMsg({
-                                type: 'ok',
-                                text: `Сообщение ${row.messageId} перечитано`,
-                              });
-                            })
-                          }
-                          disabled={busy !== null}
-                        >
-                          {busy === `reread-${row.id}` ? 'Перечитывание…' : 'Перечитать'}
-                        </button>
-                      </td>
-                    </tr>
-                  </Fragment>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
 
       {traceModal && (
         <div
