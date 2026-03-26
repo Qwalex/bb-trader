@@ -225,27 +225,58 @@ export class BybitService {
       const n = Number.parseFloat(String(v));
       return Number.isFinite(n) ? n : undefined;
     };
+    const nonNegative = (v: number | undefined): number | undefined => {
+      if (v === undefined || !Number.isFinite(v)) return undefined;
+      return Math.max(0, v);
+    };
 
     for (const accountType of accountTypes) {
       const res = await client.getWalletBalance({ accountType });
       const list = res.result?.list?.[0];
       const coin = list?.coin?.find((c) => c.coin === 'USDT');
 
-      // Приоритет: именно доступный баланс (для новых ордеров),
-      // затем уже fallback на суммарные/кошелёк поля.
+      // 1) Прямые поля "доступно к использованию"
       const candidates: unknown[] = [
-        list?.totalAvailableBalance,
         coin?.availableToWithdraw,
+        (coin as Record<string, unknown> | undefined)?.availableToTransfer,
+        (coin as Record<string, unknown> | undefined)?.transferBalance,
+      ];
+      for (const candidate of candidates) {
+        const parsed = parseFinite(candidate);
+        if (parsed !== undefined) {
+          return nonNegative(parsed) ?? parsed;
+        }
+      }
+
+      // 2) Вычисляемый fallback доступной маржи:
+      // available ~= equity - totalOrderIM - totalPositionIM
+      const equity =
+        parseFinite(coin?.equity) ?? parseFinite(coin?.walletBalance);
+      const totalOrderIM =
+        parseFinite((coin as Record<string, unknown> | undefined)?.totalOrderIM) ?? 0;
+      const totalPositionIM =
+        parseFinite((coin as Record<string, unknown> | undefined)?.totalPositionIM) ?? 0;
+      if (equity !== undefined) {
+        const computedAvailable = equity - totalOrderIM - totalPositionIM;
+        const normalized = nonNegative(computedAvailable);
+        if (normalized !== undefined) {
+          return normalized;
+        }
+      }
+
+      // 3) Последний fallback: суммарные/кошелек поля
+      const fallbackCandidates: unknown[] = [
+        list?.totalAvailableBalance,
         coin?.availableToBorrow,
         coin?.walletBalance,
         coin?.equity,
         list?.totalWalletBalance,
         list?.totalEquity,
       ];
-      for (const candidate of candidates) {
+      for (const candidate of fallbackCandidates) {
         const parsed = parseFinite(candidate);
         if (parsed !== undefined) {
-          return parsed;
+          return nonNegative(parsed) ?? parsed;
         }
       }
     }
