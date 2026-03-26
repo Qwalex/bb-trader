@@ -805,16 +805,16 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
         ? Number(String(defRaw).trim().replace(',', '.'))
         : NaN;
     const defaultLeverage =
-      Number.isFinite(parsed) && parsed >= 1 ? Math.round(parsed) : undefined;
+      Number.isFinite(parsed) && parsed >= 1 ? Math.round(parsed) : 1;
 
-    if (defaultLeverage === undefined) {
+    if (!Number.isFinite(parsed) || parsed < 1) {
       this.logger.warn(
-        'DEFAULT_LEVERAGE is not set or invalid; leverage is required in parsed signal',
+        'DEFAULT_LEVERAGE is not set or invalid; fallback leverage 1x will be used',
       );
     }
 
     return {
-      requireLeverage: defaultLeverage === undefined,
+      requireLeverage: false,
       defaultLeverage,
     };
   }
@@ -950,9 +950,11 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       const partial = normalizePartialSignal(root.signal);
       const mergedMissing = listMissingRequiredFields(partial, leverageOpts);
       const prompt =
-        typeof root.prompt === 'string' && root.prompt.trim().length > 0
-          ? root.prompt.trim()
-          : this.defaultPromptForMissing(mergedMissing);
+        mergedMissing.length > 0
+          ? this.defaultPromptForMissing(mergedMissing)
+          : typeof root.prompt === 'string' && root.prompt.trim().length > 0
+            ? root.prompt.trim()
+            : this.defaultPromptForMissing(mergedMissing);
       return {
         ok: 'incomplete',
         partial,
