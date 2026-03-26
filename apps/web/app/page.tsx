@@ -118,7 +118,7 @@ export default async function Home({
             `Автоматическая установка ордеров приостановлена: баланс ниже допустимого порога ${guard.minBalanceUsd.toFixed(2)}$`}
         </p>
       )}
-      <form className="filters" method="get" action="/">
+      <form className="filters" method="get" action="/trade">
         <label>
           Источник
           <select

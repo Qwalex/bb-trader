@@ -19,7 +19,7 @@ import {
 } from '../transcript/partial-signal.util';
 import { TranscriptService } from '../transcript/transcript.service';
 
-type DraftPhase = 'collecting' | 'ready';
+type DraftPhase = 'collecting' | 'ready' | 'awaiting_source';
 
 type DraftSession = {
   phase: DraftPhase;
@@ -29,6 +29,8 @@ type DraftSession = {
   signal?: SignalDto;
   /** Накопленные поля, пока не хватает данных. */
   partial?: Partial<SignalDto>;
+  /** Существующие источники для выбора (фаза awaiting_source). */
+  pendingSources?: string[];
 };
 
 type ExternalConfirmationResult = {
@@ -290,6 +292,26 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     ]);
   }
 
+  private sourceSelectionKeyboard(sources: string[]) {
+    const rows = sources.map((s, i) => [
+      Markup.button.callback(s, `src_pick:${i}`),
+    ]);
+    rows.push([Markup.button.callback('➡️ Без источника', 'src_none')]);
+    rows.push([Markup.button.callback('❌ Отмена', 'sig_cancel')]);
+    return Markup.inlineKeyboard(rows);
+  }
+
+  private async getDistinctSources(): Promise<string[]> {
+    const rows = await this.prisma.signal.findMany({
+      where: { source: { not: null } },
+      select: { source: true },
+      distinct: ['source'],
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+    return rows.map((r) => r.source!).filter(Boolean);
+  }
+
   private formatExternalSignalTable(s: SignalDto, defaultOrderUsd: number): string {
     const src = s.source ? `\nИсточник: ${s.source}` : '';
     const sizing =
@@ -505,6 +527,46 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       this.drafts.delete(uid);
       await ctx.answerCbQuery('Черновик отменён');
       await ctx.reply('Черновик сигнала отменён.');
+    });
+
+    this.bot.action(/^src_pick:(\d+)$/, async (ctx) => {
+      const uid = ctx.from?.id;
+      if (!uid) { await ctx.answerCbQuery(); return; }
+      const draft = this.drafts.get(uid);
+      if (draft?.phase !== 'awaiting_source' || !draft.signal) {
+        await ctx.answerCbQuery('Нет активного черновика', { show_alert: true });
+        return;
+      }
+      const idx = parseInt(ctx.match?.[1] ?? '', 10);
+      const chosen = draft.pendingSources?.[idx];
+      if (!chosen) {
+        await ctx.answerCbQuery('Неверный индекс источника', { show_alert: true });
+        return;
+      }
+      draft.signal.source = chosen;
+      this.drafts.set(uid, { phase: 'ready', signal: draft.signal, userTurns: draft.userTurns });
+      await ctx.answerCbQuery(`Источник: ${chosen}`);
+      const defaultOrderUsd = await this.settings.getDefaultOrderUsd();
+      await ctx.reply(this.formatSignalTable(draft.signal, defaultOrderUsd), {
+        ...this.confirmKeyboard(),
+      });
+    });
+
+    this.bot.action('src_none', async (ctx) => {
+      const uid = ctx.from?.id;
+      if (!uid) { await ctx.answerCbQuery(); return; }
+      const draft = this.drafts.get(uid);
+      if (draft?.phase !== 'awaiting_source' || !draft.signal) {
+        await ctx.answerCbQuery('Нет активного черновика', { show_alert: true });
+        return;
+      }
+      delete draft.signal.source;
+      this.drafts.set(uid, { phase: 'ready', signal: draft.signal, userTurns: draft.userTurns });
+      await ctx.answerCbQuery('Без источника');
+      const defaultOrderUsd = await this.settings.getDefaultOrderUsd();
+      await ctx.reply(this.formatSignalTable(draft.signal, defaultOrderUsd), {
+        ...this.confirmKeyboard(),
+      });
     });
 
     this.bot.action(/^ub_confirm:(.+)$/i, async (ctx) => {
@@ -804,6 +866,34 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
 
     await this.applySourceToSignal(uid, res.signal);
+
+    if (!res.signal.source) {
+      const existingSources = await this.getDistinctSources();
+      if (existingSources.length > 0) {
+        this.drafts.set(uid, {
+          phase: 'awaiting_source',
+          signal: res.signal,
+          userTurns: nextTurns,
+          pendingSources: existingSources,
+        });
+        this.logger.log(
+          `handleParseResult: awaiting_source userId=${uid} pair=${res.signal.pair} sources=${existingSources.length}`,
+        );
+        void this.appLog.append('info', 'telegram', 'черновик: выбор источника', {
+          userId: uid,
+          pair: res.signal.pair,
+          sources: existingSources,
+        });
+        const defaultOrderUsd = await this.settings.getDefaultOrderUsd();
+        await ctx.reply(
+          this.formatSignalTable(res.signal, defaultOrderUsd) +
+            '\n\nВыберите источник сигнала или продолжите без него:',
+          { ...this.sourceSelectionKeyboard(existingSources) },
+        );
+        return;
+      }
+    }
+
     this.drafts.set(uid, {
       phase: 'ready',
       signal: res.signal,
