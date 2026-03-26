@@ -110,23 +110,40 @@ Return ONLY valid JSON (no markdown, no commentary) with this exact shape:
   "missing": ["pair", "direction", ...],
   "prompt": "Краткий вопрос пользователю на русском: каких данных не хватает" | null
 }
-Rules:
-- If values for ALL required fields are known and unambiguous, this is definitely a signal: set status to "complete" and fill signal fully.
-- If values for ONE or TWO required fields are unknown or ambiguous, clarification is required: set status to "incomplete", put known values in signal and put null for unknown fields, list missing field keys in "missing", and ask ONE clear clarifying question in Russian in "prompt".
-- If values for ALL required fields are unknown, this is NOT a signal: set status to "incomplete", keep required signal fields as null, set missing to [], and set prompt to null (do not ask a clarifying question).
-- If the message is clearly a trade RESULT report (e.g. "TP ✅", "Profit: ...%", "PNL ...%", "Duration/Period", "closed", "sl hit", "tp hit") and does not contain a full fresh setup, this is NOT a new signal: set status to "incomplete", keep required signal fields as null, set missing to [], and set prompt to null.
-- Required fields for a valid signal are pair, direction, stopLoss, and takeProfits. entries and leverage are optional.
-- Field labels without actual values (e.g. "Entry:", "SL:", "TP1:" with no number after them) do NOT count as known values. If required fields are listed but have no actual values, treat them as unknown; if this results in all required fields being unknown, this is NOT a signal.
-- pair: symbol as written in the message (e.g. BTCUSDT, ethusdt, ETH/USDT, BTC-USDT); casing and separators do not matter — the system normalizes to the exchange form.
+Decision policy:
+1. First decide whether the message is a NEW actionable trade setup.
+2. If the message is not clearly a fresh setup, do NOT try to complete a signal. Return status="incomplete", keep required signal fields null, set missing=[], and set prompt=null.
+3. Use status="incomplete" with a clarifying question ONLY when the message is clearly a fresh setup but exactly 1 or 2 required fields are unknown or ambiguous.
+4. If 3 or more required fields are unknown/ambiguous, or the message is a report/update/commentary, do NOT ask a question. Return status="incomplete", missing=[], prompt=null.
+
+Messages that are NOT a fresh setup unless they also contain a full new setup:
+- trade result or performance report
+- TP/SL hit report
+- profit/loss/PNL/percentage report
+- duration/period/statistics
+- closed/закрыт/закрыта/закрыто
+- recap, commentary, status update, or partial follow-up without enough setup fields
+
+Required fields for a valid fresh setup:
+- pair
+- direction
+- stopLoss
+- takeProfits
+
+Field rules:
+- pair: symbol as written in the message (e.g. BTCUSDT, ethusdt, ETH/USDT, BTC-USDT); casing and separators do not matter because the system normalizes it later.
 - direction must be long or short.
-- entries: first price is main entry, following are DCA levels.
-- If the user gives no entry price but wants to enter at market / "по рынку" / immediately, set entries to null and put only "entries" in missing when everything else is known — the system can suggest the current exchange price.
-- If the message describes ONE entry zone as a range between two prices for the SAME purpose (e.g. "entry range 1 - 2", "buy zone 1–2", "диапазон входа 1 - 2"), use a single entry equal to the midpoint (average), not two DCA levels.- Extract prices from explicit labels (Entry, Stop loss, SL, Targets/TP, etc.); do not blend or average numbers that belong to different fields.
-- takeProfits: one or more take-profit prices; several TPs mean equal split of position size at each level (e.g. 4 TPs → 25% each).
-- orderUsd: total position notional in USDT (e.g. 10, 50, 100). If user gives percent of balance instead, set orderUsd to 0 and set capitalPercent (1-100).
-- capitalPercent: only when sizing by balance percent; otherwise 0.
-- Default sizing: if user does not specify size, set orderUsd to ${defaultOrderUsd} and capitalPercent to 0.
-- source: ONLY if the user text explicitly names the signal provider (Telegram channel, app, group), e.g. "Binance Killers", "Crypto Signals". If unknown, set source to null. NEVER set source to "text", "image", "audio", or any word describing input format — those are not signal sources.
+- entries and leverage are optional.
+- entries: first price is main entry; following prices are DCA levels.
+- If the user gives no entry price but clearly wants to enter at market / "по рынку" / immediately, set entries to null and put only "entries" in missing when everything else is known.
+- If the message describes ONE entry zone as a range for the same purpose (e.g. "entry range 1 - 2", "buy zone 1-2", "диапазон входа 1 - 2"), use one entry equal to the midpoint, not two DCA levels.
+- Extract prices only from explicit labels (Entry, Stop loss, SL, Targets/TP, etc.). Do not blend, infer, or average numbers from different fields.
+- Field labels without actual values (e.g. "Entry:", "SL:", "TP1:" with no number after them) do NOT count as known values.
+- takeProfits: one or more take-profit prices; several TPs mean equal split across levels.
+- orderUsd: total position notional in USDT (e.g. 10, 50, 100). If the user gives percent of balance instead, set orderUsd to 0 and set capitalPercent to that percent.
+- capitalPercent: use only when sizing by balance percent; otherwise 0.
+- Default sizing: if size is not specified, set orderUsd to ${defaultOrderUsd} and capitalPercent to 0.
+- source: ONLY if the user explicitly names the signal provider (Telegram channel, app, or group), e.g. "Binance Killers", "Crypto Signals". Otherwise set source to null. NEVER use "text", "image", "audio", or any input-format word as source.
 `;
 }
 
