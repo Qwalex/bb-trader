@@ -44,6 +44,7 @@ const USERBOT_FILTER_MATCH_THRESHOLD = 0.34;
 @Injectable()
 export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TelegramUserbotService.name);
+  private readonly pairDirectionTransitions = new Map<string, { count: number; reason?: string }>();
 
   private client: TelegramClient | null = null;
   private messageHandlerRegistered = false;
@@ -920,6 +921,23 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         takeProfitsCount: signal.takeProfits.length,
         leverage: signal.leverage,
       });
+      const transitionWait = await this.waitForPairDirectionTransitionIfAny(
+        signal.pair,
+        signal.direction,
+      );
+      if (transitionWait.waited) {
+        this.appendIngestStageLog(
+          transitionWait.timedOut ? 'warn' : 'info',
+          'Userbot: waited for pair/direction transition before duplicate check',
+          ingest,
+          {
+            pair: signal.pair,
+            direction: signal.direction,
+            timedOut: transitionWait.timedOut,
+            waitedMs: transitionWait.waitedMs,
+          },
+        );
+      }
 
       if (
         await this.bybit.wouldDuplicateActivePairDirection(
@@ -1566,6 +1584,12 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         pair: true,
         direction: true,
         entries: true,
+        stopLoss: true,
+        takeProfits: true,
+        leverage: true,
+        orderUsd: true,
+        capitalPercent: true,
+        source: true,
       },
     });
     if (!signal) {
@@ -1600,39 +1624,46 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       signalId: signal.id,
     });
 
-    const closed = await this.bybit.closeSignalManually(signal.id);
-    if (!closed.ok) {
-      return {
-        ok: false,
-        error: closed.error ?? closed.details ?? 'Не удалось закрыть сделку на Bybit',
-      };
-    }
-    await this.prisma.signalEvent.create({
-      data: {
-        signalId: signal.id,
-        type: 'CANCELLED_BY_CHAT',
-        payload: JSON.stringify({
-          reason: 'Сигнал отменен в чате (closed/cancel)',
+    const closeSignal = this.signalFromDb(signal);
+    this.beginPairDirectionTransition(closeSignal.pair, closeSignal.direction, 'close flow');
+    try {
+      const closed = await this.bybit.closeSignalManually(signal.id);
+      if (!closed.ok) {
+        return {
+          ok: false,
+          error: closed.error ?? closed.details ?? 'Не удалось закрыть сделку на Bybit',
+        };
+      }
+      await this.releaseSignalHash(this.computeSignalHash(closeSignal));
+      await this.prisma.signalEvent.create({
+        data: {
+          signalId: signal.id,
+          type: 'CANCELLED_BY_CHAT',
+          payload: JSON.stringify({
+            reason: 'Сигнал отменен в чате (closed/cancel)',
+            sourceChatId: params.chatId,
+            sourceMessageId: rootSource.messageId,
+            closeMessageId: params.messageId,
+          }),
+        },
+      });
+
+      void this.appLog.append(
+        'info',
+        'telegram',
+        'Сделка закрыта по сообщению closed с цитатой',
+        {
           sourceChatId: params.chatId,
           sourceMessageId: rootSource.messageId,
+          quotedMessageId: replyToMessageId,
           closeMessageId: params.messageId,
-        }),
-      },
-    });
-
-    void this.appLog.append(
-      'info',
-      'telegram',
-      'Сделка закрыта по сообщению closed с цитатой',
-      {
-        sourceChatId: params.chatId,
-        sourceMessageId: rootSource.messageId,
-        quotedMessageId: replyToMessageId,
-        closeMessageId: params.messageId,
-        signalId: signal.id,
-      },
-    );
-    return { ok: true };
+          signalId: signal.id,
+        },
+      );
+      return { ok: true };
+    } finally {
+      this.endPairDirectionTransition(closeSignal.pair, closeSignal.direction);
+    }
   }
 
   private async resolveRootSignalSourceMessageId(
@@ -1890,6 +1921,91 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       return normalized;
     }
     return `${normalized.slice(0, max)}...`;
+  }
+
+  private pairDirectionKey(pair: string, direction: 'long' | 'short'): string {
+    return `${normalizeTradingPair(pair)}:${direction}`;
+  }
+
+  private beginPairDirectionTransition(
+    pair: string,
+    direction: 'long' | 'short',
+    reason?: string,
+  ): void {
+    const key = this.pairDirectionKey(pair, direction);
+    const prev = this.pairDirectionTransitions.get(key);
+    this.pairDirectionTransitions.set(key, {
+      count: (prev?.count ?? 0) + 1,
+      reason: reason ?? prev?.reason,
+    });
+    void this.appLog.append('debug', 'telegram', 'Userbot: pair/direction transition started', {
+      pair: normalizeTradingPair(pair),
+      direction,
+      reason: reason ?? null,
+      lockCount: (prev?.count ?? 0) + 1,
+    });
+  }
+
+  private endPairDirectionTransition(pair: string, direction: 'long' | 'short'): void {
+    const key = this.pairDirectionKey(pair, direction);
+    const prev = this.pairDirectionTransitions.get(key);
+    if (!prev) {
+      return;
+    }
+    if (prev.count <= 1) {
+      this.pairDirectionTransitions.delete(key);
+      void this.appLog.append('debug', 'telegram', 'Userbot: pair/direction transition finished', {
+        pair: normalizeTradingPair(pair),
+        direction,
+      });
+      return;
+    }
+    this.pairDirectionTransitions.set(key, {
+      count: prev.count - 1,
+      reason: prev.reason,
+    });
+    void this.appLog.append('debug', 'telegram', 'Userbot: pair/direction transition decremented', {
+      pair: normalizeTradingPair(pair),
+      direction,
+      lockCount: prev.count - 1,
+    });
+  }
+
+  private async waitForPairDirectionTransitionIfAny(
+    pair: string,
+    direction: 'long' | 'short',
+    timeoutMs = 15_000,
+    pollMs = 250,
+  ): Promise<{ waited: boolean; timedOut: boolean; waitedMs: number }> {
+    const key = this.pairDirectionKey(pair, direction);
+    if (!this.pairDirectionTransitions.has(key)) {
+      return { waited: false, timedOut: false, waitedMs: 0 };
+    }
+    const startedAt = Date.now();
+    const deadline = startedAt + timeoutMs;
+    while (Date.now() <= deadline) {
+      if (!this.pairDirectionTransitions.has(key)) {
+        return { waited: true, timedOut: false, waitedMs: Date.now() - startedAt };
+      }
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+    }
+    return { waited: true, timedOut: true, waitedMs: Date.now() - startedAt };
+  }
+
+  private async releaseSignalHash(hash: string): Promise<void> {
+    try {
+      await this.prisma.tgUserbotSignalHash.deleteMany({
+        where: { hash },
+      });
+      void this.appLog.append('debug', 'telegram', 'Userbot: released signal hash after close', {
+        signalHash: hash,
+      });
+    } catch (e) {
+      void this.appLog.append('warn', 'telegram', 'Userbot: failed to release signal hash after close', {
+        signalHash: hash,
+        error: formatError(e),
+      });
+    }
   }
 
   private async notifySignalFailureToBot(params: {
