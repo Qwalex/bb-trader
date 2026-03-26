@@ -1,4 +1,14 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 
 import { OrdersService } from './orders.service';
 
@@ -61,6 +71,19 @@ export class OrdersController {
       id,
       body.source === undefined ? null : body.source,
     );
+  }
+
+  @Patch('trades/:id/pnl')
+  async updateTradePnl(
+    @Param('id') id: string,
+    @Body() body: { realizedPnl?: number | null },
+  ) {
+    const raw = body.realizedPnl;
+    const pnl = raw === undefined || raw === null ? null : Number(raw);
+    if (pnl !== null && !Number.isFinite(pnl)) {
+      throw new BadRequestException('realizedPnl должен быть числом или null');
+    }
+    return this.orders.updateTradePnlManual(id, pnl);
   }
 
   @Get('by-source')

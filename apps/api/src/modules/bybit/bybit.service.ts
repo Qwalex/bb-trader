@@ -2192,6 +2192,91 @@ export class BybitService {
     return rows;
   }
 
+  /**
+   * Fallback оценка PnL по исполнениям (execution list), когда ClosedPnL
+   * не удаётся связать по orderId (например, SL с отдельным id из setTradingStop).
+   */
+  private async estimateClosedPnlFromExecutions(params: {
+    client: RestClientV5;
+    symbol: string;
+    direction: string;
+    createdAt: Date;
+  }): Promise<number | undefined> {
+    const createdFloorMs = params.createdAt.getTime() - 60_000;
+    const rows: Array<{ side: string; qty: number; value: number; ts: number }> = [];
+    let cursor: string | undefined;
+    const MAX_PAGES = 8;
+
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const res = await params.client.getExecutionList({
+        category: 'linear',
+        symbol: params.symbol,
+        limit: 50,
+        cursor,
+      });
+      if (res.retCode !== 0) {
+        break;
+      }
+      const list = res.result?.list ?? [];
+      for (const ex of list) {
+        const ts = Number(ex.execTime ?? 0);
+        if (!Number.isFinite(ts) || ts < createdFloorMs) {
+          continue;
+        }
+        const qty = Number.parseFloat(String(ex.execQty ?? 0));
+        const valueRaw = Number.parseFloat(String(ex.execValue ?? 0));
+        const priceRaw = Number.parseFloat(String(ex.execPrice ?? 0));
+        const value =
+          Number.isFinite(valueRaw) && valueRaw > 0
+            ? valueRaw
+            : Number.isFinite(priceRaw) && Number.isFinite(qty)
+              ? priceRaw * qty
+              : Number.NaN;
+        if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(value) || value <= 0) {
+          continue;
+        }
+        rows.push({
+          side: String(ex.side ?? '').toLowerCase(),
+          qty,
+          value,
+          ts,
+        });
+      }
+      cursor = res.result?.nextPageCursor || undefined;
+      if (!cursor || list.length === 0) {
+        break;
+      }
+    }
+
+    let buyQty = 0;
+    let buyValue = 0;
+    let sellQty = 0;
+    let sellValue = 0;
+    for (const row of rows) {
+      if (row.side === 'buy') {
+        buyQty += row.qty;
+        buyValue += row.value;
+      } else if (row.side === 'sell') {
+        sellQty += row.qty;
+        sellValue += row.value;
+      }
+    }
+    const matchedQty = Math.min(buyQty, sellQty);
+    if (!Number.isFinite(matchedQty) || matchedQty <= 0) {
+      return undefined;
+    }
+    const avgBuy = buyValue / buyQty;
+    const avgSell = sellValue / sellQty;
+    if (!Number.isFinite(avgBuy) || !Number.isFinite(avgSell)) {
+      return undefined;
+    }
+    const pnl =
+      params.direction === 'short'
+        ? (avgBuy - avgSell) * matchedQty
+        : (avgSell - avgBuy) * matchedQty;
+    return Number.isFinite(pnl) ? pnl : undefined;
+  }
+
   async recalcClosedSignalsPnl(params?: {
     limit?: number;
     dryRun?: boolean;
@@ -2414,23 +2499,47 @@ export class BybitService {
                 },
               );
             } else if (!this.hasOpenEntryOrders(fresh.orders)) {
-              // Позиция уже 0 и входы не висят, но closedPnL не матчится по нашим orderId
-              // (часто при закрытии через setTradingStop/SL с отдельным orderId).
-              await this.orders.updateSignalStatus(fresh.id, {
-                status: 'CLOSED_MIXED',
-                realizedPnl: null,
-                closedAt: new Date(),
+              const estimatedPnl = await this.estimateClosedPnlFromExecutions({
+                client,
+                symbol: symNorm,
+                direction: fresh.direction,
+                createdAt: fresh.createdAt,
               });
-              void this.appLog.append(
-                'info',
-                'bybit',
-                'poll: позиция закрыта, но closed PnL не привязан к нашим orderId — CLOSED_MIXED',
-                {
-                  signalId: fresh.id,
-                  pair: symNorm,
-                  trackedOrderIds: Array.from(ourIds),
-                },
-              );
+              if (estimatedPnl !== undefined) {
+                await this.orders.updateSignalStatus(fresh.id, {
+                  status: estimatedPnl > 0 ? 'CLOSED_WIN' : estimatedPnl < 0 ? 'CLOSED_LOSS' : 'CLOSED_MIXED',
+                  realizedPnl: estimatedPnl,
+                  closedAt: new Date(),
+                });
+                void this.appLog.append(
+                  'warn',
+                  'bybit',
+                  'poll: fallback PnL по execution list (closedPnL без orderId match)',
+                  {
+                    signalId: fresh.id,
+                    pair: symNorm,
+                    estimatedPnl,
+                    trackedOrderIds: Array.from(ourIds),
+                  },
+                );
+              } else {
+                // Позиция уже 0 и входы не висят, но ни closedPnl, ни fallback не дали надёжный PnL.
+                await this.orders.updateSignalStatus(fresh.id, {
+                  status: 'CLOSED_MIXED',
+                  realizedPnl: null,
+                  closedAt: new Date(),
+                });
+                void this.appLog.append(
+                  'info',
+                  'bybit',
+                  'poll: позиция закрыта, но closed PnL не привязан к нашим orderId — CLOSED_MIXED',
+                  {
+                    signalId: fresh.id,
+                    pair: symNorm,
+                    trackedOrderIds: Array.from(ourIds),
+                  },
+                );
+              }
             }
           }
         }

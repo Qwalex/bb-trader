@@ -135,6 +135,7 @@ export default async function TradesPage({
             <option value="ORDERS_PLACED">ORDERS_PLACED</option>
             <option value="CLOSED_WIN">CLOSED_WIN</option>
             <option value="CLOSED_LOSS">CLOSED_LOSS</option>
+            <option value="CLOSED_MIXED">CLOSED_MIXED</option>
             <option value="FAILED">FAILED</option>
           </select>
         </label>

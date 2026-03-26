@@ -36,6 +36,9 @@ export class OrdersService {
     ...Array.from(OrdersService.ACTIVE_SIGNAL_STATUSES),
     ...Array.from(OrdersService.CLOSED_SIGNAL_STATUSES),
   ]);
+  private static readonly PNL_EDIT_ALLOWED_STATUSES = new Set([
+    ...Array.from(OrdersService.CLOSED_SIGNAL_STATUSES),
+  ]);
 
   async createSignalRecord(
     signal: SignalDto,
@@ -140,6 +143,53 @@ export class OrdersService {
     });
 
     return { ok: true, affectedSignals: res.count };
+  }
+
+  async updateTradePnlManual(signalId: string, realizedPnl: number | null) {
+    const signal = await this.prisma.signal.findUnique({
+      where: { id: signalId },
+      select: { id: true, status: true, deletedAt: true, closedAt: true },
+    });
+    if (!signal) {
+      throw new NotFoundException('Сделка не найдена');
+    }
+    if (signal.deletedAt) {
+      throw new NotFoundException('Сделка удалена');
+    }
+    if (!OrdersService.PNL_EDIT_ALLOWED_STATUSES.has(signal.status)) {
+      throw new BadRequestException(
+        `PnL можно корректировать только для закрытых сделок. Текущий статус: ${signal.status}`,
+      );
+    }
+
+    const normalizedPnl =
+      realizedPnl === null
+        ? null
+        : Number.isFinite(realizedPnl)
+          ? realizedPnl
+          : null;
+    const nextStatus =
+      normalizedPnl === null || normalizedPnl === 0
+        ? 'CLOSED_MIXED'
+        : normalizedPnl > 0
+          ? 'CLOSED_WIN'
+          : 'CLOSED_LOSS';
+
+    await this.prisma.signal.update({
+      where: { id: signalId },
+      data: {
+        realizedPnl: normalizedPnl,
+        status: nextStatus,
+        closedAt: signal.closedAt ?? new Date(),
+      },
+    });
+
+    return {
+      ok: true,
+      signalId,
+      realizedPnl: normalizedPnl,
+      status: nextStatus,
+    };
   }
 
   async createOrderRecord(data: {
