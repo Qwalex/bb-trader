@@ -35,7 +35,30 @@ type QrState = {
   error?: string;
 };
 
+type ProcessIngestOptions = {
+  enforceBalanceGuard?: boolean;
+  source?: 'realtime' | 'poll' | 'manual-reread' | 'manual-reread-all';
+  telegramReceivedAt?: Date;
+  ingestCreatedAt?: Date;
+  enqueuedAtMs?: number;
+};
+
+type IngestProcessJob = {
+  ingest: {
+    id: string;
+    chatId: string;
+    messageId: string;
+    signalHash: string | null;
+    status: string;
+  };
+  text: string;
+  meta?: { replyToMessageId?: string };
+  options?: ProcessIngestOptions;
+};
+
 const USERBOT_POLL_INTERVAL_MS = 2000;
+const USERBOT_POLL_FETCH_LIMIT = 20;
+const USERBOT_PROCESSING_CONCURRENCY = 4;
 const USERBOT_MAX_MESSAGE_AGE_MINUTES_DEFAULT = 10;
 const USERBOT_MIN_BALANCE_USD_DEFAULT = 3;
 const USERBOT_BALANCE_CHECK_CACHE_MS = 30_000;
@@ -45,6 +68,10 @@ const USERBOT_FILTER_MATCH_THRESHOLD = 0.34;
 export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TelegramUserbotService.name);
   private readonly pairDirectionTransitions = new Map<string, { count: number; reason?: string }>();
+  private readonly lastSeenMessageIds = new Map<string, number>();
+  private readonly processingQueue: IngestProcessJob[] = [];
+  private readonly processingQueuedIds = new Set<string>();
+  private processingWorkersActive = 0;
 
   private client: TelegramClient | null = null;
   private messageHandlerRegistered = false;
@@ -60,6 +87,12 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         checkedAtMs: number;
         balanceUsd: number | undefined;
         minBalanceUsd: number;
+      }
+    | undefined;
+  private messageRecencyCache:
+    | {
+        checkedAtMs: number;
+        maxAgeMs: number;
       }
     | undefined;
 
@@ -121,6 +154,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       chatsEnabled,
       pollMs: USERBOT_POLL_INTERVAL_MS,
       pollingInFlight: this.pollInFlight,
+      processingQueueDepth: this.processingQueue.length,
+      processingWorkersActive: this.processingWorkersActive,
       qr: this.qrState,
       balanceGuard: await this.getBalanceGuardSnapshot(),
     };
@@ -460,7 +495,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     if (!text) {
       return { ok: false, error: 'В сообщении нет текстового содержимого для перечитывания' };
     }
-    await this.processIngestRecord(ingest, text);
+    await this.processIngestRecord(ingest, text, undefined, {
+      source: 'manual-reread',
+    });
     return { ok: true };
   }
 
@@ -493,7 +530,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         continue;
       }
       try {
-        await this.processIngestRecord(row, text);
+        await this.processIngestRecord(row, text, undefined, {
+          source: 'manual-reread-all',
+        });
         processed += 1;
       } catch (e) {
         failed += 1;
@@ -527,7 +566,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     const limitPerChat =
       typeof limitPerChatRaw === 'number' && Number.isFinite(limitPerChatRaw)
         ? Math.max(20, Math.min(500, Math.floor(limitPerChatRaw)))
-        : 150;
+        : USERBOT_POLL_FETCH_LIMIT;
     const start = this.startOfToday();
     let readMessages = 0;
     let readTextMessages = 0;
@@ -540,27 +579,53 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           limit: limitPerChat,
         })) as unknown as Array<Record<string, unknown>>;
         chatsProcessed += 1;
-        for (const m of list) {
-          const createdAt = this.extractMessageDate(m.date);
-          if (!createdAt || createdAt < start) {
-            continue;
-          }
-          if (!(await this.isMessageRecent(createdAt))) {
+        const lastSeenMessageId = this.lastSeenMessageIds.get(chat.chatId) ?? 0;
+        const candidates = list
+          .map((m) => {
+            const createdAt = this.extractMessageDate(m.date);
+            const text = this.readString(m.message);
+            const messageId = this.readNumericString(m.id);
+            const messageIdNum = messageId ? Number(messageId) : NaN;
+            return {
+              createdAt,
+              text,
+              messageId,
+              messageIdNum,
+              replyToMessageId: this.extractReplyToMessageId(
+                m.replyTo ?? m.reply_to ?? m.replyToMsgId ?? m.reply_to_msg_id,
+              ),
+            };
+          })
+          .filter((row) => {
+            if (!row.createdAt || row.createdAt < start) {
+              return false;
+            }
+            if (!row.text || !row.messageId || !Number.isFinite(row.messageIdNum)) {
+              return false;
+            }
+            return row.messageIdNum > lastSeenMessageId;
+          })
+          .sort((a, b) => a.messageIdNum - b.messageIdNum);
+
+        for (const m of candidates) {
+          if (!(await this.isMessageRecent(m.createdAt!))) {
             continue;
           }
           readMessages += 1;
-          const text = this.readString(m.message);
-          const messageId = this.readNumericString(m.id);
-          if (!text || !messageId) {
-            continue;
-          }
-          const replyToMessageId = this.extractReplyToMessageId(
-            m.replyTo ?? m.reply_to ?? m.replyToMsgId ?? m.reply_to_msg_id,
-          );
           readTextMessages += 1;
-          await this.ingestChatMessage(chat.chatId, messageId, text, {
-            replyToMessageId,
-          });
+          this.noteLastSeenMessageId(chat.chatId, m.messageIdNum);
+          await this.ingestChatMessage(
+            chat.chatId,
+            m.messageId!,
+            m.text!,
+            {
+              replyToMessageId: m.replyToMessageId,
+            },
+            {
+              source: 'poll',
+              telegramReceivedAt: m.createdAt!,
+            },
+          );
         }
       } catch (e) {
         errors.push({ chatId: chat.chatId, error: formatError(e) });
@@ -609,7 +674,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     }
     this.pollInFlight = true;
     try {
-      await this.scanTodayMessagesCore(80, false);
+      await this.scanTodayMessagesCore(USERBOT_POLL_FETCH_LIMIT, false);
     } catch (e) {
       this.logger.warn(`Userbot pollTick failed: ${formatError(e)}`);
     } finally {
@@ -666,9 +731,19 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       if (!this.enabledChatIds.has(chatId)) {
         return;
       }
-      await this.ingestChatMessage(chatId, String(messageId), text.trim(), {
-        replyToMessageId,
-      });
+      this.noteLastSeenMessageId(chatId, messageId);
+      await this.ingestChatMessage(
+        chatId,
+        String(messageId),
+        text.trim(),
+        {
+          replyToMessageId,
+        },
+        {
+          source: 'realtime',
+          telegramReceivedAt: createdAt,
+        },
+      );
     } catch (e) {
       const msg = formatError(e);
       this.logger.error(`handleIncomingMessage failed: ${msg}`);
@@ -680,6 +755,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     messageId: string,
     text: string,
     meta?: { replyToMessageId?: string },
+    options?: ProcessIngestOptions,
   ): Promise<void> {
     const dedupMessageKey = `${chatId}:${messageId}`;
     const ingest = await this.tryCreateIngestRow({
@@ -699,8 +775,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    await this.processIngestRecord(
-      {
+    this.enqueueIngestJob({
+      ingest: {
         id: ingest.id,
         chatId: ingest.chatId,
         messageId: ingest.messageId,
@@ -709,8 +785,71 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       },
       text,
       meta,
-      { enforceBalanceGuard: true },
-    );
+      options: {
+        enforceBalanceGuard: true,
+        ...options,
+        ingestCreatedAt: ingest.createdAt,
+      },
+    });
+  }
+
+  private enqueueIngestJob(job: IngestProcessJob): void {
+    if (this.processingQueuedIds.has(job.ingest.id)) {
+      return;
+    }
+    this.processingQueuedIds.add(job.ingest.id);
+    this.processingQueue.push({
+      ...job,
+      options: {
+        ...job.options,
+        enqueuedAtMs: Date.now(),
+      },
+    });
+    this.pumpIngestQueue();
+  }
+
+  private pumpIngestQueue(): void {
+    while (
+      this.processingWorkersActive < USERBOT_PROCESSING_CONCURRENCY &&
+      this.processingQueue.length > 0
+    ) {
+      const job = this.processingQueue.shift();
+      if (!job) {
+        return;
+      }
+      this.processingQueuedIds.delete(job.ingest.id);
+      this.processingWorkersActive += 1;
+      void this.runIngestJob(job).finally(() => {
+        this.processingWorkersActive -= 1;
+        this.pumpIngestQueue();
+      });
+    }
+  }
+
+  private async runIngestJob(job: IngestProcessJob): Promise<void> {
+    try {
+      await this.processIngestRecord(
+        job.ingest,
+        job.text,
+        job.meta,
+        job.options,
+      );
+    } catch (e) {
+      const error = formatError(e);
+      this.logger.error(`runIngestJob failed ingest=${job.ingest.id}: ${error}`);
+      await this.updateIngest(job.ingest.id, {
+        classification: 'other',
+        status: 'ignored',
+        error,
+      });
+    }
+  }
+
+  private noteLastSeenMessageId(chatId: string, messageId: number): void {
+    const prev = this.lastSeenMessageIds.get(chatId) ?? 0;
+    if (messageId > prev) {
+      this.lastSeenMessageIds.set(chatId, messageId);
+    }
   }
 
   private async processIngestRecord(
@@ -723,12 +862,23 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     },
     text: string,
     meta?: { replyToMessageId?: string },
-    options?: { enforceBalanceGuard?: boolean },
+    options?: ProcessIngestOptions,
   ): Promise<void> {
     try {
+      const processingStartedAt = new Date();
+      const queueDelayMs = options?.enqueuedAtMs
+        ? Math.max(0, Date.now() - options.enqueuedAtMs)
+        : 0;
       this.appendIngestStageLog('debug', 'Userbot: processing started', ingest, {
         replyToMessageId: meta?.replyToMessageId ?? null,
         textPreview: this.makeTextPreview(text),
+        source: options?.source ?? null,
+        queueDelayMs,
+        telegramReceivedAt: options?.telegramReceivedAt?.toISOString() ?? null,
+        ingestCreatedAt: options?.ingestCreatedAt?.toISOString() ?? null,
+        processingStartedAt: processingStartedAt.toISOString(),
+        processingQueueDepth: this.processingQueue.length,
+        processingWorkersActive: this.processingWorkersActive,
       });
       await this.updateIngest(ingest.id, {
         classification: 'other',
@@ -789,6 +939,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         kind,
         hasQuotedSource,
         replyToMessageId: replyToMessageId ?? null,
+        classifiedAt: new Date().toISOString(),
+        processingElapsedMs: Date.now() - processingStartedAt.getTime(),
       });
 
       if (kind === 'reentry') {
@@ -920,6 +1072,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         entriesCount: signal.entries.length,
         takeProfitsCount: signal.takeProfits.length,
         leverage: signal.leverage,
+        parsedAt: new Date().toISOString(),
+        processingElapsedMs: Date.now() - processingStartedAt.getTime(),
       });
       const transitionWait = await this.waitForPairDirectionTransitionIfAny(
         signal.pair,
@@ -1096,6 +1250,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         signalHash,
         signalId: place.signalId,
         bybitOrderIds: place.bybitOrderIds,
+        placedAt: new Date().toISOString(),
+        totalProcessingMs: Date.now() - processingStartedAt.getTime(),
       });
       await this.updateIngest(ingest.id, {
         classification: 'signal',
@@ -2151,13 +2307,25 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async isMessageRecent(createdAt: Date): Promise<boolean> {
-    const maxAgeMinutes = await this.getNumberSetting(
-      'TELEGRAM_USERBOT_MAX_MESSAGE_AGE_MINUTES',
-      USERBOT_MAX_MESSAGE_AGE_MINUTES_DEFAULT,
-      1,
-      1440,
-    );
-    const maxAgeMs = maxAgeMinutes * 60_000;
+    const now = Date.now();
+    let maxAgeMs = this.messageRecencyCache?.maxAgeMs;
+    if (
+      maxAgeMs == null ||
+      !this.messageRecencyCache ||
+      now - this.messageRecencyCache.checkedAtMs > 30_000
+    ) {
+      const maxAgeMinutes = await this.getNumberSetting(
+        'TELEGRAM_USERBOT_MAX_MESSAGE_AGE_MINUTES',
+        USERBOT_MAX_MESSAGE_AGE_MINUTES_DEFAULT,
+        1,
+        1440,
+      );
+      maxAgeMs = maxAgeMinutes * 60_000;
+      this.messageRecencyCache = {
+        checkedAtMs: now,
+        maxAgeMs,
+      };
+    }
     return Date.now() - createdAt.getTime() <= maxAgeMs;
   }
 
