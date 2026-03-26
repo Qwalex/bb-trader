@@ -805,9 +805,6 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
 
   /** Настройки плеча из SQLite / env: опциональная подстановка или обязательное поле в сигнале. */
   private async getLeverageFieldOptions(): Promise<LeverageFieldOptions> {
-    const enabledRaw = await this.settings.get('DEFAULT_LEVERAGE_ENABLED');
-    const enabled =
-      String(enabledRaw ?? '').trim().toLowerCase() === 'true';
     const defRaw = await this.settings.get('DEFAULT_LEVERAGE');
     const parsed =
       defRaw != null && String(defRaw).trim() !== ''
@@ -816,14 +813,14 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     const defaultLeverage =
       Number.isFinite(parsed) && parsed >= 1 ? Math.round(parsed) : undefined;
 
-    if (enabled && defaultLeverage === undefined) {
+    if (defaultLeverage === undefined) {
       this.logger.warn(
-        'DEFAULT_LEVERAGE_ENABLED is true but DEFAULT_LEVERAGE is missing or invalid (<1); leverage stays required',
+        'DEFAULT_LEVERAGE is not set or invalid; leverage is required in parsed signal',
       );
     }
 
     return {
-      requireLeverage: !enabled || defaultLeverage === undefined,
+      requireLeverage: defaultLeverage === undefined,
       defaultLeverage,
     };
   }
