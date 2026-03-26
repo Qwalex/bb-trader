@@ -532,137 +532,134 @@ export default function TelegramUserbotPage() {
                     </span>
                   </summary>
                   <div style={{ padding: '0.6rem 0.15rem' }}>
-                    <table className="userbotRecentTable" style={{ width: '100%' }}>
-                      <thead>
-                        <tr>
-                          <th>Время</th>
-                          <th>Message ID</th>
-                          <th>Сообщение</th>
-                          <th>Класс</th>
-                          <th>Статус обработки</th>
-                          <th>Действия</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {rows.map((row, idx) => {
-                          const prev = idx > 0 ? rows[idx - 1] : null;
-                          const showTodayDivider =
-                            row.isToday && (!prev || prev.isToday === false);
-                          const showOldDivider =
-                            !row.isToday && prev?.isToday === true;
+                    <div className="tableWrap mobileStackTable userbotRecentTable">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Время</th>
+                            <th>Message ID</th>
+                            <th>Сообщение</th>
+                            <th>Класс</th>
+                            <th>Статус обработки</th>
+                            <th>Действия</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rows.map((row, idx) => {
+                            const prev = idx > 0 ? rows[idx - 1] : null;
+                            const showTodayDivider =
+                              row.isToday && (!prev || prev.isToday === false);
+                            const showOldDivider = !row.isToday && prev?.isToday === true;
 
-                          return (
-                            <Fragment key={row.id}>
-                              {(showTodayDivider || showOldDivider) && (
-                                <tr className="mobileStackStaticRow">
-                                  <td colSpan={6} style={{ background: 'var(--card)' }}>
-                                    <strong>
-                                      {showTodayDivider
-                                        ? 'Сегодня'
-                                        : 'Старые сообщения'}
-                                    </strong>
+                            return (
+                              <Fragment key={row.id}>
+                                {(showTodayDivider || showOldDivider) && (
+                                  <tr className="mobileStackStaticRow">
+                                    <td colSpan={6} style={{ background: 'var(--card)' }}>
+                                      <strong>
+                                        {showTodayDivider ? 'Сегодня' : 'Старые сообщения'}
+                                      </strong>
+                                    </td>
+                                  </tr>
+                                )}
+                                <tr className="mobileStackDataRow">
+                                  <td data-label="Время">{formatTimeRu(row.createdAt)}</td>
+                                  <td data-label="Message ID">{row.messageId}</td>
+                                  <td data-label="Сообщение" style={{ maxWidth: 380 }}>
+                                    {row.text ? (
+                                      <details>
+                                        <summary
+                                          style={{
+                                            cursor: 'pointer',
+                                            whiteSpace: 'nowrap',
+                                            overflow: 'hidden',
+                                            textOverflow: 'ellipsis',
+                                            maxWidth: 360,
+                                          }}
+                                          title={row.text}
+                                        >
+                                          {row.text}
+                                        </summary>
+                                        <div
+                                          style={{
+                                            marginTop: '0.35rem',
+                                            whiteSpace: 'pre-wrap',
+                                            lineHeight: 1.35,
+                                            color: 'var(--muted)',
+                                          }}
+                                        >
+                                          {row.text}
+                                        </div>
+                                      </details>
+                                    ) : (
+                                      <span style={{ color: 'var(--muted)' }}>—</span>
+                                    )}
+                                  </td>
+                                  <td data-label="Класс">{row.classification}</td>
+                                  <td
+                                    data-label="Статус обработки"
+                                    title={row.error ?? undefined}
+                                  >
+                                    {renderPipelineStatus(row)}
+                                  </td>
+                                  <td data-label="Действия" className="userbotActionsCell">
+                                    <button
+                                      className="btn btnSecondary btnSm"
+                                      type="button"
+                                      onClick={() =>
+                                        setTraceModal({
+                                          chatId: row.chatId,
+                                          messageId: row.messageId,
+                                          request: row.aiRequest,
+                                          response: row.aiResponse,
+                                        })
+                                      }
+                                      disabled={busy !== null}
+                                      style={{ marginRight: '0.35rem' }}
+                                    >
+                                      Trace
+                                    </button>
+                                    <button
+                                      className="btn btnSm"
+                                      type="button"
+                                      onClick={() =>
+                                        void runAction(`reread-${row.id}`, async () => {
+                                          const res = await fetch(
+                                            `${getApiBase()}/telegram-userbot/reread/${encodeURIComponent(
+                                              row.id,
+                                            )}`,
+                                            { method: 'POST' },
+                                          );
+                                          const j = (await res.json()) as {
+                                            ok?: boolean;
+                                            error?: string;
+                                          };
+                                          if (!j.ok) {
+                                            throw new Error(
+                                              j.error ?? 'Не удалось перечитать сообщение',
+                                            );
+                                          }
+                                          await loadAll();
+                                          setMsg({
+                                            type: 'ok',
+                                            text: `Сообщение ${row.messageId} перечитано`,
+                                          });
+                                        })
+                                      }
+                                      disabled={busy !== null}
+                                    >
+                                      {busy === `reread-${row.id}`
+                                        ? 'Перечитывание…'
+                                        : 'Перечитать'}
+                                    </button>
                                   </td>
                                 </tr>
-                              )}
-                              <tr className="mobileStackDataRow">
-                                <td data-label="Время">
-                                  {formatTimeRu(row.createdAt)}
-                                </td>
-                                <td data-label="Message ID">{row.messageId}</td>
-                                <td data-label="Сообщение" style={{ maxWidth: 380 }}>
-                                  {row.text ? (
-                                    <details>
-                                      <summary
-                                        style={{
-                                          cursor: 'pointer',
-                                          whiteSpace: 'nowrap',
-                                          overflow: 'hidden',
-                                          textOverflow: 'ellipsis',
-                                          maxWidth: 360,
-                                        }}
-                                        title={row.text}
-                                      >
-                                        {row.text}
-                                      </summary>
-                                      <div
-                                        style={{
-                                          marginTop: '0.35rem',
-                                          whiteSpace: 'pre-wrap',
-                                          lineHeight: 1.35,
-                                          color: 'var(--muted)',
-                                        }}
-                                      >
-                                        {row.text}
-                                      </div>
-                                    </details>
-                                  ) : (
-                                    <span style={{ color: 'var(--muted)' }}>—</span>
-                                  )}
-                                </td>
-                                <td data-label="Класс">{row.classification}</td>
-                                <td
-                                  data-label="Статус обработки"
-                                  title={row.error ?? undefined}
-                                >
-                                  {renderPipelineStatus(row)}
-                                </td>
-                                <td data-label="Действия" className="userbotActionsCell">
-                                  <button
-                                    className="btn btnSecondary btnSm"
-                                    type="button"
-                                    onClick={() =>
-                                      setTraceModal({
-                                        chatId: row.chatId,
-                                        messageId: row.messageId,
-                                        request: row.aiRequest,
-                                        response: row.aiResponse,
-                                      })
-                                    }
-                                    disabled={busy !== null}
-                                    style={{ marginRight: '0.35rem' }}
-                                  >
-                                    Trace
-                                  </button>
-                                  <button
-                                    className="btn btnSm"
-                                    type="button"
-                                    onClick={() =>
-                                      void runAction(`reread-${row.id}`, async () => {
-                                        const res = await fetch(
-                                          `${getApiBase()}/telegram-userbot/reread/${encodeURIComponent(
-                                            row.id,
-                                          )}`,
-                                          { method: 'POST' },
-                                        );
-                                        const j = (await res.json()) as {
-                                          ok?: boolean;
-                                          error?: string;
-                                        };
-                                        if (!j.ok) {
-                                          throw new Error(
-                                            j.error ?? 'Не удалось перечитать сообщение',
-                                          );
-                                        }
-                                        await loadAll();
-                                        setMsg({
-                                          type: 'ok',
-                                          text: `Сообщение ${row.messageId} перечитано`,
-                                        });
-                                      })
-                                    }
-                                    disabled={busy !== null}
-                                  >
-                                    {busy === `reread-${row.id}`
-                                      ? 'Перечитывание…'
-                                      : 'Перечитать'}
-                                  </button>
-                                </td>
-                              </tr>
-                            </Fragment>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+                              </Fragment>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </details>
               );
