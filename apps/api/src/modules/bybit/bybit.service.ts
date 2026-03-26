@@ -570,7 +570,18 @@ export class BybitService {
       const isBuy = side === 'buy';
       return wantBuy === isBuy;
     });
-    return matched ?? withSize[0];
+    if (matched) {
+      return matched;
+    }
+    if (withSize.length === 1) {
+      const side = String(withSize[0]?.side ?? '').toLowerCase();
+      // Для one-way позиции с известной стороной не допускаем фолбэк на противоположный сигнал.
+      if (side === 'buy' || side === 'sell') {
+        return undefined;
+      }
+      return withSize[0];
+    }
+    return withSize[0];
   }
 
   /**
@@ -1842,6 +1853,13 @@ export class BybitService {
     if (!mainRow) {
       return;
     }
+    const mainSide = String(mainRow.side ?? '').toLowerCase();
+    if (
+      (dir === 'long' && mainSide !== 'buy') ||
+      (dir === 'short' && mainSide !== 'sell')
+    ) {
+      return;
+    }
     const posSize = mainRow?.size
       ? Math.abs(parseFloat(String(mainRow.size)))
       : 0;
@@ -1957,6 +1975,13 @@ export class BybitService {
     const rowWithPos =
       BybitService.pickPositionRowForSignalDirection(rows, dir);
     if (!rowWithPos) {
+      return;
+    }
+    const posSide = String(rowWithPos.side ?? '').toLowerCase();
+    if (
+      (dir === 'long' && posSide !== 'buy') ||
+      (dir === 'short' && posSide !== 'sell')
+    ) {
       return;
     }
     const sizeStr = rowWithPos?.size;
