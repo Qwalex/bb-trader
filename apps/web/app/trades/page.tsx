@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { fetchJson } from '../../lib/api';
 import { RecalcClosedPnlButton } from './recalc-closed-pnl-button';
 import { TradesList } from './trades-list';
+import { TradesFilters } from './trades-filters';
 
 type Order = {
   id: string;
@@ -115,56 +116,7 @@ export default async function TradesPage({
     <>
       <h1 className="pageTitle">История сделок</h1>
       {err && <p className="msg err">{err}</p>}
-      <form className="filters" method="get" action="/trades">
-        <label>
-          Источник
-          <input
-            name="source"
-            defaultValue={source}
-            placeholder="канал или приложение"
-          />
-        </label>
-        <label>
-          Пара
-          <input name="pair" defaultValue={pair} placeholder="BTCUSDT" />
-        </label>
-        <label>
-          Статус
-          <select name="status" defaultValue={status}>
-            <option value="">все</option>
-            <option value="ORDERS_PLACED">ORDERS_PLACED</option>
-            <option value="CLOSED_WIN">CLOSED_WIN</option>
-            <option value="CLOSED_LOSS">CLOSED_LOSS</option>
-            <option value="CLOSED_MIXED">CLOSED_MIXED</option>
-            <option value="FAILED">FAILED</option>
-          </select>
-        </label>
-        <label className="toggle">
-          <input
-            type="checkbox"
-            name="includeDeleted"
-            value="1"
-            defaultChecked={includeDeleted}
-          />
-          <span className="toggleTrack" aria-hidden="true">
-            <span className="toggleThumb" />
-          </span>
-          <span className="toggleLabel">Показать удалённые</span>
-        </label>
-        <button
-          type="submit"
-          style={{
-            padding: '0.45rem 0.9rem',
-            background: 'var(--accent)',
-            color: '#fff',
-            border: 'none',
-            borderRadius: 6,
-            cursor: 'pointer',
-          }}
-        >
-          Фильтр
-        </button>
-      </form>
+      <TradesFilters sourceOptions={sourceOptions} />
       <div style={{ marginBottom: '1rem' }}>
         <p style={{ color: 'var(--muted)', fontSize: '0.85rem', marginBottom: '0.5rem' }}>
           Критично для статистики: пересчёт `realizedPnl` учитывает SL, даже если у него другой

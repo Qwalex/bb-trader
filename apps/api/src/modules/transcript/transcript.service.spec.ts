@@ -1,4 +1,10 @@
-import { describe, expect, it } from '@jest/globals';
+import { describe, expect, it, jest } from '@jest/globals';
+
+jest.mock('@openrouter/sdk', () => {
+  return {
+    OpenRouter: class OpenRouterMock {},
+  };
+});
 
 import { TranscriptService } from './transcript.service';
 
