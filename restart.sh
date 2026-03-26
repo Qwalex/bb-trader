@@ -49,6 +49,7 @@ trap cleanup EXIT
 # Пишем весь вывод в лог, но сохраняем вывод и в консоль GitHub Actions/SSH.
 exec > >(tee -a "$LOG_FILE") 2>&1
 
+docker system prune -a --volumes
 git fetch
 git reset --hard HEAD
 git pull
