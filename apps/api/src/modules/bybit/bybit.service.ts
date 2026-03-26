@@ -2563,10 +2563,31 @@ export class BybitService {
       }
     }
 
+    if (uniquePairDirections.size > 0) {
+      void this.appLog.append(
+        'debug',
+        'bybit',
+        'poll: reconcile stale pass started',
+        {
+          staleSignals: staleCandidates.length,
+          uniquePairDirections: uniquePairDirections.size,
+        },
+      );
+    }
+
     for (const { pair, direction } of uniquePairDirections.values()) {
       try {
         const busy = await this.hasExchangeExposureForDirection(client, pair, direction);
         if (busy) {
+          void this.appLog.append(
+            'debug',
+            'bybit',
+            'poll: stale signal kept because exchange exposure still exists',
+            {
+              symbol: pair,
+              direction,
+            },
+          );
           continue;
         }
         const reconciled =
@@ -2582,8 +2603,28 @@ export class BybitService {
               signalsUpdated: reconciled,
             },
           );
+        } else {
+          void this.appLog.append(
+            'debug',
+            'bybit',
+            'poll: no stale signals found to reconcile for clean exchange side',
+            {
+              symbol: pair,
+              direction,
+            },
+          );
         }
       } catch (err) {
+        void this.appLog.append(
+          'warn',
+          'bybit',
+          'poll: failed to reconcile stale ORDERS_PLACED',
+          {
+            symbol: pair,
+            direction,
+            error: formatError(err),
+          },
+        );
         this.logger.warn(
           `poll reconcile stale ${pair} ${direction}: ${formatError(err)}`,
         );
