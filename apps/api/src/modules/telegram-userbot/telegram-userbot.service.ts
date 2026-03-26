@@ -1190,12 +1190,16 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     if (!replyToMessageId) {
       return { ok: false, error: 'Сообщение о перезаходе без цитаты исходного сигнала' };
     }
+    const rootSource = await this.resolveRootSignalSourceMessageId(
+      params.chatId,
+      replyToMessageId,
+    );
 
     const prev = await this.prisma.signal.findFirst({
       where: {
         deletedAt: null,
         sourceChatId: params.chatId,
-        sourceMessageId: replyToMessageId,
+        sourceMessageId: rootSource.messageId,
         status: { in: ['ORDERS_PLACED', 'OPEN', 'PARSED'] },
       },
       orderBy: { createdAt: 'desc' },
@@ -1215,188 +1219,206 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     if (!prev) {
       return {
         ok: false,
-        error: `Для цитаты ${params.chatId}:${replyToMessageId} активный сигнал не найден`,
+        error: `Для цитаты ${params.chatId}:${replyToMessageId} активный сигнал не найден (root: ${rootSource.messageId})`,
       };
     }
-
-    const parsed = await this.transcript.parse('text', { text: params.text });
-    if (parsed.ok === false) {
-      return { ok: false, error: parsed.error };
-    }
-
-    const updatePartial = parsed.ok === true ? parsed.signal : parsed.partial;
     const base = this.signalFromDb(prev);
-    if (
-      (updatePartial.pair && normalizeTradingPair(updatePartial.pair) !== normalizeTradingPair(base.pair)) ||
-      (updatePartial.direction && updatePartial.direction !== base.direction)
-    ) {
-      return { ok: false, error: 'Перезаход не совпадает с исходным сигналом по паре/направлению' };
-    }
+    this.bybit.suspendStaleReconcile(base.pair, base.direction, 'reentry flow');
+    try {
+      void this.appLog.append('debug', 'telegram', 'Reentry: resolved root source message', {
+        sourceChatId: params.chatId,
+        quotedMessageId: replyToMessageId,
+        rootSourceMessageId: rootSource.messageId,
+        quoteChain: rootSource.chain,
+      });
 
-    const hasEntriesProvided =
-      Array.isArray(updatePartial.entries) && updatePartial.entries.length > 0;
-    const hasLeverageProvided =
-      typeof updatePartial.leverage === 'number' && updatePartial.leverage >= 1;
-    const hasOrderUsdProvided =
-      typeof updatePartial.orderUsd === 'number' && updatePartial.orderUsd >= 0;
-    const hasCapitalPercentProvided =
-      typeof updatePartial.capitalPercent === 'number' &&
-      updatePartial.capitalPercent >= 0;
-    const hasOtherFieldProvided =
-      Boolean(updatePartial.pair) ||
-      Boolean(updatePartial.direction) ||
-      hasEntriesProvided ||
-      hasLeverageProvided ||
-      hasOrderUsdProvided ||
-      hasCapitalPercentProvided;
+      const parsed = await this.transcript.parse('text', { text: params.text });
+      if (parsed.ok === false) {
+        return { ok: false, error: parsed.error };
+      }
 
-    const hasStopLossProvided = typeof updatePartial.stopLoss === 'number';
-    const hasTakeProfitsProvided =
-      Array.isArray(updatePartial.takeProfits) && updatePartial.takeProfits.length > 0;
-    const nextStopLoss = hasStopLossProvided ? updatePartial.stopLoss : undefined;
-    const nextTakeProfits = hasTakeProfitsProvided ? updatePartial.takeProfits : undefined;
-    const hasStopLossChanged =
-      nextStopLoss !== undefined && !this.isNumberClose(nextStopLoss, base.stopLoss);
-    const hasTakeProfitsChanged =
-      Array.isArray(nextTakeProfits) &&
-      !this.arePriceArraysClose(nextTakeProfits, base.takeProfits);
+      const updatePartial = parsed.ok === true ? parsed.signal : parsed.partial;
+      if (
+        (updatePartial.pair &&
+          normalizeTradingPair(updatePartial.pair) !== normalizeTradingPair(base.pair)) ||
+        (updatePartial.direction && updatePartial.direction !== base.direction)
+      ) {
+        return {
+          ok: false,
+          error: 'Перезаход не совпадает с исходным сигналом по паре/направлению',
+        };
+      }
 
-    if (!hasOtherFieldProvided && (hasStopLossChanged || hasTakeProfitsChanged)) {
+      const hasEntriesProvided =
+        Array.isArray(updatePartial.entries) && updatePartial.entries.length > 0;
+      const hasLeverageProvided =
+        typeof updatePartial.leverage === 'number' && updatePartial.leverage >= 1;
+      const hasOrderUsdProvided =
+        typeof updatePartial.orderUsd === 'number' && updatePartial.orderUsd >= 0;
+      const hasCapitalPercentProvided =
+        typeof updatePartial.capitalPercent === 'number' &&
+        updatePartial.capitalPercent >= 0;
+      const hasOtherFieldProvided =
+        Boolean(updatePartial.pair) ||
+        Boolean(updatePartial.direction) ||
+        hasEntriesProvided ||
+        hasLeverageProvided ||
+        hasOrderUsdProvided ||
+        hasCapitalPercentProvided;
+
+      const hasStopLossProvided = typeof updatePartial.stopLoss === 'number';
+      const hasTakeProfitsProvided =
+        Array.isArray(updatePartial.takeProfits) && updatePartial.takeProfits.length > 0;
+      const nextStopLoss = hasStopLossProvided ? updatePartial.stopLoss : undefined;
+      const nextTakeProfits = hasTakeProfitsProvided ? updatePartial.takeProfits : undefined;
+      const hasStopLossChanged =
+        nextStopLoss !== undefined && !this.isNumberClose(nextStopLoss, base.stopLoss);
+      const hasTakeProfitsChanged =
+        Array.isArray(nextTakeProfits) &&
+        !this.arePriceArraysClose(nextTakeProfits, base.takeProfits);
+
+      if (!hasOtherFieldProvided && (hasStopLossChanged || hasTakeProfitsChanged)) {
+        await this.prisma.signal.update({
+          where: { id: prev.id },
+          data: {
+            stopLoss: hasStopLossChanged ? nextStopLoss : undefined,
+            takeProfits: hasTakeProfitsChanged
+              ? JSON.stringify(nextTakeProfits)
+              : undefined,
+          },
+        });
+        await this.prisma.signalEvent.create({
+          data: {
+            signalId: prev.id,
+            type: 'REENTRY_UPDATED',
+            payload: JSON.stringify({
+              sourceChatId: params.chatId,
+              sourceMessageId: rootSource.messageId,
+              reentryMessageId: params.messageId,
+              changedFields: {
+                stopLoss: hasStopLossChanged
+                  ? { from: base.stopLoss, to: nextStopLoss }
+                  : null,
+                takeProfits: hasTakeProfitsChanged
+                  ? { from: base.takeProfits, to: nextTakeProfits }
+                  : null,
+              },
+            }),
+          },
+        });
+        void this.appLog.append('info', 'telegram', 'Перезаход: обновлены SL/TP в существующем сигнале', {
+          signalId: prev.id,
+          sourceChatId: params.chatId,
+          sourceMessageId: rootSource.messageId,
+          quotedMessageId: params.replyToMessageId,
+          reentryMessageId: params.messageId,
+          changed: {
+            stopLoss: hasStopLossChanged,
+            takeProfits: hasTakeProfitsChanged,
+          },
+        });
+        return { ok: true, mode: 'updated' };
+      }
+
+      const nextSignal: SignalDto = {
+        pair: updatePartial.pair ?? base.pair,
+        direction: updatePartial.direction ?? base.direction,
+        entries:
+          Array.isArray(updatePartial.entries) && updatePartial.entries.length > 0
+            ? updatePartial.entries
+            : base.entries,
+        stopLoss:
+          typeof updatePartial.stopLoss === 'number' ? updatePartial.stopLoss : base.stopLoss,
+        takeProfits:
+          Array.isArray(updatePartial.takeProfits) && updatePartial.takeProfits.length > 0
+            ? updatePartial.takeProfits
+            : base.takeProfits,
+        leverage:
+          typeof updatePartial.leverage === 'number' && updatePartial.leverage >= 1
+            ? Math.floor(updatePartial.leverage)
+            : base.leverage,
+        orderUsd:
+          typeof updatePartial.orderUsd === 'number' && updatePartial.orderUsd >= 0
+            ? updatePartial.orderUsd
+            : base.orderUsd,
+        capitalPercent:
+          typeof updatePartial.capitalPercent === 'number' &&
+          updatePartial.capitalPercent >= 0
+            ? updatePartial.capitalPercent
+            : base.capitalPercent,
+        source: base.source,
+      };
+
+      const closed = await this.bybit.closeSignalManually(prev.id);
+      if (!closed.ok) {
+        return {
+          ok: false,
+          error: closed.error ?? closed.details ?? 'Не удалось закрыть предыдущую позицию',
+        };
+      }
+
+      const place = await this.bybit.placeSignalOrders(nextSignal, params.text, {
+        chatId: params.chatId,
+        messageId: rootSource.messageId,
+      });
+      if (!place.ok) {
+        return { ok: false, error: formatError(place.error) };
+      }
+
       await this.prisma.signal.update({
         where: { id: prev.id },
-        data: {
-          stopLoss: hasStopLossChanged ? nextStopLoss : undefined,
-          takeProfits: hasTakeProfitsChanged
-            ? JSON.stringify(nextTakeProfits)
-            : undefined,
-        },
+        data: { deletedAt: new Date() },
       });
       await this.prisma.signalEvent.create({
         data: {
           signalId: prev.id,
-          type: 'REENTRY_UPDATED',
+          type: 'REENTRY_REPLACED_OLD',
           payload: JSON.stringify({
+            reason: 'Перезаход: старый сигнал заменен новым',
             sourceChatId: params.chatId,
-            sourceMessageId: replyToMessageId,
+            sourceMessageId: rootSource.messageId,
             reentryMessageId: params.messageId,
-            changedFields: {
-              stopLoss: hasStopLossChanged
-                ? { from: base.stopLoss, to: nextStopLoss }
-                : null,
-              takeProfits: hasTakeProfitsChanged
-                ? { from: base.takeProfits, to: nextTakeProfits }
-                : null,
-            },
+            newSignalId: place.signalId,
           }),
         },
       });
-      void this.appLog.append('info', 'telegram', 'Перезаход: обновлены SL/TP в существующем сигнале', {
-        signalId: prev.id,
+      if (place.signalId) {
+        await this.prisma.signalEvent.create({
+          data: {
+            signalId: place.signalId,
+            type: 'REENTRY_REPLACED_NEW',
+            payload: JSON.stringify({
+              reason: 'Перезаход: создан новый сигнал',
+              sourceChatId: params.chatId,
+              sourceMessageId: rootSource.messageId,
+              reentryMessageId: params.messageId,
+              oldSignalId: prev.id,
+              mergedFields: {
+                entries: nextSignal.entries,
+                stopLoss: nextSignal.stopLoss,
+                takeProfits: nextSignal.takeProfits,
+                leverage: nextSignal.leverage,
+                orderUsd: nextSignal.orderUsd,
+                capitalPercent: nextSignal.capitalPercent,
+              },
+            }),
+          },
+        });
+      }
+
+      void this.appLog.append('info', 'telegram', 'Перезаход обработан', {
+        oldSignalId: prev.id,
+        newSignalId: place.signalId,
         sourceChatId: params.chatId,
-        sourceMessageId: params.replyToMessageId,
+        sourceMessageId: rootSource.messageId,
+        quotedMessageId: params.replyToMessageId,
         reentryMessageId: params.messageId,
-        changed: {
-          stopLoss: hasStopLossChanged,
-          takeProfits: hasTakeProfitsChanged,
-        },
       });
-      return { ok: true, mode: 'updated' };
+
+      return { ok: true, mode: 'replaced' };
+    } finally {
+      this.bybit.resumeStaleReconcile(base.pair, base.direction);
     }
-
-    const nextSignal: SignalDto = {
-      pair: updatePartial.pair ?? base.pair,
-      direction: updatePartial.direction ?? base.direction,
-      entries:
-        Array.isArray(updatePartial.entries) && updatePartial.entries.length > 0
-          ? updatePartial.entries
-          : base.entries,
-      stopLoss:
-        typeof updatePartial.stopLoss === 'number' ? updatePartial.stopLoss : base.stopLoss,
-      takeProfits:
-        Array.isArray(updatePartial.takeProfits) && updatePartial.takeProfits.length > 0
-          ? updatePartial.takeProfits
-          : base.takeProfits,
-      leverage:
-        typeof updatePartial.leverage === 'number' && updatePartial.leverage >= 1
-          ? Math.floor(updatePartial.leverage)
-          : base.leverage,
-      orderUsd:
-        typeof updatePartial.orderUsd === 'number' && updatePartial.orderUsd >= 0
-          ? updatePartial.orderUsd
-          : base.orderUsd,
-      capitalPercent:
-        typeof updatePartial.capitalPercent === 'number' && updatePartial.capitalPercent >= 0
-          ? updatePartial.capitalPercent
-          : base.capitalPercent,
-      source: base.source,
-    };
-
-    const closed = await this.bybit.closeSignalManually(prev.id);
-    if (!closed.ok) {
-      return {
-        ok: false,
-        error: closed.error ?? closed.details ?? 'Не удалось закрыть предыдущую позицию',
-      };
-    }
-
-    const place = await this.bybit.placeSignalOrders(nextSignal, params.text, {
-      chatId: params.chatId,
-      messageId: replyToMessageId,
-    });
-    if (!place.ok) {
-      return { ok: false, error: formatError(place.error) };
-    }
-
-    await this.prisma.signal.update({
-      where: { id: prev.id },
-      data: { deletedAt: new Date() },
-    });
-    await this.prisma.signalEvent.create({
-      data: {
-        signalId: prev.id,
-        type: 'REENTRY_REPLACED_OLD',
-        payload: JSON.stringify({
-          reason: 'Перезаход: старый сигнал заменен новым',
-          sourceChatId: params.chatId,
-          sourceMessageId: replyToMessageId,
-          reentryMessageId: params.messageId,
-          newSignalId: place.signalId,
-        }),
-      },
-    });
-    if (place.signalId) {
-      await this.prisma.signalEvent.create({
-        data: {
-          signalId: place.signalId,
-          type: 'REENTRY_REPLACED_NEW',
-          payload: JSON.stringify({
-            reason: 'Перезаход: создан новый сигнал',
-            sourceChatId: params.chatId,
-            sourceMessageId: replyToMessageId,
-            reentryMessageId: params.messageId,
-            oldSignalId: prev.id,
-            mergedFields: {
-              entries: nextSignal.entries,
-              stopLoss: nextSignal.stopLoss,
-              takeProfits: nextSignal.takeProfits,
-              leverage: nextSignal.leverage,
-              orderUsd: nextSignal.orderUsd,
-              capitalPercent: nextSignal.capitalPercent,
-            },
-          }),
-        },
-      });
-    }
-
-    void this.appLog.append('info', 'telegram', 'Перезаход обработан', {
-      oldSignalId: prev.id,
-      newSignalId: place.signalId,
-      sourceChatId: params.chatId,
-      sourceMessageId: params.replyToMessageId,
-      reentryMessageId: params.messageId,
-    });
-
-    return { ok: true, mode: 'replaced' };
   }
 
   private isNumberClose(a: number, b: number): boolean {
@@ -1494,12 +1516,16 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     if (!replyToMessageId) {
       return { ok: false, error: 'Сообщение о закрытии без цитаты исходного сигнала' };
     }
+    const rootSource = await this.resolveRootSignalSourceMessageId(
+      params.chatId,
+      replyToMessageId,
+    );
 
     const signal = await this.prisma.signal.findFirst({
       where: {
         deletedAt: null,
         sourceChatId: params.chatId,
-        sourceMessageId: replyToMessageId,
+        sourceMessageId: rootSource.messageId,
         status: { in: ['ORDERS_PLACED', 'OPEN', 'PARSED'] },
       },
       orderBy: { createdAt: 'desc' },
@@ -1513,9 +1539,16 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     if (!signal) {
       return {
         ok: false,
-        error: `Для цитаты ${params.chatId}:${replyToMessageId} активный сигнал не найден`,
+        error: `Для цитаты ${params.chatId}:${replyToMessageId} активный сигнал не найден (root: ${rootSource.messageId})`,
       };
     }
+    void this.appLog.append('debug', 'telegram', 'Close: resolved root source message', {
+      sourceChatId: params.chatId,
+      quotedMessageId: replyToMessageId,
+      rootSourceMessageId: rootSource.messageId,
+      quoteChain: rootSource.chain,
+      signalId: signal.id,
+    });
 
     const closed = await this.bybit.closeSignalManually(signal.id);
     if (!closed.ok) {
@@ -1531,7 +1564,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         payload: JSON.stringify({
           reason: 'Сигнал отменен в чате (closed/cancel)',
           sourceChatId: params.chatId,
-          sourceMessageId: replyToMessageId,
+          sourceMessageId: rootSource.messageId,
           closeMessageId: params.messageId,
         }),
       },
@@ -1543,7 +1576,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       'Сделка закрыта по сообщению closed с цитатой',
       {
         sourceChatId: params.chatId,
-        sourceMessageId: replyToMessageId,
+        sourceMessageId: rootSource.messageId,
+        quotedMessageId: replyToMessageId,
         closeMessageId: params.messageId,
         signalId: signal.id,
       },
@@ -1551,12 +1585,65 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     return { ok: true };
   }
 
-  private async fetchChatMessageText(
+  private async resolveRootSignalSourceMessageId(
     chatId: string,
     messageId: string,
-  ): Promise<string | undefined> {
+  ): Promise<{ messageId: string; chain: string[] }> {
+    const startId = messageId.trim();
+    if (!startId) {
+      return { messageId, chain: [] };
+    }
+
+    const visited = new Set<string>();
+    const chain: string[] = [];
+    let currentId: string | undefined = startId;
+    let oldestMatchedId: string | undefined;
+
+    for (let depth = 0; depth < 20 && currentId; depth += 1) {
+      if (visited.has(currentId)) {
+        break;
+      }
+      visited.add(currentId);
+      chain.push(currentId);
+
+      const hasSignal = await this.hasAnySignalForSourceMessage(chatId, currentId);
+      if (hasSignal) {
+        oldestMatchedId = currentId;
+      }
+
+      const meta = await this.fetchChatMessageMeta(chatId, currentId);
+      const nextId = meta.replyToMessageId?.trim();
+      if (!nextId) {
+        break;
+      }
+      currentId = nextId;
+    }
+
+    return {
+      messageId: oldestMatchedId ?? startId,
+      chain,
+    };
+  }
+
+  private async hasAnySignalForSourceMessage(
+    chatId: string,
+    messageId: string,
+  ): Promise<boolean> {
+    const count = await this.prisma.signal.count({
+      where: {
+        sourceChatId: chatId,
+        sourceMessageId: messageId,
+      },
+    });
+    return count > 0;
+  }
+
+  private async fetchChatMessageMeta(
+    chatId: string,
+    messageId: string,
+  ): Promise<{ text?: string; replyToMessageId?: string }> {
     if (!this.client || !(await this.isClientAuthorized(this.client))) {
-      return undefined;
+      return {};
     }
     try {
       const list = (await this.client.getMessages(chatId, {
@@ -1564,13 +1651,26 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         limit: 1,
       })) as unknown as Array<Record<string, unknown>>;
       const msg = list[0];
-      return this.readString(msg?.message);
+      return {
+        text: this.readString(msg?.message),
+        replyToMessageId: this.extractReplyToMessageId(
+          msg?.replyTo ?? msg?.reply_to ?? msg?.replyToMsgId ?? msg?.reply_to_msg_id,
+        ),
+      };
     } catch (e) {
       this.logger.warn(
-        `fetchChatMessageText failed chat=${chatId} msg=${messageId}: ${formatError(e)}`,
+        `fetchChatMessageMeta failed chat=${chatId} msg=${messageId}: ${formatError(e)}`,
       );
-      return undefined;
+      return {};
     }
+  }
+
+  private async fetchChatMessageText(
+    chatId: string,
+    messageId: string,
+  ): Promise<string | undefined> {
+    const meta = await this.fetchChatMessageMeta(chatId, messageId);
+    return meta.text;
   }
 
   private parseEntriesJson(raw: string): number[] {

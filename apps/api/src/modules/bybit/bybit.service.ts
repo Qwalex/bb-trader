@@ -125,6 +125,7 @@ export interface SignalExecutionDebugSnapshot {
 export class BybitService {
   private readonly logger = new Logger(BybitService.name);
   private readonly staleFlatPollCounts = new Map<string, number>();
+  private readonly staleReconcileSuspensions = new Map<string, { count: number; reason?: string }>();
   private static readonly STALE_RECONCILE_REQUIRED_CLEAN_POLLS = 3;
 
   constructor(
@@ -2606,6 +2607,22 @@ export class BybitService {
 
     for (const { pair, direction } of uniquePairDirections.values()) {
       const reconcileKey = this.stalePairDirectionKey(pair, direction);
+      if (this.staleReconcileSuspensions.has(reconcileKey)) {
+        this.staleFlatPollCounts.delete(reconcileKey);
+        const suspension = this.staleReconcileSuspensions.get(reconcileKey);
+        void this.appLog.append(
+          'debug',
+          'bybit',
+          'poll: stale reconcile skipped because pair is suspended',
+          {
+            symbol: pair,
+            direction,
+            reason: suspension?.reason ?? null,
+            lockCount: suspension?.count ?? 0,
+          },
+        );
+        continue;
+      }
       try {
         const busy = await this.hasExchangeExposureForDirection(client, pair, direction);
         if (busy) {
@@ -2837,5 +2854,53 @@ export class BybitService {
     direction: 'long' | 'short',
   ): string {
     return `${normalizeTradingPair(pair)}:${direction}`;
+  }
+
+  suspendStaleReconcile(
+    pair: string,
+    direction: 'long' | 'short',
+    reason?: string,
+  ): void {
+    const key = this.stalePairDirectionKey(pair, direction);
+    const prev = this.staleReconcileSuspensions.get(key);
+    this.staleFlatPollCounts.delete(key);
+    this.staleReconcileSuspensions.set(key, {
+      count: (prev?.count ?? 0) + 1,
+      reason: reason ?? prev?.reason,
+    });
+    void this.appLog.append('debug', 'bybit', 'stale reconcile suspended', {
+      symbol: normalizeTradingPair(pair),
+      direction,
+      reason: reason ?? null,
+      lockCount: (prev?.count ?? 0) + 1,
+    });
+  }
+
+  resumeStaleReconcile(
+    pair: string,
+    direction: 'long' | 'short',
+  ): void {
+    const key = this.stalePairDirectionKey(pair, direction);
+    const prev = this.staleReconcileSuspensions.get(key);
+    if (!prev) {
+      return;
+    }
+    if (prev.count <= 1) {
+      this.staleReconcileSuspensions.delete(key);
+      void this.appLog.append('debug', 'bybit', 'stale reconcile resumed', {
+        symbol: normalizeTradingPair(pair),
+        direction,
+      });
+      return;
+    }
+    this.staleReconcileSuspensions.set(key, {
+      count: prev.count - 1,
+      reason: prev.reason,
+    });
+    void this.appLog.append('debug', 'bybit', 'stale reconcile suspension decremented', {
+      symbol: normalizeTradingPair(pair),
+      direction,
+      lockCount: prev.count - 1,
+    });
   }
 }
