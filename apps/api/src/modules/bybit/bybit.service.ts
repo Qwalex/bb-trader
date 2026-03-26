@@ -231,16 +231,16 @@ export class BybitService {
       const list = res.result?.list?.[0];
       const coin = list?.coin?.find((c) => c.coin === 'USDT');
 
-      // Приоритет: баланс USDT-кошелька, затем equity/доступный баланс по монете,
-      // затем агрегированные account-level поля.
+      // Приоритет: именно доступный баланс (для новых ордеров),
+      // затем уже fallback на суммарные/кошелёк поля.
       const candidates: unknown[] = [
-        coin?.walletBalance,
-        coin?.equity,
+        list?.totalAvailableBalance,
         coin?.availableToWithdraw,
         coin?.availableToBorrow,
+        coin?.walletBalance,
+        coin?.equity,
         list?.totalWalletBalance,
         list?.totalEquity,
-        list?.totalAvailableBalance,
       ];
       for (const candidate of candidates) {
         const parsed = parseFinite(candidate);
