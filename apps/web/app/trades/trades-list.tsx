@@ -20,6 +20,19 @@ type TradeListItem = {
   leverage: number;
   orderUsd: number;
   capitalPercent: number;
+  events?: Array<{
+    id: string;
+    type: string;
+    payload: string | null;
+    createdAt: string;
+  }>;
+};
+
+type TradeEvent = {
+  id: string;
+  type: string;
+  payload: string | null;
+  createdAt: string;
 };
 
 type Props = {
@@ -54,6 +67,34 @@ function DirectionBadge({ direction }: { direction: string }) {
 }
 
 export function TradesList({ items, sourceOptions }: Props) {
+  const renderEvent = (raw: TradeEvent) => {
+    let payload: unknown = null;
+    if (raw.payload) {
+      try {
+        payload = JSON.parse(raw.payload);
+      } catch {
+        payload = raw.payload;
+      }
+    }
+    let details = '';
+    if (payload && typeof payload === 'object') {
+      const p = payload as Record<string, unknown>;
+      if (raw.type === 'REENTRY_UPDATED') {
+        const changed = p.changedFields as Record<string, unknown> | undefined;
+        const sl = changed?.stopLoss ? 'SL' : '';
+        const tp = changed?.takeProfits ? 'TP' : '';
+        details = [sl, tp].filter(Boolean).join(', ');
+      } else if (raw.type === 'CANCELLED_BY_CHAT') {
+        details = 'отмена в чате';
+      } else if (raw.type === 'REENTRY_REPLACED_OLD') {
+        details = 'старый сигнал заменен';
+      } else if (raw.type === 'REENTRY_REPLACED_NEW') {
+        details = 'новый сигнал создан';
+      }
+    }
+    return details ? `${raw.type}: ${details}` : raw.type;
+  };
+
   return (
     <>
       <div className="tradesDesktopOnly">
@@ -68,6 +109,7 @@ export function TradesList({ items, sourceOptions }: Props) {
                 <th className="tradeSourceCell">Источник</th>
                 <th>PnL</th>
                 <th>Дата</th>
+                <th>Манипуляции</th>
                 <th>Действие</th>
               </tr>
             </thead>
@@ -103,6 +145,24 @@ export function TradesList({ items, sourceOptions }: Props) {
                     </PnlEditControl>
                   </td>
                   <td>{formatDateTimeRu(s.createdAt)}</td>
+                  <td style={{ minWidth: 260 }}>
+                    {s.events && s.events.length > 0 ? (
+                      <details>
+                        <summary style={{ cursor: 'pointer' }}>
+                          {s.events[0] ? renderEvent(s.events[0]) : 'Показать'}
+                        </summary>
+                        <div style={{ marginTop: '0.4rem', color: 'var(--muted)' }}>
+                          {s.events.map((e) => (
+                            <div key={e.id} style={{ marginBottom: '0.25rem' }}>
+                              {renderEvent(e)}
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    ) : (
+                      <span style={{ color: 'var(--muted)' }}>—</span>
+                    )}
+                  </td>
                   <td>
                     {s.deletedAt ? (
                       <RestoreTradeButton tradeId={s.id} pair={s.pair} />
@@ -170,6 +230,18 @@ export function TradesList({ items, sourceOptions }: Props) {
             </div>
             <div className="tradeCardParams">
               <TradeParamsBlock signal={s} />
+            </div>
+            <div className="tradeCardBlock">
+              <span className="tradeCardLabel">Манипуляции</span>
+              {s.events && s.events.length > 0 ? (
+                <div className="tradeCardMuted">
+                  {s.events.slice(0, 3).map((e) => (
+                    <div key={e.id}>{renderEvent(e)}</div>
+                  ))}
+                </div>
+              ) : (
+                <span className="tradeCardMuted">—</span>
+              )}
             </div>
             <div className="tradeCardActions">
               {s.deletedAt ? (

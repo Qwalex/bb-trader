@@ -66,6 +66,33 @@ export class TelegramUserbotController {
     return this.userbot.rereadAllIngestMessages(body?.limit);
   }
 
+  @Get('filters/groups')
+  async listFilterGroups() {
+    return this.userbot.listFilterGroups();
+  }
+
+  @Get('filters/examples')
+  async listFilterExamples() {
+    return this.userbot.listFilterExamples();
+  }
+
+  @Post('filters/examples')
+  async createFilterExample(
+    @Body()
+    body: {
+      groupName?: string;
+      kind?: 'signal' | 'close' | 'result' | 'reentry';
+      example?: string;
+    },
+  ) {
+    return this.userbot.createFilterExample(body);
+  }
+
+  @Post('filters/examples/:id/delete')
+  async deleteFilterExample(@Param('id') id: string) {
+    return this.userbot.deleteFilterExample(id);
+  }
+
   @Put('chats/:chatId')
   async setChatEnabled(
     @Param('chatId') chatId: string,

@@ -17,6 +17,7 @@ import { TelegramService } from '../telegram/telegram.service';
 import { TranscriptService } from '../transcript/transcript.service';
 
 type MessageKind = 'signal' | 'result' | 'other';
+type UserbotFilterKind = 'signal' | 'close' | 'result' | 'reentry';
 type QrPhase =
   | 'idle'
   | 'starting'
@@ -38,6 +39,7 @@ const USERBOT_POLL_INTERVAL_MS = 2000;
 const USERBOT_MAX_MESSAGE_AGE_MINUTES_DEFAULT = 10;
 const USERBOT_MIN_BALANCE_USD_DEFAULT = 3;
 const USERBOT_BALANCE_CHECK_CACHE_MS = 30_000;
+const USERBOT_FILTER_MATCH_THRESHOLD = 0.34;
 
 @Injectable()
 export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
@@ -361,6 +363,79 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  async listFilterGroups() {
+    const [chatRows, patternRows] = await Promise.all([
+      this.prisma.tgUserbotChat.findMany({
+        orderBy: { title: 'asc' },
+        select: { title: true, chatId: true },
+      }),
+      this.prisma.tgUserbotFilterExample.findMany({
+        where: { enabled: true },
+        orderBy: { groupName: 'asc' },
+        select: { groupName: true },
+      }),
+    ]);
+    const names = new Set<string>();
+    for (const row of chatRows) {
+      const v = typeof row.title === 'string' ? row.title.trim() : '';
+      if (v) names.add(String(v));
+    }
+    for (const row of patternRows) {
+      const v = typeof row.groupName === 'string' ? row.groupName.trim() : '';
+      if (v) names.add(String(v));
+    }
+    return {
+      groups: Array.from(names).sort((a, b) => a.localeCompare(b, 'ru')),
+    };
+  }
+
+  async listFilterExamples() {
+    const rows = await this.prisma.tgUserbotFilterExample.findMany({
+      where: { enabled: true },
+      orderBy: [{ groupName: 'asc' }, { kind: 'asc' }, { createdAt: 'asc' }],
+      select: {
+        id: true,
+        groupName: true,
+        kind: true,
+        example: true,
+        createdAt: true,
+      },
+    });
+    return { items: rows };
+  }
+
+  async createFilterExample(body: {
+    groupName?: string;
+    kind?: 'signal' | 'close' | 'result' | 'reentry';
+    example?: string;
+  }) {
+    const groupName = body.groupName?.trim() ?? '';
+    const kind = body.kind;
+    const example = body.example?.trim() ?? '';
+    if (!groupName) {
+      return { ok: false, error: 'groupName обязателен' };
+    }
+    if (kind !== 'signal' && kind !== 'close' && kind !== 'result' && kind !== 'reentry') {
+      return { ok: false, error: 'kind должен быть signal | close | result | reentry' };
+    }
+    if (example.length < 6) {
+      return { ok: false, error: 'example слишком короткий (минимум 6 символов)' };
+    }
+    const created = await this.prisma.tgUserbotFilterExample.create({
+      data: { groupName, kind, example, enabled: true },
+      select: { id: true, groupName: true, kind: true, example: true, createdAt: true },
+    });
+    return { ok: true, item: created };
+  }
+
+  async deleteFilterExample(id: string) {
+    await this.prisma.tgUserbotFilterExample.update({
+      where: { id },
+      data: { enabled: false },
+    });
+    return { ok: true };
+  }
+
   async scanTodayMessages(limitPerChatRaw?: number) {
     return this.scanTodayMessagesCore(limitPerChatRaw, true);
   }
@@ -667,11 +742,40 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         }
       }
 
-      if (this.isManualCloseCancellationText(text)) {
-        const closeResult = await this.tryCloseSignalFromReply({
+      const chatMeta = await this.prisma.tgUserbotChat.findUnique({
+        where: { chatId: ingest.chatId },
+        select: { title: true },
+      });
+      const groupName = chatMeta?.title?.trim() || ingest.chatId;
+      const patternKind = await this.matchFilterKindByExamples(groupName, text);
+
+      const shouldTreatAsReentry =
+        patternKind === 'reentry' || this.isReentryText(text);
+      if (shouldTreatAsReentry) {
+        const reentry = await this.tryReentryFromReply({
           chatId: ingest.chatId,
           messageId: ingest.messageId,
           text,
+          replyToMessageId: meta?.replyToMessageId,
+        });
+        await this.updateIngest(ingest.id, {
+          classification: 'signal',
+          status: reentry.ok
+            ? reentry.mode === 'updated'
+              ? 'reentry_updated'
+              : 'reentry_placed'
+            : 'ignored',
+          error: reentry.ok ? null : reentry.error,
+        });
+        return;
+      }
+
+      const shouldTreatAsClose =
+        patternKind === 'close' || this.isManualCloseCancellationText(text);
+      if (shouldTreatAsClose) {
+        const closeResult = await this.tryCloseSignalFromReply({
+          chatId: ingest.chatId,
+          messageId: ingest.messageId,
           replyToMessageId: meta?.replyToMessageId,
         });
         await this.updateIngest(ingest.id, {
@@ -686,7 +790,12 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         'TELEGRAM_USERBOT_USE_AI_CLASSIFIER',
         true,
       );
-      const cls = await this.classifyMessage(text, useAiClassifier);
+      const cls = await this.classifyMessage(
+        text,
+        useAiClassifier,
+        patternKind === 'signal' || patternKind === 'result' ? patternKind : undefined,
+        groupName,
+      );
       const kind = cls.kind;
       const aiRequest = cls.aiRequest;
       const aiResponse = cls.aiResponse;
@@ -725,9 +834,6 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       }
 
       const signal = parsed.signal;
-      const chatMeta = await this.prisma.tgUserbotChat.findUnique({
-        where: { chatId: ingest.chatId },
-      });
       signal.source = chatMeta?.title;
 
       if (
@@ -884,10 +990,363 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     return !hasTpOrSl;
   }
 
-  private async tryCloseSignalFromReply(params: {
+  private isReentryText(text: string): boolean {
+    const t = text.toLowerCase();
+    return (
+      /\b(re[-\s]?entry|reentry|re enter|re-enter)\b/.test(t) ||
+      /\b(перезаход|перезаходим|перезайти|повторный вход|снова входим)\b/u.test(t)
+    );
+  }
+
+  private async matchFilterKindByExamples(
+    groupName: string,
+    text: string,
+  ): Promise<UserbotFilterKind | undefined> {
+    const rows = await this.prisma.tgUserbotFilterExample.findMany({
+      where: { enabled: true },
+      select: { groupName: true, kind: true, example: true },
+    });
+    const target = groupName.trim().toLowerCase();
+    const scoped = rows.filter((row) => {
+      const name = typeof row.groupName === 'string' ? row.groupName.trim().toLowerCase() : '';
+      return name === target;
+    });
+    if (scoped.length === 0) {
+      return undefined;
+    }
+
+    let bestKind: UserbotFilterKind | undefined;
+    let bestScore = 0;
+    for (const row of scoped) {
+      const kind = row.kind as UserbotFilterKind;
+      const exampleText = typeof row.example === 'string' ? row.example : '';
+      if (kind !== 'signal' && kind !== 'close' && kind !== 'result' && kind !== 'reentry') {
+        continue;
+      }
+      if (!exampleText) {
+        continue;
+      }
+      const score = this.computeTextSimilarity(String(text), String(exampleText));
+      if (score > bestScore) {
+        bestScore = score;
+        bestKind = kind;
+      }
+    }
+    if (!bestKind) {
+      return undefined;
+    }
+    return bestScore >= USERBOT_FILTER_MATCH_THRESHOLD ? bestKind : undefined;
+  }
+
+  private async tryReentryFromReply(params: {
     chatId: string;
     messageId: string;
     text: string;
+    replyToMessageId?: string;
+  }): Promise<
+    { ok: true; mode: 'updated' | 'replaced' } | { ok: false; error: string }
+  > {
+    const replyToMessageId = params.replyToMessageId?.trim();
+    if (!replyToMessageId) {
+      return { ok: false, error: 'Сообщение о перезаходе без цитаты исходного сигнала' };
+    }
+
+    const prev = await this.prisma.signal.findFirst({
+      where: {
+        deletedAt: null,
+        sourceChatId: params.chatId,
+        sourceMessageId: replyToMessageId,
+        status: { in: ['ORDERS_PLACED', 'OPEN', 'PARSED'] },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        pair: true,
+        direction: true,
+        entries: true,
+        stopLoss: true,
+        takeProfits: true,
+        leverage: true,
+        orderUsd: true,
+        capitalPercent: true,
+        source: true,
+      },
+    });
+    if (!prev) {
+      return {
+        ok: false,
+        error: `Для цитаты ${params.chatId}:${replyToMessageId} активный сигнал не найден`,
+      };
+    }
+
+    const parsed = await this.transcript.parse('text', { text: params.text });
+    if (parsed.ok === false) {
+      return { ok: false, error: parsed.error };
+    }
+
+    const updatePartial = parsed.ok === true ? parsed.signal : parsed.partial;
+    const base = this.signalFromDb(prev);
+    if (
+      (updatePartial.pair && normalizeTradingPair(updatePartial.pair) !== normalizeTradingPair(base.pair)) ||
+      (updatePartial.direction && updatePartial.direction !== base.direction)
+    ) {
+      return { ok: false, error: 'Перезаход не совпадает с исходным сигналом по паре/направлению' };
+    }
+
+    const hasEntriesProvided =
+      Array.isArray(updatePartial.entries) && updatePartial.entries.length > 0;
+    const hasLeverageProvided =
+      typeof updatePartial.leverage === 'number' && updatePartial.leverage >= 1;
+    const hasOrderUsdProvided =
+      typeof updatePartial.orderUsd === 'number' && updatePartial.orderUsd >= 0;
+    const hasCapitalPercentProvided =
+      typeof updatePartial.capitalPercent === 'number' &&
+      updatePartial.capitalPercent >= 0;
+    const hasOtherFieldProvided =
+      Boolean(updatePartial.pair) ||
+      Boolean(updatePartial.direction) ||
+      hasEntriesProvided ||
+      hasLeverageProvided ||
+      hasOrderUsdProvided ||
+      hasCapitalPercentProvided;
+
+    const hasStopLossProvided = typeof updatePartial.stopLoss === 'number';
+    const hasTakeProfitsProvided =
+      Array.isArray(updatePartial.takeProfits) && updatePartial.takeProfits.length > 0;
+    const nextStopLoss = hasStopLossProvided ? updatePartial.stopLoss : undefined;
+    const nextTakeProfits = hasTakeProfitsProvided ? updatePartial.takeProfits : undefined;
+    const hasStopLossChanged =
+      nextStopLoss !== undefined && !this.isNumberClose(nextStopLoss, base.stopLoss);
+    const hasTakeProfitsChanged =
+      Array.isArray(nextTakeProfits) &&
+      !this.arePriceArraysClose(nextTakeProfits, base.takeProfits);
+
+    if (!hasOtherFieldProvided && (hasStopLossChanged || hasTakeProfitsChanged)) {
+      await this.prisma.signal.update({
+        where: { id: prev.id },
+        data: {
+          stopLoss: hasStopLossChanged ? nextStopLoss : undefined,
+          takeProfits: hasTakeProfitsChanged
+            ? JSON.stringify(nextTakeProfits)
+            : undefined,
+        },
+      });
+      await this.prisma.signalEvent.create({
+        data: {
+          signalId: prev.id,
+          type: 'REENTRY_UPDATED',
+          payload: JSON.stringify({
+            sourceChatId: params.chatId,
+            sourceMessageId: replyToMessageId,
+            reentryMessageId: params.messageId,
+            changedFields: {
+              stopLoss: hasStopLossChanged
+                ? { from: base.stopLoss, to: nextStopLoss }
+                : null,
+              takeProfits: hasTakeProfitsChanged
+                ? { from: base.takeProfits, to: nextTakeProfits }
+                : null,
+            },
+          }),
+        },
+      });
+      void this.appLog.append('info', 'telegram', 'Перезаход: обновлены SL/TP в существующем сигнале', {
+        signalId: prev.id,
+        sourceChatId: params.chatId,
+        sourceMessageId: params.replyToMessageId,
+        reentryMessageId: params.messageId,
+        changed: {
+          stopLoss: hasStopLossChanged,
+          takeProfits: hasTakeProfitsChanged,
+        },
+      });
+      return { ok: true, mode: 'updated' };
+    }
+
+    const nextSignal: SignalDto = {
+      pair: updatePartial.pair ?? base.pair,
+      direction: updatePartial.direction ?? base.direction,
+      entries:
+        Array.isArray(updatePartial.entries) && updatePartial.entries.length > 0
+          ? updatePartial.entries
+          : base.entries,
+      stopLoss:
+        typeof updatePartial.stopLoss === 'number' ? updatePartial.stopLoss : base.stopLoss,
+      takeProfits:
+        Array.isArray(updatePartial.takeProfits) && updatePartial.takeProfits.length > 0
+          ? updatePartial.takeProfits
+          : base.takeProfits,
+      leverage:
+        typeof updatePartial.leverage === 'number' && updatePartial.leverage >= 1
+          ? Math.floor(updatePartial.leverage)
+          : base.leverage,
+      orderUsd:
+        typeof updatePartial.orderUsd === 'number' && updatePartial.orderUsd >= 0
+          ? updatePartial.orderUsd
+          : base.orderUsd,
+      capitalPercent:
+        typeof updatePartial.capitalPercent === 'number' && updatePartial.capitalPercent >= 0
+          ? updatePartial.capitalPercent
+          : base.capitalPercent,
+      source: base.source,
+    };
+
+    const closed = await this.bybit.closeSignalManually(prev.id);
+    if (!closed.ok) {
+      return {
+        ok: false,
+        error: closed.error ?? closed.details ?? 'Не удалось закрыть предыдущую позицию',
+      };
+    }
+
+    const place = await this.bybit.placeSignalOrders(nextSignal, params.text, {
+      chatId: params.chatId,
+      messageId: params.messageId,
+    });
+    if (!place.ok) {
+      return { ok: false, error: formatError(place.error) };
+    }
+
+    await this.prisma.signal.update({
+      where: { id: prev.id },
+      data: { deletedAt: new Date() },
+    });
+    await this.prisma.signalEvent.create({
+      data: {
+        signalId: prev.id,
+        type: 'REENTRY_REPLACED_OLD',
+        payload: JSON.stringify({
+          reason: 'Перезаход: старый сигнал заменен новым',
+          sourceChatId: params.chatId,
+          sourceMessageId: replyToMessageId,
+          reentryMessageId: params.messageId,
+          newSignalId: place.signalId,
+        }),
+      },
+    });
+    if (place.signalId) {
+      await this.prisma.signalEvent.create({
+        data: {
+          signalId: place.signalId,
+          type: 'REENTRY_REPLACED_NEW',
+          payload: JSON.stringify({
+            reason: 'Перезаход: создан новый сигнал',
+            sourceChatId: params.chatId,
+            sourceMessageId: params.messageId,
+            oldSignalId: prev.id,
+            mergedFields: {
+              entries: nextSignal.entries,
+              stopLoss: nextSignal.stopLoss,
+              takeProfits: nextSignal.takeProfits,
+              leverage: nextSignal.leverage,
+              orderUsd: nextSignal.orderUsd,
+              capitalPercent: nextSignal.capitalPercent,
+            },
+          }),
+        },
+      });
+    }
+
+    void this.appLog.append('info', 'telegram', 'Перезаход обработан', {
+      oldSignalId: prev.id,
+      newSignalId: place.signalId,
+      sourceChatId: params.chatId,
+      sourceMessageId: params.replyToMessageId,
+      reentryMessageId: params.messageId,
+    });
+
+    return { ok: true, mode: 'replaced' };
+  }
+
+  private isNumberClose(a: number, b: number): boolean {
+    if (!Number.isFinite(a) || !Number.isFinite(b)) {
+      return false;
+    }
+    const diff = Math.abs(a - b);
+    const base = Math.max(Math.abs(b), 1);
+    return diff / base <= 0.0005;
+  }
+
+  private arePriceArraysClose(a: number[], b: number[]): boolean {
+    if (a.length !== b.length) {
+      return false;
+    }
+    for (let i = 0; i < a.length; i += 1) {
+      const av = a[i];
+      const bv = b[i];
+      if (av == null || bv == null || !this.isNumberClose(av, bv)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private signalFromDb(prev: {
+    pair: string;
+    direction: string;
+    entries: string;
+    stopLoss: number;
+    takeProfits: string;
+    leverage: number;
+    orderUsd: number;
+    capitalPercent: number;
+    source: string | null;
+  }): SignalDto {
+    const direction = prev.direction === 'short' ? 'short' : 'long';
+    return {
+      pair: prev.pair,
+      direction,
+      entries: this.parseEntriesJson(prev.entries),
+      stopLoss: prev.stopLoss,
+      takeProfits: this.parseEntriesJson(prev.takeProfits),
+      leverage: prev.leverage,
+      orderUsd: prev.orderUsd,
+      capitalPercent: prev.capitalPercent,
+      source: prev.source ?? undefined,
+    };
+  }
+
+  private computeTextSimilarity(a: string, b: string): number {
+    const aTokens = this.tokenizeForSimilarity(a);
+    const bTokens = this.tokenizeForSimilarity(b);
+    if (aTokens.size === 0 || bTokens.size === 0) {
+      return 0;
+    }
+
+    let intersection = 0;
+    for (const tok of aTokens) {
+      if (bTokens.has(tok)) {
+        intersection += 1;
+      }
+    }
+    const union = aTokens.size + bTokens.size - intersection;
+    if (union <= 0) {
+      return 0;
+    }
+    return intersection / union;
+  }
+
+  private tokenizeForSimilarity(text: string): Set<string> {
+    const normalized = text
+      .toLowerCase()
+      .replace(/https?:\/\/\S+/g, ' ')
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .trim();
+    if (!normalized) {
+      return new Set();
+    }
+    return new Set(
+      normalized
+        .split(/\s+/)
+        .map((x) => x.trim())
+        .filter((x) => x.length >= 3)
+        .slice(0, 256),
+    );
+  }
+
+  private async tryCloseSignalFromReply(params: {
+    chatId: string;
+    messageId: string;
     replyToMessageId?: string;
   }): Promise<{ ok: true } | { ok: false; error: string }> {
     const replyToMessageId = params.replyToMessageId?.trim();
@@ -954,6 +1413,18 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         error: closed.error ?? closed.details ?? 'Не удалось закрыть сделку на Bybit',
       };
     }
+    await this.prisma.signalEvent.create({
+      data: {
+        signalId: signal.id,
+        type: 'CANCELLED_BY_CHAT',
+        payload: JSON.stringify({
+          reason: 'Сигнал отменен в чате (closed/cancel)',
+          sourceChatId: params.chatId,
+          sourceMessageId: replyToMessageId,
+          closeMessageId: params.messageId,
+        }),
+      },
+    });
 
     void this.appLog.append(
       'info',
@@ -1080,7 +1551,28 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   private async classifyMessage(
     text: string,
     useAiClassifier: boolean,
+    preferredKind?: 'signal' | 'result',
+    groupName?: string,
   ): Promise<{ kind: MessageKind; aiRequest?: string; aiResponse?: string }> {
+    if (preferredKind) {
+      return {
+        kind: preferredKind,
+        aiRequest: this.limitTrace(
+          JSON.stringify({
+            operation: 'classifyMessage',
+            source: 'group_filter_example',
+            groupName: groupName ?? null,
+            preferredKind,
+          }),
+        ),
+        aiResponse: this.limitTrace(
+          JSON.stringify({
+            forcedKind: preferredKind,
+            reason: 'matched by user examples for group',
+          }),
+        ),
+      };
+    }
     if (!useAiClassifier) {
       return { kind: 'other' };
     }

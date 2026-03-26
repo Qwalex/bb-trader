@@ -14,6 +14,13 @@ type Order = {
   qty: number | null;
 };
 
+type SignalEvent = {
+  id: string;
+  type: string;
+  payload: string | null;
+  createdAt: string;
+};
+
 type Signal = {
   id: string;
   pair: string;
@@ -33,6 +40,7 @@ type Signal = {
   /** Номинал в USDT */
   orderUsd: number;
   capitalPercent: number;
+  events?: SignalEvent[];
 };
 
 type TradesRes = {

@@ -208,6 +208,10 @@ export default function TelegramUserbotPage() {
     switch (row.status) {
       case 'placed':
         return 'Прочитано -> распознано -> установлен сигнал';
+      case 'reentry_placed':
+        return 'Прочитано -> распознан перезаход -> старый закрыт -> новый установлен';
+      case 'reentry_updated':
+        return 'Прочитано -> распознан перезаход -> обновлены SL/TP в текущем сигнале';
       case 'blocked_by_setting':
         return 'Прочитано -> распознано -> ожидает подтверждение в боте';
       case 'cancelled_by_confirmation':

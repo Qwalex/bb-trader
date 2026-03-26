@@ -589,7 +589,13 @@ export class OrdersService {
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
-        include: { orders: true },
+        include: {
+          orders: true,
+          events: {
+            orderBy: { createdAt: 'desc' },
+            take: 8,
+          },
+        },
       }),
       this.prisma.signal.count({ where }),
     ]);

@@ -29,8 +29,20 @@ model Signal {
   updatedAt      DateTime @updatedAt
   deletedAt      DateTime?
   orders         Order[]
+  events         SignalEvent[]
 
   @@index([sourceChatId, sourceMessageId])
+}
+
+model SignalEvent {
+  id        String   @id @default(cuid())
+  signalId  String
+  signal    Signal   @relation(fields: [signalId], references: [id], onDelete: Cascade)
+  type      String
+  payload   String?
+  createdAt DateTime @default(now())
+
+  @@index([signalId, createdAt])
 }
 
 model Order {
@@ -101,4 +113,17 @@ model TgUserbotIngest {
 model TgUserbotSignalHash {
   hash      String   @id
   createdAt DateTime @default(now())
+}
+
+model TgUserbotFilterExample {
+  id         String   @id @default(cuid())
+  groupName  String
+  kind       String // signal | close | result | reentry
+  example    String
+  enabled    Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([groupName, kind, enabled])
+  @@index([createdAt])
 }
