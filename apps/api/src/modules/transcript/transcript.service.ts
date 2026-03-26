@@ -114,6 +114,7 @@ Rules:
 - If values for ALL required fields are known and unambiguous, this is definitely a signal: set status to "complete" and fill signal fully.
 - If values for ONE or TWO required fields are unknown or ambiguous, clarification is required: set status to "incomplete", put known values in signal and put null for unknown fields, list missing field keys in "missing", and ask ONE clear clarifying question in Russian in "prompt".
 - If values for ALL required fields are unknown, this is NOT a signal: set status to "incomplete", keep required signal fields as null, set missing to [], and set prompt to null (do not ask a clarifying question).
+- Required fields for a valid signal are pair, direction, stopLoss, and takeProfits. entries and leverage are optional.
 - Field labels without actual values (e.g. "Entry:", "SL:", "TP1:" with no number after them) do NOT count as known values. If required fields are listed but have no actual values, treat them as unknown; if this results in all required fields being unknown, this is NOT a signal.
 - pair: symbol as written in the message (e.g. BTCUSDT, ethusdt, ETH/USDT, BTC-USDT); casing and separators do not matter — the system normalizes to the exchange form.
 - direction must be long or short.
@@ -121,7 +122,6 @@ Rules:
 - If the user gives no entry price but wants to enter at market / "по рынку" / immediately, set entries to null and put only "entries" in missing when everything else is known — the system can suggest the current exchange price.
 - If the message describes ONE entry zone as a range between two prices for the SAME purpose (e.g. "entry range 1 - 2", "buy zone 1–2", "диапазон входа 1 - 2"), use a single entry equal to the midpoint (average), not two DCA levels.- Extract prices from explicit labels (Entry, Stop loss, SL, Targets/TP, etc.); do not blend or average numbers that belong to different fields.
 - takeProfits: one or more take-profit prices; several TPs mean equal split of position size at each level (e.g. 4 TPs → 25% each).
-- leverage: integer >= 1.
 - orderUsd: total position notional in USDT (e.g. 10, 50, 100). If user gives percent of balance instead, set orderUsd to 0 and set capitalPercent (1-100).
 - capitalPercent: only when sizing by balance percent; otherwise 0.
 - Default sizing: if user does not specify size, set orderUsd to ${defaultOrderUsd} and capitalPercent to 0.
