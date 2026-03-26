@@ -204,13 +204,20 @@ Return ONLY strict JSON:
   "kind": "signal" | "result" | "other",
   "reason": "short reason in Russian"
 }
-Rules:
-- signal: the message describes a new trade setup with pair, side, stop-loss, at least one take-profit, and either an entry price/zone OR explicit intent to enter at market / immediately without a limit entry (entry may be omitted).
-- If ANY of pair, side, stop-loss, take-profit is missing or ambiguous, do NOT return "signal" (return "other" unless it is clearly a result).
+Decision policy:
+- First decide whether the message is a fresh actionable trade setup.
+- Return "signal" ONLY for a fresh setup with pair, side, stop-loss, and at least one take-profit. Entry may be omitted only if the message explicitly says market / immediately / "по рынку".
+- If any of pair, side, stop-loss, or take-profit is missing or ambiguous, do NOT return "signal".
 - Leverage and position size/order amount are optional and are NOT required for "signal".
-- result: reports past outcome/performance/closed trade/TP/SL hit without actionable new setup.
-- If message contains profit/loss info with percentages (e.g. "+12%", "Profit: 22.3%", "-5%"), treat it as "result" unless there is a full new setup with all required fields above.
-- other: anything else.
+
+Return "result" for messages about an existing/past trade, including:
+- closed trade / manual close
+- TP hit / SL hit
+- profit, loss, PNL, percentages
+- duration, period, statistics, recap, performance summary
+
+- If the message contains profit/loss info with percentages (e.g. "+12%", "Profit: 22.3%", "-5%"), TP/SL outcome markers, or closed-trade wording and does not also contain a full fresh setup, return "result".
+- Return "other" for everything else, including commentary, follow-ups, partial updates, and incomplete trade ideas that are not clearly a full fresh setup.
 Be conservative: if unsure, return "other".`;
     const requestPayload = {
       operation: 'classifyTradingMessage',
