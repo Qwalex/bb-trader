@@ -143,6 +143,92 @@ th {
   color: var(--muted);
 }
 
+.srOnly {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.pnlEditTrigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pnlEditTrigger:hover:not(:disabled) .pnl {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 2px;
+}
+
+.pnlEditTrigger:disabled {
+  cursor: default;
+}
+
+.pnlEditTrigger:focus-visible {
+  outline: 2px solid rgba(59, 130, 246, 0.65);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.liveExposureHeaderButton {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.015);
+  color: var(--foreground);
+  padding: 0.55rem 0.7rem;
+  margin-bottom: 0.55rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.liveExposureHeaderButton:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.liveExposureHeaderButton:focus-visible {
+  outline: 2px solid rgba(59, 130, 246, 0.65);
+  outline-offset: 2px;
+}
+
+.liveExposureSummaryBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+@media (max-width: 680px) {
+  .liveExposureHeaderButton {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
 .toggle {
   display: inline-flex;
   align-items: center;
@@ -254,6 +340,20 @@ th {
   border: 1px solid var(--border);
   background: var(--card);
   color: var(--foreground);
+}
+
+.inlineCheckboxLabel {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.inlineCheckbox {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 
 .settingsForm {
@@ -576,10 +676,28 @@ h1.pageTitle {
     width: 100%;
   }
 
-  .filters input,
+  .filters input:not([type='checkbox']),
   .filters select {
     width: 100%;
     min-height: 44px;
+  }
+
+  .inlineCheckboxLabel {
+    width: auto !important;
+    align-self: flex-start;
+    min-height: 44px;
+    display: inline-flex !important;
+    align-items: center;
+    padding-right: 0.35rem;
+  }
+
+  .inlineCheckbox {
+    width: 20px !important;
+    height: 20px !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
   }
 
   .filters button {
@@ -721,6 +839,100 @@ h1.pageTitle {
   .tableWrap {
     -webkit-overflow-scrolling: touch;
     overscroll-behavior-x: contain;
+  }
+
+  .mobileStackTable table {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    border-collapse: separate;
+    border-spacing: 0;
+    table-layout: fixed;
+  }
+
+  .mobileStackTable {
+    overflow-x: hidden;
+  }
+
+  .mobileStackTable thead {
+    display: none;
+  }
+
+  .mobileStackTable tbody {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+    width: 100%;
+    max-width: 100%;
+    padding: 0.5rem;
+  }
+
+  .mobileStackTable .mobileStackDataRow {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .mobileStackTable .mobileStackDataRow td {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    width: 100%;
+    border-bottom: 1px solid var(--border);
+    padding: 0.5rem 0.6rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .mobileStackTable .mobileStackDataRow td:last-child {
+    border-bottom: 0;
+  }
+
+  .mobileStackTable .mobileStackDataRow td::before {
+    content: attr(data-label);
+    font-size: 0.72rem;
+    color: var(--muted);
+    letter-spacing: 0.01em;
+  }
+
+  .mobileStackTable .mobileStackStaticRow td {
+    display: table-cell;
+    border-bottom: 1px solid var(--border);
+    padding: 0.5rem 0.6rem;
+  }
+
+  .userbotRecentTable .mobileStackDataRow td[data-label='Сообщение'] {
+    max-width: 100% !important;
+  }
+
+  .userbotRecentTable .mobileStackDataRow summary {
+    max-width: 100% !important;
+  }
+
+  .userbotActionsCell {
+    gap: 0.45rem !important;
+  }
+
+  .userbotActionsCell button {
+    width: 100%;
+    margin-right: 0 !important;
+    min-height: 40px;
+  }
+
+  .userbotChatsTable .mobileStackDataRow td[data-label='Включено'] {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .userbotChatsTable .mobileStackDataRow td[data-label='Включено']::before {
+    margin-right: 0.4rem;
   }
 
   .pnl {

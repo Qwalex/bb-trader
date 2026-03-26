@@ -36,6 +36,9 @@ export class OrdersService {
     ...Array.from(OrdersService.ACTIVE_SIGNAL_STATUSES),
     ...Array.from(OrdersService.CLOSED_SIGNAL_STATUSES),
   ]);
+  private static readonly PNL_EDIT_ALLOWED_STATUSES = new Set([
+    ...Array.from(OrdersService.CLOSED_SIGNAL_STATUSES),
+  ]);
 
   async createSignalRecord(
     signal: SignalDto,
@@ -140,6 +143,53 @@ export class OrdersService {
     });
 
     return { ok: true, affectedSignals: res.count };
+  }
+
+  async updateTradePnlManual(signalId: string, realizedPnl: number | null) {
+    const signal = await this.prisma.signal.findUnique({
+      where: { id: signalId },
+      select: { id: true, status: true, deletedAt: true, closedAt: true },
+    });
+    if (!signal) {
+      throw new NotFoundException('Сделка не найдена');
+    }
+    if (signal.deletedAt) {
+      throw new NotFoundException('Сделка удалена');
+    }
+    if (!OrdersService.PNL_EDIT_ALLOWED_STATUSES.has(signal.status)) {
+      throw new BadRequestException(
+        `PnL можно корректировать только для закрытых сделок. Текущий статус: ${signal.status}`,
+      );
+    }
+
+    const normalizedPnl =
+      realizedPnl === null
+        ? null
+        : Number.isFinite(realizedPnl)
+          ? realizedPnl
+          : null;
+    const nextStatus =
+      normalizedPnl === null || normalizedPnl === 0
+        ? 'CLOSED_MIXED'
+        : normalizedPnl > 0
+          ? 'CLOSED_WIN'
+          : 'CLOSED_LOSS';
+
+    await this.prisma.signal.update({
+      where: { id: signalId },
+      data: {
+        realizedPnl: normalizedPnl,
+        status: nextStatus,
+        closedAt: signal.closedAt ?? new Date(),
+      },
+    });
+
+    return {
+      ok: true,
+      signalId,
+      realizedPnl: normalizedPnl,
+      status: nextStatus,
+    };
   }
 
   async createOrderRecord(data: {
@@ -315,11 +365,13 @@ export class OrdersService {
     return res.count;
   }
 
-  async getDashboardStats() {
+  async getDashboardStats(params?: { source?: string }) {
+    const source = params?.source;
     const closed = await this.prisma.signal.findMany({
       where: {
         deletedAt: null,
         status: { in: ['CLOSED_WIN', 'CLOSED_LOSS', 'CLOSED_MIXED'] },
+        ...(source ? { source } : {}),
       },
     });
     const wins = closed.filter((s) => s.status === 'CLOSED_WIN').length;
@@ -334,6 +386,7 @@ export class OrdersService {
       where: {
         deletedAt: null,
         status: { in: ['ORDERS_PLACED', 'OPEN', 'PARSED'] },
+        ...(source ? { source } : {}),
       },
     });
     return {
@@ -346,12 +399,14 @@ export class OrdersService {
     };
   }
 
-  async getPnlSeries(bucket: 'day' | 'week') {
+  async getPnlSeries(bucket: 'day' | 'week', params?: { source?: string }) {
+    const source = params?.source;
     const closed = await this.prisma.signal.findMany({
       where: {
         deletedAt: null,
         closedAt: { not: null },
         realizedPnl: { not: null },
+        ...(source ? { source } : {}),
       },
       orderBy: { closedAt: 'asc' },
     });
@@ -368,6 +423,131 @@ export class OrdersService {
     return Array.from(map.entries()).map(([date, pnl]) => ({ date, pnl }));
   }
 
+  private computeWinrate(wins: number, losses: number): number {
+    const total = wins + losses;
+    return total === 0 ? 0 : (wins / total) * 100;
+  }
+
+  async getSourceStats(params?: { source?: string }) {
+    const source = params?.source;
+    const rows = await this.prisma.signal.findMany({
+      where: {
+        deletedAt: null,
+        ...(source ? { source } : {}),
+      },
+      select: {
+        source: true,
+        status: true,
+        realizedPnl: true,
+      },
+    });
+
+    type Acc = {
+      source: string | null;
+      wins: number;
+      losses: number;
+      closedMixed: number;
+      closedTotal: number;
+      openTotal: number;
+      totalPnl: number;
+    };
+
+    const map = new Map<string, Acc>();
+    const keyOf = (s: string | null) => (s && s.trim().length > 0 ? s : '—');
+    for (const r of rows) {
+      const key = keyOf(r.source);
+      const acc =
+        map.get(key) ??
+        ({
+          source: key === '—' ? null : key,
+          wins: 0,
+          losses: 0,
+          closedMixed: 0,
+          closedTotal: 0,
+          openTotal: 0,
+          totalPnl: 0,
+        } satisfies Acc);
+
+      if (r.status === 'CLOSED_WIN') {
+        acc.wins += 1;
+        acc.closedTotal += 1;
+      } else if (r.status === 'CLOSED_LOSS') {
+        acc.losses += 1;
+        acc.closedTotal += 1;
+      } else if (r.status === 'CLOSED_MIXED') {
+        acc.closedMixed += 1;
+        acc.closedTotal += 1;
+      } else if (
+        r.status === 'ORDERS_PLACED' ||
+        r.status === 'OPEN' ||
+        r.status === 'PARSED'
+      ) {
+        acc.openTotal += 1;
+      }
+
+      if (
+        r.status === 'CLOSED_WIN' ||
+        r.status === 'CLOSED_LOSS' ||
+        r.status === 'CLOSED_MIXED'
+      ) {
+        acc.totalPnl += r.realizedPnl ?? 0;
+      }
+
+      map.set(key, acc);
+    }
+
+    const items = Array.from(map.entries())
+      .map(([, acc]) => ({
+        source: acc.source,
+        winrate: this.computeWinrate(acc.wins, acc.losses),
+        wins: acc.wins,
+        losses: acc.losses,
+        wL: `${acc.wins} / ${acc.losses}`,
+        totalClosed: acc.closedTotal,
+        openSignals: acc.openTotal,
+        totalPnl: acc.totalPnl,
+      }))
+      .sort((a, b) => {
+        const as = a.source ?? '—';
+        const bs = b.source ?? '—';
+        return as.localeCompare(bs, 'ru');
+      });
+
+    return items;
+  }
+
+  async getTopSources(params?: { limit?: number }) {
+    const limit = Math.min(Math.max(params?.limit ?? 5, 1), 50);
+    const all = await this.getSourceStats();
+    const byPnl = [...all].sort((a, b) => b.totalPnl - a.totalPnl).slice(0, limit);
+    const byWorstPnl = [...all].sort((a, b) => a.totalPnl - b.totalPnl).slice(0, limit);
+    const byWinrate = [...all]
+      .sort((a, b) => {
+        if (b.winrate !== a.winrate) return b.winrate - a.winrate;
+        // tie-breaker: больше "решённых" сделок (wins+losses)
+        const aDec = a.wins + a.losses;
+        const bDec = b.wins + b.losses;
+        if (bDec !== aDec) return bDec - aDec;
+        return b.totalPnl - a.totalPnl;
+      })
+      .slice(0, limit);
+
+    const decided = all.filter((r) => r.wins + r.losses > 0);
+    const byWorstWinrate = [...decided]
+      .sort((a, b) => {
+        if (a.winrate !== b.winrate) return a.winrate - b.winrate;
+        const aDec = a.wins + a.losses;
+        const bDec = b.wins + b.losses;
+        if (bDec !== aDec) return bDec - aDec;
+        return a.totalPnl - b.totalPnl;
+      })
+      .slice(0, limit);
+    const worstWinrate =
+      byWorstWinrate.length > 0 ? (byWorstWinrate[0] ?? null) : null;
+
+    return { byPnl, byWinrate, byWorstPnl, byWorstWinrate, worstWinrate };
+  }
+
   async listTrades(f: TradesFilter) {
     const page = f.page ?? 1;
     const pageSize = Math.min(f.pageSize ?? 20, 100);
@@ -376,10 +556,17 @@ export class OrdersService {
       where.deletedAt = null;
     }
     if (f.source) {
-      where.source = f.source;
+      if (f.source === '—') {
+        where.source = null;
+      } else {
+        where.source = f.source;
+      }
     }
     if (f.pair) {
-      where.pair = f.pair;
+      const want = normalizeTradingPair(f.pair);
+      where.pair = {
+        contains: want,
+      };
     }
     if (f.status) {
       where.status = f.status;

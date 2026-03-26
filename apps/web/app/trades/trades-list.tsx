@@ -1,5 +1,6 @@
 import { formatDateTimeRu } from '../../lib/datetime';
 import { DeleteTradeButton } from './delete-trade-button';
+import { PnlEditControl } from './pnl-edit-control';
 import { RestoreTradeButton } from './restore-trade-button';
 import { SourceSelect } from './source-select';
 import { TradeParamsBlock } from './trade-params-block';
@@ -92,7 +93,14 @@ export function TradesList({ items, sourceOptions }: Props) {
                     )}
                   </td>
                   <td>
-                    <PnlDisplay pnl={s.realizedPnl} />
+                    <PnlEditControl
+                      signalId={s.id}
+                      status={s.status}
+                      realizedPnl={s.realizedPnl}
+                      disabled={Boolean(s.deletedAt)}
+                    >
+                      <PnlDisplay pnl={s.realizedPnl} />
+                    </PnlEditControl>
                   </td>
                   <td>{formatDateTimeRu(s.createdAt)}</td>
                   <td>
@@ -136,7 +144,14 @@ export function TradesList({ items, sourceOptions }: Props) {
               <div className="tradeCardMetaRow tradeCardPnlRow">
                 <span className="tradeCardLabel">PnL</span>
                 <span className="tradeCardValue">
-                  <PnlDisplay pnl={s.realizedPnl} />
+                  <PnlEditControl
+                    signalId={s.id}
+                    status={s.status}
+                    realizedPnl={s.realizedPnl}
+                    disabled={Boolean(s.deletedAt)}
+                  >
+                    <PnlDisplay pnl={s.realizedPnl} />
+                  </PnlEditControl>
                 </span>
               </div>
             </div>

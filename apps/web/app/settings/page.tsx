@@ -52,6 +52,11 @@ const KEYS = [
   { key: 'TELEGRAM_USERBOT_USE_AI_CLASSIFIER', label: 'Userbot: AI-классификация сообщений (true/false)' },
   { key: 'TELEGRAM_USERBOT_REQUIRE_CONFIRMATION', label: 'Userbot: требовать подтверждение перед размещением (true/false)' },
   {
+    key: 'TELEGRAM_USERBOT_MIN_BALANCE_USD',
+    label:
+      'Userbot: минимальный баланс USDT для автоторговли (если ниже — автоустановка ордеров приостановлена)',
+  },
+  {
     key: 'TELEGRAM_USERBOT_NOTIFY_FAILURES',
     label:
       'Userbot: присылать ошибки обработки сигнала в бота (true/false)',

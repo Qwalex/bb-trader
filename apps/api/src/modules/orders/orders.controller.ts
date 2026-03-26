@@ -1,4 +1,14 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 
 import { OrdersService } from './orders.service';
 
@@ -7,14 +17,16 @@ export class OrdersController {
   constructor(private readonly orders: OrdersService) {}
 
   @Get('stats')
-  async stats() {
-    return this.orders.getDashboardStats();
+  async stats(@Query('source') source?: string) {
+    const s = typeof source === 'string' ? source.trim() : '';
+    return this.orders.getDashboardStats({ source: s.length > 0 ? s : undefined });
   }
 
   @Get('pnl-series')
-  async pnlSeries(@Query('bucket') bucket?: string) {
+  async pnlSeries(@Query('bucket') bucket?: string, @Query('source') source?: string) {
     const b = bucket === 'week' ? 'week' : 'day';
-    return this.orders.getPnlSeries(b);
+    const s = typeof source === 'string' ? source.trim() : '';
+    return this.orders.getPnlSeries(b, { source: s.length > 0 ? s : undefined });
   }
 
   @Get('trades')
@@ -63,9 +75,29 @@ export class OrdersController {
     );
   }
 
+  @Patch('trades/:id/pnl')
+  async updateTradePnl(
+    @Param('id') id: string,
+    @Body() body: { realizedPnl?: number | null },
+  ) {
+    const raw = body.realizedPnl;
+    const pnl = raw === undefined || raw === null ? null : Number(raw);
+    if (pnl !== null && !Number.isFinite(pnl)) {
+      throw new BadRequestException('realizedPnl должен быть числом или null');
+    }
+    return this.orders.updateTradePnlManual(id, pnl);
+  }
+
   @Get('by-source')
   async bySource() {
     return this.orders.statsBySource();
+  }
+
+  @Get('top-sources')
+  async topSources(@Query('limit') limit?: string) {
+    const raw = limit ? Number(limit) : 5;
+    const take = Number.isFinite(raw) ? Math.min(Math.max(Math.trunc(raw), 1), 50) : 5;
+    return this.orders.getTopSources({ limit: take });
   }
 
   @Get('sources')

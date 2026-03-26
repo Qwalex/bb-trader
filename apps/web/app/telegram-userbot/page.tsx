@@ -27,6 +27,12 @@ type BotStatus = {
     updatedAt?: string;
     error?: string;
   };
+  balanceGuard?: {
+    minBalanceUsd: number;
+    balanceUsd: number | null;
+    paused: boolean;
+    reason?: string;
+  };
 };
 
 type UserbotChat = {
@@ -235,6 +241,12 @@ export default function TelegramUserbotPage() {
           {msg.text}
         </p>
       )}
+      {status?.balanceGuard?.paused && (
+        <p className="msg err" style={{ marginBottom: '1rem' }}>
+          {status.balanceGuard.reason ??
+            `Автоматическая установка ордеров приостановлена: баланс ниже допустимого порога ${(status?.balanceGuard?.minBalanceUsd ?? 3).toFixed(2)}$`}
+        </p>
+      )}
       <div className="card" style={{ marginBottom: '1rem' }}>
         <h3 style={{ marginBottom: '0.5rem' }}>Статус</h3>
         <p>
@@ -254,6 +266,24 @@ export default function TelegramUserbotPage() {
           <strong>{Math.max(1, Math.round((status?.pollMs ?? 2000) / 1000))}с</strong>{' '}
           {status?.pollingInFlight ? '(идёт цикл чтения...)' : ''}
         </p>
+        <p>
+          Баланс USDT:{' '}
+          <strong>
+            {status?.balanceGuard?.balanceUsd != null
+              ? `${status.balanceGuard.balanceUsd.toFixed(2)}$`
+              : 'недоступен'}
+          </strong>
+        </p>
+        <p>
+          Порог автоторговли:{' '}
+          <strong>{(status?.balanceGuard?.minBalanceUsd ?? 3).toFixed(2)}$</strong>
+        </p>
+        {status?.balanceGuard?.paused && (
+          <p className="msg err" style={{ marginTop: '0.5rem' }}>
+            {status.balanceGuard.reason ??
+              `Автоматическая установка ордеров приостановлена: баланс ниже допустимого порога ${(status?.balanceGuard?.minBalanceUsd ?? 3).toFixed(2)}$`}
+          </p>
+        )}
         <p style={{ color: 'var(--muted)', marginTop: '0.35rem' }}>
           Обработка сообщений: только за текущий день.
         </p>
@@ -427,16 +457,18 @@ export default function TelegramUserbotPage() {
       <div className="card" style={{ marginBottom: '1rem' }}>
         <h3 style={{ marginBottom: '0.5rem' }}>Последние сообщения</h3>
         <div className="filters" style={{ marginBottom: '0.75rem' }}>
-          <label style={{ flexDirection: 'row', alignItems: 'center', gap: '0.45rem' }}>
+          <label className="inlineCheckboxLabel">
             <input
+              className="inlineCheckbox"
               type="checkbox"
               checked={onlySignals}
               onChange={(e) => setOnlySignals(e.target.checked)}
             />
             Показывать только сигналы
           </label>
-          <label style={{ flexDirection: 'row', alignItems: 'center', gap: '0.45rem' }}>
+          <label className="inlineCheckboxLabel">
             <input
+              className="inlineCheckbox"
               type="checkbox"
               checked={groupByChat}
               onChange={(e) => setGroupByChat(e.target.checked)}
@@ -444,7 +476,10 @@ export default function TelegramUserbotPage() {
             Разбивать по группам
           </label>
         </div>
-        <div className="tableWrap" style={{ maxHeight: 500, overflowY: 'auto' }}>
+        <div
+          className="tableWrap mobileStackTable userbotRecentTable"
+          style={{ maxHeight: 500, overflowY: 'auto' }}
+        >
           <table>
             <thead>
               <tr>
@@ -478,7 +513,7 @@ export default function TelegramUserbotPage() {
                 return (
                   <Fragment key={row.id}>
                     {showChatDivider && (
-                      <tr>
+                      <tr className="mobileStackStaticRow">
                         <td colSpan={7} className="chatDividerCell">
                           <span className="chatDividerTitle">
                             {chatTitleById.get(row.chatId) ?? row.chatId}
@@ -488,7 +523,7 @@ export default function TelegramUserbotPage() {
                       </tr>
                     )}
                     {(showTodayDivider || showOldDivider) && (
-                      <tr>
+                      <tr className="mobileStackStaticRow">
                         <td colSpan={7} style={{ background: 'var(--card)' }}>
                           <strong>
                             {showTodayDivider ? 'Сегодня' : 'Старые сообщения'}
@@ -496,11 +531,11 @@ export default function TelegramUserbotPage() {
                         </td>
                       </tr>
                     )}
-                    <tr>
-                      <td>{formatTimeRu(row.createdAt)}</td>
-                      <td>{row.chatId}</td>
-                      <td>{row.messageId}</td>
-                      <td style={{ maxWidth: 380 }}>
+                    <tr className="mobileStackDataRow">
+                      <td data-label="Время">{formatTimeRu(row.createdAt)}</td>
+                      <td data-label="Chat ID">{row.chatId}</td>
+                      <td data-label="Message ID">{row.messageId}</td>
+                      <td data-label="Сообщение" style={{ maxWidth: 380 }}>
                         {row.text ? (
                           <details>
                             <summary
@@ -530,11 +565,11 @@ export default function TelegramUserbotPage() {
                           <span style={{ color: 'var(--muted)' }}>—</span>
                         )}
                       </td>
-                      <td>{row.classification}</td>
-                      <td title={row.error ?? undefined}>
+                      <td data-label="Класс">{row.classification}</td>
+                      <td data-label="Статус обработки" title={row.error ?? undefined}>
                         {renderPipelineStatus(row)}
                       </td>
-                      <td>
+                      <td data-label="Действия" className="userbotActionsCell">
                         <button
                           className="btn btnSecondary btnSm"
                           type="button"
@@ -720,7 +755,10 @@ export default function TelegramUserbotPage() {
         </p>
       )}
 
-      <div className="tableWrap" style={{ maxHeight: 500, overflowY: 'auto' }}>
+      <div
+        className="tableWrap mobileStackTable userbotChatsTable"
+        style={{ maxHeight: 500, overflowY: 'auto' }}
+      >
         <table>
           <thead>
             <tr>
@@ -746,9 +784,10 @@ export default function TelegramUserbotPage() {
               </tr>
             )}
             {filteredChats.map((chat) => (
-              <tr key={chat.id}>
-                <td>
+              <tr key={chat.id} className="mobileStackDataRow">
+                <td data-label="Включено">
                   <input
+                    className="inlineCheckbox"
                     type="checkbox"
                     checked={chat.enabled}
                     onChange={(e) => {
@@ -785,11 +824,11 @@ export default function TelegramUserbotPage() {
                     }}
                   />
                 </td>
-                <td>
+                <td data-label="Название">
                   <span className="chatName">{chat.title}</span>
                 </td>
-                <td>{chat.username ? `@${chat.username}` : '-'}</td>
-                <td>{chat.chatId}</td>
+                <td data-label="Username">{chat.username ? `@${chat.username}` : '-'}</td>
+                <td data-label="Chat ID">{chat.chatId}</td>
               </tr>
             ))}
           </tbody>

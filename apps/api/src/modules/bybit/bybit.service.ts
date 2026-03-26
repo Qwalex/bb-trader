@@ -202,15 +202,86 @@ export class BybitService {
     });
   }
 
+  /** Текущий USDT-баланс (best-effort) для внешних guard-проверок. */
+  async getUnifiedUsdtBalance(): Promise<number | undefined> {
+    const client = await this.getClient();
+    if (!client) {
+      return undefined;
+    }
+    try {
+      const balance = await this.getUsdtBalance(client);
+      return Number.isFinite(balance) ? balance : undefined;
+    } catch (e) {
+      this.logger.warn(`getUnifiedUsdtBalance failed: ${formatError(e)}`);
+      return undefined;
+    }
+  }
+
   /** USDT balance in unified derivatives wallet (best-effort). */
   private async getUsdtBalance(client: RestClientV5): Promise<number> {
-    const res = await client.getWalletBalance({
-      accountType: 'UNIFIED',
-    });
-    const list = res.result?.list?.[0];
-    const coin = list?.coin?.find((c) => c.coin === 'USDT');
-    const avail = coin?.walletBalance ?? coin?.equity ?? '0';
-    return parseFloat(String(avail));
+    const accountTypes: Array<'UNIFIED' | 'CONTRACT'> = ['UNIFIED', 'CONTRACT'];
+    const parseFinite = (v: unknown): number | undefined => {
+      if (v == null || String(v).trim() === '') return undefined;
+      const n = Number.parseFloat(String(v));
+      return Number.isFinite(n) ? n : undefined;
+    };
+    const nonNegative = (v: number | undefined): number | undefined => {
+      if (v === undefined || !Number.isFinite(v)) return undefined;
+      return Math.max(0, v);
+    };
+
+    for (const accountType of accountTypes) {
+      const res = await client.getWalletBalance({ accountType });
+      const list = res.result?.list?.[0];
+      const coin = list?.coin?.find((c) => c.coin === 'USDT');
+
+      // 1) Прямые поля "доступно к использованию"
+      const candidates: unknown[] = [
+        coin?.availableToWithdraw,
+        (coin as Record<string, unknown> | undefined)?.availableToTransfer,
+        (coin as Record<string, unknown> | undefined)?.transferBalance,
+      ];
+      for (const candidate of candidates) {
+        const parsed = parseFinite(candidate);
+        if (parsed !== undefined) {
+          return nonNegative(parsed) ?? parsed;
+        }
+      }
+
+      // 2) Вычисляемый fallback доступной маржи:
+      // available ~= equity - totalOrderIM - totalPositionIM
+      const equity =
+        parseFinite(coin?.equity) ?? parseFinite(coin?.walletBalance);
+      const totalOrderIM =
+        parseFinite((coin as Record<string, unknown> | undefined)?.totalOrderIM) ?? 0;
+      const totalPositionIM =
+        parseFinite((coin as Record<string, unknown> | undefined)?.totalPositionIM) ?? 0;
+      if (equity !== undefined) {
+        const computedAvailable = equity - totalOrderIM - totalPositionIM;
+        const normalized = nonNegative(computedAvailable);
+        if (normalized !== undefined) {
+          return normalized;
+        }
+      }
+
+      // 3) Последний fallback: суммарные/кошелек поля
+      const fallbackCandidates: unknown[] = [
+        list?.totalAvailableBalance,
+        coin?.availableToBorrow,
+        coin?.walletBalance,
+        coin?.equity,
+        list?.totalWalletBalance,
+        list?.totalEquity,
+      ];
+      for (const candidate of fallbackCandidates) {
+        const parsed = parseFinite(candidate);
+        if (parsed !== undefined) {
+          return nonNegative(parsed) ?? parsed;
+        }
+      }
+    }
+
+    throw new Error('USDT balance is unavailable for current Bybit account');
   }
 
   /** Лот, мин. объём и шаг цены (для TP limit / trading-stop). */
@@ -2177,6 +2248,91 @@ export class BybitService {
     return rows;
   }
 
+  /**
+   * Fallback оценка PnL по исполнениям (execution list), когда ClosedPnL
+   * не удаётся связать по orderId (например, SL с отдельным id из setTradingStop).
+   */
+  private async estimateClosedPnlFromExecutions(params: {
+    client: RestClientV5;
+    symbol: string;
+    direction: string;
+    createdAt: Date;
+  }): Promise<number | undefined> {
+    const createdFloorMs = params.createdAt.getTime() - 60_000;
+    const rows: Array<{ side: string; qty: number; value: number; ts: number }> = [];
+    let cursor: string | undefined;
+    const MAX_PAGES = 8;
+
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const res = await params.client.getExecutionList({
+        category: 'linear',
+        symbol: params.symbol,
+        limit: 50,
+        cursor,
+      });
+      if (res.retCode !== 0) {
+        break;
+      }
+      const list = res.result?.list ?? [];
+      for (const ex of list) {
+        const ts = Number(ex.execTime ?? 0);
+        if (!Number.isFinite(ts) || ts < createdFloorMs) {
+          continue;
+        }
+        const qty = Number.parseFloat(String(ex.execQty ?? 0));
+        const valueRaw = Number.parseFloat(String(ex.execValue ?? 0));
+        const priceRaw = Number.parseFloat(String(ex.execPrice ?? 0));
+        const value =
+          Number.isFinite(valueRaw) && valueRaw > 0
+            ? valueRaw
+            : Number.isFinite(priceRaw) && Number.isFinite(qty)
+              ? priceRaw * qty
+              : Number.NaN;
+        if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(value) || value <= 0) {
+          continue;
+        }
+        rows.push({
+          side: String(ex.side ?? '').toLowerCase(),
+          qty,
+          value,
+          ts,
+        });
+      }
+      cursor = res.result?.nextPageCursor || undefined;
+      if (!cursor || list.length === 0) {
+        break;
+      }
+    }
+
+    let buyQty = 0;
+    let buyValue = 0;
+    let sellQty = 0;
+    let sellValue = 0;
+    for (const row of rows) {
+      if (row.side === 'buy') {
+        buyQty += row.qty;
+        buyValue += row.value;
+      } else if (row.side === 'sell') {
+        sellQty += row.qty;
+        sellValue += row.value;
+      }
+    }
+    const matchedQty = Math.min(buyQty, sellQty);
+    if (!Number.isFinite(matchedQty) || matchedQty <= 0) {
+      return undefined;
+    }
+    const avgBuy = buyValue / buyQty;
+    const avgSell = sellValue / sellQty;
+    if (!Number.isFinite(avgBuy) || !Number.isFinite(avgSell)) {
+      return undefined;
+    }
+    const pnl =
+      params.direction === 'short'
+        ? (avgBuy - avgSell) * matchedQty
+        : (avgSell - avgBuy) * matchedQty;
+    return Number.isFinite(pnl) ? pnl : undefined;
+  }
+
   async recalcClosedSignalsPnl(params?: {
     limit?: number;
     dryRun?: boolean;
@@ -2398,6 +2554,48 @@ export class BybitService {
                   siblingId: sibling.id,
                 },
               );
+            } else if (!this.hasOpenEntryOrders(fresh.orders)) {
+              const estimatedPnl = await this.estimateClosedPnlFromExecutions({
+                client,
+                symbol: symNorm,
+                direction: fresh.direction,
+                createdAt: fresh.createdAt,
+              });
+              if (estimatedPnl !== undefined) {
+                await this.orders.updateSignalStatus(fresh.id, {
+                  status: estimatedPnl > 0 ? 'CLOSED_WIN' : estimatedPnl < 0 ? 'CLOSED_LOSS' : 'CLOSED_MIXED',
+                  realizedPnl: estimatedPnl,
+                  closedAt: new Date(),
+                });
+                void this.appLog.append(
+                  'warn',
+                  'bybit',
+                  'poll: fallback PnL по execution list (closedPnL без orderId match)',
+                  {
+                    signalId: fresh.id,
+                    pair: symNorm,
+                    estimatedPnl,
+                    trackedOrderIds: Array.from(ourIds),
+                  },
+                );
+              } else {
+                // Позиция уже 0 и входы не висят, но ни closedPnl, ни fallback не дали надёжный PnL.
+                await this.orders.updateSignalStatus(fresh.id, {
+                  status: 'CLOSED_MIXED',
+                  realizedPnl: null,
+                  closedAt: new Date(),
+                });
+                void this.appLog.append(
+                  'info',
+                  'bybit',
+                  'poll: позиция закрыта, но closed PnL не привязан к нашим orderId — CLOSED_MIXED',
+                  {
+                    signalId: fresh.id,
+                    pair: symNorm,
+                    trackedOrderIds: Array.from(ourIds),
+                  },
+                );
+              }
             }
           }
         }
