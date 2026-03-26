@@ -1341,7 +1341,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
     const place = await this.bybit.placeSignalOrders(nextSignal, params.text, {
       chatId: params.chatId,
-      messageId: params.messageId,
+      messageId: replyToMessageId,
     });
     if (!place.ok) {
       return { ok: false, error: formatError(place.error) };
@@ -1372,7 +1372,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           payload: JSON.stringify({
             reason: 'Перезаход: создан новый сигнал',
             sourceChatId: params.chatId,
-            sourceMessageId: params.messageId,
+            sourceMessageId: replyToMessageId,
+            reentryMessageId: params.messageId,
             oldSignalId: prev.id,
             mergedFields: {
               entries: nextSignal.entries,
@@ -1513,36 +1514,6 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       return {
         ok: false,
         error: `Для цитаты ${params.chatId}:${replyToMessageId} активный сигнал не найден`,
-      };
-    }
-
-    const repliedText = await this.fetchChatMessageText(params.chatId, replyToMessageId);
-    if (!repliedText) {
-      return {
-        ok: false,
-        error: 'Не удалось прочитать текст сообщения из цитаты для сверки',
-      };
-    }
-
-    const parsedQuoted = await this.transcript.parse('text', { text: repliedText });
-    if (parsedQuoted.ok !== true) {
-      return {
-        ok: false,
-        error: 'Не удалось распарсить сообщение из цитаты для сверки сигнала',
-      };
-    }
-
-    const parsedEntry = parsedQuoted.signal.entries[0];
-    const dbEntries = this.parseEntriesJson(signal.entries);
-    const dbEntry = dbEntries[0];
-    if (
-      !this.isEntryCloseEnough(parsedEntry, dbEntry) ||
-      normalizeTradingPair(parsedQuoted.signal.pair) !== normalizeTradingPair(signal.pair) ||
-      parsedQuoted.signal.direction !== signal.direction
-    ) {
-      return {
-        ok: false,
-        error: 'Сверка token/side/entry с цитируемым сигналом не прошла',
       };
     }
 

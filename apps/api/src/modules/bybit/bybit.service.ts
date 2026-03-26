@@ -1182,6 +1182,25 @@ export class BybitService {
       };
     }
 
+    const flatState = await this.waitForSymbolToBeFlat(client, symbol);
+    if (!flatState.ok) {
+      void this.appLog.append('warn', 'bybit', 'manual close pending exchange cleanup', {
+        signalId,
+        symbol,
+        activeOrders: flatState.activeOrders,
+        positions: flatState.positions,
+      });
+      return {
+        ok: false,
+        signalId,
+        symbol,
+        cancelledOrders,
+        closedPositions,
+        error: 'Bybit ещё не подтвердил полное закрытие ордеров/позиции',
+        details: `activeOrders=${flatState.activeOrders}; positions=${flatState.positions}`,
+      };
+    }
+
     for (const ord of signal.orders) {
       if (BybitService.isFilledOrderStatus(ord.status)) {
         continue;
@@ -1210,6 +1229,36 @@ export class BybitService {
       symbol,
       cancelledOrders,
       closedPositions,
+    };
+  }
+
+  private async waitForSymbolToBeFlat(
+    client: RestClientV5,
+    symbol: string,
+    timeoutMs = 10_000,
+    pollMs = 1_000,
+  ): Promise<{ ok: true } | { ok: false; activeOrders: number; positions: number }> {
+    const deadline = Date.now() + timeoutMs;
+    let lastActiveOrders = 0;
+    let lastPositions = 0;
+
+    while (Date.now() <= deadline) {
+      const [activeOrders, positions] = await Promise.all([
+        this.getExchangeActiveOrders(client, symbol),
+        this.getExchangePositions(client, symbol),
+      ]);
+      lastActiveOrders = activeOrders.length;
+      lastPositions = positions.length;
+      if (lastActiveOrders === 0 && lastPositions === 0) {
+        return { ok: true };
+      }
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+    }
+
+    return {
+      ok: false,
+      activeOrders: lastActiveOrders,
+      positions: lastPositions,
     };
   }
 
