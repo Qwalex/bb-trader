@@ -968,7 +968,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       Number.isFinite(balanceUsd) &&
       balanceUsd < minBalanceUsd;
     const reason =
-      paused && balanceUsd !== undefined
+      balanceUsd !== undefined &&
+      Number.isFinite(balanceUsd) &&
+      balanceUsd < minBalanceUsd
         ? `Автоматическая установка ордеров приостановлена: баланс ${balanceUsd.toFixed(2)}$ ниже допустимого порога ${minBalanceUsd.toFixed(2)}$`
         : undefined;
     return {
