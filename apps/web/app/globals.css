@@ -256,6 +256,20 @@ th {
   color: var(--foreground);
 }
 
+.inlineCheckboxLabel {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.inlineCheckbox {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 .settingsForm {
   max-width: 520px;
   display: flex;
@@ -576,10 +590,28 @@ h1.pageTitle {
     width: 100%;
   }
 
-  .filters input,
+  .filters input:not([type='checkbox']),
   .filters select {
     width: 100%;
     min-height: 44px;
+  }
+
+  .inlineCheckboxLabel {
+    width: auto !important;
+    align-self: flex-start;
+    min-height: 44px;
+    display: inline-flex !important;
+    align-items: center;
+    padding-right: 0.35rem;
+  }
+
+  .inlineCheckbox {
+    width: 20px !important;
+    height: 20px !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
   }
 
   .filters button {
@@ -721,6 +753,86 @@ h1.pageTitle {
   .tableWrap {
     -webkit-overflow-scrolling: touch;
     overscroll-behavior-x: contain;
+  }
+
+  .mobileStackTable table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  .mobileStackTable thead {
+    display: none;
+  }
+
+  .mobileStackTable tbody {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+    padding: 0.5rem;
+  }
+
+  .mobileStackTable .mobileStackDataRow {
+    display: block;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .mobileStackTable .mobileStackDataRow td {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    width: 100%;
+    border-bottom: 1px solid var(--border);
+    padding: 0.5rem 0.6rem;
+    min-width: 0;
+  }
+
+  .mobileStackTable .mobileStackDataRow td:last-child {
+    border-bottom: 0;
+  }
+
+  .mobileStackTable .mobileStackDataRow td::before {
+    content: attr(data-label);
+    font-size: 0.72rem;
+    color: var(--muted);
+    letter-spacing: 0.01em;
+  }
+
+  .mobileStackTable .mobileStackStaticRow td {
+    display: table-cell;
+    border-bottom: 1px solid var(--border);
+    padding: 0.5rem 0.6rem;
+  }
+
+  .userbotRecentTable .mobileStackDataRow td[data-label='Сообщение'] {
+    max-width: 100% !important;
+  }
+
+  .userbotRecentTable .mobileStackDataRow summary {
+    max-width: 100% !important;
+  }
+
+  .userbotActionsCell {
+    gap: 0.45rem !important;
+  }
+
+  .userbotActionsCell button {
+    width: 100%;
+    margin-right: 0 !important;
+    min-height: 40px;
+  }
+
+  .userbotChatsTable .mobileStackDataRow td[data-label='Включено'] {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .userbotChatsTable .mobileStackDataRow td[data-label='Включено']::before {
+    margin-right: 0.4rem;
   }
 
   .pnl {
