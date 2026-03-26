@@ -1097,11 +1097,17 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
 
   private classifyHeuristic(text: string): 'signal' | 'result' | 'other' {
     const t = text.toLowerCase();
-    const signalish =
-      /\b(entry|entries|вход|входы|sl|stop loss|tp|take profit|long|short|leverage|плечо)\b/.test(
-        t,
-      ) && /\b(usdt|usd|btc|eth|xrp|sol)\b/.test(t);
-    if (signalish) {
+    const hasPairHint =
+      /[a-z0-9]{2,20}\s*\/\s*usdt\b/i.test(text) ||
+      /\b[a-z0-9]{2,20}usdt\b/i.test(text);
+    const hasDirectionHint =
+      /\b(long|short)\b/.test(t) || /(лонг|шорт)/u.test(t);
+    const hasStopHint =
+      /\b(sl|stop[\s-]?loss)\b/.test(t) || /(стоп|стоп-лосс)/u.test(t);
+    const hasTpHint =
+      /\b(tp|take[\s-]?profit|target|targets)\b/.test(t) ||
+      /(тейк|тейк-профит|цели|цель)/u.test(t);
+    if (hasPairHint && hasDirectionHint && hasStopHint && hasTpHint) {
       return 'signal';
     }
     const hasResultKeywords =
