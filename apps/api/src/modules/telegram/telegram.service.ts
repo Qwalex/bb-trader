@@ -441,6 +441,21 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private registerHandlers(): void {
     if (!this.bot) return;
 
+    const clearInlineKeyboard = async (ctx: Context) => {
+      try {
+        // Убираем список кнопок у сообщения, по которому кликнули.
+        // deleteMessage менее предсказуем (нет прав/старое сообщение), поэтому чистим только клавиатуру.
+        // Telegraf: editMessageReplyMarkup принимает объект разметки.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const anyCtx = ctx as any;
+        if (typeof anyCtx.editMessageReplyMarkup === 'function') {
+          await anyCtx.editMessageReplyMarkup({ inline_keyboard: [] });
+        }
+      } catch {
+        // ignore (message already edited, no rights, etc.)
+      }
+    };
+
     this.bot.use(async (ctx, next) => {
       const uid = ctx.from?.id;
       const textPreview =
@@ -485,6 +500,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         return;
       }
       await ctx.answerCbQuery();
+      await clearInlineKeyboard(ctx);
       await this.applySourceToSignal(uid, draft.signal);
       const rawCombined = draft.userTurns.join('\n---\n');
       void this.appLog.append('info', 'telegram', 'Подтверждение: выставление ордеров', {
@@ -526,6 +542,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       }
       this.drafts.delete(uid);
       await ctx.answerCbQuery('Черновик отменён');
+      await clearInlineKeyboard(ctx);
       await ctx.reply('Черновик сигнала отменён.');
     });
 
@@ -546,6 +563,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       draft.signal.source = chosen;
       this.drafts.set(uid, { phase: 'ready', signal: draft.signal, userTurns: draft.userTurns });
       await ctx.answerCbQuery(`Источник: ${chosen}`);
+      await clearInlineKeyboard(ctx);
       const defaultOrderUsd = await this.settings.getDefaultOrderUsd();
       await ctx.reply(this.formatSignalTable(draft.signal, defaultOrderUsd), {
         ...this.confirmKeyboard(),
@@ -563,6 +581,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       delete draft.signal.source;
       this.drafts.set(uid, { phase: 'ready', signal: draft.signal, userTurns: draft.userTurns });
       await ctx.answerCbQuery('Без источника');
+      await clearInlineKeyboard(ctx);
       const defaultOrderUsd = await this.settings.getDefaultOrderUsd();
       await ctx.reply(this.formatSignalTable(draft.signal, defaultOrderUsd), {
         ...this.confirmKeyboard(),
