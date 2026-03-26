@@ -525,6 +525,7 @@ export class BybitService {
         if (busy) {
           return true;
         }
+        await this.clearImmediateStaleDbBlockerIfExchangeFlat(symbol, direction, client, 'duplicate-check');
         return false;
       } catch (e) {
         this.logger.warn(`wouldDuplicateActivePairDirection: ${formatError(e)}`);
@@ -1310,6 +1311,12 @@ export class BybitService {
           error: `На Bybit по ${symbol} уже есть открытые ордера или позиция по стороне ${signal.direction.toUpperCase()}. Повторный вход в ту же сторону недоступен.`,
         };
       }
+      await this.clearImmediateStaleDbBlockerIfExchangeFlat(
+        symbol,
+        signal.direction,
+        client,
+        'place-before-db-check',
+      );
     } catch (e) {
       const msg = formatError(e);
       this.logger.warn(`Exchange activity check failed: ${msg}`);
@@ -2893,6 +2900,67 @@ export class BybitService {
     direction: 'long' | 'short',
   ): string {
     return `${normalizeTradingPair(pair)}:${direction}`;
+  }
+
+  private async clearImmediateStaleDbBlockerIfExchangeFlat(
+    pair: string,
+    direction: 'long' | 'short',
+    client: RestClientV5,
+    reason: string,
+  ): Promise<number> {
+    const symbol = normalizeTradingPair(pair);
+    const reconcileKey = this.stalePairDirectionKey(symbol, direction);
+    if (this.staleReconcileSuspensions.has(reconcileKey)) {
+      return 0;
+    }
+    const hasDbBlocker = await this.orders.hasActiveSignalForPairAndDirection(symbol, direction);
+    if (!hasDbBlocker) {
+      return 0;
+    }
+
+    let cleanObservations = 0;
+    for (let i = 0; i < 3; i += 1) {
+      const busy = await this.hasExchangeExposureForDirection(client, symbol, direction);
+      if (busy) {
+        void this.appLog.append(
+          'debug',
+          'bybit',
+          'immediate stale blocker cleanup skipped because exchange exposure exists',
+          {
+            symbol,
+            direction,
+            reason,
+            cleanObservations,
+          },
+        );
+        return 0;
+      }
+      cleanObservations += 1;
+      if (i < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+    }
+
+    const reconciled = await this.orders.reconcileStaleOpenSignalsForPairAndDirection(
+      symbol,
+      direction,
+    );
+    if (reconciled > 0) {
+      this.staleFlatPollCounts.delete(reconcileKey);
+      void this.appLog.append(
+        'info',
+        'bybit',
+        'immediate stale blocker cleaned before duplicate/place check',
+        {
+          symbol,
+          direction,
+          reason,
+          cleanObservations,
+          signalsUpdated: reconciled,
+        },
+      );
+    }
+    return reconciled;
   }
 
   suspendStaleReconcile(
