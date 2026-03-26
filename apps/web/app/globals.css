@@ -186,6 +186,49 @@ th {
   border-radius: 4px;
 }
 
+.liveExposureHeaderButton {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.015);
+  color: var(--foreground);
+  padding: 0.55rem 0.7rem;
+  margin-bottom: 0.55rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.liveExposureHeaderButton:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.liveExposureHeaderButton:focus-visible {
+  outline: 2px solid rgba(59, 130, 246, 0.65);
+  outline-offset: 2px;
+}
+
+.liveExposureSummaryBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+@media (max-width: 680px) {
+  .liveExposureHeaderButton {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
 .toggle {
   display: inline-flex;
   align-items: center;

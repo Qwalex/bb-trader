@@ -59,6 +59,7 @@ export function LiveExposurePanel() {
   const [closingId, setClosingId] = useState<string | null>(null);
   const [jsonLoadingId, setJsonLoadingId] = useState<string | null>(null);
   const [jsonBySignalId, setJsonBySignalId] = useState<Record<string, string>>({});
+  const [expandedBySignalId, setExpandedBySignalId] = useState<Record<string, boolean>>({});
   const [lastMsg, setLastMsg] = useState<string | null>(null);
 
   const apiBase = useMemo(() => getApiBase(), []);
@@ -145,6 +146,10 @@ export function LiveExposurePanel() {
     void load();
   }, [load]);
 
+  const toggleExpanded = useCallback((signalId: string) => {
+    setExpandedBySignalId((prev) => ({ ...prev, [signalId]: !prev[signalId] }));
+  }, []);
+
   return (
     <section style={{ marginBottom: '2rem' }}>
       <div
@@ -197,146 +202,174 @@ export function LiveExposurePanel() {
 
       {data?.items.map((item) => (
         <div className="card" key={item.signalId} style={{ marginBottom: '0.75rem' }}>
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginBottom: '0.6rem',
-              gap: '0.75rem',
-              flexWrap: 'wrap',
-            }}
-          >
-            <div>
-              <strong>{item.pair}</strong> · {item.direction} · {item.status}
-              <div style={{ color: 'var(--muted)', fontSize: '0.8rem', marginTop: '0.2rem' }}>
-                Источник: {item.source ?? '—'} · {formatDateTimeRu(item.createdAt)}
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                onClick={() => void loadSignalJson(item.signalId)}
-                disabled={jsonLoadingId === item.signalId}
-                style={{
-                  padding: '0.45rem 0.9rem',
-                  background: 'var(--card)',
-                  color: 'var(--text)',
-                  border: '1px solid var(--border)',
-                  borderRadius: 6,
-                  cursor: 'pointer',
-                }}
-              >
-                {jsonLoadingId === item.signalId ? 'Загрузка JSON...' : 'JSON'}
-              </button>
-              <button
-                type="button"
-                className="btnDanger"
-                disabled={closingId === item.signalId}
-                onClick={() => void closeSignal(item.signalId, item.pair)}
-              >
-                {closingId === item.signalId ? 'Закрытие...' : 'Закрыть сигнал'}
-              </button>
-            </div>
-          </div>
+          {(() => {
+            const isExpanded = Boolean(expandedBySignalId[item.signalId]);
+            const activeOrdersCount = item.exchange.activeOrders.length;
+            const positionsCount = item.exchange.positions.length;
+            return (
+              <>
+                <button
+                  type="button"
+                  onClick={() => toggleExpanded(item.signalId)}
+                  className="liveExposureHeaderButton"
+                  aria-expanded={isExpanded}
+                  aria-controls={`live-exposure-${item.signalId}`}
+                >
+                  <div>
+                    <strong>{item.pair}</strong> · {item.direction} · {item.status}
+                    <div style={{ color: 'var(--muted)', fontSize: '0.8rem', marginTop: '0.2rem' }}>
+                      Источник: {item.source ?? '—'} · {formatDateTimeRu(item.createdAt)}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                    <span className="liveExposureSummaryBadge">
+                      Ордера: {activeOrdersCount} · Позиции: {positionsCount}
+                    </span>
+                    <span style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>
+                      {isExpanded ? 'Скрыть' : 'Подробнее'}
+                    </span>
+                  </div>
+                </button>
 
-          <div className="tableWrap" style={{ marginBottom: '0.6rem' }}>
-            <table>
-              <thead>
-                <tr>
-                  <th colSpan={6}>Ордера на Bybit</th>
-                </tr>
-                <tr>
-                  <th>ID</th>
-                  <th>Сторона</th>
-                  <th>Тип</th>
-                  <th>Статус</th>
-                  <th>Цена</th>
-                  <th>Qty</th>
-                </tr>
-              </thead>
-              <tbody>
-                {item.exchange.activeOrders.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} style={{ color: 'var(--muted)' }}>
-                      Нет активных ордеров
-                    </td>
-                  </tr>
-                ) : (
-                  item.exchange.activeOrders.map((o) => (
-                    <tr key={o.orderId}>
-                      <td>{o.orderId}</td>
-                      <td>{o.side}</td>
-                      <td>{o.type}</td>
-                      <td>{o.status}</td>
-                      <td>{o.price ?? '—'}</td>
-                      <td>{o.qty ?? '—'}</td>
-                    </tr>
-                  ))
+                {isExpanded && (
+                  <div id={`live-exposure-${item.signalId}`}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'flex-end',
+                        alignItems: 'center',
+                        marginBottom: '0.6rem',
+                        gap: '0.5rem',
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => void loadSignalJson(item.signalId)}
+                        disabled={jsonLoadingId === item.signalId}
+                        style={{
+                          padding: '0.45rem 0.9rem',
+                          background: 'var(--card)',
+                          color: 'var(--text)',
+                          border: '1px solid var(--border)',
+                          borderRadius: 6,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {jsonLoadingId === item.signalId ? 'Загрузка JSON...' : 'JSON'}
+                      </button>
+                      <button
+                        type="button"
+                        className="btnDanger"
+                        disabled={closingId === item.signalId}
+                        onClick={() => void closeSignal(item.signalId, item.pair)}
+                      >
+                        {closingId === item.signalId ? 'Закрытие...' : 'Закрыть сигнал'}
+                      </button>
+                    </div>
+
+                    <div className="tableWrap" style={{ marginBottom: '0.6rem' }}>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th colSpan={6}>Ордера на Bybit</th>
+                          </tr>
+                          <tr>
+                            <th>ID</th>
+                            <th>Сторона</th>
+                            <th>Тип</th>
+                            <th>Статус</th>
+                            <th>Цена</th>
+                            <th>Qty</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {item.exchange.activeOrders.length === 0 ? (
+                            <tr>
+                              <td colSpan={6} style={{ color: 'var(--muted)' }}>
+                                Нет активных ордеров
+                              </td>
+                            </tr>
+                          ) : (
+                            item.exchange.activeOrders.map((o) => (
+                              <tr key={o.orderId}>
+                                <td>{o.orderId}</td>
+                                <td>{o.side}</td>
+                                <td>{o.type}</td>
+                                <td>{o.status}</td>
+                                <td>{o.price ?? '—'}</td>
+                                <td>{o.qty ?? '—'}</td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="tableWrap">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th colSpan={5}>Позиции на Bybit</th>
+                          </tr>
+                          <tr>
+                            <th>Сторона</th>
+                            <th>Размер</th>
+                            <th>Entry</th>
+                            <th>Mark</th>
+                            <th>uPnL</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {item.exchange.positions.length === 0 ? (
+                            <tr>
+                              <td colSpan={5} style={{ color: 'var(--muted)' }}>
+                                Нет открытых позиций
+                              </td>
+                            </tr>
+                          ) : (
+                            item.exchange.positions.map((p) => (
+                              <tr key={`${item.signalId}-${p.positionIdx}`}>
+                                <td>{p.side}</td>
+                                <td>{p.size}</td>
+                                <td>{p.entryPrice ?? '—'}</td>
+                                <td>{p.markPrice ?? '—'}</td>
+                                <td>{p.unrealizedPnl ?? '—'}</td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {jsonBySignalId[item.signalId] && (
+                      <div style={{ marginTop: '0.6rem' }}>
+                        <div style={{ fontSize: '0.85rem', color: 'var(--muted)', marginBottom: '0.35rem' }}>
+                          JSON-снимок (БД + биржа)
+                        </div>
+                        <pre
+                          style={{
+                            margin: 0,
+                            padding: '0.75rem',
+                            borderRadius: 8,
+                            border: '1px solid var(--border)',
+                            background: '#0f172a',
+                            color: '#e2e8f0',
+                            overflowX: 'auto',
+                            whiteSpace: 'pre',
+                            fontSize: '0.78rem',
+                            lineHeight: 1.4,
+                          }}
+                        >
+                          {jsonBySignalId[item.signalId]}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
                 )}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="tableWrap">
-            <table>
-              <thead>
-                <tr>
-                  <th colSpan={5}>Позиции на Bybit</th>
-                </tr>
-                <tr>
-                  <th>Сторона</th>
-                  <th>Размер</th>
-                  <th>Entry</th>
-                  <th>Mark</th>
-                  <th>uPnL</th>
-                </tr>
-              </thead>
-              <tbody>
-                {item.exchange.positions.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} style={{ color: 'var(--muted)' }}>
-                      Нет открытых позиций
-                    </td>
-                  </tr>
-                ) : (
-                  item.exchange.positions.map((p) => (
-                    <tr key={`${item.signalId}-${p.positionIdx}`}>
-                      <td>{p.side}</td>
-                      <td>{p.size}</td>
-                      <td>{p.entryPrice ?? '—'}</td>
-                      <td>{p.markPrice ?? '—'}</td>
-                      <td>{p.unrealizedPnl ?? '—'}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {jsonBySignalId[item.signalId] && (
-            <div style={{ marginTop: '0.6rem' }}>
-              <div style={{ fontSize: '0.85rem', color: 'var(--muted)', marginBottom: '0.35rem' }}>
-                JSON-снимок (БД + биржа)
-              </div>
-              <pre
-                style={{
-                  margin: 0,
-                  padding: '0.75rem',
-                  borderRadius: 8,
-                  border: '1px solid var(--border)',
-                  background: '#0f172a',
-                  color: '#e2e8f0',
-                  overflowX: 'auto',
-                  whiteSpace: 'pre',
-                  fontSize: '0.78rem',
-                  lineHeight: 1.4,
-                }}
-              >
-                {jsonBySignalId[item.signalId]}
-              </pre>
-            </div>
-          )}
+              </>
+            );
+          })()}
         </div>
       ))}
     </section>

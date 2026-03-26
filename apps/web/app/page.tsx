@@ -266,13 +266,13 @@ export default async function Home({
           </div>
         </div>
       )}
-      <LiveExposurePanel />
       <h2 className="pageTitle" style={{ fontSize: '1.1rem' }}>
         PnL по дням{source ? ` — ${source}` : ''}
       </h2>
       <div className="chartWrap">
         <PnlChart data={pnl} />
       </div>
+      <LiveExposurePanel />
     </>
   );
 }
