@@ -93,15 +93,14 @@ export function TradesList({ items, sourceOptions }: Props) {
                     )}
                   </td>
                   <td>
-                    <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <PnlEditControl
+                      signalId={s.id}
+                      status={s.status}
+                      realizedPnl={s.realizedPnl}
+                      disabled={Boolean(s.deletedAt)}
+                    >
                       <PnlDisplay pnl={s.realizedPnl} />
-                      <PnlEditControl
-                        signalId={s.id}
-                        status={s.status}
-                        realizedPnl={s.realizedPnl}
-                        disabled={Boolean(s.deletedAt)}
-                      />
-                    </div>
+                    </PnlEditControl>
                   </td>
                   <td>{formatDateTimeRu(s.createdAt)}</td>
                   <td>
@@ -144,14 +143,15 @@ export function TradesList({ items, sourceOptions }: Props) {
               </div>
               <div className="tradeCardMetaRow tradeCardPnlRow">
                 <span className="tradeCardLabel">PnL</span>
-                <span className="tradeCardValue" style={{ display: 'flex', gap: '0.35rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                  <PnlDisplay pnl={s.realizedPnl} />
+                <span className="tradeCardValue">
                   <PnlEditControl
                     signalId={s.id}
                     status={s.status}
                     realizedPnl={s.realizedPnl}
                     disabled={Boolean(s.deletedAt)}
-                  />
+                  >
+                    <PnlDisplay pnl={s.realizedPnl} />
+                  </PnlEditControl>
                 </span>
               </div>
             </div>

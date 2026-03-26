@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import type { ReactNode } from 'react';
+import { useId, useState } from 'react';
 
 import { useRouter } from 'next/navigation';
 
@@ -11,13 +12,15 @@ type Props = {
   status: string;
   realizedPnl: number | null;
   disabled?: boolean;
+  children: ReactNode;
 };
 
 const EDITABLE_STATUSES = new Set(['CLOSED_WIN', 'CLOSED_LOSS', 'CLOSED_MIXED']);
 
-export function PnlEditControl({ signalId, status, realizedPnl, disabled }: Props) {
+export function PnlEditControl({ signalId, status, realizedPnl, disabled, children }: Props) {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
+  const helpId = useId();
   const isDisabled = disabled || saving || !EDITABLE_STATUSES.has(status);
 
   async function onEdit() {
@@ -63,20 +66,27 @@ export function PnlEditControl({ signalId, status, realizedPnl, disabled }: Prop
     }
   }
 
+  const title = EDITABLE_STATUSES.has(status)
+    ? 'Скорректировать realized PnL'
+    : `Для статуса ${status} корректировка PnL недоступна`;
+
   return (
-    <button
-      className="btn btnSecondary btnSm"
-      type="button"
-      disabled={isDisabled}
-      onClick={() => void onEdit()}
-      title={
-        EDITABLE_STATUSES.has(status)
-          ? 'Скорректировать realized PnL'
-          : `Для статуса ${status} корректировка PnL недоступна`
-      }
-    >
-      {saving ? 'Сохранение…' : 'Изменить'}
-    </button>
+    <>
+      <button
+        className="pnlEditTrigger"
+        type="button"
+        disabled={isDisabled}
+        aria-disabled={isDisabled}
+        aria-describedby={helpId}
+        onClick={() => void onEdit()}
+        title={title}
+      >
+        {children}
+      </button>
+      <span id={helpId} className="srOnly">
+        {saving ? 'Сохранение…' : title}
+      </span>
+    </>
   );
 }
 
