@@ -96,7 +96,6 @@ export function listMissingRequiredFields(
   const missing: string[] = [];
   if (!p.pair?.trim()) missing.push('pair');
   if (!p.direction) missing.push('direction');
-  if (!p.entries?.length) missing.push('entries');
   if (p.stopLoss === undefined || Number.isNaN(Number(p.stopLoss))) {
     missing.push('stopLoss');
   }

@@ -16,7 +16,7 @@ import { SettingsService } from '../settings/settings.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { TranscriptService } from '../transcript/transcript.service';
 
-type MessageKind = 'signal' | 'result' | 'other';
+type MessageKind = 'signal' | 'close' | 'reentry' | 'result' | 'other';
 type UserbotFilterKind = 'signal' | 'close' | 'result' | 'reentry';
 type QrPhase =
   | 'idle'
@@ -749,14 +749,43 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       const groupName = chatMeta?.title?.trim() || ingest.chatId;
       const patternKind = await this.matchFilterKindByExamples(groupName, text);
 
-      const shouldTreatAsReentry =
-        patternKind === 'reentry' || this.isReentryText(text);
-      if (shouldTreatAsReentry) {
+      const useAiClassifier = await this.getBoolSetting(
+        'TELEGRAM_USERBOT_USE_AI_CLASSIFIER',
+        true,
+      );
+      const replyToMessageId = meta?.replyToMessageId?.trim() || undefined;
+      const quotedText = replyToMessageId
+        ? await this.fetchChatMessageText(ingest.chatId, replyToMessageId)
+        : undefined;
+      const cls = await this.classifyMessage(
+        text,
+        useAiClassifier,
+        patternKind,
+        groupName,
+        replyToMessageId,
+        quotedText,
+      );
+      const kind = cls.kind;
+      const aiRequest = cls.aiRequest;
+      const aiResponse = cls.aiResponse;
+      const hasQuotedSource = Boolean(replyToMessageId);
+
+      if (kind === 'reentry') {
+        if (!hasQuotedSource) {
+          await this.updateIngest(ingest.id, {
+            classification: 'other',
+            status: 'ignored',
+            error: 'Reentry-сообщение без цитаты исходного сигнала',
+            aiRequest,
+            aiResponse,
+          });
+          return;
+        }
         const reentry = await this.tryReentryFromReply({
           chatId: ingest.chatId,
           messageId: ingest.messageId,
           text,
-          replyToMessageId: meta?.replyToMessageId,
+          replyToMessageId,
         });
         await this.updateIngest(ingest.id, {
           classification: 'signal',
@@ -766,39 +795,38 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
               : 'reentry_placed'
             : 'ignored',
           error: reentry.ok ? null : reentry.error,
+          aiRequest,
+          aiResponse,
         });
         return;
       }
 
-      const shouldTreatAsClose =
-        patternKind === 'close' || this.isManualCloseCancellationText(text);
-      if (shouldTreatAsClose) {
+      if (kind === 'close') {
+        if (!hasQuotedSource) {
+          await this.updateIngest(ingest.id, {
+            classification: 'other',
+            status: 'ignored',
+            error: 'Close-сообщение без цитаты исходного сигнала',
+            aiRequest,
+            aiResponse,
+          });
+          return;
+        }
         const closeResult = await this.tryCloseSignalFromReply({
           chatId: ingest.chatId,
           messageId: ingest.messageId,
-          replyToMessageId: meta?.replyToMessageId,
+          replyToMessageId,
         });
         await this.updateIngest(ingest.id, {
           classification: 'result',
           status: closeResult.ok ? 'closed_by_reply' : 'ignored',
           error: closeResult.ok ? null : closeResult.error,
+          aiRequest,
+          aiResponse,
         });
         return;
       }
 
-      const useAiClassifier = await this.getBoolSetting(
-        'TELEGRAM_USERBOT_USE_AI_CLASSIFIER',
-        true,
-      );
-      const cls = await this.classifyMessage(
-        text,
-        useAiClassifier,
-        patternKind === 'signal' || patternKind === 'result' ? patternKind : undefined,
-        groupName,
-      );
-      const kind = cls.kind;
-      const aiRequest = cls.aiRequest;
-      const aiResponse = cls.aiResponse;
       if (kind !== 'signal') {
         await this.updateIngest(ingest.id, {
           classification: kind,
@@ -1556,8 +1584,10 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   private async classifyMessage(
     text: string,
     useAiClassifier: boolean,
-    preferredKind?: 'signal' | 'result',
+    preferredKind?: UserbotFilterKind,
     groupName?: string,
+    replyToMessageId?: string,
+    quotedText?: string,
   ): Promise<{ kind: MessageKind; aiRequest?: string; aiResponse?: string }> {
     if (preferredKind) {
       return {
@@ -1581,12 +1611,17 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     if (!useAiClassifier) {
       return { kind: 'other' };
     }
-    const ai = await this.transcript.classifyTradingMessage(text);
+    const ai = await this.transcript.classifyTradingMessage(text, {
+      replyToMessageId,
+      quotedText,
+    });
     const aiRequest = this.limitTrace(
       ai.debug?.request ??
         JSON.stringify({
           operation: 'classifyTradingMessage',
           text,
+          replyToMessageId: replyToMessageId ?? null,
+          quotedText: quotedText ?? null,
         }),
     );
     const aiResponse = this.limitTrace(

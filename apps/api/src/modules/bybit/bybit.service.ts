@@ -385,13 +385,20 @@ export class BybitService {
   }
 
   /** Базовая валидация направления/уровней сигнала. */
-  private validateSignalLevels(signal: SignalDto): string | undefined {
+  private validateSignalLevels(
+    signal: SignalDto,
+    marketEntryPrice?: number,
+  ): string | undefined {
     const entries = signal.entries;
-    if (!entries.length) {
-      return 'Не заданы входы';
+    if (!entries.length && !Number.isFinite(marketEntryPrice)) {
+      return 'Не удалось определить цену рыночного входа';
     }
-    const minEntry = Math.min(...entries);
-    const maxEntry = Math.max(...entries);
+    const minEntry = entries.length
+      ? Math.min(...entries)
+      : Number(marketEntryPrice);
+    const maxEntry = entries.length
+      ? Math.max(...entries)
+      : Number(marketEntryPrice);
     const sl = signal.stopLoss;
     const tps = signal.takeProfits;
 
@@ -1296,7 +1303,16 @@ export class BybitService {
     const side: 'Buy' | 'Sell' = signal.direction === 'long' ? 'Buy' : 'Sell';
 
     try {
-      const validationErr = this.validateSignalLevels(signal);
+      const lastPrice = await this.getLastPrice(client, symbol);
+      if (!lastPrice) {
+        void this.appLog.append(
+          'warn',
+          'bybit',
+          'placeSignalOrders: last price unavailable',
+          { symbol },
+        );
+      }
+      const validationErr = this.validateSignalLevels(signal, lastPrice);
       if (validationErr) {
         void this.appLog.append('warn', 'bybit', 'placeSignalOrders: signal validation failed', {
           symbol,
@@ -1364,16 +1380,10 @@ export class BybitService {
         client,
         symbol,
       );
-      const lastPrice = await this.getLastPrice(client, symbol);
-      if (!lastPrice) {
-        void this.appLog.append('warn', 'bybit', 'placeSignalOrders: last price unavailable, fallback to limit entries', {
-          symbol,
-        });
-      }
       const minQtyNum = parseFloat(minQty);
       const requestedEntries = signal.entries;
       let effectiveEntries = requestedEntries;
-      let weights = this.entryNotionalWeights(effectiveEntries.length);
+      let weights = this.entryNotionalWeights(effectiveEntries.length || 1);
 
       /**
        * Если бюджет не позволяет проставить все заданные входы (qty по какому-то входу
@@ -1421,7 +1431,62 @@ export class BybitService {
        * (по одному ордеру на каждый уровень TP, позиция делится поровну).
        */
 
-      for (let i = 0; i < effectiveEntries.length; i++) {
+      if (effectiveEntries.length === 0) {
+        if (!lastPrice) {
+          await this.orders.updateSignalStatus(signalRow.id, {
+            status: 'FAILED',
+          });
+          return {
+            ok: false,
+            error: 'Не удалось получить текущую цену для рыночного входа',
+            signalId: signalRow.id,
+          };
+        }
+
+        const qtyNum = leveragedNotional / lastPrice;
+        const qty = this.roundQty(qtyNum, qtyStep, minQty);
+        const orderRes = await client.submitOrder({
+          category: 'linear',
+          symbol,
+          side,
+          orderType: 'Market',
+          qty,
+          positionIdx: 0,
+        });
+
+        const oid = orderRes.result?.orderId;
+        if (oid) {
+          bybitIds.push(oid);
+        }
+
+        await this.orders.createOrderRecord({
+          signalId: signalRow.id,
+          bybitOrderId: oid,
+          orderKind: 'ENTRY',
+          side,
+          price: lastPrice,
+          qty: parseFloat(qty),
+          status: orderRes.retCode === 0 ? 'NEW' : 'FAILED',
+        });
+
+        if (orderRes.retCode !== 0) {
+          const errText = formatError(orderRes.retMsg ?? 'submitOrder failed');
+          void this.appLog.append('error', 'bybit', 'submitOrder Market отклонён', {
+            symbol,
+            retCode: orderRes.retCode,
+            retMsg: errText,
+          });
+          await this.orders.updateSignalStatus(signalRow.id, {
+            status: 'FAILED',
+          });
+          return {
+            ok: false,
+            error: errText,
+            signalId: signalRow.id,
+          };
+        }
+      } else {
+        for (let i = 0; i < effectiveEntries.length; i++) {
         const price = effectiveEntries[i]!;
         const share = weights[i] ?? 1 / effectiveEntries.length;
         const notionalSlice = leveragedNotional * share;
@@ -1472,44 +1537,45 @@ export class BybitService {
           status: orderRes.retCode === 0 ? 'NEW' : 'FAILED',
         });
 
-        if (orderRes.retCode !== 0) {
-          const errText = formatError(orderRes.retMsg ?? 'submitOrder failed');
-          const isDca = i > 0;
-          const insufficient = BybitService.isInsufficientBalanceError(errText);
+          if (orderRes.retCode !== 0) {
+            const errText = formatError(orderRes.retMsg ?? 'submitOrder failed');
+            const isDca = i > 0;
+            const insufficient = BybitService.isInsufficientBalanceError(errText);
 
-          if (isDca && insufficient) {
-            this.logger.warn(
-              `DCA skipped due to insufficient balance ${symbol} index=${i}: ${errText}`,
-            );
-            void this.appLog.append(
-              'warn',
-              'bybit',
-              'DCA пропущен: недостаточно маржи/баланса',
-              {
-                symbol,
-                signalId: signalRow.id,
-                entryIndex: i,
-                retCode: orderRes.retCode,
-                retMsg: errText,
-              },
-            );
-            continue;
+            if (isDca && insufficient) {
+              this.logger.warn(
+                `DCA skipped due to insufficient balance ${symbol} index=${i}: ${errText}`,
+              );
+              void this.appLog.append(
+                'warn',
+                'bybit',
+                'DCA пропущен: недостаточно маржи/баланса',
+                {
+                  symbol,
+                  signalId: signalRow.id,
+                  entryIndex: i,
+                  retCode: orderRes.retCode,
+                  retMsg: errText,
+                },
+              );
+              continue;
+            }
+
+            void this.appLog.append('error', 'bybit', 'submitOrder отклонён', {
+              symbol,
+              entryIndex: i,
+              retCode: orderRes.retCode,
+              retMsg: errText,
+            });
+            await this.orders.updateSignalStatus(signalRow.id, {
+              status: 'FAILED',
+            });
+            return {
+              ok: false,
+              error: errText,
+              signalId: signalRow.id,
+            };
           }
-
-          void this.appLog.append('error', 'bybit', 'submitOrder отклонён', {
-            symbol,
-            entryIndex: i,
-            retCode: orderRes.retCode,
-            retMsg: errText,
-          });
-          await this.orders.updateSignalStatus(signalRow.id, {
-            status: 'FAILED',
-          });
-          return {
-            ok: false,
-            error: errText,
-            signalId: signalRow.id,
-          };
         }
       }
 

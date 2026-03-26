@@ -15,10 +15,11 @@ export class SignalParseDto {
   @IsIn(['long', 'short'])
   direction!: 'long' | 'short';
 
+  @IsOptional()
   @IsArray()
   @IsNumber({}, { each: true })
   @Type(() => Number)
-  entries!: number[];
+  entries?: number[];
 
   @IsNumber()
   stopLoss!: number;

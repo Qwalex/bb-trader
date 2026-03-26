@@ -83,7 +83,7 @@ const TRANSCRIPT_RESPONSE_JSON_SCHEMA = {
 const CLASSIFIER_RESPONSE_JSON_SCHEMA = {
   type: 'object',
   properties: {
-    kind: { type: 'string', enum: ['signal', 'result', 'other'] },
+    kind: { type: 'string', enum: ['signal', 'close', 'reentry', 'result', 'other'] },
     reason: { type: 'string' },
   },
   required: ['kind', 'reason'],
@@ -135,7 +135,7 @@ Field rules:
 - direction must be long or short.
 - entries and leverage are optional.
 - entries: first price is main entry; following prices are DCA levels.
-- If the user gives no entry price but clearly wants to enter at market / "по рынку" / immediately, set entries to null and put only "entries" in missing when everything else is known.
+- If the user gives no entry price, treat it as market entry: set entries to null and do NOT ask for clarification only because entries are missing. The order will be placed at market at the execution stage.
 - If the message describes ONE entry zone as a range for the same purpose (e.g. "entry range 1 - 2", "buy zone 1-2", "диапазон входа 1 - 2"), use one entry equal to the midpoint, not two DCA levels.
 - Extract prices only from explicit labels (Entry, Stop loss, SL, Targets/TP, etc.). Do not blend, infer, or average numbers from different fields.
 - Field labels without actual values (e.g. "Entry:", "SL:", "TP1:" with no number after them) do NOT count as known values.
@@ -188,8 +188,11 @@ export class TranscriptService {
     private readonly bybit: BybitService,
   ) {}
 
-  async classifyTradingMessage(text: string): Promise<{
-    kind: 'signal' | 'result' | 'other';
+  async classifyTradingMessage(
+    text: string,
+    context?: { replyToMessageId?: string; quotedText?: string },
+  ): Promise<{
+    kind: 'signal' | 'close' | 'reentry' | 'result' | 'other';
     reason?: string;
     debug?: {
       model?: string;
@@ -199,29 +202,41 @@ export class TranscriptService {
     };
   }> {
     const classifierPrompt = `You classify trading-related Telegram messages.
+The user message may contain:
+- MAIN_MESSAGE: current message text
+- REPLY_TO_MESSAGE_ID: quoted/replied message id
+- QUOTED_MESSAGE: quoted/replied message text
+Use all provided parts together.
+
 Return ONLY strict JSON:
 {
-  "kind": "signal" | "result" | "other",
+  "kind": "signal" | "close" | "reentry" | "result" | "other",
   "reason": "short reason in Russian"
 }
-Decision policy:
-- First decide whether the message is a fresh actionable trade setup.
-- Return "signal" ONLY for a fresh setup with pair, side, stop-loss, and at least one take-profit. Entry may be omitted only if the message explicitly says market / immediately / "по рынку".
-- If any of pair, side, stop-loss, or take-profit is missing or ambiguous, do NOT return "signal".
-- Leverage and position size/order amount are optional and are NOT required for "signal".
 
-Return "result" for messages about an existing/past trade, including:
-- closed trade / manual close
-- TP hit / SL hit
-- profit, loss, PNL, percentages
-- duration, period, statistics, recap, performance summary
+Classification rules:
+1. Return "signal" ONLY for a fresh actionable trade setup with pair, side, stop-loss, and at least one take-profit. Entry is optional: if it is omitted, treat it as market entry at the signal placement stage. If any of the required fields above is missing or ambiguous, do NOT return "signal". Leverage and size are optional.
+2. Return "close" ONLY when the current message is a manual cancellation/force-close instruction for a previously quoted/replied signal. A quoted/replied context is required.
+3. Return "reentry" ONLY when the current message is a re-entry / add-entry / update instruction for a previously quoted/replied signal. A quoted/replied context is required.
+4. Return "result" for outcome/performance messages about an existing or past trade: TP hit, SL hit, closed trade report, profit/loss, PNL, percentages, duration, period, recap, statistics, performance summary.
+5. If the text contains result markers such as percentages, profit/loss, PNL, TP/SL outcome markers, duration/period, or closed-trade wording and is not clearly a quoted manual close command, return "result".
+6. Return "other" for everything else: commentary, chat, partial follow-ups, incomplete ideas, or anything that is not clearly one of the categories above.
 
-- If the message contains profit/loss info with percentages (e.g. "+12%", "Profit: 22.3%", "-5%"), TP/SL outcome markers, or closed-trade wording and does not also contain a full fresh setup, return "result".
-- Return "other" for everything else, including commentary, follow-ups, partial updates, and incomplete trade ideas that are not clearly a full fresh setup.
+Priority:
+- quoted manual close > close
+- quoted re-entry/update > reentry
+- fresh full setup > signal
+- outcome/performance report > result
+- otherwise > other
+
 Be conservative: if unsure, return "other".`;
+    const replyToMessageId = context?.replyToMessageId?.trim() || undefined;
+    const quotedText = context?.quotedText?.trim() || undefined;
     const requestPayload = {
       operation: 'classifyTradingMessage',
       text,
+      replyToMessageId: replyToMessageId ?? null,
+      quotedText: quotedText ?? null,
       prompt: classifierPrompt,
     };
 
@@ -253,9 +268,17 @@ Be conservative: if unsure, return "other".`;
     }
 
     try {
+      const userInput =
+        replyToMessageId || quotedText
+          ? [
+              `MAIN_MESSAGE:\n${text}`,
+              `REPLY_TO_MESSAGE_ID: ${replyToMessageId ?? 'none'}`,
+              `QUOTED_MESSAGE:\n${quotedText ?? 'none'}`,
+            ].join('\n\n')
+          : text;
       const messages = [
         { role: 'system', content: classifierPrompt },
-        { role: 'user', content: text },
+        { role: 'user', content: userInput },
       ];
       const content = await this.callOpenRouter(
         apiKey,
@@ -283,7 +306,13 @@ Be conservative: if unsure, return "other".`;
         };
       }
       const root = parsed.value as { kind?: string; reason?: string };
-      if (root.kind === 'signal' || root.kind === 'result' || root.kind === 'other') {
+      if (
+        root.kind === 'signal' ||
+        root.kind === 'close' ||
+        root.kind === 'reentry' ||
+        root.kind === 'result' ||
+        root.kind === 'other'
+      ) {
         return {
           kind: root.kind,
           reason: root.reason,
@@ -371,11 +400,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
         levOpts,
         defaultOrderUsd,
       );
-      return await this.tryFillMissingEntryFromMarket(
-        result,
-        levOpts,
-        defaultOrderUsd,
-      );
+      return result;
     } catch (e) {
       const ms = Date.now() - t0;
       const msg = e instanceof Error ? e.message : String(e);
@@ -444,11 +469,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
         levOpts,
         defaultOrderUsd,
       );
-      return await this.tryFillMissingEntryFromMarket(
-        result,
-        levOpts,
-        defaultOrderUsd,
-      );
+      return result;
     } catch (e) {
       const ms = Date.now() - t0;
       const msg = e instanceof Error ? e.message : String(e);
@@ -532,13 +553,8 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
         `parse: OpenRouter ok in ${ms}ms (primary=${model}${fallbackModels[0] ? `, fallback=${fallbackModels[0]}` : ''})`,
       );
       const levOpts = await this.getLeverageFieldOptions();
-      let parsed = this.finishTranscriptResult(
+      const parsed = this.finishTranscriptResult(
         this.parseModelContent(content, levOpts, defaultOrderUsd),
-        levOpts,
-        defaultOrderUsd,
-      );
-      parsed = await this.tryFillMissingEntryFromMarket(
-        parsed,
         levOpts,
         defaultOrderUsd,
       );
@@ -781,69 +797,6 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     return defaultOrderUsd;
   }
 
-  /**
-   * Если не хватает только цены входа, но пара уже известна — берём last/mark с Bybit
-   * и завершаем сигнал (лимит по текущей котировке ≈ вход «по рынку»).
-   */
-  private async tryFillMissingEntryFromMarket(
-    result: TranscriptResult,
-    leverageOpts: LeverageFieldOptions,
-    defaultOrderUsd: number,
-  ): Promise<TranscriptResult> {
-    if (result.ok !== 'incomplete') {
-      return result;
-    }
-    const missing = listMissingRequiredFields(result.partial, leverageOpts);
-    if (missing.length !== 1 || missing[0] !== 'entries') {
-      return result;
-    }
-    const pair = result.partial.pair?.trim();
-    if (!pair) {
-      return result;
-    }
-    const price = await this.bybit.getLastPriceForPair(normalizeTradingPair(pair));
-    if (price == null) {
-      return result;
-    }
-    const merged: Partial<SignalDto> = {
-      ...result.partial,
-      entries: [price],
-    };
-    const stillMissing = listMissingRequiredFields(merged, leverageOpts);
-    if (stillMissing.length > 0) {
-      return {
-        ok: 'incomplete',
-        partial: merged,
-        missing: stillMissing,
-        prompt: this.defaultPromptForMissing(stillMissing),
-      };
-    }
-    const completed = this.tryCompleteSignal(merged, leverageOpts, defaultOrderUsd);
-    if (completed.ok === true) {
-      void this.appLog.append('info', 'system', 'transcript: цена входа подставлена с рынка (Bybit)', {
-        pair: completed.signal.pair,
-        suggestedEntry: price,
-      });
-      return completed;
-    }
-    return {
-      ok: 'incomplete',
-      partial: merged,
-      missing: listMissingRequiredFields(merged, leverageOpts),
-      prompt:
-        `Цена входа не указана; с биржи получена котировка ≈ ${this.formatPriceForUser(price)}, но сигнал всё ещё не проходит проверку. Уточните параметры одним сообщением.`,
-    };
-  }
-
-  private formatPriceForUser(price: number): string {
-    const abs = Math.abs(price);
-    const maxFrac = abs >= 1 ? 4 : 8;
-    return price.toLocaleString('ru-RU', {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: maxFrac,
-    });
-  }
-
   /** Настройки плеча из SQLite / env: опциональная подстановка или обязательное поле в сигнале. */
   private async getLeverageFieldOptions(): Promise<LeverageFieldOptions> {
     const defRaw = await this.settings.get('DEFAULT_LEVERAGE');
@@ -934,7 +887,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     const signal: SignalDto = {
       pair: normalizeTradingPair(dto.pair),
       direction: dto.direction,
-      entries: dto.entries,
+      entries: dto.entries ?? [],
       stopLoss: dto.stopLoss,
       takeProfits: dto.takeProfits,
       leverage: dto.leverage,
