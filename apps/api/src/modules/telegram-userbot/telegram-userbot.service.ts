@@ -1217,6 +1217,22 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       },
     });
     if (!prev) {
+      const lookup = await this.collectSignalLookupDiagnostics(
+        params.chatId,
+        rootSource.messageId,
+        rootSource.chain,
+      );
+      void this.appLog.append('warn', 'telegram', 'Reentry: active signal not found for resolved root', {
+        sourceChatId: params.chatId,
+        quotedMessageId: replyToMessageId,
+        rootSourceMessageId: rootSource.messageId,
+        rootResolution: {
+          chain: rootSource.chain,
+          matchedSignalMessageIds: rootSource.matchedSignalMessageIds,
+          stopReason: rootSource.stopReason,
+        },
+        lookup,
+      });
       return {
         ok: false,
         error: `Для цитаты ${params.chatId}:${replyToMessageId} активный сигнал не найден (root: ${rootSource.messageId})`,
@@ -1230,6 +1246,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         quotedMessageId: replyToMessageId,
         rootSourceMessageId: rootSource.messageId,
         quoteChain: rootSource.chain,
+        matchedSignalMessageIds: rootSource.matchedSignalMessageIds,
+        stopReason: rootSource.stopReason,
       });
 
       const parsed = await this.transcript.parse('text', { text: params.text });
@@ -1537,6 +1555,22 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       },
     });
     if (!signal) {
+      const lookup = await this.collectSignalLookupDiagnostics(
+        params.chatId,
+        rootSource.messageId,
+        rootSource.chain,
+      );
+      void this.appLog.append('warn', 'telegram', 'Close: active signal not found for resolved root', {
+        sourceChatId: params.chatId,
+        quotedMessageId: replyToMessageId,
+        rootSourceMessageId: rootSource.messageId,
+        rootResolution: {
+          chain: rootSource.chain,
+          matchedSignalMessageIds: rootSource.matchedSignalMessageIds,
+          stopReason: rootSource.stopReason,
+        },
+        lookup,
+      });
       return {
         ok: false,
         error: `Для цитаты ${params.chatId}:${replyToMessageId} активный сигнал не найден (root: ${rootSource.messageId})`,
@@ -1547,6 +1581,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       quotedMessageId: replyToMessageId,
       rootSourceMessageId: rootSource.messageId,
       quoteChain: rootSource.chain,
+      matchedSignalMessageIds: rootSource.matchedSignalMessageIds,
+      stopReason: rootSource.stopReason,
       signalId: signal.id,
     });
 
@@ -1588,19 +1624,32 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   private async resolveRootSignalSourceMessageId(
     chatId: string,
     messageId: string,
-  ): Promise<{ messageId: string; chain: string[] }> {
+  ): Promise<{
+    messageId: string;
+    chain: string[];
+    matchedSignalMessageIds: string[];
+    stopReason: string;
+  }> {
     const startId = messageId.trim();
     if (!startId) {
-      return { messageId, chain: [] };
+      return {
+        messageId,
+        chain: [],
+        matchedSignalMessageIds: [],
+        stopReason: 'empty_start_id',
+      };
     }
 
     const visited = new Set<string>();
     const chain: string[] = [];
+    const matchedSignalMessageIds: string[] = [];
     let currentId: string | undefined = startId;
     let oldestMatchedId: string | undefined;
+    let stopReason = 'chain_end';
 
     for (let depth = 0; depth < 20 && currentId; depth += 1) {
       if (visited.has(currentId)) {
+        stopReason = 'cycle_detected';
         break;
       }
       visited.add(currentId);
@@ -1609,19 +1658,31 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       const hasSignal = await this.hasAnySignalForSourceMessage(chatId, currentId);
       if (hasSignal) {
         oldestMatchedId = currentId;
+        matchedSignalMessageIds.push(currentId);
       }
 
       const meta = await this.fetchChatMessageMeta(chatId, currentId);
+      if (meta.error) {
+        stopReason = `fetch_failed:${meta.error}`;
+        break;
+      }
       const nextId = meta.replyToMessageId?.trim();
       if (!nextId) {
+        stopReason = 'chain_end';
         break;
       }
       currentId = nextId;
     }
 
+    if (chain.length >= 20 && currentId) {
+      stopReason = 'depth_limit_reached';
+    }
+
     return {
       messageId: oldestMatchedId ?? startId,
       chain,
+      matchedSignalMessageIds,
+      stopReason,
     };
   }
 
@@ -1638,12 +1699,77 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     return count > 0;
   }
 
+  private async collectSignalLookupDiagnostics(
+    chatId: string,
+    rootSourceMessageId: string,
+    chain: string[],
+  ): Promise<{
+    rootAnyCount: number;
+    rootActiveCount: number;
+    rootStatuses: string[];
+    chainMatches: Array<{ messageId: string; total: number; active: number; statuses: string[] }>;
+  }> {
+    const rootSignals = await this.prisma.signal.findMany({
+      where: {
+        sourceChatId: chatId,
+        sourceMessageId: rootSourceMessageId,
+      },
+      select: {
+        id: true,
+        status: true,
+        deletedAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+    });
+
+    const chainUnique = Array.from(new Set(chain)).slice(0, 20);
+    const chainRows = await Promise.all(
+      chainUnique.map(async (messageId) => {
+        const rows = await this.prisma.signal.findMany({
+          where: {
+            sourceChatId: chatId,
+            sourceMessageId: messageId,
+          },
+          select: {
+            status: true,
+            deletedAt: true,
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+        });
+        const active = rows.filter(
+          (row) =>
+            row.deletedAt == null && ['ORDERS_PLACED', 'OPEN', 'PARSED'].includes(row.status),
+        ).length;
+        return {
+          messageId,
+          total: rows.length,
+          active,
+          statuses: rows.map((row) => row.status),
+        };
+      }),
+    );
+
+    const rootActive = rootSignals.filter(
+      (row) =>
+        row.deletedAt == null && ['ORDERS_PLACED', 'OPEN', 'PARSED'].includes(row.status),
+    ).length;
+
+    return {
+      rootAnyCount: rootSignals.length,
+      rootActiveCount: rootActive,
+      rootStatuses: rootSignals.map((row) => row.status),
+      chainMatches: chainRows.filter((row) => row.total > 0),
+    };
+  }
+
   private async fetchChatMessageMeta(
     chatId: string,
     messageId: string,
-  ): Promise<{ text?: string; replyToMessageId?: string }> {
+  ): Promise<{ text?: string; replyToMessageId?: string; error?: string }> {
     if (!this.client || !(await this.isClientAuthorized(this.client))) {
-      return {};
+      return { error: 'telegram_client_unavailable' };
     }
     try {
       const list = (await this.client.getMessages(chatId, {
@@ -1658,10 +1784,11 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         ),
       };
     } catch (e) {
+      const err = formatError(e);
       this.logger.warn(
-        `fetchChatMessageMeta failed chat=${chatId} msg=${messageId}: ${formatError(e)}`,
+        `fetchChatMessageMeta failed chat=${chatId} msg=${messageId}: ${err}`,
       );
-      return {};
+      return { error: err };
     }
   }
 
