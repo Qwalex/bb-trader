@@ -899,7 +899,8 @@ export class BybitService {
       });
     }
 
-    return { bybitConnected, items };
+    const exposedItems = items.filter((item) => item.exchange.hasExposure);
+    return { bybitConnected, items: exposedItems };
   }
 
   async getSignalExecutionDebugSnapshot(

@@ -114,6 +114,7 @@ Rules:
 - If values for ALL required fields are known and unambiguous, this is definitely a signal: set status to "complete" and fill signal fully.
 - If values for ONE or TWO required fields are unknown or ambiguous, clarification is required: set status to "incomplete", put known values in signal and put null for unknown fields, list missing field keys in "missing", and ask ONE clear clarifying question in Russian in "prompt".
 - If values for ALL required fields are unknown, this is NOT a signal: set status to "incomplete", keep required signal fields as null, set missing to [], and set prompt to null (do not ask a clarifying question).
+- If the message is clearly a trade RESULT report (e.g. "TP ✅", "Profit: ...%", "PNL ...%", "Duration/Period", "closed", "sl hit", "tp hit") and does not contain a full fresh setup, this is NOT a new signal: set status to "incomplete", keep required signal fields as null, set missing to [], and set prompt to null.
 - Required fields for a valid signal are pair, direction, stopLoss, and takeProfits. entries and leverage are optional.
 - Field labels without actual values (e.g. "Entry:", "SL:", "TP1:" with no number after them) do NOT count as known values. If required fields are listed but have no actual values, treat them as unknown; if this results in all required fields being unknown, this is NOT a signal.
 - pair: symbol as written in the message (e.g. BTCUSDT, ethusdt, ETH/USDT, BTC-USDT); casing and separators do not matter — the system normalizes to the exchange form.
@@ -472,6 +473,22 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     }
 
     const defaultOrderUsd: number = await this.settings.getDefaultOrderUsd();
+    if (
+      kind === 'text' &&
+      typeof payload.text === 'string' &&
+      this.classifyHeuristic(payload.text) === 'result'
+    ) {
+      return {
+        ok: 'incomplete',
+        partial: {
+          orderUsd: defaultOrderUsd,
+          capitalPercent: 0,
+        },
+        missing: [],
+        prompt:
+          'Похоже на отчёт по уже закрытой/отработанной сделке, а не на новый сигнал. Новый ордер не создаю.',
+      };
+    }
     const messages = this.buildMessages(kind, payload, defaultOrderUsd);
     const t0 = Date.now();
     this.logger.log(
@@ -1108,7 +1125,14 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     if (signalish) {
       return 'signal';
     }
-    if (/\b(result|результат|прибыль|убыток|закрыт|tp hit|sl hit|closed)\b/.test(t)) {
+    const hasResultKeywords =
+      /\b(result|profit|pnl|closed|tp hit|sl hit|duration|period)\b/.test(t) ||
+      /(результат|прибыль|убыток|закрыт|закрыта|закрыто)/u.test(t);
+    const hasPercent = /[-+]?\d+(?:[.,]\d+)?\s*%/u.test(t);
+    const hasResultPattern =
+      /profit\s*:|pnl\s*:|tp\s*\d+\s*✅|duration\s*:|period\s*:/u.test(t) ||
+      /✅\s*$/.test(t);
+    if (hasResultKeywords || (hasPercent && hasResultPattern)) {
       return 'result';
     }
     return 'other';
