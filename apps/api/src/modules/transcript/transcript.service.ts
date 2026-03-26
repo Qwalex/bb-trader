@@ -116,6 +116,14 @@ Decision policy:
 3. Use status="incomplete" with a clarifying question ONLY when the message is clearly a fresh setup but exactly 1 or 2 required fields are unknown or ambiguous.
 4. If 3 or more required fields are unknown/ambiguous, or the message is a report/update/commentary, do NOT ask a question. Return status="incomplete", missing=[], prompt=null.
 
+Special update mode:
+- If the user input contains sections named BASE_SIGNAL_JSON and UPDATE_MESSAGE, this is NOT a fresh setup classification task.
+- In that case, treat BASE_SIGNAL_JSON as the authoritative current signal state.
+- Extract only explicit changes from UPDATE_MESSAGE and merge them into BASE_SIGNAL_JSON.
+- Keep all unchanged fields from BASE_SIGNAL_JSON as-is.
+- ORIGINAL_SIGNAL_MESSAGE and QUOTED_MESSAGE are reference context only; do not discard known BASE_SIGNAL_JSON values just because they are absent in UPDATE_MESSAGE.
+- Return the merged signal. Ask a clarifying question only if UPDATE_MESSAGE makes a required field ambiguous after merging.
+
 Messages that are NOT a fresh setup unless they also contain a full new setup:
 - trade result or performance report
 - TP/SL hit report
@@ -489,6 +497,12 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       imageMime?: string;
       audioBase64?: string;
       audioMime?: string;
+      reentryContext?: {
+        baseSignal: Partial<SignalDto>;
+        rootSourceMessageId?: string;
+        originalMessageText?: string;
+        quotedMessageText?: string;
+      };
       /** Продолжение черновика: то же сообщение + новый контент (фото/голос). */
       continuationContext?: {
         partial: Partial<SignalDto>;
@@ -583,6 +597,12 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       imageMime?: string;
       audioBase64?: string;
       audioMime?: string;
+      reentryContext?: {
+        baseSignal: Partial<SignalDto>;
+        rootSourceMessageId?: string;
+        originalMessageText?: string;
+        quotedMessageText?: string;
+      };
       continuationContext?: {
         partial: Partial<SignalDto>;
         userTurns: string[];
@@ -590,6 +610,9 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     },
     defaultOrderUsd: number,
   ): TranscriptMessage[] {
+    const reentry = payload.reentryContext;
+    const hasReentryContext =
+      reentry != null && Object.keys(reentry.baseSignal ?? {}).length > 0;
     const cont = payload.continuationContext;
     const hasContinuationContext =
       cont != null &&
@@ -603,6 +626,25 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
 
     if (kind === 'text') {
       const text = payload.text ?? '';
+      if (hasReentryContext) {
+        const userContent = [
+          'REENTRY_UPDATE_MODE: true',
+          reentry?.rootSourceMessageId
+            ? `ROOT_SOURCE_MESSAGE_ID: ${reentry.rootSourceMessageId}`
+            : undefined,
+          `BASE_SIGNAL_JSON:\n${JSON.stringify(reentry?.baseSignal ?? {})}`,
+          `ORIGINAL_SIGNAL_MESSAGE:\n${reentry?.originalMessageText?.trim() || 'none'}`,
+          `QUOTED_MESSAGE:\n${reentry?.quotedMessageText?.trim() || 'none'}`,
+          `UPDATE_MESSAGE:\n${text}`,
+          'Task: merge UPDATE_MESSAGE into BASE_SIGNAL_JSON and return the merged signal JSON.',
+        ]
+          .filter((part): part is string => Boolean(part))
+          .join('\n\n');
+        return [
+          { role: 'system', content: buildSystemPrompt(defaultOrderUsd) },
+          { role: 'user', content: userContent },
+        ];
+      }
       return [
         { role: 'system', content: buildSystemPrompt(defaultOrderUsd) },
         { role: 'user', content: contPrefix + text },

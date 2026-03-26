@@ -842,6 +842,28 @@ export class BybitService {
     return out;
   }
 
+  private static pickLiveExposurePositionForDirection(
+    positions: LiveExposurePosition[],
+    direction: 'long' | 'short',
+  ): LiveExposurePosition | undefined {
+    const wantSide = direction === 'long' ? 'buy' : 'sell';
+    const matched = positions.find(
+      (row) => String(row.side ?? '').trim().toLowerCase() === wantSide,
+    );
+    if (matched) {
+      return matched;
+    }
+    if (positions.length === 1) {
+      const only = positions[0];
+      const side = String(only?.side ?? '').trim().toLowerCase();
+      if (side === 'buy' || side === 'sell') {
+        return undefined;
+      }
+      return only;
+    }
+    return undefined;
+  }
+
   async getLiveExposureSnapshot(): Promise<{
     bybitConnected: boolean;
     items: LiveExposureItem[];
@@ -2742,16 +2764,33 @@ export class BybitService {
 
       try {
         const symNorm = normalizeTradingPair(fresh.pair);
-        const pos = await client.getPositionInfo({
-          category: 'linear',
-          symbol: symNorm,
-        });
-        const size = pos.result?.list?.[0]?.size;
-        const posSize = size ? Math.abs(parseFloat(size)) : 0;
+        const livePositions = await this.getExchangePositions(client, symNorm);
+        const mainPosition = BybitService.pickLiveExposurePositionForDirection(
+          livePositions,
+          fresh.direction as 'long' | 'short',
+        );
+        const posSize = mainPosition ? Math.abs(mainPosition.size) : 0;
         const hadFill = fresh.orders.some((o) =>
           BybitService.isFilledOrderStatus(o.status),
         );
         if (hadFill && posSize === 0 && fresh.status === 'ORDERS_PLACED') {
+          void this.appLog.append(
+            'debug',
+            'bybit',
+            'poll: no live position for signal direction before close candidate evaluation',
+            {
+              signalId: fresh.id,
+              pair: symNorm,
+              direction: fresh.direction,
+              hadFill,
+              positionSnapshot: livePositions.map((row) => ({
+                side: row.side,
+                size: row.size,
+                positionIdx: row.positionIdx,
+                entryPrice: row.entryPrice,
+              })),
+            },
+          );
           const ourIds = new Set<string>(
             fresh.orders
               .map((o) => (o.bybitOrderId ? String(o.bybitOrderId) : ''))

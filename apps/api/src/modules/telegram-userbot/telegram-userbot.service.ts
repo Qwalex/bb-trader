@@ -1250,7 +1250,21 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         stopReason: rootSource.stopReason,
       });
 
-      const parsed = await this.transcript.parse('text', { text: params.text });
+      const [originalMessageText, quotedMessageText] = await Promise.all([
+        this.fetchChatMessageText(params.chatId, rootSource.messageId),
+        replyToMessageId !== rootSource.messageId
+          ? this.fetchChatMessageText(params.chatId, replyToMessageId)
+          : Promise.resolve(undefined),
+      ]);
+      const parsed = await this.transcript.parse('text', {
+        text: params.text,
+        reentryContext: {
+          baseSignal: base,
+          rootSourceMessageId: rootSource.messageId,
+          originalMessageText,
+          quotedMessageText,
+        },
+      });
       if (parsed.ok === false) {
         return { ok: false, error: parsed.error };
       }
