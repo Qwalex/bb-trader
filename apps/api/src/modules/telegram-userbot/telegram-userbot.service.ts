@@ -978,14 +978,17 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
   private isManualCloseCancellationText(text: string): boolean {
     const t = text.toLowerCase();
+    // \b works only with ASCII; for Cyrillic use Unicode lookahead/lookbehind
     const hasClosedWord =
       /\b(closed|close)\b/.test(t) ||
-      /\b(закрыт|закрыта|закрыто|закрыли|закрываем|отменен|отмена)\b/u.test(t);
+      /(?<!\p{L})(закрыт|закрыта|закрыто|закрыли|закрываем|отменен|отмена)(?!\p{L})/u.test(t);
     if (!hasClosedWord) {
       return false;
     }
     const hasTpOrSl =
-      /\b(tp|take[\s-]?profit|sl|stop[\s-]?loss|стоп|тейк|стоп-лосс)\b/u.test(t) ||
+      /\b(tp|take[\s-]?profit|sl|stop[\s-]?loss)\b/.test(t) ||
+      /(?<!\p{L})(стоп|тейк)(?!\p{L})/u.test(t) ||
+      /стоп-лосс/u.test(t) ||
       /✅|❌|🟢|🔴/.test(text);
     return !hasTpOrSl;
   }
@@ -993,8 +996,10 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   private isReentryText(text: string): boolean {
     const t = text.toLowerCase();
     return (
-      /\b(re[-\s]?entry|reentry|re enter|re-enter)\b/.test(t) ||
-      /\b(перезаход|перезаходим|перезайти|повторный вход|снова входим)\b/u.test(t)
+      /\b(re[-\s]?entry|reentry|re[\s-]enter)\b/.test(t) ||
+      /(?<!\p{L})(перезаход|перезаходим|перезайти)(?!\p{L})/u.test(t) ||
+      /повторный вход/u.test(t) ||
+      /снова входим/u.test(t)
     );
   }
 
