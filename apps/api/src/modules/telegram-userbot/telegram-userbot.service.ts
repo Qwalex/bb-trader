@@ -690,6 +690,11 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       status: 'ignored',
     });
     if (!ingest) {
+      void this.appLog.append('debug', 'telegram', 'Userbot: duplicate ingest skipped', {
+        chatId,
+        messageId,
+        dedupMessageKey,
+      });
       return;
     }
 
@@ -720,6 +725,10 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     options?: { enforceBalanceGuard?: boolean },
   ): Promise<void> {
     try {
+      this.appendIngestStageLog('debug', 'Userbot: processing started', ingest, {
+        replyToMessageId: meta?.replyToMessageId ?? null,
+        textPreview: this.makeTextPreview(text),
+      });
       await this.updateIngest(ingest.id, {
         classification: 'other',
         status: 'ignored',
@@ -731,6 +740,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       if (options?.enforceBalanceGuard) {
         const lowBalance = await this.getLowBalanceGuardState();
         if (lowBalance.ignore) {
+          this.appendIngestStageLog('warn', 'Userbot: skipped by low balance guard', ingest, {
+            reason: lowBalance.reason ?? null,
+          });
           await this.updateIngest(ingest.id, {
             classification: 'other',
             status: 'ignored',
@@ -769,9 +781,20 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       const aiRequest = cls.aiRequest;
       const aiResponse = cls.aiResponse;
       const hasQuotedSource = Boolean(replyToMessageId);
+      this.appendIngestStageLog('info', 'Userbot: classification resolved', ingest, {
+        groupName,
+        patternKind: patternKind ?? null,
+        useAiClassifier,
+        kind,
+        hasQuotedSource,
+        replyToMessageId: replyToMessageId ?? null,
+      });
 
       if (kind === 'reentry') {
         if (!hasQuotedSource) {
+          this.appendIngestStageLog('warn', 'Userbot: reentry ignored without quote', ingest, {
+            kind,
+          });
           await this.updateIngest(ingest.id, {
             classification: 'other',
             status: 'ignored',
@@ -787,6 +810,14 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           text,
           replyToMessageId,
         });
+        this.appendIngestStageLog(
+          reentry.ok ? 'info' : 'warn',
+          'Userbot: reentry processing finished',
+          ingest,
+          reentry.ok
+            ? { mode: reentry.mode, replyToMessageId }
+            : { error: reentry.error, replyToMessageId },
+        );
         await this.updateIngest(ingest.id, {
           classification: 'signal',
           status: reentry.ok
@@ -803,6 +834,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
       if (kind === 'close') {
         if (!hasQuotedSource) {
+          this.appendIngestStageLog('warn', 'Userbot: close ignored without quote', ingest, {
+            kind,
+          });
           await this.updateIngest(ingest.id, {
             classification: 'other',
             status: 'ignored',
@@ -817,6 +851,12 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           messageId: ingest.messageId,
           replyToMessageId,
         });
+        this.appendIngestStageLog(
+          closeResult.ok ? 'info' : 'warn',
+          'Userbot: close processing finished',
+          ingest,
+          closeResult.ok ? { replyToMessageId } : { error: closeResult.error, replyToMessageId },
+        );
         await this.updateIngest(ingest.id, {
           classification: 'result',
           status: closeResult.ok ? 'closed_by_reply' : 'ignored',
@@ -828,6 +868,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       }
 
       if (kind !== 'signal') {
+        this.appendIngestStageLog('info', 'Userbot: ignored after classification', ingest, {
+          classification: kind,
+        });
         await this.updateIngest(ingest.id, {
           classification: kind,
           status: 'ignored',
@@ -837,9 +880,16 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
+      this.appendIngestStageLog('debug', 'Userbot: parse started', ingest, {
+        kind,
+      });
       const parsed = await this.transcript.parse('text', { text });
       if (parsed.ok !== true) {
         const parseError = parsed.ok === false ? parsed.error : parsed.prompt;
+        this.appendIngestStageLog('warn', 'Userbot: parse did not produce a signal', ingest, {
+          parseStatus: parsed.ok,
+          error: parseError,
+        });
         await this.updateIngest(ingest.id, {
           classification: parsed.ok === 'incomplete' ? 'other' : 'signal',
           status: parsed.ok === 'incomplete' ? 'ignored' : 'parse_error',
@@ -863,6 +913,13 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
       const signal = parsed.signal;
       signal.source = chatMeta?.title;
+      this.appendIngestStageLog('info', 'Userbot: parse produced signal', ingest, {
+        pair: signal.pair,
+        direction: signal.direction,
+        entriesCount: signal.entries.length,
+        takeProfitsCount: signal.takeProfits.length,
+        leverage: signal.leverage,
+      });
 
       if (
         await this.bybit.wouldDuplicateActivePairDirection(
@@ -870,6 +927,10 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           signal.direction,
         )
       ) {
+        this.appendIngestStageLog('warn', 'Userbot: duplicate active pair/direction', ingest, {
+          pair: signal.pair,
+          direction: signal.direction,
+        });
         await this.updateIngest(ingest.id, {
           classification: 'signal',
           status: 'duplicate_signal',
@@ -887,6 +948,11 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         ? true
         : await this.tryCreateSignalHash(signalHash);
       if (!isNewSignal) {
+        this.appendIngestStageLog('warn', 'Userbot: duplicate signal hash', ingest, {
+          signalHash,
+          pair: signal.pair,
+          direction: signal.direction,
+        });
         await this.updateIngest(ingest.id, {
           classification: 'signal',
           status: 'duplicate_signal',
@@ -903,6 +969,11 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         false,
       );
       if (requireConfirmation) {
+        this.appendIngestStageLog('info', 'Userbot: waiting external confirmation', ingest, {
+          signalHash,
+          pair: signal.pair,
+          direction: signal.direction,
+        });
         await this.updateIngest(ingest.id, {
           classification: 'signal',
           status: 'blocked_by_setting',
@@ -918,6 +989,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           rawMessage: text,
           onResult: async (result) => {
             if (result.decision === 'rejected') {
+              this.appendIngestStageLog('info', 'Userbot: confirmation rejected by user', ingest, {
+                actorUserId: result.actorUserId ?? null,
+              });
               await this.updateIngest(ingest.id, {
                 status: 'cancelled_by_confirmation',
                 error: `Отклонено пользователем ${result.actorUserId ?? ''}`.trim(),
@@ -925,6 +999,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
               return;
             }
             if (!result.ok) {
+              this.appendIngestStageLog('error', 'Userbot: confirmation accepted but placement failed', ingest, {
+                error: result.error ?? 'unknown',
+              });
               await this.updateIngest(ingest.id, {
                 status: 'place_error',
                 error:
@@ -933,6 +1010,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
               });
               return;
             }
+            this.appendIngestStageLog('info', 'Userbot: confirmation accepted and placement succeeded', ingest, {
+              actorUserId: result.actorUserId ?? null,
+            });
             await this.updateIngest(ingest.id, {
               status: 'placed',
               error: null,
@@ -940,10 +1020,16 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           },
         });
         if (!req.ok) {
+          this.appendIngestStageLog('warn', 'Userbot: failed to send confirmation request', ingest, {
+            error: req.error ?? null,
+          });
           await this.updateIngest(ingest.id, {
             error: `Ожидание подтверждения: ${req.error ?? 'не удалось отправить запрос в бот'}`,
           });
         } else {
+          this.appendIngestStageLog('info', 'Userbot: confirmation request sent', ingest, {
+            deliveredTo: req.deliveredTo,
+          });
           await this.updateIngest(ingest.id, {
             error: `Ожидает подтверждение в боте (доставлено: ${req.deliveredTo})`,
           });
@@ -951,12 +1037,23 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
+      this.appendIngestStageLog('info', 'Userbot: placing signal on Bybit', ingest, {
+        pair: signal.pair,
+        direction: signal.direction,
+        signalHash,
+      });
       const place = await this.bybit.placeSignalOrders(signal, text, {
         chatId: ingest.chatId,
         messageId: ingest.messageId,
       });
       if (!place.ok) {
         const placeError = formatError(place.error);
+        this.appendIngestStageLog('error', 'Userbot: Bybit placement failed', ingest, {
+          pair: signal.pair,
+          direction: signal.direction,
+          signalHash,
+          error: placeError,
+        });
         await this.updateIngest(ingest.id, {
           classification: 'signal',
           status: 'place_error',
@@ -975,6 +1072,13 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
+      this.appendIngestStageLog('info', 'Userbot: Bybit placement succeeded', ingest, {
+        pair: signal.pair,
+        direction: signal.direction,
+        signalHash,
+        signalId: place.signalId,
+        bybitOrderIds: place.bybitOrderIds,
+      });
       await this.updateIngest(ingest.id, {
         classification: 'signal',
         status: 'placed',
@@ -990,6 +1094,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       });
     } catch (e) {
       const err = formatError(e);
+      this.appendIngestStageLog('error', 'Userbot: pipeline exception', ingest, {
+        error: err,
+      });
       await this.updateIngest(ingest.id, {
         status: 'parse_error',
         error: err,
@@ -1549,6 +1656,28 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       return undefined;
     }
     return Array.from(new Set(parts)).slice(0, 8);
+  }
+
+  private appendIngestStageLog(
+    level: 'debug' | 'info' | 'warn' | 'error',
+    message: string,
+    ingest: { id: string; chatId: string; messageId: string },
+    payload?: Record<string, unknown>,
+  ): void {
+    void this.appLog.append(level, 'telegram', message, {
+      ingestId: ingest.id,
+      chatId: ingest.chatId,
+      messageId: ingest.messageId,
+      ...payload,
+    });
+  }
+
+  private makeTextPreview(text: string, max = 180): string {
+    const normalized = text.replace(/\s+/g, ' ').trim();
+    if (normalized.length <= max) {
+      return normalized;
+    }
+    return `${normalized.slice(0, max)}...`;
   }
 
   private async notifySignalFailureToBot(params: {

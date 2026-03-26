@@ -2549,7 +2549,48 @@ export class BybitService {
       return;
     }
 
-    const openSignals = await this.orders.listOpenSignals();
+    let openSignals = await this.orders.listOpenSignals();
+    const staleCandidates = openSignals.filter((sig) => sig.status === 'ORDERS_PLACED');
+    const uniquePairDirections = new Map<string, { pair: string; direction: 'long' | 'short' }>();
+    for (const sig of staleCandidates) {
+      const symbol = normalizeTradingPair(sig.pair);
+      const key = `${symbol}:${sig.direction}`;
+      if (!uniquePairDirections.has(key)) {
+        uniquePairDirections.set(key, {
+          pair: symbol,
+          direction: sig.direction as 'long' | 'short',
+        });
+      }
+    }
+
+    for (const { pair, direction } of uniquePairDirections.values()) {
+      try {
+        const busy = await this.hasExchangeExposureForDirection(client, pair, direction);
+        if (busy) {
+          continue;
+        }
+        const reconciled =
+          await this.orders.reconcileStaleOpenSignalsForPairAndDirection(pair, direction);
+        if (reconciled > 0) {
+          void this.appLog.append(
+            'info',
+            'bybit',
+            'poll: автоматически сняты зависшие ORDERS_PLACED при чистой бирже',
+            {
+              symbol: pair,
+              direction,
+              signalsUpdated: reconciled,
+            },
+          );
+        }
+      } catch (err) {
+        this.logger.warn(
+          `poll reconcile stale ${pair} ${direction}: ${formatError(err)}`,
+        );
+      }
+    }
+
+    openSignals = await this.orders.listOpenSignals();
     for (const sig of openSignals) {
       for (const ord of sig.orders) {
         if (!ord.bybitOrderId) continue;
