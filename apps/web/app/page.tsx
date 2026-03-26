@@ -30,6 +30,9 @@ type TopSources = {
   byPnl: SourceStatsItem[];
   byWinrate: SourceStatsItem[];
 };
+type SettingsRaw = {
+  settings: { key: string; value: string }[];
+};
 type UserbotStatus = {
   balanceGuard?: {
     minBalanceUsd: number;
@@ -49,16 +52,44 @@ export default async function Home({
   let stats: Stats | null = null;
   let pnl: PnlPoint[] = [];
   let top: TopSources | null = null;
+  let sourceOptions: string[] = [];
   let userbotStatus: UserbotStatus | null = null;
   let err: string | null = null;
   try {
     const q = new URLSearchParams();
     if (source) q.set('source', source);
     const qs = q.toString();
-    [stats, pnl, top] = await Promise.all([
+    [stats, pnl, top, sourceOptions] = await Promise.all([
       fetchJson<Stats>(`/orders/stats${qs ? `?${qs}` : ''}`),
       fetchJson<PnlPoint[]>(`/orders/pnl-series?bucket=day${source ? `&source=${encodeURIComponent(source)}` : ''}`),
       fetchJson<TopSources>('/orders/top-sources?limit=5'),
+      (async () => {
+        try {
+          const [sourcesFromDb, settingsRaw] = await Promise.all([
+            fetchJson<string[]>('/orders/sources'),
+            fetchJson<SettingsRaw>('/settings/raw'),
+          ]);
+          const raw = settingsRaw.settings.find((r) => r.key === 'SOURCE_LIST')?.value;
+          let sourcesFromSettings: string[] = [];
+          if (raw && raw.trim()) {
+            try {
+              const parsed = JSON.parse(raw) as unknown;
+              if (Array.isArray(parsed)) {
+                sourcesFromSettings = parsed
+                  .map((v) => (typeof v === 'string' ? v.trim() : ''))
+                  .filter((v) => v.length > 0);
+              }
+            } catch {
+              // ignore malformed SOURCE_LIST
+            }
+          }
+          return Array.from(new Set([...sourcesFromDb, ...sourcesFromSettings])).sort((a, b) =>
+            a.localeCompare(b, 'ru'),
+          );
+        } catch {
+          return [];
+        }
+      })(),
     ]);
   } catch (e) {
     err = e instanceof Error ? e.message : 'Ошибка API';
@@ -87,11 +118,17 @@ export default async function Home({
       <form className="filters" method="get" action="/">
         <label>
           Источник
-          <input
+          <select
             name="source"
             defaultValue={source}
-            placeholder="например AI Gloden Crypto"
-          />
+          >
+            <option value="">все</option>
+            {sourceOptions.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
         </label>
         <button
           type="submit"
@@ -158,8 +195,8 @@ export default async function Home({
         </div>
       )}
       {top && (
-        <div className="grid" style={{ marginTop: '1rem' }}>
-          <div className="card" style={{ gridColumn: 'span 3' }}>
+        <div className="grid topSources" style={{ marginTop: '1rem' }}>
+          <div className="card" style={{ gridColumn: 'span 5' }}>
             <h3>Топ источников по PnL</h3>
             <div className="tableWrap" style={{ marginTop: '0.5rem' }}>
               <table>
@@ -188,7 +225,7 @@ export default async function Home({
               </table>
             </div>
           </div>
-          <div className="card" style={{ gridColumn: 'span 3' }}>
+          <div className="card" style={{ gridColumn: 'span 5' }}>
             <h3>Топ источников по Winrate</h3>
             <div className="tableWrap" style={{ marginTop: '0.5rem' }}>
               <table>

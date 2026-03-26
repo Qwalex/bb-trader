@@ -109,7 +109,7 @@ export default async function TradesPage({
   const buildPageLink = (p: number) => {
     const nq = new URLSearchParams(q);
     nq.set('page', String(p));
-    return `/trades?${nq.toString()}`;
+    return `?${nq.toString()}`;
   };
 
   return (
