@@ -2413,6 +2413,24 @@ export class BybitService {
                   siblingId: sibling.id,
                 },
               );
+            } else if (!this.hasOpenEntryOrders(fresh.orders)) {
+              // Позиция уже 0 и входы не висят, но closedPnL не матчится по нашим orderId
+              // (часто при закрытии через setTradingStop/SL с отдельным orderId).
+              await this.orders.updateSignalStatus(fresh.id, {
+                status: 'CLOSED_MIXED',
+                realizedPnl: null,
+                closedAt: new Date(),
+              });
+              void this.appLog.append(
+                'info',
+                'bybit',
+                'poll: позиция закрыта, но closed PnL не привязан к нашим orderId — CLOSED_MIXED',
+                {
+                  signalId: fresh.id,
+                  pair: symNorm,
+                  trackedOrderIds: Array.from(ourIds),
+                },
+              );
             }
           }
         }
