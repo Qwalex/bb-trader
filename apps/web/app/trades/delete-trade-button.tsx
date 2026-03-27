@@ -13,12 +13,12 @@ export function DeleteTradeButton(props: {
   const router = useRouter();
   const [deleting, setDeleting] = useState(false);
 
+  const isPlaced = props.status === 'ORDERS_PLACED';
   const isDisabled =
     deleting || props.status === 'OPEN' || props.status === 'PARSED';
 
   async function onDelete() {
     if (isDisabled) return;
-    const isPlaced = props.status === 'ORDERS_PLACED';
     const ok = window.confirm(
       isPlaced
         ? `Удалить сделку ${props.pair}?\n\nНа Bybit будут отменены ордера по паре и закрыта позиция (если есть), затем сделка скроется из статистики (можно восстановить).`
