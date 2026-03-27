@@ -30,6 +30,26 @@ const KIND_LABEL: Record<FilterKind, string> = {
   reentry: 'Перезаход в позицию',
 };
 
+const SECTION_TITLE_STYLE = {
+  marginBottom: '0.7rem',
+  display: 'inline-block',
+  padding: '0.3rem 0.55rem',
+  borderRadius: 8,
+  background: 'rgba(0, 200, 255, 0.12)',
+  border: '1px solid rgba(0, 200, 255, 0.28)',
+  color: 'var(--accent)',
+} as const;
+
+const KIND_TITLE_STYLE = {
+  fontSize: '0.9rem',
+  display: 'inline-block',
+  marginBottom: '0.25rem',
+  padding: '0.15rem 0.45rem',
+  borderRadius: 999,
+  background: 'rgba(255, 255, 255, 0.06)',
+  color: 'var(--foreground)',
+} as const;
+
 const SAMPLE_HINTS: Record<
   FilterKind,
   {
@@ -337,6 +357,26 @@ export default function FiltersPage() {
     }
   }
 
+  function jumpToSection(sectionId: 'example-form' | 'pattern-form') {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const node = document.getElementById(sectionId);
+    node?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function quickAddExample(group: string, nextKind: FilterKind) {
+    setGroupName(group);
+    setKind(nextKind);
+    jumpToSection('example-form');
+  }
+
+  function quickAddPattern(group: string, nextKind: FilterKind) {
+    setPatternGroupName(group);
+    setPatternKind(nextKind);
+    jumpToSection('pattern-form');
+  }
+
   async function removePattern(id: string) {
     setBusy(`del-pattern:${id}`);
     setMsg(null);
@@ -371,8 +411,8 @@ export default function FiltersPage() {
       </p>
       {msg && <p className={`msg ${msg.type === 'ok' ? 'ok' : 'err'}`}>{msg.text}</p>}
 
-      <div className="card" style={{ marginBottom: '1rem' }}>
-        <h3 style={{ marginBottom: '0.65rem' }}>Добавить пример для AI</h3>
+      <div id="example-form" className="card" style={{ marginBottom: '1rem' }}>
+        <h3 style={SECTION_TITLE_STYLE}>Добавить пример для AI</h3>
         <div className="filters">
           <label style={{ minWidth: 260, flex: '1 1 260px' }}>
             Группа
@@ -446,7 +486,7 @@ export default function FiltersPage() {
                   marginBottom: '0.45rem',
                 }}
               >
-                <strong style={{ fontSize: '0.9rem' }}>{KIND_LABEL[sampleKind]}</strong>
+                <strong style={KIND_TITLE_STYLE}>{KIND_LABEL[sampleKind]}</strong>
                 <button
                   className="btn btnSecondary btnSm"
                   type="button"
@@ -512,8 +552,8 @@ export default function FiltersPage() {
         </div>
       </div>
 
-      <div className="card" style={{ marginBottom: '1rem' }}>
-        <h3 style={{ marginBottom: '0.65rem' }}>Добавить фильтр-паттерн</h3>
+      <div id="pattern-form" className="card" style={{ marginBottom: '1rem' }}>
+        <h3 style={SECTION_TITLE_STYLE}>Добавить фильтр-паттерн</h3>
         <div className="filters">
           <label style={{ minWidth: 260, flex: '1 1 260px' }}>
             Группа
@@ -587,7 +627,7 @@ export default function FiltersPage() {
                   marginBottom: '0.45rem',
                 }}
               >
-                <strong style={{ fontSize: '0.9rem' }}>{KIND_LABEL[sampleKind]}</strong>
+                <strong style={KIND_TITLE_STYLE}>{KIND_LABEL[sampleKind]}</strong>
                 <button
                   className="btn btnSecondary btnSm"
                   type="button"
@@ -720,11 +760,29 @@ export default function FiltersPage() {
       {filterGroupTabs.length > 0 && (
         <div style={{ display: 'grid', gap: '1rem', marginBottom: '1rem' }}>
           <div className="card" style={{ padding: '0.85rem 1rem' }}>
-            <h3 style={{ marginBottom: '0.7rem' }}>{activeFilterGroup} · Фильтры-паттерны</h3>
+            <h3 style={SECTION_TITLE_STYLE}>{activeFilterGroup} · Фильтры-паттерны</h3>
             {activePatternEntry ? (
               (['signal', 'close', 'result', 'reentry'] as const).map((k) => (
                 <div key={`${activeFilterGroup}-pattern-${k}`} style={{ marginBottom: '0.9rem' }}>
-                  <strong style={{ fontSize: '0.9rem' }}>{KIND_LABEL[k]}</strong>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '0.5rem',
+                      marginBottom: '0.2rem',
+                    }}
+                  >
+                    <strong style={KIND_TITLE_STYLE}>{KIND_LABEL[k]}</strong>
+                    <button
+                      className="btn btnSecondary btnSm"
+                      type="button"
+                      disabled={busy !== null}
+                      onClick={() => quickAddPattern(activeFilterGroup, k)}
+                    >
+                      Добавить
+                    </button>
+                  </div>
                   {activePatternEntry[1][k].length === 0 ? (
                     <p style={{ color: 'var(--muted)', marginTop: '0.3rem' }}>Нет паттернов</p>
                   ) : (
@@ -784,11 +842,29 @@ export default function FiltersPage() {
       ) : (
         <div style={{ display: 'grid', gap: '1rem' }}>
           <div key={activeFilterGroup} className="card">
-            <h3 style={{ marginBottom: '0.6rem' }}>{activeFilterGroup} · Примеры для AI</h3>
+            <h3 style={SECTION_TITLE_STYLE}>{activeFilterGroup} · Примеры для AI</h3>
             {activeExampleEntry ? (
               (['signal', 'close', 'result', 'reentry'] as const).map((k) => (
                 <div key={`${activeFilterGroup}-${k}`} style={{ marginBottom: '0.9rem' }}>
-                  <strong style={{ fontSize: '0.9rem' }}>{KIND_LABEL[k]}</strong>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '0.5rem',
+                      marginBottom: '0.2rem',
+                    }}
+                  >
+                    <strong style={KIND_TITLE_STYLE}>{KIND_LABEL[k]}</strong>
+                    <button
+                      className="btn btnSecondary btnSm"
+                      type="button"
+                      disabled={busy !== null}
+                      onClick={() => quickAddExample(activeFilterGroup, k)}
+                    >
+                      Добавить
+                    </button>
+                  </div>
                   {activeExampleEntry[1][k].length === 0 ? (
                     <p style={{ color: 'var(--muted)', marginTop: '0.3rem' }}>Нет примеров</p>
                   ) : (
