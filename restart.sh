@@ -54,17 +54,21 @@ if [[ -n "${GHCR_TOKEN:-}" && -n "${GHCR_USERNAME:-}" ]]; then
   echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
 fi
 
-git fetch
-git reset --hard HEAD
-git pull
+# Один fetch + жёсткий сброс на origin (быстрее, чем fetch + reset HEAD + pull).
+# SKIP_GIT=1 — пропустить git (только образы из registry; compose/restart.sh на диске не обновятся).
+if [[ "${SKIP_GIT:-}" != "1" ]]; then
+  branch="$(git rev-parse --abbrev-ref HEAD)"
+  git fetch origin
+  git reset --hard "origin/${branch}"
+fi
 
-# Деплой из registry (CI задаёт API_IMAGE и WEB_IMAGE): короткий простой — pull + recreate.
+# Деплой из registry (CI задаёт API_IMAGE и WEB_IMAGE): pull слоёв + recreate.
 # Локально без образов в registry: сборка на месте с кэшем слоёв.
 if [[ -n "${API_IMAGE:-}" && -n "${WEB_IMAGE:-}" ]]; then
   docker compose pull
-  docker compose up -d
+  docker compose up -d --remove-orphans
 else
-  docker compose up -d --build
+  docker compose up -d --build --remove-orphans
 fi
 
 notify "✅ Проект ${PROJECT_NAME} обновлён без ошибок."

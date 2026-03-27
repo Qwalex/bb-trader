@@ -142,7 +142,7 @@ export default async function TradesPage({
 
   return (
     <>
-      <h1 className="pageTitle">История сделок 123</h1>
+      <h1 className="pageTitle">История сделок</h1>
       {err && <p className="msg err">{err}</p>}
       <TradesFilters sourceOptions={sourceOptions} />
       <div style={{ marginBottom: '1rem' }}>
