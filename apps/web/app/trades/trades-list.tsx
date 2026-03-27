@@ -192,8 +192,11 @@ export function TradesList({ items, sourceOptions }: Props) {
                 </summary>
                 <div className="tradeCardMuted" style={{ marginTop: '0.4rem' }}>
                   {s.events.map((e) => (
-                    <div key={e.id} style={{ marginBottom: '0.25rem' }}>
-                      {renderEvent(e)}
+                    <div key={e.id} style={{ marginBottom: '0.45rem' }}>
+                      <div>{renderEvent(e)}</div>
+                      <div style={{ fontSize: '0.78rem', opacity: 0.8 }}>
+                        {formatDateTimeRu(e.createdAt)}
+                      </div>
                     </div>
                   ))}
                 </div>
