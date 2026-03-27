@@ -413,12 +413,12 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Недавние записи userbot-ingest, похожие на исходные сигналы (для привязки к сделке).
+   * Недавние записи userbot-ingest для ручной привязки сделки (chat id + message id).
+   * Все сообщения из ingest, без отбора по classification/status; опционально только chatId.
    */
   async listIngestLinkCandidates(options: {
     limit?: number;
     chatId?: string;
-    pair?: string;
   }): Promise<{
     items: Array<{
       ingestId: string;
@@ -431,32 +431,11 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       createdAt: string;
     }>;
   }> {
-    const limit = Math.min(Math.max(options.limit ?? 50, 1), 150);
+    const limit = Math.min(Math.max(options.limit ?? 50, 1), 500);
     const chatIdFilter = options.chatId?.trim();
-    const pairRaw = options.pair?.trim() ?? '';
-
-    const andParts: Prisma.TgUserbotIngestWhereInput[] = [
-      {
-        OR: [
-          { classification: 'signal' },
-          { status: { in: ['placed', 'reentry_placed', 'reentry_updated'] } },
-        ],
-      },
-    ];
-    if (chatIdFilter) {
-      andParts.push({ chatId: chatIdFilter });
-    }
-    if (pairRaw.length >= 2) {
-      const p = pairRaw.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-      if (p.length >= 2) {
-        andParts.push({
-          OR: [{ text: { contains: pairRaw } }, { text: { contains: p } }],
-        });
-      }
-    }
 
     const rows = await this.prisma.tgUserbotIngest.findMany({
-      where: { AND: andParts },
+      where: chatIdFilter ? { chatId: chatIdFilter } : {},
       orderBy: { createdAt: 'desc' },
       take: limit,
       select: {

@@ -58,14 +58,12 @@ export class TelegramUserbotController {
   async ingestLinkCandidates(
     @Query('limit') limit?: string,
     @Query('chatId') chatId?: string,
-    @Query('pair') pair?: string,
   ) {
     const raw = limit ? parseInt(limit, 10) : undefined;
     const n = Number.isFinite(raw) ? raw : undefined;
     return this.userbot.listIngestLinkCandidates({
       limit: n,
       chatId: typeof chatId === 'string' ? chatId : undefined,
-      pair: typeof pair === 'string' ? pair : undefined,
     });
   }
 

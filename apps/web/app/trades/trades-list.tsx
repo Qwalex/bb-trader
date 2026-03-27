@@ -193,7 +193,6 @@ export function TradesList({ items, sourceOptions }: Props) {
             <span className="tradeCardLabel">Telegram (userbot)</span>
             <TelegramSourceLink
               signalId={s.id}
-              pair={s.pair}
               status={s.status}
               deletedAt={s.deletedAt}
               sourceChatId={s.sourceChatId ?? null}

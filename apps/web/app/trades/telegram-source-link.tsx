@@ -7,7 +7,6 @@ import { getApiBase } from '../../lib/api';
 
 type Props = {
   signalId: string;
-  pair: string;
   status: string;
   deletedAt?: string | null;
   sourceChatId: string | null;
@@ -29,7 +28,6 @@ type Candidate = {
 
 export function TelegramSourceLink({
   signalId,
-  pair,
   status,
   deletedAt,
   sourceChatId,
@@ -60,8 +58,7 @@ export function TelegramSourceLink({
     try {
       const base = getApiBase();
       const q = new URLSearchParams();
-      q.set('limit', '80');
-      if (pair.trim()) q.set('pair', pair.trim());
+      q.set('limit', '400');
       if (filterChatId.trim()) q.set('chatId', filterChatId.trim());
 
       const [chRes, candRes] = await Promise.all([
@@ -86,7 +83,7 @@ export function TelegramSourceLink({
     } finally {
       setLoadingPick(false);
     }
-  }, [pair, filterChatId]);
+  }, [filterChatId]);
 
   useEffect(() => {
     if (!pickerOpen) return;
@@ -266,7 +263,7 @@ export function TelegramSourceLink({
               Обновить
             </button>
             <span className="tradeCardMuted" style={{ fontSize: '0.78rem' }}>
-              Фильтр по паре сделки: {pair || '—'}
+              Список по всем парам; при необходимости выберите чат выше.
             </span>
           </div>
           {loadingPick && <div className="tradeCardMuted">Загрузка…</div>}
@@ -275,8 +272,7 @@ export function TelegramSourceLink({
           )}
           {!loadingPick && !pickError && candidates.length === 0 && (
             <div className="tradeCardMuted" style={{ fontSize: '0.85rem' }}>
-              Нет подходящих записей в TgUserbotIngest. Нужны сообщения с classification=signal или
-              статусом placed / reentry_*.
+              В TgUserbotIngest пока нет записей (сообщения должны попадать в ingest через userbot).
             </div>
           )}
           <div
@@ -317,7 +313,7 @@ export function TelegramSourceLink({
 
       <span className="tradeCardMuted" style={{ fontSize: '0.78rem', lineHeight: 1.35 }}>
         Для userbot: closed/reentry с цитатой ищут активную сделку по паре chat id + message id
-        корневого поста. «Подобрать из БД» берёт недавние сообщения из ingest userbot.
+        корневого поста. «Подобрать из БД» — последние сообщения из ingest (по желанию сузьте чатом).
       </span>
     </div>
   );
