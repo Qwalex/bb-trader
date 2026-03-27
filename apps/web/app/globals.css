@@ -576,18 +576,29 @@ h1.pageTitle {
   word-break: break-word;
 }
 
-/* История сделок: десктоп — таблица, мобильные — карточки */
-.tradesMobileOnly {
-  display: none;
+/* История сделок: карточки на всех экранах */
+.tradesCardsGrid {
   list-style: none;
   margin: 0;
   padding: 0;
+  display: grid;
+  gap: 0.9rem;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
 }
 
-.tradeSourceCell {
-  min-width: 12rem;
-  max-width: 22rem;
-  vertical-align: top;
+.tradeCard {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.95rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.tradeCardRich {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01));
 }
 
 .tradeDirBadge {
@@ -617,6 +628,114 @@ h1.pageTitle {
 .tradeDirNeutral {
   color: var(--muted);
   background: rgba(255, 255, 255, 0.04);
+}
+
+.tradeCardTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.tradeCardPair {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  word-break: break-word;
+  min-width: 0;
+}
+
+.tradeCardSubtleId {
+  margin-top: 0.2rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-family: var(--font-geist-mono), monospace;
+}
+
+.tradeCardMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 0.84rem;
+}
+
+.tradeCardMetaDense {
+  padding: 0.55rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.tradeCardMetaRow {
+  display: grid;
+  grid-template-columns: 5.2rem 1fr;
+  gap: 0.5rem 0.75rem;
+  align-items: baseline;
+}
+
+.tradeCardPnlRow .tradeCardValue {
+  font-size: 1rem;
+}
+
+.tradeCardLabel {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+.tradeCardValue {
+  color: var(--foreground);
+  word-break: break-word;
+  min-width: 0;
+}
+
+.tradeCardMono {
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.tradeCardMuted {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.tradeCardBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.tradeCardBlock .tradeCardLabel {
+  margin: 0;
+}
+
+.tradeCardBlock select {
+  width: 100%;
+  min-height: 38px;
+  padding: 0.45rem 0.55rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 0.88rem;
+}
+
+.tradeCardParams {
+  min-width: 0;
+}
+
+.tradeCardParams .tradeParamsGrid {
+  font-size: 0.8rem;
+}
+
+.tradeCardSummary {
+  cursor: pointer;
+  color: var(--foreground);
+}
+
+.tradeCardActions {
+  display: flex;
+  justify-content: flex-start;
 }
 
 /* Узкие экраны и телефоны */
@@ -717,113 +836,13 @@ h1.pageTitle {
     font-size: 0.8125rem;
   }
 
-  .tradesDesktopOnly {
-    display: none !important;
-  }
-
-  .tradesMobileOnly {
-    display: flex;
-    flex-direction: column;
+  .tradesCardsGrid {
+    grid-template-columns: 1fr;
     gap: 0.85rem;
   }
 
   .tradeCard {
-    background: var(--card);
-    border: 1px solid var(--border);
     border-radius: 10px;
-    padding: 0.95rem 1rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-  }
-
-  .tradeCardTop {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 0.65rem;
-  }
-
-  .tradeCardPair {
-    font-size: 1.05rem;
-    font-weight: 700;
-    letter-spacing: 0.02em;
-    word-break: break-word;
-    min-width: 0;
-  }
-
-  .tradeCardMeta {
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-    font-size: 0.84rem;
-  }
-
-  .tradeCardMetaRow {
-    display: grid;
-    grid-template-columns: 5.2rem 1fr;
-    gap: 0.5rem 0.75rem;
-    align-items: baseline;
-  }
-
-  .tradeCardPnlRow .tradeCardValue {
-    font-size: 1rem;
-  }
-
-  .tradeCardLabel {
-    color: var(--muted);
-    font-size: 0.78rem;
-    font-weight: 500;
-  }
-
-  .tradeCardValue {
-    color: var(--foreground);
-    word-break: break-word;
-    min-width: 0;
-  }
-
-  .tradeCardMono {
-    font-size: 0.78rem;
-    line-height: 1.35;
-  }
-
-  .tradeCardMuted {
-    color: var(--muted);
-    font-size: 0.88rem;
-  }
-
-  .tradeCardBlock {
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-  }
-
-  .tradeCardBlock .tradeCardLabel {
-    margin: 0;
-  }
-
-  .tradeCardBlock select {
-    width: 100%;
-    min-height: 44px;
-    padding: 0.45rem 0.55rem;
-    border-radius: 6px;
-    border: 1px solid var(--border);
-    background: var(--background);
-    color: var(--foreground);
-    font-size: 0.88rem;
-  }
-
-  .tradeCardParams {
-    min-width: 0;
-  }
-
-  .tradeCardParams .tradeParamsGrid {
-    font-size: 0.78rem;
-  }
-
-  .tradeCardActions {
-    display: flex;
-    justify-content: flex-start;
   }
 
   .tradeCardActions button {
