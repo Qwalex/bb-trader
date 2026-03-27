@@ -1166,58 +1166,94 @@ export class BybitService {
     const errors: string[] = [];
     let cancelledOrders = 0;
     let closedPositions = 0;
+    const maxRounds = 4;
+    const settleWaitMs = 1_200;
 
-    const orderFilters = ['Order', 'StopOrder'] as const;
-    for (const orderFilter of orderFilters) {
+    for (let round = 1; round <= maxRounds; round += 1) {
+      const orderFilters = ['Order', 'StopOrder'] as const;
+      for (const orderFilter of orderFilters) {
+        try {
+          const res = await client.cancelAllOrders({
+            category: 'linear',
+            symbol,
+            orderFilter,
+          });
+          if (res.retCode !== 0) {
+            errors.push(
+              `[round ${round}] cancelAllOrders(${orderFilter}) retCode=${res.retCode} ${String(res.retMsg ?? '')}`,
+            );
+            continue;
+          }
+          cancelledOrders += res.result?.list?.length ?? 0;
+        } catch (e) {
+          errors.push(`[round ${round}] cancelAllOrders(${orderFilter}) ${formatError(e)}`);
+        }
+      }
+
       try {
-        const res = await client.cancelAllOrders({
-          category: 'linear',
-          symbol,
-          orderFilter,
-        });
-        if (res.retCode !== 0) {
-          errors.push(
-            `cancelAllOrders(${orderFilter}) retCode=${res.retCode} ${String(res.retMsg ?? '')}`,
+        const positions = await this.getExchangePositions(client, symbol);
+        for (const p of positions) {
+          const closeSide = p.side === 'Buy' ? 'Sell' : 'Buy';
+          const qty = this.formatQtyToStep(
+            p.size,
+            (await this.getLotStep(client, symbol)).qtyStep,
           );
-          continue;
+          if (!qty || parseFloat(qty) <= 0) {
+            continue;
+          }
+          const res = await client.submitOrder({
+            category: 'linear',
+            symbol,
+            side: closeSide,
+            orderType: 'Market',
+            qty,
+            reduceOnly: true,
+            closeOnTrigger: true,
+            positionIdx: (p.positionIdx as 0 | 1 | 2) ?? 0,
+          });
+          if (res.retCode !== 0) {
+            errors.push(
+              `[round ${round}] submit close Market retCode=${res.retCode} ${String(res.retMsg ?? '')}`,
+            );
+            continue;
+          }
+          closedPositions += 1;
         }
-        cancelledOrders += res.result?.list?.length ?? 0;
       } catch (e) {
-        errors.push(`cancelAllOrders(${orderFilter}) ${formatError(e)}`);
+        errors.push(`[round ${round}] close positions ${formatError(e)}`);
       }
-    }
 
-    try {
-      const positions = await this.getExchangePositions(client, symbol);
-      for (const p of positions) {
-        const closeSide = p.side === 'Buy' ? 'Sell' : 'Buy';
-        const qty = this.formatQtyToStep(
-          p.size,
-          (await this.getLotStep(client, symbol)).qtyStep,
-        );
-        if (!qty || parseFloat(qty) <= 0) {
-          continue;
-        }
-        const res = await client.submitOrder({
-          category: 'linear',
-          symbol,
-          side: closeSide,
-          orderType: 'Market',
-          qty,
-          reduceOnly: true,
-          closeOnTrigger: true,
-          positionIdx: (p.positionIdx as 0 | 1 | 2) ?? 0,
-        });
-        if (res.retCode !== 0) {
-          errors.push(
-            `submit close Market retCode=${res.retCode} ${String(res.retMsg ?? '')}`,
-          );
-          continue;
-        }
-        closedPositions += 1;
+      // Даём бирже применить отмены/исполнения и проверяем состояние.
+      await new Promise((resolve) => setTimeout(resolve, settleWaitMs));
+      const flatState = await this.waitForSymbolToBeFlat(client, symbol, 8_000, 800);
+      if (flatState.ok) {
+        return { ok: true, cancelledOrders, closedPositions };
       }
-    } catch (e) {
-      errors.push(`close positions ${formatError(e)}`);
+
+      if (round < maxRounds) {
+        void this.appLog.append(
+          'warn',
+          'bybit',
+          'flatten: symbol not flat after round, retrying',
+          {
+            symbol,
+            round,
+            activeOrders: flatState.activeOrders,
+            positions: flatState.positions,
+          },
+        );
+      } else {
+        return {
+          ok: false,
+          cancelledOrders,
+          closedPositions,
+          error: 'Bybit ещё не подтвердил полное закрытие ордеров/позиции',
+          details: `activeOrders=${flatState.activeOrders}; positions=${flatState.positions}`,
+          pendingExchange: true,
+          activeOrders: flatState.activeOrders,
+          positions: flatState.positions,
+        };
+      }
     }
 
     if (errors.length > 0) {
@@ -1228,20 +1264,6 @@ export class BybitService {
         error: 'Не удалось полностью закрыть на Bybit',
         details: errors.join(' | '),
         pendingExchange: false,
-      };
-    }
-
-    const flatState = await this.waitForSymbolToBeFlat(client, symbol);
-    if (!flatState.ok) {
-      return {
-        ok: false,
-        cancelledOrders,
-        closedPositions,
-        error: 'Bybit ещё не подтвердил полное закрытие ордеров/позиции',
-        details: `activeOrders=${flatState.activeOrders}; positions=${flatState.positions}`,
-        pendingExchange: true,
-        activeOrders: flatState.activeOrders,
-        positions: flatState.positions,
       };
     }
 

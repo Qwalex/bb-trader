@@ -74,11 +74,13 @@ const USERBOT_MAX_MESSAGE_AGE_MINUTES_DEFAULT = 10;
 const USERBOT_MIN_BALANCE_USD_DEFAULT = 3;
 const USERBOT_BALANCE_CHECK_CACHE_MS = 30_000;
 const USERBOT_FILTER_MATCH_THRESHOLD = 0.34;
+const CLOSE_REOPEN_COOLDOWN_MS = 30_000;
 
 @Injectable()
 export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TelegramUserbotService.name);
   private readonly pairDirectionTransitions = new Map<string, { count: number; reason?: string }>();
+  private readonly pairDirectionCloseCooldownUntilMs = new Map<string, number>();
   private readonly lastSeenMessageIds = new Map<string, number>();
   private readonly processingQueue: IngestProcessJob[] = [];
   private readonly processingQueuedIds = new Set<string>();
@@ -1220,6 +1222,29 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           },
         );
       }
+      const closeCooldownMs = this.getCloseCooldownRemainingMs(signal.pair, signal.direction);
+      if (closeCooldownMs > 0) {
+        this.appendIngestStageLog(
+          'warn',
+          'Userbot: blocked by close cooldown',
+          ingest,
+          {
+            pair: signal.pair,
+            direction: signal.direction,
+            cooldownMsRemaining: closeCooldownMs,
+          },
+        );
+        await this.updateIngest(ingest.id, {
+          classification: 'signal',
+          status: 'duplicate_signal',
+          error: `Повторный вход по ${signal.pair} (${signal.direction}) временно заблокирован после close (${Math.ceil(
+            closeCooldownMs / 1000,
+          )}s)`,
+          aiRequest,
+          aiResponse,
+        });
+        return;
+      }
 
       if (
         await this.bybit.wouldDuplicateActivePairDirection(
@@ -1603,6 +1628,13 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       };
     }
     const base = this.signalFromDb(prev);
+    const closeCooldownMs = this.getCloseCooldownRemainingMs(base.pair, base.direction);
+    if (closeCooldownMs > 0) {
+      return {
+        ok: false,
+        error: `Перезаход временно заблокирован после close (${Math.ceil(closeCooldownMs / 1000)}s)`,
+      };
+    }
     this.bybit.suspendStaleReconcile(base.pair, base.direction, 'reentry flow');
     try {
       void this.appLog.append('debug', 'telegram', 'Reentry: resolved root source message', {
@@ -1980,6 +2012,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           error: closed.error ?? closed.details ?? 'Не удалось закрыть сделку на Bybit',
         };
       }
+      this.setCloseCooldown(closeSignal.pair, closeSignal.direction);
       await this.releaseSignalHash(this.computeSignalHash(closeSignal));
       await this.prisma.signalEvent.create({
         data: {
@@ -2271,6 +2304,32 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
   private pairDirectionKey(pair: string, direction: 'long' | 'short'): string {
     return `${normalizeTradingPair(pair)}:${direction}`;
+  }
+
+  private setCloseCooldown(pair: string, direction: 'long' | 'short'): void {
+    const key = this.pairDirectionKey(pair, direction);
+    const untilMs = Date.now() + CLOSE_REOPEN_COOLDOWN_MS;
+    this.pairDirectionCloseCooldownUntilMs.set(key, untilMs);
+    void this.appLog.append('debug', 'telegram', 'Userbot: close cooldown set', {
+      pair: normalizeTradingPair(pair),
+      direction,
+      cooldownMs: CLOSE_REOPEN_COOLDOWN_MS,
+      untilIso: new Date(untilMs).toISOString(),
+    });
+  }
+
+  private getCloseCooldownRemainingMs(pair: string, direction: 'long' | 'short'): number {
+    const key = this.pairDirectionKey(pair, direction);
+    const untilMs = this.pairDirectionCloseCooldownUntilMs.get(key);
+    if (!untilMs) {
+      return 0;
+    }
+    const remain = untilMs - Date.now();
+    if (remain <= 0) {
+      this.pairDirectionCloseCooldownUntilMs.delete(key);
+      return 0;
+    }
+    return remain;
   }
 
   private beginPairDirectionTransition(
