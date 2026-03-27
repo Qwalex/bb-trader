@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -12,7 +13,12 @@ export type LogCategory =
   | 'orders'
   | 'system';
 
-const MAX_ROWS = 12_000;
+const MAX_ROWS = 100_000;
+const NOISE_MESSAGES = [
+  'poll: stale signal kept because exchange exposure still exists',
+  'poll: reconcile stale pass started',
+  'Userbot: duplicate ingest skipped',
+] as const;
 
 @Injectable()
 export class AppLogService {
@@ -68,5 +74,41 @@ export class AppLogService {
       orderBy: { createdAt: 'desc' },
       take: limit,
     });
+  }
+
+  @Cron(CronExpression.EVERY_30_MINUTES)
+  async deleteOldNoiseLogs(): Promise<void> {
+    const olderThan = new Date(Date.now() - 30 * 60 * 1000);
+    try {
+      const result = await this.prisma.appLog.deleteMany({
+        where: {
+          message: { in: [...NOISE_MESSAGES] },
+          createdAt: { lt: olderThan },
+        },
+      });
+      if (result.count > 0) {
+        this.logger.log(`deleted old noise logs: ${result.count}`);
+      }
+    } catch (e) {
+      this.logger.warn(`deleteOldNoiseLogs failed: ${String(e)}`);
+    }
+  }
+
+  @Cron('0 0 0 */3 * *')
+  async deleteOldRegularLogs(): Promise<void> {
+    const olderThan = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+    try {
+      const result = await this.prisma.appLog.deleteMany({
+        where: {
+          message: { notIn: [...NOISE_MESSAGES] },
+          createdAt: { lt: olderThan },
+        },
+      });
+      if (result.count > 0) {
+        this.logger.log(`deleted old regular logs: ${result.count}`);
+      }
+    } catch (e) {
+      this.logger.warn(`deleteOldRegularLogs failed: ${String(e)}`);
+    }
   }
 }

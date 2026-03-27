@@ -806,8 +806,10 @@ h1.pageTitle {
 
 .tradesFiltersToggle {
   min-height: 38px;
-  padding: 0.35rem 0.7rem;
+  padding: 0;
   border-radius: 10px;
+  border: none;
+  background: transparent;
 }
 
 .tradesFiltersToggle .toggleLabel {

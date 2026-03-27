@@ -10,6 +10,7 @@ import { AppService } from './app.service';
 import { AppLogModule } from './modules/app-log/app-log.module';
 import { BybitModule } from './modules/bybit/bybit.module';
 import { OrdersModule } from './modules/orders/orders.module';
+import { DiagnosticsModule } from './modules/diagnostics/diagnostics.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { TelegramModule } from './modules/telegram/telegram.module';
 import { TelegramUserbotModule } from './modules/telegram-userbot/telegram-userbot.module';
@@ -53,6 +54,7 @@ function loadEnvFilePaths(): string[] {
     ScheduleModule.forRoot(),
     PrismaModule,
     AppLogModule,
+    DiagnosticsModule,
     SettingsModule,
     OrdersModule,
     TranscriptModule,

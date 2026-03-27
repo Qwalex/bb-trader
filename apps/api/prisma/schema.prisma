@@ -142,3 +142,115 @@ model TgUserbotFilterPattern {
   @@index([groupName, kind, enabled])
   @@index([createdAt])
 }
+
+model DiagnosticRun {
+  id          String   @id @default(cuid())
+  status      String // running | completed | failed
+  requestJson String?
+  modelsJson  String // JSON string[]
+  caseCount   Int      @default(0)
+  summary     String?
+  error       String?
+  startedAt   DateTime @default(now())
+  finishedAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  cases        DiagnosticCase[]
+  modelResults DiagnosticModelResult[]
+  stepResults  DiagnosticStepResult[]
+  logs         DiagnosticLog[]
+
+  @@index([createdAt])
+  @@index([status, createdAt])
+}
+
+model DiagnosticCase {
+  id        String   @id @default(cuid())
+  runId     String
+  run       DiagnosticRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  ingestId  String?
+  signalId  String?
+  chatId    String?
+  messageId String?
+  title     String?
+  status    String   @default("pending") // pending | completed | failed
+  traceJson String // normalized trace payload for auditing
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  modelResults DiagnosticModelResult[]
+  stepResults  DiagnosticStepResult[]
+  logs         DiagnosticLog[]
+
+  @@index([runId, createdAt])
+  @@index([ingestId])
+  @@index([signalId])
+}
+
+model DiagnosticModelResult {
+  id          String   @id @default(cuid())
+  runId       String
+  caseId      String
+  model       String
+  status      String // ok | warning | error | unknown
+  summary     String?
+  rawResponse String?
+  inputTokens Int?
+  outputTokens Int?
+  totalTokens Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  run         DiagnosticRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  diagnosticCase DiagnosticCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  stepResults DiagnosticStepResult[]
+  logs        DiagnosticLog[]
+
+  @@unique([runId, caseId, model])
+  @@index([runId, model])
+  @@index([caseId, createdAt])
+}
+
+model DiagnosticStepResult {
+  id              String   @id @default(cuid())
+  runId           String
+  caseId          String
+  modelResultId   String?
+  stepKey         String
+  status          String // ok | warning | error | unknown
+  comment         String?
+  issuesJson      String?
+  evidenceJson    String?
+  missingContextJson String?
+  recommendedFixesJson String?
+  payloadJson     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  run           DiagnosticRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  diagnosticCase DiagnosticCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  modelResult   DiagnosticModelResult? @relation(fields: [modelResultId], references: [id], onDelete: Cascade)
+
+  @@index([runId, caseId, createdAt])
+  @@index([modelResultId, stepKey])
+}
+
+model DiagnosticLog {
+  id            String   @id @default(cuid())
+  runId         String
+  caseId        String?
+  modelResultId String?
+  level         String // info | warn | error | debug
+  category      String // diagnostics | openrouter | bybit | db | system
+  message       String
+  payload       String?
+  createdAt     DateTime @default(now())
+
+  run         DiagnosticRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  diagnosticCase DiagnosticCase? @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  modelResult DiagnosticModelResult? @relation(fields: [modelResultId], references: [id], onDelete: Cascade)
+
+  @@index([runId, createdAt])
+  @@index([caseId, createdAt])
+}

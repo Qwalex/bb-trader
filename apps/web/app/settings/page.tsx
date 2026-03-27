@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { getApiBase } from '../../lib/api';
 
 const MODEL_HISTORY_KEY = 'OPENROUTER_MODEL_HISTORY';
+const DIAGNOSTIC_MODELS_KEY = 'OPENROUTER_DIAGNOSTIC_MODELS';
 const KEYS = [
   { key: 'OPENROUTER_API_KEY', label: 'OpenRouter API key' },
   { key: 'OPENROUTER_MODEL_DEFAULT', label: 'Модель по умолчанию' },
@@ -14,6 +15,14 @@ const KEYS = [
   { key: 'OPENROUTER_MODEL_IMAGE_FALLBACK_1', label: 'Fallback модель (изображение) #1' },
   { key: 'OPENROUTER_MODEL_AUDIO', label: 'Модель (аудио)' },
   { key: 'OPENROUTER_MODEL_AUDIO_FALLBACK_1', label: 'Fallback модель (аудио) #1' },
+  {
+    key: 'DIAGNOSTIC_BATCH_SIZE',
+    label: 'Диагностика: размер батча (сколько последних кейсов проверять за запуск)',
+  },
+  {
+    key: 'DIAGNOSTIC_MAX_LOG_LINES',
+    label: 'Диагностика: лимит логов AppLog на один кейс',
+  },
   {
     key: 'BYBIT_TESTNET',
     label:
@@ -110,6 +119,11 @@ const SETTINGS_SECTIONS: { id: string; title: string; keys: string[] }[] = [
     keys: ['MIN_CAPITAL_AMOUNT', 'DEFAULT_ORDER_USD', 'DEFAULT_LEVERAGE_ENABLED', 'DEFAULT_LEVERAGE', 'POLLING_INTERVAL_MS'],
   },
   {
+    id: 'diagnostics',
+    title: 'Диагностика',
+    keys: ['DIAGNOSTIC_BATCH_SIZE', 'DIAGNOSTIC_MAX_LOG_LINES'],
+  },
+  {
     id: 'bybit',
     title: 'Bybit',
     keys: [
@@ -171,6 +185,7 @@ export default function SettingsPage() {
   const [resettingStats, setResettingStats] = useState(false);
   const [newSource, setNewSource] = useState('');
   const [newExcludedSource, setNewExcludedSource] = useState('');
+  const [newDiagnosticModel, setNewDiagnosticModel] = useState('');
 
   useEffect(() => {
     void (async () => {
@@ -219,6 +234,10 @@ export default function SettingsPage() {
   );
   const excludedSourceList = parseStringList(valueFor('SOURCE_EXCLUDE_LIST'));
   const excludedSourceListSorted = Array.from(new Set(excludedSourceList)).sort((a, b) =>
+    a.localeCompare(b, 'ru'),
+  );
+  const diagnosticModels = parseStringList(valueFor(DIAGNOSTIC_MODELS_KEY));
+  const diagnosticModelsSorted = Array.from(new Set(diagnosticModels)).sort((a, b) =>
     a.localeCompare(b, 'ru'),
   );
 
@@ -339,6 +358,21 @@ export default function SettingsPage() {
     const next = excludedSourceListSorted.filter((x) => x !== v);
     const raw = JSON.stringify(next);
     await save('SOURCE_EXCLUDE_LIST', raw);
+  }
+
+  async function addDiagnosticModel() {
+    const v = newDiagnosticModel.trim();
+    if (!v) return;
+    const next = Array.from(new Set([...diagnosticModelsSorted, v]));
+    const raw = JSON.stringify(next);
+    setNewDiagnosticModel('');
+    await save(DIAGNOSTIC_MODELS_KEY, raw);
+  }
+
+  async function removeDiagnosticModel(model: string) {
+    const next = diagnosticModelsSorted.filter((v) => v !== model);
+    const raw = JSON.stringify(next);
+    await save(DIAGNOSTIC_MODELS_KEY, raw);
   }
 
   async function resetStats() {
@@ -464,8 +498,8 @@ export default function SettingsPage() {
         </p>
       )}
       <div className="settingsAccordion" style={{ marginTop: '0.75rem' }}>
-        {SETTINGS_SECTIONS.map((section, idx) => (
-          <details key={section.id} className="card" open={idx === 0}>
+        {SETTINGS_SECTIONS.map((section) => (
+          <details key={section.id} className="card">
             <summary className="settingsSectionSummary">{section.title}</summary>
             <div className="settingsForm" style={{ marginTop: '0.9rem' }}>
               {section.keys.map((key) => renderSettingField(key))}
@@ -592,6 +626,64 @@ export default function SettingsPage() {
                 </div>
               )}
             </div>
+          </div>
+        </details>
+
+        <details className="card">
+          <summary className="settingsSectionSummary">Модели для диагностики</summary>
+          <div style={{ marginTop: '0.9rem' }}>
+            <p style={{ color: 'var(--muted)', marginBottom: '0.75rem', fontSize: '0.9rem' }}>
+              Эти модели используются на странице `/diagnostics` для поэтапного аудита workflow.
+              Значение сохраняется в ключе `OPENROUTER_DIAGNOSTIC_MODELS`.
+            </p>
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <input
+                value={newDiagnosticModel}
+                placeholder="добавить модель, например openai/gpt-5.4"
+                onChange={(e) => setNewDiagnosticModel(e.target.value)}
+                style={{
+                  flex: '1 1 260px',
+                  padding: '0.5rem',
+                  borderRadius: 4,
+                  border: '1px solid var(--border)',
+                  background: 'var(--card)',
+                  color: 'var(--foreground)',
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => void addDiagnosticModel()}
+                disabled={saving === DIAGNOSTIC_MODELS_KEY || !newDiagnosticModel.trim()}
+                className="btn"
+              >
+                {saving === DIAGNOSTIC_MODELS_KEY ? 'Добавление…' : 'Добавить модель'}
+              </button>
+            </div>
+            {diagnosticModelsSorted.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.85rem' }}>
+                {diagnosticModelsSorted.map((model) => (
+                  <button
+                    key={`diagnostic-model-${model}`}
+                    type="button"
+                    onClick={() => void removeDiagnosticModel(model)}
+                    style={{
+                      padding: '0.2rem 0.45rem',
+                      borderRadius: 999,
+                      border: '1px solid var(--border, #444)',
+                      background: 'transparent',
+                      color: 'var(--muted)',
+                      cursor: saving === DIAGNOSTIC_MODELS_KEY ? 'not-allowed' : 'pointer',
+                      opacity: saving === DIAGNOSTIC_MODELS_KEY ? 0.7 : 1,
+                      fontSize: '0.85rem',
+                    }}
+                    disabled={saving === DIAGNOSTIC_MODELS_KEY}
+                    title="Удалить модель из диагностики"
+                  >
+                    {model} ×
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </details>
 

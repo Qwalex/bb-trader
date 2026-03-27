@@ -70,6 +70,11 @@ export class SettingsService {
    */
   async resetAllData(): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
+      await tx.diagnosticStepResult.deleteMany();
+      await tx.diagnosticLog.deleteMany();
+      await tx.diagnosticModelResult.deleteMany();
+      await tx.diagnosticCase.deleteMany();
+      await tx.diagnosticRun.deleteMany();
       await tx.order.deleteMany();
       await tx.signal.deleteMany();
       await tx.appLog.deleteMany();

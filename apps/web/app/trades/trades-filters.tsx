@@ -138,10 +138,11 @@ export function TradesFilters({ sourceOptions }: Props) {
         </select>
       </label>
 
-      <label className="toggle tradesFiltersToggle">
+      <label className="toggle tradesFiltersToggle" title="Показать удаленные">
         <input
           type="checkbox"
           checked={includeDeleted}
+          aria-label="Показать удаленные"
           onChange={(e) => {
             const v = e.target.checked;
             setIncludeDeleted(v);
@@ -151,7 +152,6 @@ export function TradesFilters({ sourceOptions }: Props) {
         <span className="toggleTrack" aria-hidden="true">
           <span className="toggleThumb" />
         </span>
-        <span className="toggleLabel">Показать удалённые</span>
       </label>
 
       <button
