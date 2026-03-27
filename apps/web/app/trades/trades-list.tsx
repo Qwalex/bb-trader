@@ -3,6 +3,7 @@ import { DeleteTradeButton } from './delete-trade-button';
 import { PnlEditControl } from './pnl-edit-control';
 import { RestoreTradeButton } from './restore-trade-button';
 import { SourceSelect } from './source-select';
+import { TelegramSourceLink } from './telegram-source-link';
 import { TradeParamsBlock } from './trade-params-block';
 
 type TradeListItem = {
@@ -11,6 +12,8 @@ type TradeListItem = {
   direction: string;
   status: string;
   source: string | null;
+  sourceChatId?: string | null;
+  sourceMessageId?: string | null;
   realizedPnl: number | null;
   createdAt: string;
   deletedAt?: string | null;
@@ -110,6 +113,12 @@ export function TradesList({ items, sourceOptions }: Props) {
         details = 'старый сигнал заменен';
       } else if (raw.type === 'REENTRY_REPLACED_NEW') {
         details = 'новый сигнал создан';
+      } else if (raw.type === 'TELEGRAM_LINK_UPDATED') {
+        const pFrom = p.from as { sourceChatId?: unknown; sourceMessageId?: unknown } | undefined;
+        const pTo = p.to as { sourceChatId?: unknown; sourceMessageId?: unknown } | undefined;
+        const short = (v: unknown) =>
+          typeof v === 'string' && v.length > 10 ? `${v.slice(0, 6)}…` : String(v ?? '—');
+        details = `было chat ${short(pFrom?.sourceChatId)} / msg ${short(pFrom?.sourceMessageId)} → стало chat ${short(pTo?.sourceChatId)} / msg ${short(pTo?.sourceMessageId)}`;
       }
     }
     const titles: Record<string, string> = {
@@ -120,6 +129,7 @@ export function TradesList({ items, sourceOptions }: Props) {
       REENTRY_UPDATED: 'Перезаход обновил параметры',
       REENTRY_REPLACED_OLD: 'Старый сигнал заменён',
       REENTRY_REPLACED_NEW: 'Создан новый сигнал',
+      TELEGRAM_LINK_UPDATED: 'Привязка к сообщению Telegram',
     };
     const title = titles[raw.type] ?? raw.type;
     return details ? `${title}: ${details}` : title;
@@ -177,6 +187,18 @@ export function TradesList({ items, sourceOptions }: Props) {
                 options={sourceOptions}
               />
             )}
+          </div>
+
+          <div className="tradeCardBlock">
+            <span className="tradeCardLabel">Telegram (userbot)</span>
+            <TelegramSourceLink
+              signalId={s.id}
+              pair={s.pair}
+              status={s.status}
+              deletedAt={s.deletedAt}
+              sourceChatId={s.sourceChatId ?? null}
+              sourceMessageId={s.sourceMessageId ?? null}
+            />
           </div>
 
           <div className="tradeCardParams">

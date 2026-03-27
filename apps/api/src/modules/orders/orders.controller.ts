@@ -75,6 +75,26 @@ export class OrdersController {
     );
   }
 
+  @Patch('trades/:id/telegram-source')
+  async updateTradeTelegramSource(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      sourceChatId?: string | null;
+      sourceMessageId?: string | null;
+    },
+  ) {
+    if (body.sourceChatId === undefined || body.sourceMessageId === undefined) {
+      throw new BadRequestException(
+        'Укажите sourceChatId и sourceMessageId (строки или null для сброса)',
+      );
+    }
+    return this.orders.updateTradeTelegramSource(id, {
+      sourceChatId: body.sourceChatId,
+      sourceMessageId: body.sourceMessageId,
+    });
+  }
+
   @Patch('trades/:id/pnl')
   async updateTradePnl(
     @Param('id') id: string,

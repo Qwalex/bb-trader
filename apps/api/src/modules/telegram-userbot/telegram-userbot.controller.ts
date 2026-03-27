@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
 
 import { TelegramUserbotService } from './telegram-userbot.service';
 
@@ -49,6 +49,24 @@ export class TelegramUserbotController {
   @Get('chats')
   async listChats() {
     return this.userbot.listChats();
+  }
+
+  /**
+   * Сообщения из TgUserbotIngest для ручной привязки сделки (chat id + message id).
+   */
+  @Get('ingest-link-candidates')
+  async ingestLinkCandidates(
+    @Query('limit') limit?: string,
+    @Query('chatId') chatId?: string,
+    @Query('pair') pair?: string,
+  ) {
+    const raw = limit ? parseInt(limit, 10) : undefined;
+    const n = Number.isFinite(raw) ? raw : undefined;
+    return this.userbot.listIngestLinkCandidates({
+      limit: n,
+      chatId: typeof chatId === 'string' ? chatId : undefined,
+      pair: typeof pair === 'string' ? pair : undefined,
+    });
   }
 
   @Post('scan-today')

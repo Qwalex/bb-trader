@@ -161,6 +161,102 @@ export class OrdersService {
     return { ok: true, affectedSignals: res.count };
   }
 
+  /**
+   * Ручная привязка сделки к сообщению в Telegram (для close/reentry по цитате в userbot).
+   * Нужны оба id или оба null (сброс).
+   */
+  async updateTradeTelegramSource(
+    signalId: string,
+    body: { sourceChatId: string | null; sourceMessageId: string | null },
+  ) {
+    const chatRaw = body.sourceChatId;
+    const msgRaw = body.sourceMessageId;
+    const nextChat =
+      chatRaw === null || chatRaw === undefined
+        ? null
+        : String(chatRaw).trim();
+    const nextMsg =
+      msgRaw === null || msgRaw === undefined
+        ? null
+        : String(msgRaw).trim();
+
+    const normalizedChat = nextChat && nextChat.length > 0 ? nextChat : null;
+    const normalizedMsg = nextMsg && nextMsg.length > 0 ? nextMsg : null;
+
+    if (Boolean(normalizedChat) !== Boolean(normalizedMsg)) {
+      throw new BadRequestException(
+        'Укажите оба поля: chat id и message id, или очистите оба (сброс привязки)',
+      );
+    }
+
+    const signal = await this.prisma.signal.findUnique({
+      where: { id: signalId },
+      select: {
+        id: true,
+        status: true,
+        deletedAt: true,
+        sourceChatId: true,
+        sourceMessageId: true,
+      },
+    });
+
+    if (!signal) {
+      throw new NotFoundException('Сделка не найдена');
+    }
+    if (signal.deletedAt) {
+      throw new NotFoundException('Сделка удалена');
+    }
+    if (!OrdersService.SOURCE_EDIT_ALLOWED_STATUSES.has(signal.status)) {
+      throw new BadRequestException(
+        `Нельзя менять привязку к Telegram для статуса: ${signal.status}`,
+      );
+    }
+
+    if (normalizedChat && normalizedMsg) {
+      const conflict = await this.prisma.signal.findFirst({
+        where: {
+          id: { not: signalId },
+          deletedAt: null,
+          sourceChatId: normalizedChat,
+          sourceMessageId: normalizedMsg,
+          status: { in: ['ORDERS_PLACED', 'OPEN', 'PARSED'] },
+        },
+        select: { id: true },
+      });
+      if (conflict) {
+        throw new BadRequestException(
+          `Уже есть активная сделка, привязанная к этому сообщению (${conflict.id.slice(0, 8)}…)`,
+        );
+      }
+    }
+
+    await this.prisma.signal.update({
+      where: { id: signalId },
+      data: {
+        sourceChatId: normalizedChat,
+        sourceMessageId: normalizedMsg,
+      },
+    });
+
+    await this.createSignalEvent(signalId, 'TELEGRAM_LINK_UPDATED', {
+      from: {
+        sourceChatId: signal.sourceChatId,
+        sourceMessageId: signal.sourceMessageId,
+      },
+      to: {
+        sourceChatId: normalizedChat,
+        sourceMessageId: normalizedMsg,
+      },
+    });
+
+    return {
+      ok: true,
+      signalId,
+      sourceChatId: normalizedChat,
+      sourceMessageId: normalizedMsg,
+    };
+  }
+
   async updateTradePnlManual(signalId: string, realizedPnl: number | null) {
     const signal = await this.prisma.signal.findUnique({
       where: { id: signalId },

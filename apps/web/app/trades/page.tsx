@@ -27,6 +27,8 @@ type Signal = {
   direction: string;
   status: string;
   source: string | null;
+  sourceChatId?: string | null;
+  sourceMessageId?: string | null;
   realizedPnl: number | null;
   createdAt: string;
   deletedAt?: string | null;

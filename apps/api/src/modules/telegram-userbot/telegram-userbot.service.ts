@@ -412,6 +412,91 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  /**
+   * Недавние записи userbot-ingest, похожие на исходные сигналы (для привязки к сделке).
+   */
+  async listIngestLinkCandidates(options: {
+    limit?: number;
+    chatId?: string;
+    pair?: string;
+  }): Promise<{
+    items: Array<{
+      ingestId: string;
+      chatId: string;
+      messageId: string;
+      chatTitle: string;
+      textPreview: string;
+      classification: string;
+      status: string;
+      createdAt: string;
+    }>;
+  }> {
+    const limit = Math.min(Math.max(options.limit ?? 50, 1), 150);
+    const chatIdFilter = options.chatId?.trim();
+    const pairRaw = options.pair?.trim() ?? '';
+
+    const andParts: Prisma.TgUserbotIngestWhereInput[] = [
+      {
+        OR: [
+          { classification: 'signal' },
+          { status: { in: ['placed', 'reentry_placed', 'reentry_updated'] } },
+        ],
+      },
+    ];
+    if (chatIdFilter) {
+      andParts.push({ chatId: chatIdFilter });
+    }
+    if (pairRaw.length >= 2) {
+      const p = pairRaw.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      if (p.length >= 2) {
+        andParts.push({
+          OR: [{ text: { contains: pairRaw } }, { text: { contains: p } }],
+        });
+      }
+    }
+
+    const rows = await this.prisma.tgUserbotIngest.findMany({
+      where: { AND: andParts },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      select: {
+        id: true,
+        chatId: true,
+        messageId: true,
+        text: true,
+        classification: true,
+        status: true,
+        createdAt: true,
+      },
+    });
+
+    const chatIds = Array.from(new Set(rows.map((r) => r.chatId)));
+    const chats = await this.prisma.tgUserbotChat.findMany({
+      where: { chatId: { in: chatIds } },
+      select: { chatId: true, title: true },
+    });
+    const titleByChat = new Map(chats.map((c) => [c.chatId, c.title]));
+
+    const preview = (t: string | null | undefined): string => {
+      const s = (t ?? '').replace(/\s+/g, ' ').trim();
+      if (s.length <= 220) return s;
+      return `${s.slice(0, 220)}…`;
+    };
+
+    return {
+      items: rows.map((r) => ({
+        ingestId: r.id,
+        chatId: r.chatId,
+        messageId: r.messageId,
+        chatTitle: titleByChat.get(r.chatId) ?? r.chatId,
+        textPreview: preview(r.text),
+        classification: r.classification,
+        status: r.status,
+        createdAt: r.createdAt.toISOString(),
+      })),
+    };
+  }
+
   async listFilterGroups() {
     const chatRows = await this.prisma.tgUserbotChat.findMany({
       where: { enabled: true },
