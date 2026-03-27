@@ -375,6 +375,7 @@ export class OrdersService {
   async getDashboardStats(params?: { source?: string }) {
     const source = params?.source;
     const excluded = await this.getExcludedSourcesSet();
+    const statsResetAt = await this.getStatsResetAt();
     if (source && excluded.has(source)) {
       return {
         winrate: 0,
@@ -389,6 +390,7 @@ export class OrdersService {
       where: {
         deletedAt: null,
         status: { in: ['CLOSED_WIN', 'CLOSED_LOSS', 'CLOSED_MIXED'] },
+        ...(statsResetAt ? { closedAt: { gte: statsResetAt } } : {}),
         ...(source ? { source } : {}),
       },
     });
@@ -407,6 +409,7 @@ export class OrdersService {
       where: {
         deletedAt: null,
         status: { in: ['ORDERS_PLACED', 'OPEN', 'PARSED'] },
+        ...(statsResetAt ? { createdAt: { gte: statsResetAt } } : {}),
         ...(source ? { source } : {}),
       },
       select: { source: true },
@@ -427,6 +430,7 @@ export class OrdersService {
   async getPnlSeries(bucket: 'day' | 'week', params?: { source?: string }) {
     const source = params?.source;
     const excluded = await this.getExcludedSourcesSet();
+    const statsResetAt = await this.getStatsResetAt();
     if (source && excluded.has(source)) {
       return [];
     }
@@ -435,6 +439,7 @@ export class OrdersService {
         deletedAt: null,
         closedAt: { not: null },
         realizedPnl: { not: null },
+        ...(statsResetAt ? { closedAt: { gte: statsResetAt } } : {}),
         ...(source ? { source } : {}),
       },
       orderBy: { closedAt: 'asc' },
@@ -482,9 +487,25 @@ export class OrdersService {
     return new Set(this.parseStringList(raw));
   }
 
+  private async getStatsResetAt(): Promise<Date | undefined> {
+    const raw = await this.settings.get('STATS_RESET_AT');
+    if (!raw || raw.trim() === '') {
+      return undefined;
+    }
+    const d = new Date(raw);
+    return Number.isNaN(d.getTime()) ? undefined : d;
+  }
+
+  async resetAnalyticsStats() {
+    const resetAt = new Date();
+    await this.settings.set('STATS_RESET_AT', resetAt.toISOString());
+    return { ok: true, resetAt: resetAt.toISOString() };
+  }
+
   async getSourceStats(params?: { source?: string }) {
     const source = params?.source;
     const excluded = await this.getExcludedSourcesSet();
+    const statsResetAt = await this.getStatsResetAt();
     if (source && excluded.has(source)) {
       return [];
     }
@@ -497,11 +518,25 @@ export class OrdersService {
         source: true,
         status: true,
         realizedPnl: true,
+        createdAt: true,
+        closedAt: true,
       },
     });
     const rowsFiltered = source
       ? rows
       : rows.filter((row) => !excluded.has(String(row.source ?? '')));
+    const rowsResetFiltered = rowsFiltered.filter((row) => {
+      if (!statsResetAt) {
+        return true;
+      }
+      if (row.status === 'CLOSED_WIN' || row.status === 'CLOSED_LOSS' || row.status === 'CLOSED_MIXED') {
+        return row.closedAt != null && row.closedAt >= statsResetAt;
+      }
+      if (row.status === 'ORDERS_PLACED' || row.status === 'OPEN' || row.status === 'PARSED') {
+        return row.createdAt >= statsResetAt;
+      }
+      return false;
+    });
 
     type Acc = {
       source: string | null;
@@ -515,7 +550,7 @@ export class OrdersService {
 
     const map = new Map<string, Acc>();
     const keyOf = (s: string | null) => (s && s.trim().length > 0 ? s : '—');
-    for (const r of rowsFiltered) {
+    for (const r of rowsResetFiltered) {
       const key = keyOf(r.source);
       const acc =
         map.get(key) ??

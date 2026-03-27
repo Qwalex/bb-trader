@@ -118,7 +118,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleInit(): Promise<void> {
     await this.refreshEnabledChatsCache();
-    this.startPollingLoop();
+    void this.startPollingLoop();
     const enabled = await this.getBoolSetting('TELEGRAM_USERBOT_ENABLED', false);
     if (!enabled) {
       return;
@@ -163,7 +163,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       },
       chatsTotal,
       chatsEnabled,
-      pollMs: USERBOT_POLL_INTERVAL_MS,
+      pollMs: await this.getUserbotPollIntervalMs(),
       pollingInFlight: this.pollInFlight,
       processingQueueDepth: this.processingQueue.length,
       processingWorkersActive: this.processingWorkersActive,
@@ -728,13 +728,17 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  private startPollingLoop() {
+  private async startPollingLoop() {
     if (this.pollTimer) {
       return;
     }
-    this.pollTimer = setInterval(() => {
-      void this.pollTick();
-    }, USERBOT_POLL_INTERVAL_MS);
+    const pollMs = await this.getUserbotPollIntervalMs();
+    this.pollTimer = setTimeout(() => {
+      this.pollTimer = null;
+      void this.pollTick().finally(() => {
+        void this.startPollingLoop();
+      });
+    }, pollMs);
   }
 
   private stopPollingLoop() {
@@ -743,6 +747,15 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     }
     clearInterval(this.pollTimer);
     this.pollTimer = null;
+  }
+
+  private async getUserbotPollIntervalMs(): Promise<number> {
+    return this.getNumberSetting(
+      'TELEGRAM_USERBOT_POLL_INTERVAL_MS',
+      USERBOT_POLL_INTERVAL_MS,
+      500,
+      60_000,
+    );
   }
 
   private async pollTick() {

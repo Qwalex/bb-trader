@@ -105,6 +105,14 @@ export class OrdersController {
     return this.orders.listDistinctSources();
   }
 
+  @Post('reset-stats')
+  async resetStats(@Body() body?: { confirm?: boolean }) {
+    if (body?.confirm !== true) {
+      throw new BadRequestException('Укажите { "confirm": true } для сброса статистики');
+    }
+    return this.orders.resetAnalyticsStats();
+  }
+
   @Get('by-pair')
   async byPair() {
     return this.orders.statsByPair();
