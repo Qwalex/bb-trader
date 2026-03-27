@@ -232,8 +232,13 @@ export default function FiltersPage() {
     }
   }
 
-  async function generatePatternsFromExample() {
-    const e = example.trim();
+  async function generatePatternsFromSource(params: {
+    exampleText: string;
+    kind: FilterKind;
+    groupName?: string;
+    requiresQuote?: boolean;
+  }) {
+    const e = params.exampleText.trim();
     if (!e) {
       setMsg({ type: 'err', text: 'Сначала вставьте пример сообщения для AI' });
       return;
@@ -244,7 +249,7 @@ export default function FiltersPage() {
       const res = await fetch(`${getApiBase()}/telegram-userbot/filters/patterns/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kind, example: e }),
+        body: JSON.stringify({ kind: params.kind, example: e }),
       });
       const json = (await res.json()) as {
         ok?: boolean;
@@ -256,10 +261,11 @@ export default function FiltersPage() {
       }
       const patterns = (json.patterns ?? []).filter(Boolean);
       setGeneratedPatterns(patterns);
-      setPatternKind(kind);
-      setPatternRequiresQuote(exampleRequiresQuote);
-      if (groupName.trim()) {
-        setPatternGroupName(groupName.trim());
+      setPatternKind(params.kind);
+      setPatternRequiresQuote(params.requiresQuote === true);
+      const nextGroupName = params.groupName?.trim() ?? '';
+      if (nextGroupName) {
+        setPatternGroupName(nextGroupName);
       }
       setMsg({
         type: 'ok',
@@ -273,6 +279,15 @@ export default function FiltersPage() {
     } finally {
       setBusy(null);
     }
+  }
+
+  async function generatePatternsFromExample() {
+    await generatePatternsFromSource({
+      exampleText: example,
+      kind,
+      groupName,
+      requiresQuote: exampleRequiresQuote,
+    });
   }
 
   function applyGeneratedPattern(value: string) {
@@ -627,60 +642,81 @@ export default function FiltersPage() {
         <p style={{ color: 'var(--muted)' }}>Пока нет сохраненных фильтров-паттернов.</p>
       ) : (
         <div style={{ display: 'grid', gap: '1rem', marginBottom: '1rem' }}>
-          {groupedPatterns.map(([name, byKind]) => (
-            <div key={`patterns-${name}`} className="card">
-              <h3 style={{ marginBottom: '0.6rem' }}>{name} · Фильтры</h3>
-              {(['signal', 'close', 'result', 'reentry'] as const).map((k) => (
-                <div key={`${name}-pattern-${k}`} style={{ marginBottom: '0.9rem' }}>
-                  <strong style={{ fontSize: '0.9rem' }}>{KIND_LABEL[k]}</strong>
-                  {byKind[k].length === 0 ? (
-                    <p style={{ color: 'var(--muted)', marginTop: '0.3rem' }}>Нет паттернов</p>
-                  ) : (
-                    <div style={{ display: 'grid', gap: '0.5rem', marginTop: '0.4rem' }}>
-                      {byKind[k].map((it) => (
-                        <div
-                          key={it.id}
-                          style={{
-                            border: '1px solid var(--border)',
-                            borderRadius: 8,
-                            padding: '0.55rem 0.6rem',
-                            background: 'rgba(255,255,255,0.02)',
-                          }}
-                        >
-                          <pre
+          {groupedPatterns.map(([name, byKind], groupIdx) => (
+            <details
+              key={`patterns-${name}`}
+              className="card"
+              open={groupIdx === 0}
+              style={{ padding: '0.85rem 1rem' }}
+            >
+              <summary
+                style={{
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '0.75rem',
+                }}
+              >
+                <span>{name}</span>
+                <span style={{ color: 'var(--muted)', fontWeight: 500, fontSize: '0.9rem' }}>
+                  {Object.values(byKind).reduce((sum, items) => sum + items.length, 0)} паттернов
+                </span>
+              </summary>
+              <div style={{ marginTop: '0.85rem' }}>
+                {(['signal', 'close', 'result', 'reentry'] as const).map((k) => (
+                  <div key={`${name}-pattern-${k}`} style={{ marginBottom: '0.9rem' }}>
+                    <strong style={{ fontSize: '0.9rem' }}>{KIND_LABEL[k]}</strong>
+                    {byKind[k].length === 0 ? (
+                      <p style={{ color: 'var(--muted)', marginTop: '0.3rem' }}>Нет паттернов</p>
+                    ) : (
+                      <div style={{ display: 'grid', gap: '0.5rem', marginTop: '0.4rem' }}>
+                        {byKind[k].map((it) => (
+                          <div
+                            key={it.id}
                             style={{
-                              margin: 0,
-                              whiteSpace: 'pre-wrap',
-                              color: 'var(--foreground)',
-                              fontFamily: 'var(--font-geist-mono), monospace',
-                              fontSize: '0.78rem',
-                              lineHeight: 1.35,
+                              border: '1px solid var(--border)',
+                              borderRadius: 8,
+                              padding: '0.55rem 0.6rem',
+                              background: 'rgba(255,255,255,0.02)',
                             }}
                           >
-                            {it.pattern}
-                          </pre>
-                          {it.requiresQuote && (
-                            <div style={{ marginTop: '0.35rem', color: 'var(--muted)' }}>
-                              Только с цитатой
-                            </div>
-                          )}
-                          <div style={{ marginTop: '0.45rem' }}>
-                            <button
-                              className="btn btnSecondary btnSm"
-                              type="button"
-                              disabled={busy !== null}
-                              onClick={() => void removePattern(it.id)}
+                            <pre
+                              style={{
+                                margin: 0,
+                                whiteSpace: 'pre-wrap',
+                                color: 'var(--foreground)',
+                                fontFamily: 'var(--font-geist-mono), monospace',
+                                fontSize: '0.78rem',
+                                lineHeight: 1.35,
+                              }}
                             >
-                              {busy === `del-pattern:${it.id}` ? 'Удаление…' : 'Удалить'}
-                            </button>
+                              {it.pattern}
+                            </pre>
+                            {it.requiresQuote && (
+                              <div style={{ marginTop: '0.35rem', color: 'var(--muted)' }}>
+                                Только с цитатой
+                              </div>
+                            )}
+                            <div style={{ marginTop: '0.45rem' }}>
+                              <button
+                                className="btn btnSecondary btnSm"
+                                type="button"
+                                disabled={busy !== null}
+                                onClick={() => void removePattern(it.id)}
+                              >
+                                {busy === `del-pattern:${it.id}` ? 'Удаление…' : 'Удалить'}
+                              </button>
+                            </div>
                           </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </details>
           ))}
         </div>
       )}
@@ -727,6 +763,24 @@ export default function FiltersPage() {
                             </div>
                           )}
                           <div style={{ marginTop: '0.45rem' }}>
+                            <button
+                              className="btn btnSecondary btnSm"
+                              type="button"
+                              disabled={busy !== null}
+                              onClick={() =>
+                                void generatePatternsFromSource({
+                                  exampleText: it.example,
+                                  kind: it.kind,
+                                  groupName: it.groupName,
+                                  requiresQuote: it.requiresQuote,
+                                })
+                              }
+                              style={{ marginRight: '0.35rem' }}
+                            >
+                              {busy === 'generate-patterns'
+                                ? 'Генерация…'
+                                : 'Сгенерировать паттерны'}
+                            </button>
                             <button
                               className="btn btnSecondary btnSm"
                               type="button"

@@ -411,33 +411,14 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   }
 
   async listFilterGroups() {
-    const [chatRows, exampleRows, filterRows] = await Promise.all([
-      this.prisma.tgUserbotChat.findMany({
-        orderBy: { title: 'asc' },
-        select: { title: true, chatId: true },
-      }),
-      this.prisma.tgUserbotFilterExample.findMany({
-        where: { enabled: true },
-        orderBy: { groupName: 'asc' },
-        select: { groupName: true },
-      }),
-      this.prisma.tgUserbotFilterPattern.findMany({
-        where: { enabled: true },
-        orderBy: { groupName: 'asc' },
-        select: { groupName: true },
-      }),
-    ]);
+    const chatRows = await this.prisma.tgUserbotChat.findMany({
+      where: { enabled: true },
+      orderBy: { title: 'asc' },
+      select: { title: true },
+    });
     const names = new Set<string>();
     for (const row of chatRows) {
       const v = typeof row.title === 'string' ? row.title.trim() : '';
-      if (v) names.add(String(v));
-    }
-    for (const row of exampleRows) {
-      const v = typeof row.groupName === 'string' ? row.groupName.trim() : '';
-      if (v) names.add(String(v));
-    }
-    for (const row of filterRows) {
-      const v = typeof row.groupName === 'string' ? row.groupName.trim() : '';
       if (v) names.add(String(v));
     }
     return {
@@ -1062,9 +1043,30 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         replyToMessageId,
         quotedText,
       );
-      const kind = cls.kind;
+      let kind = cls.kind;
       const aiRequest = cls.aiRequest;
-      const aiResponse = cls.aiResponse;
+      let aiResponse = cls.aiResponse;
+      let ignoredOtherError: string | null = null;
+      if (!hasQuotedSource && (kind === 'close' || kind === 'reentry')) {
+        const previousKind = kind;
+        kind = 'other';
+        ignoredOtherError =
+          previousKind === 'reentry'
+            ? 'Reentry-сообщение без цитаты исходного сигнала'
+            : 'Close-сообщение без цитаты исходного сигнала';
+        this.appendIngestStageLog('warn', 'Userbot: close/reentry сняты — нет цитаты', ingest, {
+          previousKind,
+          filterKind: filterKind ?? null,
+          exampleKind: exampleKind ?? null,
+        });
+        const note = this.limitTrace(
+          JSON.stringify({
+            note: 'close/reentry недопустимы без reply; классификация сброшена в other',
+            previousKind,
+          }),
+        );
+        aiResponse = aiResponse ? `${aiResponse}\n${note}` : note;
+      }
       this.appendIngestStageLog('info', 'Userbot: classification resolved', ingest, {
         groupName,
         filterKind: filterKind ?? null,
@@ -1082,19 +1084,6 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       });
 
       if (kind === 'reentry') {
-        if (!hasQuotedSource) {
-          this.appendIngestStageLog('warn', 'Userbot: reentry ignored without quote', ingest, {
-            kind,
-          });
-          await this.updateIngest(ingest.id, {
-            classification: 'other',
-            status: 'ignored',
-            error: 'Reentry-сообщение без цитаты исходного сигнала',
-            aiRequest,
-            aiResponse,
-          });
-          return;
-        }
         const reentry = await this.tryReentryFromReply({
           chatId: ingest.chatId,
           messageId: ingest.messageId,
@@ -1124,19 +1113,6 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       }
 
       if (kind === 'close') {
-        if (!hasQuotedSource) {
-          this.appendIngestStageLog('warn', 'Userbot: close ignored without quote', ingest, {
-            kind,
-          });
-          await this.updateIngest(ingest.id, {
-            classification: 'other',
-            status: 'ignored',
-            error: 'Close-сообщение без цитаты исходного сигнала',
-            aiRequest,
-            aiResponse,
-          });
-          return;
-        }
         const closeResult = await this.tryCloseSignalFromReply({
           chatId: ingest.chatId,
           messageId: ingest.messageId,
@@ -1165,6 +1141,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         await this.updateIngest(ingest.id, {
           classification: kind,
           status: 'ignored',
+          error: ignoredOtherError,
           aiRequest,
           aiResponse,
         });
@@ -1479,6 +1456,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       if (kind !== 'signal' && kind !== 'close' && kind !== 'result' && kind !== 'reentry') {
         continue;
       }
+      if ((kind === 'close' || kind === 'reentry') && !hasQuotedSource) {
+        continue;
+      }
       if (requiresQuote && !hasQuotedSource) {
         continue;
       }
@@ -1530,6 +1510,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         continue;
       }
       if (kind !== 'signal' && kind !== 'close' && kind !== 'result' && kind !== 'reentry') {
+        continue;
+      }
+      if ((kind === 'close' || kind === 'reentry') && !hasQuotedSource) {
         continue;
       }
       if (requiresQuote && !hasQuotedSource) {
@@ -2397,20 +2380,27 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     replyToMessageId?: string,
     quotedText?: string,
   ): Promise<{ kind: MessageKind; aiRequest?: string; aiResponse?: string }> {
-    if (preferredKind) {
+    const replyId = String(replyToMessageId ?? '').trim();
+    const forcedKind =
+      preferredKind &&
+      (preferredKind === 'close' || preferredKind === 'reentry') &&
+      !replyId
+        ? undefined
+        : preferredKind;
+    if (forcedKind) {
       return {
-        kind: preferredKind,
+        kind: forcedKind,
         aiRequest: this.limitTrace(
           JSON.stringify({
             operation: 'classifyMessage',
             source: preferredKindSource ?? 'group_filter_example',
             groupName: groupName ?? null,
-            preferredKind,
+            preferredKind: forcedKind,
           }),
         ),
         aiResponse: this.limitTrace(
           JSON.stringify({
-            forcedKind: preferredKind,
+            forcedKind,
             reason:
               preferredKindSource === 'group_filter_pattern'
                 ? 'matched by user filter pattern for group'
