@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 import { RestClientV5 } from 'bybit-api';
 
 import { normalizeTradingPair, type SignalDto } from '@repo/shared';
@@ -130,6 +130,7 @@ export class BybitService {
 
   constructor(
     private readonly settings: SettingsService,
+    @Inject(forwardRef(() => OrdersService))
     private readonly orders: OrdersService,
     private readonly appLog: AppLogService,
   ) {}
@@ -1142,24 +1143,26 @@ export class BybitService {
     };
   }
 
-  async closeSignalManually(signalId: string): Promise<CloseSignalResult> {
-    const signal = await this.orders.getSignalWithOrders(signalId);
-    if (!signal) {
-      return { ok: false, error: 'Сигнал не найден' };
-    }
-
-    const symbol = normalizeTradingPair(signal.pair);
-    const client = await this.getClient();
-    if (!client) {
-      return {
-        ok: false,
-        signalId,
-        symbol,
-        error:
-          'Нет подключенных ключей Bybit. Настройте BYBIT_API_KEY/BYBIT_API_SECRET.',
-      };
-    }
-
+  /**
+   * Снимает все лимитные/стоп-ордера по символу и закрывает позиции (market reduce-only),
+   * затем ждёт «плоского» состояния по API.
+   */
+  private async flattenLinearSymbolOnExchange(
+    client: RestClientV5,
+    symbol: string,
+  ): Promise<
+    | { ok: true; cancelledOrders: number; closedPositions: number }
+    | {
+        ok: false;
+        cancelledOrders: number;
+        closedPositions: number;
+        error: string;
+        details: string;
+        pendingExchange: boolean;
+        activeOrders?: number;
+        positions?: number;
+      }
+  > {
     const errors: string[] = [];
     let cancelledOrders = 0;
     let closedPositions = 0;
@@ -1218,58 +1221,203 @@ export class BybitService {
     }
 
     if (errors.length > 0) {
-      await this.orders.createSignalEvent(signalId, 'BYBIT_CLOSE_FAILED', {
-        symbol,
-        errors,
-        cancelledOrders,
-        closedPositions,
-      });
-      void this.appLog.append(
-        'error',
-        'bybit',
-        'manual close failed',
-        {
-          signalId,
-          symbol,
-          errors,
-        },
-      );
       return {
         ok: false,
-        signalId,
-        symbol,
         cancelledOrders,
         closedPositions,
         error: 'Не удалось полностью закрыть на Bybit',
         details: errors.join(' | '),
+        pendingExchange: false,
       };
     }
 
     const flatState = await this.waitForSymbolToBeFlat(client, symbol);
     if (!flatState.ok) {
-      await this.orders.createSignalEvent(signalId, 'BYBIT_CLOSE_PENDING', {
-        symbol,
-        activeOrders: flatState.activeOrders,
-        positions: flatState.positions,
-        cancelledOrders,
-        closedPositions,
-      });
-      void this.appLog.append('warn', 'bybit', 'manual close pending exchange cleanup', {
-        signalId,
-        symbol,
-        activeOrders: flatState.activeOrders,
-        positions: flatState.positions,
-      });
       return {
         ok: false,
-        signalId,
-        symbol,
         cancelledOrders,
         closedPositions,
         error: 'Bybit ещё не подтвердил полное закрытие ордеров/позиции',
         details: `activeOrders=${flatState.activeOrders}; positions=${flatState.positions}`,
+        pendingExchange: true,
+        activeOrders: flatState.activeOrders,
+        positions: flatState.positions,
       };
     }
+
+    return { ok: true, cancelledOrders, closedPositions };
+  }
+
+  /**
+   * Перед удалением сделки в статусе ORDERS_PLACED: отмена ордеров и закрытие позиции на Bybit.
+   */
+  async cleanupExchangeBeforeDeletingPlacedSignal(
+    signalId: string,
+  ): Promise<CloseSignalResult> {
+    const signal = await this.orders.getSignalWithOrders(signalId);
+    if (!signal) {
+      return { ok: false, error: 'Сигнал не найден' };
+    }
+
+    const symbol = normalizeTradingPair(signal.pair);
+    const client = await this.getClient();
+    if (!client) {
+      return {
+        ok: false,
+        signalId,
+        symbol,
+        error:
+          'Нет подключенных ключей Bybit. Настройте BYBIT_API_KEY/BYBIT_API_SECRET.',
+      };
+    }
+
+    const flatResult = await this.flattenLinearSymbolOnExchange(client, symbol);
+    if (!flatResult.ok) {
+      if (flatResult.pendingExchange) {
+        await this.orders.createSignalEvent(
+          signalId,
+          'BYBIT_TRADE_DELETE_CLEANUP_PENDING',
+          {
+            symbol,
+            activeOrders: flatResult.activeOrders,
+            positions: flatResult.positions,
+            cancelledOrders: flatResult.cancelledOrders,
+            closedPositions: flatResult.closedPositions,
+          },
+        );
+        void this.appLog.append('warn', 'bybit', 'trade delete: exchange cleanup pending', {
+          signalId,
+          symbol,
+          activeOrders: flatResult.activeOrders,
+          positions: flatResult.positions,
+        });
+      } else {
+        const errParts = flatResult.details
+          .split(' | ')
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0);
+        await this.orders.createSignalEvent(
+          signalId,
+          'BYBIT_TRADE_DELETE_CLEANUP_FAILED',
+          {
+            symbol,
+            errors: errParts.length > 0 ? errParts : [flatResult.details],
+            cancelledOrders: flatResult.cancelledOrders,
+            closedPositions: flatResult.closedPositions,
+          },
+        );
+        void this.appLog.append('error', 'bybit', 'trade delete: exchange cleanup failed', {
+          signalId,
+          symbol,
+          details: flatResult.details,
+        });
+      }
+      return {
+        ok: false,
+        signalId,
+        symbol,
+        cancelledOrders: flatResult.cancelledOrders,
+        closedPositions: flatResult.closedPositions,
+        error: flatResult.error,
+        details: flatResult.details,
+      };
+    }
+
+    for (const ord of signal.orders) {
+      if (BybitService.isFilledOrderStatus(ord.status)) {
+        continue;
+      }
+      await this.orders.updateOrder(ord.id, {
+        status: 'CANCELLED_MANUAL',
+      });
+    }
+
+    await this.orders.createSignalEvent(signalId, 'BYBIT_TRADE_DELETE_CLEANUP_SUCCESS', {
+      symbol,
+      cancelledOrders: flatResult.cancelledOrders,
+      closedPositions: flatResult.closedPositions,
+      deletedAt: new Date().toISOString(),
+    });
+    void this.appLog.append('info', 'bybit', 'trade delete: exchange cleanup ok', {
+      signalId,
+      symbol,
+      cancelledOrders: flatResult.cancelledOrders,
+      closedPositions: flatResult.closedPositions,
+    });
+
+    return {
+      ok: true,
+      signalId,
+      symbol,
+      cancelledOrders: flatResult.cancelledOrders,
+      closedPositions: flatResult.closedPositions,
+    };
+  }
+
+  async closeSignalManually(signalId: string): Promise<CloseSignalResult> {
+    const signal = await this.orders.getSignalWithOrders(signalId);
+    if (!signal) {
+      return { ok: false, error: 'Сигнал не найден' };
+    }
+
+    const symbol = normalizeTradingPair(signal.pair);
+    const client = await this.getClient();
+    if (!client) {
+      return {
+        ok: false,
+        signalId,
+        symbol,
+        error:
+          'Нет подключенных ключей Bybit. Настройте BYBIT_API_KEY/BYBIT_API_SECRET.',
+      };
+    }
+
+    const flatResult = await this.flattenLinearSymbolOnExchange(client, symbol);
+    if (!flatResult.ok) {
+      if (flatResult.pendingExchange) {
+        await this.orders.createSignalEvent(signalId, 'BYBIT_CLOSE_PENDING', {
+          symbol,
+          activeOrders: flatResult.activeOrders,
+          positions: flatResult.positions,
+          cancelledOrders: flatResult.cancelledOrders,
+          closedPositions: flatResult.closedPositions,
+        });
+        void this.appLog.append('warn', 'bybit', 'manual close pending exchange cleanup', {
+          signalId,
+          symbol,
+          activeOrders: flatResult.activeOrders,
+          positions: flatResult.positions,
+        });
+      } else {
+        const errParts = flatResult.details
+          .split(' | ')
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0);
+        await this.orders.createSignalEvent(signalId, 'BYBIT_CLOSE_FAILED', {
+          symbol,
+          errors: errParts.length > 0 ? errParts : [flatResult.details],
+          cancelledOrders: flatResult.cancelledOrders,
+          closedPositions: flatResult.closedPositions,
+        });
+        void this.appLog.append('error', 'bybit', 'manual close failed', {
+          signalId,
+          symbol,
+          errors: errParts,
+        });
+      }
+      return {
+        ok: false,
+        signalId,
+        symbol,
+        cancelledOrders: flatResult.cancelledOrders,
+        closedPositions: flatResult.closedPositions,
+        error: flatResult.error,
+        details: flatResult.details,
+      };
+    }
+
+    const cancelledOrders = flatResult.cancelledOrders;
+    const closedPositions = flatResult.closedPositions;
 
     for (const ord of signal.orders) {
       if (BybitService.isFilledOrderStatus(ord.status)) {

@@ -1,9 +1,16 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  forwardRef,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 
 import { normalizeTradingPair, type SignalDto } from '@repo/shared';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import { BybitService } from '../bybit/bybit.service';
 import { SettingsService } from '../settings/settings.service';
 
 export interface TradesFilter {
@@ -22,6 +29,8 @@ export class OrdersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly settings: SettingsService,
+    @Inject(forwardRef(() => BybitService))
+    private readonly bybit: BybitService,
   ) {}
 
   private static readonly ACTIVE_SIGNAL_STATUSES = new Set([
@@ -265,10 +274,19 @@ export class OrdersService {
     if (row.deletedAt) {
       return;
     }
-    if (OrdersService.ACTIVE_SIGNAL_STATUSES.has(row.status)) {
+    if (row.status === 'OPEN' || row.status === 'PARSED') {
       throw new BadRequestException(
         'Нельзя удалить активную сделку: сначала закройте позицию/ордера на бирже',
       );
+    }
+    if (row.status === 'ORDERS_PLACED') {
+      const cleanup = await this.bybit.cleanupExchangeBeforeDeletingPlacedSignal(id);
+      if (!cleanup.ok) {
+        const tail = cleanup.details ? `: ${cleanup.details}` : '';
+        throw new BadRequestException(
+          `${cleanup.error ?? 'Не удалось снять ордера и закрыть позицию на Bybit'}${tail}`,
+        );
+      }
     }
     await this.prisma.signal.update({
       where: { id },

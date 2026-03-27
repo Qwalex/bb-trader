@@ -14,15 +14,15 @@ export function DeleteTradeButton(props: {
   const [deleting, setDeleting] = useState(false);
 
   const isDisabled =
-    deleting ||
-    props.status === 'ORDERS_PLACED' ||
-    props.status === 'OPEN' ||
-    props.status === 'PARSED';
+    deleting || props.status === 'OPEN' || props.status === 'PARSED';
 
   async function onDelete() {
     if (isDisabled) return;
+    const isPlaced = props.status === 'ORDERS_PLACED';
     const ok = window.confirm(
-      `Удалить сделку ${props.pair} из базы данных?\n\nСделка будет скрыта из статистики и таблиц (можно восстановить).`,
+      isPlaced
+        ? `Удалить сделку ${props.pair}?\n\nНа Bybit будут отменены ордера по паре и закрыта позиция (если есть), затем сделка скроется из статистики (можно восстановить).`
+        : `Удалить сделку ${props.pair} из базы данных?\n\nСделка будет скрыта из статистики и таблиц (можно восстановить).`,
     );
     if (!ok) return;
 
@@ -50,9 +50,13 @@ export function DeleteTradeButton(props: {
       onClick={onDelete}
       disabled={isDisabled}
       title={
-        isDisabled
-          ? 'Активные сделки удалять нельзя'
-          : 'Скрыть сделку (soft-delete)'
+        deleting
+          ? 'Выполняется удаление…'
+          : isDisabled
+            ? 'Сделки OPEN/PARSED удалять нельзя'
+            : isPlaced
+              ? 'Снять ордера/позицию на Bybit и скрыть сделку'
+              : 'Скрыть сделку (soft-delete)'
       }
       style={{
         padding: '0.3rem 0.55rem',
