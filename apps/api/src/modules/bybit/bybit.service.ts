@@ -1216,6 +1216,12 @@ export class BybitService {
     }
 
     if (errors.length > 0) {
+      await this.orders.createSignalEvent(signalId, 'BYBIT_CLOSE_FAILED', {
+        symbol,
+        errors,
+        cancelledOrders,
+        closedPositions,
+      });
       void this.appLog.append(
         'error',
         'bybit',
@@ -1239,6 +1245,13 @@ export class BybitService {
 
     const flatState = await this.waitForSymbolToBeFlat(client, symbol);
     if (!flatState.ok) {
+      await this.orders.createSignalEvent(signalId, 'BYBIT_CLOSE_PENDING', {
+        symbol,
+        activeOrders: flatState.activeOrders,
+        positions: flatState.positions,
+        cancelledOrders,
+        closedPositions,
+      });
       void this.appLog.append('warn', 'bybit', 'manual close pending exchange cleanup', {
         signalId,
         symbol,
@@ -1269,6 +1282,12 @@ export class BybitService {
       status: 'CLOSED_MIXED',
       closedAt: new Date(),
       realizedPnl: null,
+    });
+    await this.orders.createSignalEvent(signalId, 'BYBIT_CLOSE_SUCCESS', {
+      symbol,
+      cancelledOrders,
+      closedPositions,
+      closedAt: new Date().toISOString(),
     });
 
     void this.appLog.append('info', 'bybit', 'manual close success', {

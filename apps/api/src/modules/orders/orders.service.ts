@@ -221,6 +221,21 @@ export class OrdersService {
     });
   }
 
+  async createSignalEvent(
+    signalId: string,
+    type: string,
+    payload?: unknown,
+  ) {
+    return this.prisma.signalEvent.create({
+      data: {
+        signalId,
+        type,
+        payload:
+          payload === undefined ? null : JSON.stringify(payload),
+      },
+    });
+  }
+
   async updateOrder(
     id: string,
     data: Prisma.OrderUpdateInput,
