@@ -694,7 +694,8 @@ export class BybitService {
           const ao = await client.getActiveOrders({
             category: 'linear',
             symbol,
-            openOnly: 1,
+            // Для V5 нужны именно открытые ордера; openOnly=1 пропускает живые заявки.
+            openOnly: 0,
             limit: 50,
             orderFilter,
             cursor,
@@ -814,7 +815,8 @@ export class BybitService {
         const res = await client.getActiveOrders({
           category: 'linear',
           symbol,
-          openOnly: 1,
+          // Для V5 нужны именно открытые ордера; openOnly=1 пропускает живые заявки.
+          openOnly: 0,
           orderFilter,
           limit: 50,
           cursor,
@@ -1940,7 +1942,8 @@ export class BybitService {
       const active = await client.getActiveOrders({
         ...base,
         orderId,
-        openOnly: 1,
+        // Ищем ордер среди реально активных, иначе New/Untriggered пропадают из snapshot/poll.
+        openOnly: 0,
         limit: 1,
       });
       if (active.retCode === 0 && (active.result?.list?.length ?? 0) > 0) {
