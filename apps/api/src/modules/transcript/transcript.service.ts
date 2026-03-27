@@ -157,6 +157,7 @@ Field rules:
 - entries and leverage are optional.
 - entries: first price is main entry; following prices are DCA levels.
 - If the user gives no entry price, treat it as market entry: set entries to null and do NOT ask for clarification only because entries are missing. The order will be placed at market at the execution stage.
+- If the message gives BOTH a market entry option and a limit entry (labels such as Entry market / Entry limit, маркет и лимит, market vs limit, two entry lines where one is market and the other has a price), ALWAYS prefer the limit: set entries to the limit price(s) only. Do NOT set entries to null because "market" is also mentioned alongside an explicit limit price.
 - If the message describes ONE entry zone as a range for the same purpose (e.g. "entry range 1 - 2", "buy zone 1-2", "диапазон входа 1 - 2"), use one entry equal to the midpoint, not two DCA levels.
 - Extract prices only from explicit labels (Entry, Stop loss, SL, Targets/TP, etc.). Do not blend, infer, or average numbers from different fields.
 - Field labels without actual values (e.g. "Entry:", "SL:", "TP1:" with no number after them) do NOT count as known values.
@@ -236,7 +237,7 @@ Return ONLY strict JSON:
 }
 
 Classification rules:
-1. Return "signal" ONLY for a fresh actionable trade setup with pair, side, stop-loss, and at least one take-profit. Entry is optional: if it is omitted, treat it as market entry at the signal placement stage. If any of the required fields above is missing or ambiguous, do NOT return "signal". Leverage and size are optional.
+1. Return "signal" ONLY for a fresh actionable trade setup with pair, side, stop-loss, and at least one take-profit. Entry is optional: if it is omitted, treat it as market entry at the signal placement stage. If BOTH market and limit entry are described, treat as limit entry (the limit price counts as the setup). If any of the required fields above is missing or ambiguous, do NOT return "signal". Leverage and size are optional.
 2. Return "close" when the current message explicitly says close/closed/cancel/закрыт/отмена for a trade and it is not a TP/SL result report. Quoted/replied context strongly indicates "close", but even without a quote explicit close wording should still be classified as "close" rather than "result".
 3. Return "reentry" ONLY when the current message is a re-entry / add-entry / update instruction for a previously quoted/replied signal. A quoted/replied context is required.
 4. Return "result" for outcome/performance messages about an existing or past trade: TP hit, SL hit, closed trade report, profit/loss, PNL, percentages, duration, period, recap, statistics, performance summary.
