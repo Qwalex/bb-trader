@@ -115,6 +115,17 @@ export class TelegramUserbotController {
     return this.userbot.deleteFilterPattern(id);
   }
 
+  @Post('filters/patterns/generate')
+  async generateFilterPatterns(
+    @Body()
+    body: {
+      kind?: 'signal' | 'close' | 'result' | 'reentry';
+      example?: string;
+    },
+  ) {
+    return this.userbot.generateFilterPatterns(body);
+  }
+
   @Put('chats/:chatId')
   async setChatEnabled(
     @Param('chatId') chatId: string,

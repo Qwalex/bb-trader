@@ -28,6 +28,48 @@ const KIND_LABEL: Record<FilterKind, string> = {
   reentry: 'Перезаход в позицию',
 };
 
+const SAMPLE_HINTS: Record<
+  FilterKind,
+  {
+    patterns: string[];
+    examples: string[];
+  }
+> = {
+  signal: {
+    patterns: ['entry:', 'stop loss:', 'targets:', 'long'],
+    examples: [
+      `#ETHUSDT LONG
+
+Entry: 2450-2470
+Stop Loss: 2390
+Targets: 2520, 2580, 2640`,
+    ],
+  },
+  close: {
+    patterns: ['closed!', 'trade closed', 'manual close', 'закрыт'],
+    examples: [
+      `#TRUMPUSDT - Closed! 🔘
+Trade closed with 15.6938% profit.`,
+    ],
+  },
+  result: {
+    patterns: ['tp', 'target reached', 'profit:', 'sl hit', 'duration:'],
+    examples: [
+      `#POLUSDT - 🚨 Target 2 reached
+💸 Profit collected 22.2952%
+⏰ Posted: 5 hr 38 min Ago`,
+    ],
+  },
+  reentry: {
+    patterns: ['reentry', 'перезаход', 'add entry', 'добор'],
+    examples: [
+      `Перезаход по #BTCUSDT
+Новый вход: 64200
+SL тот же`,
+    ],
+  },
+};
+
 export default function FiltersPage() {
   const [groups, setGroups] = useState<string[]>([]);
   const [exampleItems, setExampleItems] = useState<FilterItem[]>([]);
@@ -38,6 +80,7 @@ export default function FiltersPage() {
   const [patternGroupName, setPatternGroupName] = useState('');
   const [patternKind, setPatternKind] = useState<FilterKind>('result');
   const [pattern, setPattern] = useState('');
+  const [generatedPatterns, setGeneratedPatterns] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
@@ -111,6 +154,7 @@ export default function FiltersPage() {
         setGroups((prev) => [...prev, g].sort((a, b) => a.localeCompare(b, 'ru')));
       }
       await loadAll();
+      setGeneratedPatterns([]);
       setMsg({ type: 'ok', text: 'Пример для AI добавлен' });
     } catch (err) {
       setMsg({ type: 'err', text: err instanceof Error ? err.message : 'Ошибка добавления' });
@@ -163,11 +207,62 @@ export default function FiltersPage() {
         setGroups((prev) => [...prev, g].sort((a, b) => a.localeCompare(b, 'ru')));
       }
       await loadAll();
+      setGeneratedPatterns((prev) => prev.filter((item) => item !== p));
       setMsg({ type: 'ok', text: 'Фильтр-паттерн добавлен' });
     } catch (err) {
       setMsg({ type: 'err', text: err instanceof Error ? err.message : 'Ошибка добавления' });
     } finally {
       setBusy(null);
+    }
+  }
+
+  async function generatePatternsFromExample() {
+    const e = example.trim();
+    if (!e) {
+      setMsg({ type: 'err', text: 'Сначала вставьте пример сообщения для AI' });
+      return;
+    }
+    setBusy('generate-patterns');
+    setMsg(null);
+    try {
+      const res = await fetch(`${getApiBase()}/telegram-userbot/filters/patterns/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind, example: e }),
+      });
+      const json = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        patterns?: string[];
+      };
+      if (!res.ok || !json.ok) {
+        throw new Error(json.error ?? `Ошибка ${res.status}`);
+      }
+      const patterns = (json.patterns ?? []).filter(Boolean);
+      setGeneratedPatterns(patterns);
+      setPatternKind(kind);
+      if (groupName.trim()) {
+        setPatternGroupName(groupName.trim());
+      }
+      setMsg({
+        type: 'ok',
+        text:
+          patterns.length > 0
+            ? 'AI предложил кандидаты паттернов ниже'
+            : 'AI не нашел подходящих паттернов',
+      });
+    } catch (err) {
+      setMsg({ type: 'err', text: err instanceof Error ? err.message : 'Ошибка генерации' });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function applyGeneratedPattern(value: string) {
+    setPattern(value);
+    setPatternKind(kind);
+    if (groupName.trim()) {
+      setPatternGroupName(groupName.trim());
     }
   }
 
@@ -199,8 +294,9 @@ export default function FiltersPage() {
     <>
       <h1 className="pageTitle">Правила распознавания</h1>
       <p style={{ color: 'var(--muted)', marginBottom: '1rem' }}>
-        `Фильтры` проверяются первыми и, если сообщение попало под паттерн, до AI оно не
-        доходит. `Примеры` используются как подсказки для AI-классификации внутри группы.
+        <code>Фильтры</code> проверяются первыми и, если сообщение попало под паттерн, до AI
+        оно не доходит. <code>Примеры</code> используются как подсказки для AI-классификации
+        внутри группы.
       </p>
       {msg && <p className={`msg ${msg.type === 'ok' ? 'ok' : 'err'}`}>{msg.text}</p>}
 
@@ -252,15 +348,81 @@ export default function FiltersPage() {
             }}
           />
         </label>
-        <button
-          className="btn"
-          type="button"
-          onClick={() => void addExample()}
-          disabled={busy !== null}
-          style={{ marginTop: '0.75rem' }}
+        <div
+          style={{
+            marginTop: '0.75rem',
+            display: 'grid',
+            gap: '0.6rem',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+          }}
         >
-          {busy === 'add' ? 'Сохранение…' : 'Добавить пример для AI'}
-        </button>
+          {(['signal', 'close', 'result', 'reentry'] as const).map((sampleKind) => (
+            <div
+              key={`example-hint-${sampleKind}`}
+              style={{
+                border: '1px solid var(--border)',
+                borderRadius: 8,
+                padding: '0.65rem',
+                background: 'rgba(255,255,255,0.02)',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  gap: '0.5rem',
+                  alignItems: 'center',
+                  marginBottom: '0.45rem',
+                }}
+              >
+                <strong style={{ fontSize: '0.9rem' }}>{KIND_LABEL[sampleKind]}</strong>
+                <button
+                  className="btn btnSecondary btnSm"
+                  type="button"
+                  disabled={busy !== null}
+                  onClick={() => {
+                    setKind(sampleKind);
+                    setExample(SAMPLE_HINTS[sampleKind].examples[0] ?? '');
+                  }}
+                >
+                  Подставить
+                </button>
+              </div>
+              <pre
+                style={{
+                  margin: 0,
+                  whiteSpace: 'pre-wrap',
+                  fontFamily: 'var(--font-geist-mono), monospace',
+                  fontSize: '0.76rem',
+                  lineHeight: 1.35,
+                  color: 'var(--muted)',
+                }}
+              >
+                {SAMPLE_HINTS[sampleKind].examples[0]}
+              </pre>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
+          <button
+            className="btn"
+            type="button"
+            onClick={() => void addExample()}
+            disabled={busy !== null}
+          >
+            {busy === 'add' ? 'Сохранение…' : 'Добавить пример для AI'}
+          </button>
+          <button
+            className="btn btnSecondary"
+            type="button"
+            onClick={() => void generatePatternsFromExample()}
+            disabled={busy !== null}
+          >
+            {busy === 'generate-patterns'
+              ? 'Генерация…'
+              : 'Сгенерировать паттерны из примера'}
+          </button>
+        </div>
       </div>
 
       <div className="card" style={{ marginBottom: '1rem' }}>
@@ -311,6 +473,95 @@ export default function FiltersPage() {
             }}
           />
         </label>
+        <div
+          style={{
+            marginTop: '0.75rem',
+            display: 'grid',
+            gap: '0.6rem',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+          }}
+        >
+          {(['signal', 'close', 'result', 'reentry'] as const).map((sampleKind) => (
+            <div
+              key={`pattern-hint-${sampleKind}`}
+              style={{
+                border: '1px solid var(--border)',
+                borderRadius: 8,
+                padding: '0.65rem',
+                background: 'rgba(255,255,255,0.02)',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  gap: '0.5rem',
+                  alignItems: 'center',
+                  marginBottom: '0.45rem',
+                }}
+              >
+                <strong style={{ fontSize: '0.9rem' }}>{KIND_LABEL[sampleKind]}</strong>
+                <button
+                  className="btn btnSecondary btnSm"
+                  type="button"
+                  disabled={busy !== null}
+                  onClick={() => {
+                    setPatternKind(sampleKind);
+                    setPattern(SAMPLE_HINTS[sampleKind].patterns[0] ?? '');
+                  }}
+                >
+                  Подставить
+                </button>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+                {SAMPLE_HINTS[sampleKind].patterns.map((samplePattern) => (
+                  <code
+                    key={`${sampleKind}-${samplePattern}`}
+                    style={{
+                      padding: '0.12rem 0.4rem',
+                      borderRadius: 999,
+                      background: 'rgba(255,255,255,0.06)',
+                      fontSize: '0.75rem',
+                    }}
+                  >
+                    {samplePattern}
+                  </code>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+        {generatedPatterns.length > 0 && (
+          <div
+            style={{
+              marginTop: '0.75rem',
+              border: '1px solid var(--border)',
+              borderRadius: 8,
+              padding: '0.75rem',
+              background: 'rgba(255,255,255,0.02)',
+            }}
+          >
+            <strong style={{ display: 'block', marginBottom: '0.5rem' }}>
+              Сгенерированные кандидаты
+            </strong>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem' }}>
+              {generatedPatterns.map((candidate) => (
+                <button
+                  key={candidate}
+                  className="btn btnSecondary btnSm"
+                  type="button"
+                  disabled={busy !== null}
+                  onClick={() => applyGeneratedPattern(candidate)}
+                >
+                  {candidate}
+                </button>
+              ))}
+            </div>
+            <p style={{ marginTop: '0.55rem', color: 'var(--muted)' }}>
+              Нажмите на кандидат, чтобы перенести его в поле паттерна.
+            </p>
+          </div>
+        )}
         <button
           className="btn"
           type="button"

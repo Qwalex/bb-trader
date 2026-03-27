@@ -90,6 +90,19 @@ const CLASSIFIER_RESPONSE_JSON_SCHEMA = {
   additionalProperties: false,
 } as const;
 
+const FILTER_PATTERN_GENERATION_JSON_SCHEMA = {
+  type: 'object',
+  properties: {
+    patterns: {
+      type: 'array',
+      items: { type: 'string', minLength: 2 },
+      minItems: 1,
+    },
+  },
+  required: ['patterns'],
+  additionalProperties: false,
+} as const;
+
 /** Общая схема ответа модели (с явным статусом); defaultOrderUsd — из настроек DEFAULT_ORDER_USD. */
 function buildJsonSchemaRules(defaultOrderUsd: number): string {
   return `
@@ -352,6 +365,121 @@ Be conservative: if unsure, return "other".`;
           request: JSON.stringify(requestPayload),
           response: this.formatOpenRouterError(e),
           usedFallback: true,
+        },
+      };
+    }
+  }
+
+  async generateFilterPatterns(params: {
+    kind: 'signal' | 'close' | 'result' | 'reentry';
+    example: string;
+  }): Promise<{
+    ok: boolean;
+    patterns?: string[];
+    error?: string;
+    debug?: {
+      model?: string;
+      request: string;
+      response: string;
+    };
+  }> {
+    const example = params.example.trim();
+    if (example.length < 6) {
+      return { ok: false, error: 'Пример слишком короткий для генерации паттернов' };
+    }
+
+    const apiKey = await this.settings.get('OPENROUTER_API_KEY');
+    if (!apiKey) {
+      return { ok: false, error: 'OPENROUTER_API_KEY is not configured' };
+    }
+
+    const model =
+      (await this.resolveModelKeyWithDefault('OPENROUTER_MODEL_TEXT')) ??
+      (await this.settings.get('OPENROUTER_MODEL_DEFAULT'));
+    if (!model) {
+      return { ok: false, error: 'OPENROUTER model is not configured' };
+    }
+
+    const prompt = `You generate literal substring patterns for Telegram message pre-filters.
+
+Return ONLY strict JSON:
+{
+  "patterns": ["string", ...]
+}
+
+Task:
+- Message kind: ${params.kind}
+- Generate 3 to 6 short candidate patterns from the example message.
+- Every pattern MUST be a literal substring that already exists in the example message, after lowercasing.
+- Prefer stable phrases that are specific enough for this kind.
+- Avoid overly generic tokens such as coin tickers, usdt, numbers, isolated punctuation, or single common words.
+- Do NOT generate regex.
+- Do NOT invent text that is absent from the example.
+- Keep patterns short, usually 2-40 characters.
+- Order patterns from best to weaker alternatives.
+- Ensure all patterns are unique.`;
+
+    const userInput = `MESSAGE_KIND: ${params.kind}\n\nEXAMPLE_MESSAGE:\n${example}`;
+    const messages = [
+      { role: 'system', content: prompt },
+      { role: 'user', content: userInput },
+    ];
+    try {
+      const content = await this.callOpenRouter(apiKey, model, messages, {
+        operation: 'generateFilterPatterns',
+      });
+      const responseRaw =
+        typeof content === 'string' ? content : JSON.stringify(content);
+      const parsed = this.tryParseModelContent(content);
+      if (!parsed.ok) {
+        return {
+          ok: false,
+          error: parsed.result.ok === false ? parsed.result.error : 'Не удалось разобрать ответ AI',
+          debug: {
+            model,
+            request: JSON.stringify({ model, messages }),
+            response: responseRaw,
+          },
+        };
+      }
+      const rawPatterns = Array.isArray((parsed.value as { patterns?: unknown[] }).patterns)
+        ? ((parsed.value as { patterns?: unknown[] }).patterns ?? [])
+        : [];
+      const patterns = Array.from(
+        new Set(
+          rawPatterns
+            .map((item) => (typeof item === 'string' ? item.trim().toLowerCase() : ''))
+            .filter((item) => item.length >= 2),
+        ),
+      ).slice(0, 6);
+      if (patterns.length === 0) {
+        return {
+          ok: false,
+          error: 'AI не вернул пригодные паттерны',
+          debug: {
+            model,
+            request: JSON.stringify({ model, messages }),
+            response: responseRaw,
+          },
+        };
+      }
+      return {
+        ok: true,
+        patterns,
+        debug: {
+          model,
+          request: JSON.stringify({ model, messages }),
+          response: responseRaw,
+        },
+      };
+    } catch (e) {
+      return {
+        ok: false,
+        error: this.formatOpenRouterError(e),
+        debug: {
+          model,
+          request: JSON.stringify({ model, messages }),
+          response: this.formatOpenRouterError(e),
         },
       };
     }
@@ -728,11 +856,15 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     const schemaName =
       ctx.operation === 'classifyTradingMessage'
         ? 'transcript_classifier_result'
-        : 'transcript_signal_result';
+        : ctx.operation === 'generateFilterPatterns'
+          ? 'transcript_filter_pattern_generation_result'
+          : 'transcript_signal_result';
     const schema =
       ctx.operation === 'classifyTradingMessage'
         ? CLASSIFIER_RESPONSE_JSON_SCHEMA
-        : TRANSCRIPT_RESPONSE_JSON_SCHEMA;
+        : ctx.operation === 'generateFilterPatterns'
+          ? FILTER_PATTERN_GENERATION_JSON_SCHEMA
+          : TRANSCRIPT_RESPONSE_JSON_SCHEMA;
     const responseFormat = {
       type: 'json_schema' as const,
       jsonSchema: {
