@@ -22,10 +22,12 @@ type UserbotFilterExampleMatch = {
   kind: UserbotFilterKind;
   score: number;
   examplePreview: string;
+  requiresQuote: boolean;
 };
 type UserbotFilterPatternMatch = {
   kind: UserbotFilterKind;
   pattern: string;
+  requiresQuote: boolean;
 };
 type QrPhase =
   | 'idle'
@@ -452,6 +454,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         groupName: true,
         kind: true,
         example: true,
+        requiresQuote: true,
         createdAt: true,
       },
     });
@@ -467,6 +470,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         groupName: true,
         kind: true,
         pattern: true,
+        requiresQuote: true,
         createdAt: true,
       },
     });
@@ -477,10 +481,12 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     groupName?: string;
     kind?: 'signal' | 'close' | 'result' | 'reentry';
     example?: string;
+    requiresQuote?: boolean;
   }) {
     const groupName = body.groupName?.trim() ?? '';
     const kind = body.kind;
     const example = body.example?.trim() ?? '';
+    const requiresQuote = body.requiresQuote === true;
     if (!groupName) {
       return { ok: false, error: 'groupName обязателен' };
     }
@@ -491,8 +497,15 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       return { ok: false, error: 'example слишком короткий (минимум 6 символов)' };
     }
     const created = await this.prisma.tgUserbotFilterExample.create({
-      data: { groupName, kind, example, enabled: true },
-      select: { id: true, groupName: true, kind: true, example: true, createdAt: true },
+      data: { groupName, kind, example, requiresQuote, enabled: true },
+      select: {
+        id: true,
+        groupName: true,
+        kind: true,
+        example: true,
+        requiresQuote: true,
+        createdAt: true,
+      },
     });
     return { ok: true, item: created };
   }
@@ -509,10 +522,12 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     groupName?: string;
     kind?: 'signal' | 'close' | 'result' | 'reentry';
     pattern?: string;
+    requiresQuote?: boolean;
   }) {
     const groupName = body.groupName?.trim() ?? '';
     const kind = body.kind;
     const pattern = body.pattern?.trim() ?? '';
+    const requiresQuote = body.requiresQuote === true;
     if (!groupName) {
       return { ok: false, error: 'groupName обязателен' };
     }
@@ -523,8 +538,15 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       return { ok: false, error: 'pattern слишком короткий (минимум 2 символа)' };
     }
     const created = await this.prisma.tgUserbotFilterPattern.create({
-      data: { groupName, kind, pattern, enabled: true },
-      select: { id: true, groupName: true, kind: true, pattern: true, createdAt: true },
+      data: { groupName, kind, pattern, requiresQuote, enabled: true },
+      select: {
+        id: true,
+        groupName: true,
+        kind: true,
+        pattern: true,
+        requiresQuote: true,
+        createdAt: true,
+      },
     });
     return { ok: true, item: created };
   }
@@ -990,10 +1012,16 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         select: { title: true },
       });
       const groupName = chatMeta?.title?.trim() || ingest.chatId;
-      const patternMatch = await this.matchFilterKindByPatterns(groupName, text);
+      const replyToMessageId = meta?.replyToMessageId?.trim() || undefined;
+      const hasQuotedSource = Boolean(replyToMessageId);
+      const patternMatch = await this.matchFilterKindByPatterns(
+        groupName,
+        text,
+        hasQuotedSource,
+      );
       const exampleMatch = patternMatch
         ? undefined
-        : await this.matchFilterKindByExamples(groupName, text);
+        : await this.matchFilterKindByExamples(groupName, text, hasQuotedSource);
       const filterKind = patternMatch?.kind;
       const exampleKind = exampleMatch?.kind;
       if (patternMatch) {
@@ -1001,6 +1029,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           groupName,
           matchedKind: patternMatch.kind,
           matchedPattern: patternMatch.pattern,
+          requiresQuote: patternMatch.requiresQuote,
+          hasQuotedSource,
           textPreview: this.makeTextPreview(text),
         });
       }
@@ -1010,6 +1040,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           matchedKind: exampleMatch.kind,
           similarityScore: Number(exampleMatch.score.toFixed(4)),
           examplePreview: exampleMatch.examplePreview,
+          requiresQuote: exampleMatch.requiresQuote,
+          hasQuotedSource,
           textPreview: this.makeTextPreview(text),
         });
       }
@@ -1018,7 +1050,6 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         'TELEGRAM_USERBOT_USE_AI_CLASSIFIER',
         true,
       );
-      const replyToMessageId = meta?.replyToMessageId?.trim() || undefined;
       const quotedText = replyToMessageId
         ? await this.fetchChatMessageText(ingest.chatId, replyToMessageId)
         : undefined;
@@ -1034,13 +1065,14 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       const kind = cls.kind;
       const aiRequest = cls.aiRequest;
       const aiResponse = cls.aiResponse;
-      const hasQuotedSource = Boolean(replyToMessageId);
       this.appendIngestStageLog('info', 'Userbot: classification resolved', ingest, {
         groupName,
         filterKind: filterKind ?? null,
         exampleKind: exampleKind ?? null,
         matchedPattern: patternMatch?.pattern ?? null,
         matchedExampleScore: exampleMatch ? Number(exampleMatch.score.toFixed(4)) : null,
+        matchedPatternRequiresQuote: patternMatch?.requiresQuote ?? null,
+        matchedExampleRequiresQuote: exampleMatch?.requiresQuote ?? null,
         useAiClassifier,
         kind,
         hasQuotedSource,
@@ -1421,10 +1453,11 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   private async matchFilterKindByExamples(
     groupName: string,
     text: string,
+    hasQuotedSource: boolean,
   ): Promise<UserbotFilterExampleMatch | undefined> {
     const rows = await this.prisma.tgUserbotFilterExample.findMany({
       where: { enabled: true },
-      select: { groupName: true, kind: true, example: true },
+      select: { groupName: true, kind: true, example: true, requiresQuote: true },
     });
     const target = groupName.trim().toLowerCase();
     const scoped = rows.filter((row) => {
@@ -1438,10 +1471,15 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     let bestKind: UserbotFilterKind | undefined;
     let bestScore = 0;
     let bestExampleText = '';
+    let bestRequiresQuote = false;
     for (const row of scoped) {
       const kind = row.kind as UserbotFilterKind;
       const exampleText = typeof row.example === 'string' ? row.example : '';
+      const requiresQuote = row.requiresQuote === true;
       if (kind !== 'signal' && kind !== 'close' && kind !== 'result' && kind !== 'reentry') {
+        continue;
+      }
+      if (requiresQuote && !hasQuotedSource) {
         continue;
       }
       if (!exampleText) {
@@ -1452,6 +1490,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         bestScore = score;
         bestKind = kind;
         bestExampleText = exampleText;
+        bestRequiresQuote = requiresQuote;
       }
     }
     if (!bestKind) {
@@ -1462,6 +1501,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           kind: bestKind,
           score: bestScore,
           examplePreview: this.makeTextPreview(bestExampleText, 220),
+          requiresQuote: bestRequiresQuote,
         }
       : undefined;
   }
@@ -1469,11 +1509,12 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   private async matchFilterKindByPatterns(
     groupName: string,
     text: string,
+    hasQuotedSource: boolean,
   ): Promise<UserbotFilterPatternMatch | undefined> {
     const rows = await this.prisma.tgUserbotFilterPattern.findMany({
       where: { enabled: true },
       orderBy: [{ groupName: 'asc' }, { createdAt: 'asc' }],
-      select: { groupName: true, kind: true, pattern: true },
+      select: { groupName: true, kind: true, pattern: true, requiresQuote: true },
     });
     const target = groupName.trim().toLowerCase();
     const normalizedText = text.toLowerCase().replace(/\s+/g, ' ').trim();
@@ -1484,16 +1525,21 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         typeof row.pattern === 'string'
           ? String(row.pattern).trim().toLowerCase()
           : '';
+      const requiresQuote = row.requiresQuote === true;
       if (name !== target || !pattern) {
         continue;
       }
       if (kind !== 'signal' && kind !== 'close' && kind !== 'result' && kind !== 'reentry') {
         continue;
       }
+      if (requiresQuote && !hasQuotedSource) {
+        continue;
+      }
       if (normalizedText.includes(pattern)) {
         return {
           kind,
           pattern,
+          requiresQuote,
         };
       }
     }

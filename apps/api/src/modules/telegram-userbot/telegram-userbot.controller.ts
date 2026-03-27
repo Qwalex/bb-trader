@@ -88,6 +88,7 @@ export class TelegramUserbotController {
       groupName?: string;
       kind?: 'signal' | 'close' | 'result' | 'reentry';
       example?: string;
+      requiresQuote?: boolean;
     },
   ) {
     return this.userbot.createFilterExample(body);
@@ -105,6 +106,7 @@ export class TelegramUserbotController {
       groupName?: string;
       kind?: 'signal' | 'close' | 'result' | 'reentry';
       pattern?: string;
+      requiresQuote?: boolean;
     },
   ) {
     return this.userbot.createFilterPattern(body);

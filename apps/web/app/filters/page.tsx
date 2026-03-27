@@ -10,6 +10,7 @@ type FilterItem = {
   groupName: string;
   kind: FilterKind;
   example: string;
+  requiresQuote: boolean;
   createdAt: string;
 };
 
@@ -18,6 +19,7 @@ type PatternItem = {
   groupName: string;
   kind: FilterKind;
   pattern: string;
+  requiresQuote: boolean;
   createdAt: string;
 };
 
@@ -77,9 +79,11 @@ export default function FiltersPage() {
   const [groupName, setGroupName] = useState('');
   const [kind, setKind] = useState<FilterKind>('signal');
   const [example, setExample] = useState('');
+  const [exampleRequiresQuote, setExampleRequiresQuote] = useState(false);
   const [patternGroupName, setPatternGroupName] = useState('');
   const [patternKind, setPatternKind] = useState<FilterKind>('result');
   const [pattern, setPattern] = useState('');
+  const [patternRequiresQuote, setPatternRequiresQuote] = useState(false);
   const [generatedPatterns, setGeneratedPatterns] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
@@ -143,7 +147,12 @@ export default function FiltersPage() {
       const res = await fetch(`${getApiBase()}/telegram-userbot/filters/examples`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ groupName: g, kind, example: e }),
+        body: JSON.stringify({
+          groupName: g,
+          kind,
+          example: e,
+          requiresQuote: exampleRequiresQuote,
+        }),
       });
       const json = (await res.json()) as { ok?: boolean; error?: string };
       if (!res.ok || !json.ok) {
@@ -155,6 +164,7 @@ export default function FiltersPage() {
       }
       await loadAll();
       setGeneratedPatterns([]);
+      setExampleRequiresQuote(false);
       setMsg({ type: 'ok', text: 'Пример для AI добавлен' });
     } catch (err) {
       setMsg({ type: 'err', text: err instanceof Error ? err.message : 'Ошибка добавления' });
@@ -196,7 +206,12 @@ export default function FiltersPage() {
       const res = await fetch(`${getApiBase()}/telegram-userbot/filters/patterns`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ groupName: g, kind: patternKind, pattern: p }),
+        body: JSON.stringify({
+          groupName: g,
+          kind: patternKind,
+          pattern: p,
+          requiresQuote: patternRequiresQuote,
+        }),
       });
       const json = (await res.json()) as { ok?: boolean; error?: string };
       if (!res.ok || !json.ok) {
@@ -208,6 +223,7 @@ export default function FiltersPage() {
       }
       await loadAll();
       setGeneratedPatterns((prev) => prev.filter((item) => item !== p));
+      setPatternRequiresQuote(false);
       setMsg({ type: 'ok', text: 'Фильтр-паттерн добавлен' });
     } catch (err) {
       setMsg({ type: 'err', text: err instanceof Error ? err.message : 'Ошибка добавления' });
@@ -241,6 +257,7 @@ export default function FiltersPage() {
       const patterns = (json.patterns ?? []).filter(Boolean);
       setGeneratedPatterns(patterns);
       setPatternKind(kind);
+      setPatternRequiresQuote(exampleRequiresQuote);
       if (groupName.trim()) {
         setPatternGroupName(groupName.trim());
       }
@@ -261,6 +278,7 @@ export default function FiltersPage() {
   function applyGeneratedPattern(value: string) {
     setPattern(value);
     setPatternKind(kind);
+    setPatternRequiresQuote(exampleRequiresQuote);
     if (groupName.trim()) {
       setPatternGroupName(groupName.trim());
     }
@@ -383,6 +401,7 @@ export default function FiltersPage() {
                   onClick={() => {
                     setKind(sampleKind);
                     setExample(SAMPLE_HINTS[sampleKind].examples[0] ?? '');
+                    setExampleRequiresQuote(sampleKind === 'close' || sampleKind === 'reentry');
                   }}
                 >
                   Подставить
@@ -403,6 +422,21 @@ export default function FiltersPage() {
             </div>
           ))}
         </div>
+        <label
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.45rem',
+            marginTop: '0.75rem',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={exampleRequiresQuote}
+            onChange={(e) => setExampleRequiresQuote(e.target.checked)}
+          />
+          Только для сообщений с цитатой
+        </label>
         <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
           <button
             className="btn"
@@ -508,6 +542,7 @@ export default function FiltersPage() {
                   onClick={() => {
                     setPatternKind(sampleKind);
                     setPattern(SAMPLE_HINTS[sampleKind].patterns[0] ?? '');
+                    setPatternRequiresQuote(sampleKind === 'close' || sampleKind === 'reentry');
                   }}
                 >
                   Подставить
@@ -531,6 +566,21 @@ export default function FiltersPage() {
             </div>
           ))}
         </div>
+        <label
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.45rem',
+            marginTop: '0.75rem',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={patternRequiresQuote}
+            onChange={(e) => setPatternRequiresQuote(e.target.checked)}
+          />
+          Только для сообщений с цитатой
+        </label>
         {generatedPatterns.length > 0 && (
           <div
             style={{
@@ -609,6 +659,11 @@ export default function FiltersPage() {
                           >
                             {it.pattern}
                           </pre>
+                          {it.requiresQuote && (
+                            <div style={{ marginTop: '0.35rem', color: 'var(--muted)' }}>
+                              Только с цитатой
+                            </div>
+                          )}
                           <div style={{ marginTop: '0.45rem' }}>
                             <button
                               className="btn btnSecondary btnSm"
@@ -666,6 +721,11 @@ export default function FiltersPage() {
                           >
                             {it.example}
                           </pre>
+                          {it.requiresQuote && (
+                            <div style={{ marginTop: '0.35rem', color: 'var(--muted)' }}>
+                              Только с цитатой
+                            </div>
+                          )}
                           <div style={{ marginTop: '0.45rem' }}>
                             <button
                               className="btn btnSecondary btnSm"

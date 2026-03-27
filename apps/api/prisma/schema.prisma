@@ -120,6 +120,7 @@ model TgUserbotFilterExample {
   groupName  String
   kind       String // signal | close | result | reentry
   example    String
+  requiresQuote Boolean @default(false)
   enabled    Boolean  @default(true)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
@@ -133,6 +134,7 @@ model TgUserbotFilterPattern {
   groupName  String
   kind       String // signal | close | result | reentry
   pattern    String
+  requiresQuote Boolean @default(false)
   enabled    Boolean  @default(true)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
