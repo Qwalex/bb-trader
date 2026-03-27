@@ -111,6 +111,7 @@ export default function SettingsPage() {
   );
   const [resetting, setResetting] = useState(false);
   const [newSource, setNewSource] = useState('');
+  const [newExcludedSource, setNewExcludedSource] = useState('');
 
   useEffect(() => {
     void (async () => {
@@ -155,6 +156,10 @@ export default function SettingsPage() {
 
   const sourceList = parseStringList(valueFor('SOURCE_LIST'));
   const sourceListSorted = Array.from(new Set(sourceList)).sort((a, b) =>
+    a.localeCompare(b, 'ru'),
+  );
+  const excludedSourceList = parseStringList(valueFor('SOURCE_EXCLUDE_LIST'));
+  const excludedSourceListSorted = Array.from(new Set(excludedSourceList)).sort((a, b) =>
     a.localeCompare(b, 'ru'),
   );
 
@@ -260,6 +265,21 @@ export default function SettingsPage() {
     const next = sourceListSorted.filter((x) => x !== v);
     const raw = JSON.stringify(next);
     await save('SOURCE_LIST', raw);
+  }
+
+  async function addExcludedSource() {
+    const v = newExcludedSource.trim();
+    if (!v) return;
+    const next = Array.from(new Set([...excludedSourceListSorted, v]));
+    const raw = JSON.stringify(next);
+    setNewExcludedSource('');
+    await save('SOURCE_EXCLUDE_LIST', raw);
+  }
+
+  async function removeExcludedSource(v: string) {
+    const next = excludedSourceListSorted.filter((x) => x !== v);
+    const raw = JSON.stringify(next);
+    await save('SOURCE_EXCLUDE_LIST', raw);
   }
 
   return (
@@ -417,6 +437,72 @@ export default function SettingsPage() {
             ))}
           </div>
         )}
+
+        <div
+          style={{
+            marginTop: '1.5rem',
+            paddingTop: '1rem',
+            borderTop: '1px dashed var(--border, #333)',
+          }}
+        >
+          <h3 style={{ fontSize: '0.95rem', marginBottom: '0.45rem' }}>
+            Исключённые источники из аналитики
+          </h3>
+          <p style={{ color: 'var(--muted)', marginBottom: '0.75rem', fontSize: '0.88rem' }}>
+            История сделок сохраняется, но эти источники не учитываются в топах, winrate и PnL на
+            дашборде.
+          </p>
+          <div
+            style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}
+          >
+            <input
+              value={newExcludedSource}
+              placeholder="добавить источник в исключения"
+              onChange={(e) => setNewExcludedSource(e.target.value)}
+              style={{
+                flex: '1 1 260px',
+                padding: '0.5rem',
+                borderRadius: 4,
+                border: '1px solid var(--border)',
+                background: 'var(--card)',
+                color: 'var(--foreground)',
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => void addExcludedSource()}
+              disabled={saving === 'SOURCE_EXCLUDE_LIST' || !newExcludedSource.trim()}
+              className="btn btnSecondary"
+            >
+              {saving === 'SOURCE_EXCLUDE_LIST' ? 'Добавление…' : 'Добавить в исключения'}
+            </button>
+          </div>
+          {excludedSourceListSorted.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.85rem' }}>
+              {excludedSourceListSorted.map((v) => (
+                <button
+                  key={`excluded-${v}`}
+                  type="button"
+                  onClick={() => void removeExcludedSource(v)}
+                  style={{
+                    padding: '0.2rem 0.45rem',
+                    borderRadius: 999,
+                    border: '1px solid var(--border, #444)',
+                    background: 'transparent',
+                    color: 'var(--muted)',
+                    cursor: saving === 'SOURCE_EXCLUDE_LIST' ? 'not-allowed' : 'pointer',
+                    opacity: saving === 'SOURCE_EXCLUDE_LIST' ? 0.7 : 1,
+                    fontSize: '0.85rem',
+                  }}
+                  disabled={saving === 'SOURCE_EXCLUDE_LIST'}
+                  title="Убрать из исключений"
+                >
+                  {v} ×
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
         <div
           style={{

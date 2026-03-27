@@ -86,8 +86,11 @@ export default async function TradesPage({
 
       const raw = settingsRaw.settings.find((r) => r.key === 'SOURCE_LIST')
         ?.value;
+      const rawExcluded = settingsRaw.settings.find((r) => r.key === 'SOURCE_EXCLUDE_LIST')
+        ?.value;
 
       let sourcesFromSettings: string[] = [];
+      let excludedSources: string[] = [];
       if (raw && raw.trim()) {
         try {
           const parsed = JSON.parse(raw) as unknown;
@@ -100,10 +103,25 @@ export default async function TradesPage({
           // ignore malformed SOURCE_LIST
         }
       }
+      if (rawExcluded && rawExcluded.trim()) {
+        try {
+          const parsed = JSON.parse(rawExcluded) as unknown;
+          if (Array.isArray(parsed)) {
+            excludedSources = parsed
+              .map((v) => (typeof v === 'string' ? v.trim() : ''))
+              .filter((v) => v.length > 0);
+          }
+        } catch {
+          // ignore malformed SOURCE_EXCLUDE_LIST
+        }
+      }
+      const excludedSet = new Set(excludedSources);
 
       sourceOptions = Array.from(
         new Set([...sourcesFromDb, ...sourcesFromSettings]),
-      ).sort((a, b) => a.localeCompare(b, 'ru'));
+      )
+        .filter((s) => !excludedSet.has(s))
+        .sort((a, b) => a.localeCompare(b, 'ru'));
     } catch {
       sourceOptions = [];
     }

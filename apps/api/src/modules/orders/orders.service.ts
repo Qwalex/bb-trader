@@ -4,6 +4,7 @@ import type { Prisma } from '@prisma/client';
 import { normalizeTradingPair, type SignalDto } from '@repo/shared';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import { SettingsService } from '../settings/settings.service';
 
 export interface TradesFilter {
   source?: string;
@@ -18,7 +19,10 @@ export interface TradesFilter {
 
 @Injectable()
 export class OrdersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly settings: SettingsService,
+  ) {}
 
   private static readonly ACTIVE_SIGNAL_STATUSES = new Set([
     'ORDERS_PLACED',
@@ -370,6 +374,17 @@ export class OrdersService {
 
   async getDashboardStats(params?: { source?: string }) {
     const source = params?.source;
+    const excluded = await this.getExcludedSourcesSet();
+    if (source && excluded.has(source)) {
+      return {
+        winrate: 0,
+        wins: 0,
+        losses: 0,
+        totalClosed: 0,
+        totalPnl: 0,
+        openSignals: 0,
+      };
+    }
     const closed = await this.prisma.signal.findMany({
       where: {
         deletedAt: null,
@@ -377,21 +392,28 @@ export class OrdersService {
         ...(source ? { source } : {}),
       },
     });
-    const wins = closed.filter((s) => s.status === 'CLOSED_WIN').length;
-    const losses = closed.filter((s) => s.status === 'CLOSED_LOSS').length;
+    const closedFiltered = source
+      ? closed
+      : closed.filter((row) => !excluded.has(String(row.source ?? '')));
+    const wins = closedFiltered.filter((s) => s.status === 'CLOSED_WIN').length;
+    const losses = closedFiltered.filter((s) => s.status === 'CLOSED_LOSS').length;
     const total = wins + losses;
     const winrate = total === 0 ? 0 : (wins / total) * 100;
-    const totalPnl = closed.reduce(
+    const totalPnl = closedFiltered.reduce(
       (acc, s) => acc + (s.realizedPnl ?? 0),
       0,
     );
-    const open = await this.prisma.signal.count({
+    const openRows = await this.prisma.signal.findMany({
       where: {
         deletedAt: null,
         status: { in: ['ORDERS_PLACED', 'OPEN', 'PARSED'] },
         ...(source ? { source } : {}),
       },
+      select: { source: true },
     });
+    const open = source
+      ? openRows.length
+      : openRows.filter((row) => !excluded.has(String(row.source ?? ''))).length;
     return {
       winrate,
       wins,
@@ -404,6 +426,10 @@ export class OrdersService {
 
   async getPnlSeries(bucket: 'day' | 'week', params?: { source?: string }) {
     const source = params?.source;
+    const excluded = await this.getExcludedSourcesSet();
+    if (source && excluded.has(source)) {
+      return [];
+    }
     const closed = await this.prisma.signal.findMany({
       where: {
         deletedAt: null,
@@ -413,8 +439,11 @@ export class OrdersService {
       },
       orderBy: { closedAt: 'asc' },
     });
+    const closedFiltered = source
+      ? closed
+      : closed.filter((row) => !excluded.has(String(row.source ?? '')));
     const map = new Map<string, number>();
-    for (const s of closed) {
+    for (const s of closedFiltered) {
       if (!s.closedAt || s.realizedPnl === null) continue;
       const d = s.closedAt;
       const key =
@@ -431,8 +460,34 @@ export class OrdersService {
     return total === 0 ? 0 : (wins / total) * 100;
   }
 
+  private parseStringList(raw: string | undefined): string[] {
+    const text = String(raw ?? '').trim();
+    if (!text) return [];
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .map((v) => (typeof v === 'string' ? v.trim() : ''))
+        .filter((v) => v.length > 0);
+    } catch {
+      return text
+        .split(/[\n,]/g)
+        .map((v) => v.trim())
+        .filter((v) => v.length > 0);
+    }
+  }
+
+  private async getExcludedSourcesSet(): Promise<Set<string>> {
+    const raw = await this.settings.get('SOURCE_EXCLUDE_LIST');
+    return new Set(this.parseStringList(raw));
+  }
+
   async getSourceStats(params?: { source?: string }) {
     const source = params?.source;
+    const excluded = await this.getExcludedSourcesSet();
+    if (source && excluded.has(source)) {
+      return [];
+    }
     const rows = await this.prisma.signal.findMany({
       where: {
         deletedAt: null,
@@ -444,6 +499,9 @@ export class OrdersService {
         realizedPnl: true,
       },
     });
+    const rowsFiltered = source
+      ? rows
+      : rows.filter((row) => !excluded.has(String(row.source ?? '')));
 
     type Acc = {
       source: string | null;
@@ -457,7 +515,7 @@ export class OrdersService {
 
     const map = new Map<string, Acc>();
     const keyOf = (s: string | null) => (s && s.trim().length > 0 ? s : '—');
-    for (const r of rows) {
+    for (const r of rowsFiltered) {
       const key = keyOf(r.source);
       const acc =
         map.get(key) ??
@@ -612,6 +670,7 @@ export class OrdersService {
   }
 
   async listDistinctSources(): Promise<string[]> {
+    const excluded = await this.getExcludedSourcesSet();
     const rows = await this.prisma.signal.groupBy({
       by: ['source'],
       _count: { id: true },
@@ -624,6 +683,7 @@ export class OrdersService {
     return rows
       .map((r) => r.source)
       .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+      .filter((v) => !excluded.has(v))
       .sort((a, b) => a.localeCompare(b, 'ru'));
   }
 

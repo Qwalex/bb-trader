@@ -16,6 +16,8 @@ type LogRow = {
 
 type TpLogFilterMode = 'all' | 'hide' | 'only';
 type NoiseLogFilterMode = 'all' | 'hide' | 'only';
+type JsonTokenKind = 'key' | 'string' | 'number' | 'boolean' | 'null' | 'punct' | 'plain';
+type JsonToken = { text: string; kind: JsonTokenKind };
 
 const CATEGORIES = [
   { id: 'all', label: 'Все' },
@@ -40,6 +42,50 @@ function isNoiseLogEvent(message: string): boolean {
   );
 }
 
+function tokenizeJson(pretty: string): JsonToken[] {
+  const tokenRegex =
+    /"(?:\\.|[^"\\])*"(?=\s*:)|"(?:\\.|[^"\\])*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|\btrue\b|\bfalse\b|\bnull\b|[{}\[\],:]/g;
+  const out: JsonToken[] = [];
+  let last = 0;
+  for (const match of pretty.matchAll(tokenRegex)) {
+    const index = match.index ?? 0;
+    const token = match[0] ?? '';
+    if (index > last) {
+      out.push({ text: pretty.slice(last, index), kind: 'plain' });
+    }
+    let kind: JsonTokenKind = 'plain';
+    if (/^"(?:\\.|[^"\\])*"$/.test(token) && pretty.slice(index + token.length).match(/^\s*:/)) {
+      kind = 'key';
+    } else if (/^"(?:\\.|[^"\\])*"$/.test(token)) {
+      kind = 'string';
+    } else if (/^-?\d/.test(token)) {
+      kind = 'number';
+    } else if (token === 'true' || token === 'false') {
+      kind = 'boolean';
+    } else if (token === 'null') {
+      kind = 'null';
+    } else if (/^[{}\[\],:]$/.test(token)) {
+      kind = 'punct';
+    }
+    out.push({ text: token, kind });
+    last = index + token.length;
+  }
+  if (last < pretty.length) {
+    out.push({ text: pretty.slice(last), kind: 'plain' });
+  }
+  return out;
+}
+
+function formatPayloadPretty(payload: string | null): string {
+  if (!payload) return '';
+  try {
+    const parsed = JSON.parse(payload) as unknown;
+    return JSON.stringify(parsed, null, 2);
+  } catch {
+    return payload;
+  }
+}
+
 export default function LogsPage() {
   const [rows, setRows] = useState<LogRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,6 +95,7 @@ export default function LogsPage() {
   const [tpLogFilter, setTpLogFilter] = useState<TpLogFilterMode>('hide');
   const [noiseLogFilter, setNoiseLogFilter] = useState<NoiseLogFilterMode>('hide');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -78,13 +125,17 @@ export default function LogsPage() {
     setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
   }
 
-  function formatPayload(payload: string | null): string {
-    if (!payload) return '';
+  async function copyPayload(id: string, payload: string | null) {
+    const pretty = formatPayloadPretty(payload);
+    if (!pretty) return;
     try {
-      const parsed = JSON.parse(payload) as unknown;
-      return JSON.stringify(parsed, null, 2);
+      await navigator.clipboard.writeText(pretty);
+      setCopiedId(id);
+      window.setTimeout(() => {
+        setCopiedId((current) => (current === id ? null : current));
+      }, 1200);
     } catch {
-      return payload;
+      // ignore clipboard errors
     }
   }
 
@@ -307,8 +358,25 @@ export default function LogsPage() {
                       wordBreak: 'break-word',
                     }}
                   >
-                    {formatPayload(row.payload)}
+                    {tokenizeJson(formatPayloadPretty(row.payload)).map((token, idx) => (
+                      <span
+                        key={`${row.id}-tok-${idx}`}
+                        className={`jsonTok jsonTok-${token.kind}`}
+                      >
+                        {token.text}
+                      </span>
+                    ))}
                   </pre>
+                )}
+                {expanded[row.id] && (
+                  <button
+                    type="button"
+                    onClick={() => void copyPayload(row.id, row.payload)}
+                    className="btn btnSecondary btnSm"
+                    style={{ marginTop: '0.45rem' }}
+                  >
+                    {copiedId === row.id ? 'Скопировано' : 'Копировать'}
+                  </button>
                 )}
               </div>
             )}

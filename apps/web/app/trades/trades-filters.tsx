@@ -138,7 +138,7 @@ export function TradesFilters({ sourceOptions }: Props) {
         </select>
       </label>
 
-      <label className="toggle">
+      <label className="toggle tradesFiltersToggle">
         <input
           type="checkbox"
           checked={includeDeleted}

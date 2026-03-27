@@ -598,7 +598,7 @@ h1.pageTitle {
 }
 
 .tradeCardRich {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01));
+  background: linear-gradient(#7a93b236, #e3dcff14);
 }
 
 .tradeDirBadge {
@@ -736,6 +736,74 @@ h1.pageTitle {
 .tradeCardActions {
   display: flex;
   justify-content: flex-start;
+}
+
+.topSourcesTable {
+  table-layout: fixed;
+}
+
+.topSourcesTable th,
+.topSourcesTable td {
+  padding: 0.42rem 0.55rem;
+  font-size: 0.78rem;
+  line-height: 1.25;
+}
+
+.topSourcesTable th:not(.sourceNameCell),
+.topSourcesTable td:not(.sourceNameCell) {
+  white-space: nowrap;
+}
+
+.topSourcesTable .sourceNameCell {
+  width: min(32vw, 260px);
+  max-width: 260px;
+}
+
+.sourceNameText {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.jsonTok-key {
+  color: #7dd3fc;
+}
+
+.jsonTok-string {
+  color: #86efac;
+}
+
+.jsonTok-number {
+  color: #facc15;
+}
+
+.jsonTok-boolean {
+  color: #c084fc;
+}
+
+.jsonTok-null {
+  color: #fb7185;
+}
+
+.jsonTok-punct {
+  color: #94a3b8;
+}
+
+.tradesFiltersToggle {
+  min-height: 38px;
+  padding: 0.35rem 0.7rem;
+  border-radius: 10px;
+}
+
+.tradesFiltersToggle .toggleLabel {
+  color: var(--foreground);
+}
+
+.tradesFiltersToggle .toggleTrack {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
 }
 
 /* Узкие экраны и телефоны */

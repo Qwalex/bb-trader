@@ -68,6 +68,9 @@ function DirectionBadge({ direction }: { direction: string }) {
 
 export function TradesList({ items, sourceOptions }: Props) {
   const renderEvent = (raw: TradeEvent) => {
+    if (raw.type === 'CANCELLED_BY_CHAT') {
+      return 'Отмена в чате';
+    }
     let payload: unknown = null;
     if (raw.payload) {
       try {
@@ -84,8 +87,6 @@ export function TradesList({ items, sourceOptions }: Props) {
         const sl = changed?.stopLoss ? 'SL' : '';
         const tp = changed?.takeProfits ? 'TP' : '';
         details = [sl, tp].filter(Boolean).join(', ');
-      } else if (raw.type === 'CANCELLED_BY_CHAT') {
-        details = 'отмена в чате';
       } else if (raw.type === 'REENTRY_REPLACED_OLD') {
         details = 'старый сигнал заменен';
       } else if (raw.type === 'REENTRY_REPLACED_NEW') {

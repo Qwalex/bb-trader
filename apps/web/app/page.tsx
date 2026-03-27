@@ -73,7 +73,10 @@ export default async function Home({
             fetchJson<SettingsRaw>('/settings/raw'),
           ]);
           const raw = settingsRaw.settings.find((r) => r.key === 'SOURCE_LIST')?.value;
+          const rawExcluded = settingsRaw.settings.find((r) => r.key === 'SOURCE_EXCLUDE_LIST')
+            ?.value;
           let sourcesFromSettings: string[] = [];
+          let excludedSources: string[] = [];
           if (raw && raw.trim()) {
             try {
               const parsed = JSON.parse(raw) as unknown;
@@ -86,9 +89,22 @@ export default async function Home({
               // ignore malformed SOURCE_LIST
             }
           }
+          if (rawExcluded && rawExcluded.trim()) {
+            try {
+              const parsed = JSON.parse(rawExcluded) as unknown;
+              if (Array.isArray(parsed)) {
+                excludedSources = parsed
+                  .map((v) => (typeof v === 'string' ? v.trim() : ''))
+                  .filter((v) => v.length > 0);
+              }
+            } catch {
+              // ignore malformed SOURCE_EXCLUDE_LIST
+            }
+          }
+          const excludedSet = new Set(excludedSources);
           return Array.from(new Set([...sourcesFromDb, ...sourcesFromSettings])).sort((a, b) =>
             a.localeCompare(b, 'ru'),
-          );
+          ).filter((s) => !excludedSet.has(s));
         } catch {
           return [];
         }
@@ -211,10 +227,10 @@ export default async function Home({
           <div className="card" style={{ gridColumn: 'span 5' }}>
             <h3>Топ источников по PnL</h3>
             <div className="tableWrap" style={{ marginTop: '0.5rem' }}>
-              <table>
+              <table className="topSourcesTable">
                 <thead>
                   <tr>
-                    <th>Источник</th>
+                    <th className="sourceNameCell">Источник</th>
                     <th>PnL</th>
                     <th>Winrate</th>
                     <th>W / L</th>
@@ -225,7 +241,9 @@ export default async function Home({
                 <tbody>
                   {top.byPnl.map((r) => (
                     <tr key={`pnl-${r.source ?? '—'}`}>
-                      <td>{r.source ?? '—'}</td>
+                      <td className="sourceNameCell">
+                        <span className="sourceNameText">{r.source ?? '—'}</span>
+                      </td>
                       <td>{r.totalPnl.toFixed(2)}</td>
                       <td>{r.winrate.toFixed(1)}%</td>
                       <td>{r.wL}</td>
@@ -240,10 +258,10 @@ export default async function Home({
           <div className="card" style={{ gridColumn: 'span 5' }}>
             <h3>Топ источников по Winrate</h3>
             <div className="tableWrap" style={{ marginTop: '0.5rem' }}>
-              <table>
+              <table className="topSourcesTable">
                 <thead>
                   <tr>
-                    <th>Источник</th>
+                    <th className="sourceNameCell">Источник</th>
                     <th>Winrate</th>
                     <th>W / L</th>
                     <th>PnL</th>
@@ -254,7 +272,9 @@ export default async function Home({
                 <tbody>
                   {top.byWinrate.map((r) => (
                     <tr key={`wr-${r.source ?? '—'}`}>
-                      <td>{r.source ?? '—'}</td>
+                      <td className="sourceNameCell">
+                        <span className="sourceNameText">{r.source ?? '—'}</span>
+                      </td>
                       <td>{r.winrate.toFixed(1)}%</td>
                       <td>{r.wL}</td>
                       <td>{r.totalPnl.toFixed(2)}</td>
@@ -269,10 +289,10 @@ export default async function Home({
           <div className="card" style={{ gridColumn: 'span 5' }}>
             <h3>Топ источников по худшему PnL</h3>
             <div className="tableWrap" style={{ marginTop: '0.5rem' }}>
-              <table>
+              <table className="topSourcesTable">
                 <thead>
                   <tr>
-                    <th>Источник</th>
+                    <th className="sourceNameCell">Источник</th>
                     <th>PnL</th>
                     <th>Winrate</th>
                     <th>W / L</th>
@@ -283,7 +303,9 @@ export default async function Home({
                 <tbody>
                   {top.byWorstPnl.map((r) => (
                     <tr key={`worst-pnl-${r.source ?? '—'}`}>
-                      <td>{r.source ?? '—'}</td>
+                      <td className="sourceNameCell">
+                        <span className="sourceNameText">{r.source ?? '—'}</span>
+                      </td>
                       <td>{r.totalPnl.toFixed(2)}</td>
                       <td>{r.winrate.toFixed(1)}%</td>
                       <td>{r.wL}</td>
@@ -298,10 +320,10 @@ export default async function Home({
           <div className="card" style={{ gridColumn: 'span 5' }}>
             <h3>Топ источников по худшему Winrate</h3>
             <div className="tableWrap" style={{ marginTop: '0.5rem' }}>
-              <table>
+              <table className="topSourcesTable">
                 <thead>
                   <tr>
-                    <th>Источник</th>
+                    <th className="sourceNameCell">Источник</th>
                     <th>Winrate</th>
                     <th>W / L</th>
                     <th>PnL</th>
@@ -312,7 +334,9 @@ export default async function Home({
                 <tbody>
                   {top.byWorstWinrate.map((r) => (
                     <tr key={`worst-wr-${r.source ?? '—'}`}>
-                      <td>{r.source ?? '—'}</td>
+                      <td className="sourceNameCell">
+                        <span className="sourceNameText">{r.source ?? '—'}</span>
+                      </td>
                       <td>{r.winrate.toFixed(1)}%</td>
                       <td>{r.wL}</td>
                       <td>{r.totalPnl.toFixed(2)}</td>
