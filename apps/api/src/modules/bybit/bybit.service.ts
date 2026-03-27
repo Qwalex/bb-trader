@@ -504,6 +504,51 @@ export class BybitService {
     return parseFloat(one) > 0 ? [one] : [];
   }
 
+  private buildTpSplitDiagnostics(params: {
+    posSize: number;
+    requestedLevels: number;
+    qtyStep: string;
+    minQty: string;
+  }): {
+    posSizeRounded: string;
+    totalUnits: number;
+    qtyStepNum: number | null;
+    minQtyNum: number | null;
+    reasons: string[];
+  } {
+    const qtyStepNum = parseFloat(params.qtyStep);
+    const minQtyNum = parseFloat(params.minQty);
+    const posSizeRounded = this.formatQtyToStep(params.posSize, params.qtyStep);
+    const totalUnits =
+      Number.isFinite(qtyStepNum) && qtyStepNum > 0
+        ? Math.floor(params.posSize / qtyStepNum)
+        : 0;
+    const reasons: string[] = [];
+    if (!Number.isFinite(qtyStepNum) || qtyStepNum <= 0) {
+      reasons.push('invalid_qty_step');
+    }
+    if (!Number.isFinite(minQtyNum) || minQtyNum <= 0) {
+      reasons.push('invalid_min_qty');
+    }
+    if (Number.isFinite(minQtyNum) && parseFloat(posSizeRounded) < minQtyNum) {
+      reasons.push('position_below_min_qty');
+    }
+    if (params.requestedLevels > 1 && totalUnits > 0 && Number.isFinite(minQtyNum) && minQtyNum > 0) {
+      const unitsPerLevel = Math.floor(totalUnits / params.requestedLevels);
+      const qtyPerLevel = unitsPerLevel * qtyStepNum;
+      if (!Number.isFinite(qtyPerLevel) || qtyPerLevel < minQtyNum) {
+        reasons.push('per_tp_qty_below_min_qty');
+      }
+    }
+    return {
+      posSizeRounded,
+      totalUnits,
+      qtyStepNum: Number.isFinite(qtyStepNum) ? qtyStepNum : null,
+      minQtyNum: Number.isFinite(minQtyNum) ? minQtyNum : null,
+      reasons,
+    };
+  }
+
   /**
    * Проверка до подтверждения: нельзя второй раз открыть ту же сторону (long/short) по паре.
    * Long и short по одной паре допускаются. Источник истины — Bybit API по стороне сделки;
@@ -2126,9 +2171,11 @@ export class BybitService {
     );
 
     const tpChildrenPerLevel = 1;
+    const requestedTpLevels = takeProfits.length;
 
     let n = takeProfits.length;
     let qtyParts: string[] = [];
+    let usedSingleTpFallback = false;
     while (n >= 1) {
       qtyParts = this.splitPositionQtyForTps(
         posSize,
@@ -2142,24 +2189,85 @@ export class BybitService {
       n--;
     }
 
+    if (qtyParts.length === 0) {
+      const singleTpQtyParts = this.splitQtyForChildOrders(
+        posSize,
+        1,
+        qtyStep,
+        minQty,
+      );
+      if (singleTpQtyParts.length > 0) {
+        qtyParts = singleTpQtyParts;
+        n = 1;
+        usedSingleTpFallback = true;
+      }
+    }
+
     const activeTpPrices = takeProfits.slice(0, Math.max(n, 0));
 
     let totalTpPlaced = 0;
 
     if (qtyParts.length === 0) {
+      const splitDiag = this.buildTpSplitDiagnostics({
+        posSize,
+        requestedLevels: requestedTpLevels,
+        qtyStep,
+        minQty,
+      });
       void this.appLog.append('warn', 'bybit', 'placeTpSplit: не удалось разбить позицию по уровням TP', {
         symbol,
         posSize,
-        tpLevelsRequested: takeProfits.length,
+        posSizeRounded: splitDiag.posSizeRounded,
+        tpLevelsRequested: requestedTpLevels,
+        qtyStep,
+        minQty,
+        totalUnits: splitDiag.totalUnits,
+        reasons: splitDiag.reasons,
       });
       return;
     }
-    if (n < takeProfits.length) {
+    if (usedSingleTpFallback) {
+      const splitDiag = this.buildTpSplitDiagnostics({
+        posSize,
+        requestedLevels: requestedTpLevels,
+        qtyStep,
+        minQty,
+      });
+      void this.appLog.append(
+        'warn',
+        'bybit',
+        'placeTpSplit: multi-TP не влез в лот, используем один TP на всю позицию',
+        {
+          symbol,
+          posSize,
+          posSizeRounded: splitDiag.posSizeRounded,
+          requestedLevels: requestedTpLevels,
+          usedLevels: 1,
+          fallbackTpPrice: activeTpPrices[0] ?? null,
+          fallbackQty: qtyParts[0] ?? null,
+          qtyStep,
+          minQty,
+          totalUnits: splitDiag.totalUnits,
+          reasons: splitDiag.reasons,
+        },
+      );
+    } else if (n < requestedTpLevels) {
+      const splitDiag = this.buildTpSplitDiagnostics({
+        posSize,
+        requestedLevels: requestedTpLevels,
+        qtyStep,
+        minQty,
+      });
       void this.appLog.append('warn', 'bybit', 'placeTpSplit: число TP уменьшено из-за minQty лота', {
         symbol,
         posSize,
-        requestedLevels: takeProfits.length,
+        posSizeRounded: splitDiag.posSizeRounded,
+        requestedLevels: requestedTpLevels,
         usedLevels: n,
+        qtyStep,
+        minQty,
+        totalUnits: splitDiag.totalUnits,
+        reasons: splitDiag.reasons,
       });
     }
 
