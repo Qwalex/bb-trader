@@ -82,6 +82,9 @@ export class DiagnosticsAiService {
       'Проанализируй предоставленный trace целиком.',
       'Оцени каждый шаг и укажи проблемы, доказательства и рекомендации.',
       'Будь максимально конкретным, не придумывай факты, отмечай missingContext если данных нет.',
+      'Все текстовые поля ответа должны быть только на русском языке.',
+      'Пиши на русском: finalComment, comment, issues, evidence, missingContext, recommendedFixes.',
+      'Не используй английский язык в пояснениях, кроме технических идентификаторов, статусов, названий моделей, ключей и исходных символов из trace.',
       `Обязательные шаги: ${DIAGNOSTIC_AI_STEP_KEYS.join(', ')}`,
       'Верни ТОЛЬКО JSON.',
     ].join('\n');
@@ -95,6 +98,7 @@ export class DiagnosticsAiService {
         role: 'user',
         content: JSON.stringify({
           caseKey: `${trace.ingest.chatId}:${trace.ingest.messageId}`,
+          locale: 'ru',
           trace: compactTrace,
         }),
       },

@@ -138,7 +138,7 @@ export function TradesFilters({ sourceOptions }: Props) {
         </select>
       </label>
 
-      <label className="toggle tradesFiltersToggle" title="Показать удаленные">
+      <label className="toggle tradesFiltersToggle" title="Показать удаленные" style={{ justifyContent: 'flex-end' }}>
         <input
           type="checkbox"
           checked={includeDeleted}
