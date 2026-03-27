@@ -76,6 +76,11 @@ export class TelegramUserbotController {
     return this.userbot.listFilterExamples();
   }
 
+  @Get('filters/patterns')
+  async listFilterPatterns() {
+    return this.userbot.listFilterPatterns();
+  }
+
   @Post('filters/examples')
   async createFilterExample(
     @Body()
@@ -91,6 +96,23 @@ export class TelegramUserbotController {
   @Post('filters/examples/:id/delete')
   async deleteFilterExample(@Param('id') id: string) {
     return this.userbot.deleteFilterExample(id);
+  }
+
+  @Post('filters/patterns')
+  async createFilterPattern(
+    @Body()
+    body: {
+      groupName?: string;
+      kind?: 'signal' | 'close' | 'result' | 'reentry';
+      pattern?: string;
+    },
+  ) {
+    return this.userbot.createFilterPattern(body);
+  }
+
+  @Post('filters/patterns/:id/delete')
+  async deleteFilterPattern(@Param('id') id: string) {
+    return this.userbot.deleteFilterPattern(id);
   }
 
   @Put('chats/:chatId')

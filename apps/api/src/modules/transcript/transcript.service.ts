@@ -224,14 +224,15 @@ Return ONLY strict JSON:
 
 Classification rules:
 1. Return "signal" ONLY for a fresh actionable trade setup with pair, side, stop-loss, and at least one take-profit. Entry is optional: if it is omitted, treat it as market entry at the signal placement stage. If any of the required fields above is missing or ambiguous, do NOT return "signal". Leverage and size are optional.
-2. Return "close" ONLY when the current message is a manual cancellation/force-close instruction for a previously quoted/replied signal. A quoted/replied context is required.
+2. Return "close" when the current message explicitly says close/closed/cancel/закрыт/отмена for a trade and it is not a TP/SL result report. Quoted/replied context strongly indicates "close", but even without a quote explicit close wording should still be classified as "close" rather than "result".
 3. Return "reentry" ONLY when the current message is a re-entry / add-entry / update instruction for a previously quoted/replied signal. A quoted/replied context is required.
 4. Return "result" for outcome/performance messages about an existing or past trade: TP hit, SL hit, closed trade report, profit/loss, PNL, percentages, duration, period, recap, statistics, performance summary.
-5. If the text contains result markers such as percentages, profit/loss, PNL, TP/SL outcome markers, duration/period, or closed-trade wording and is not clearly a quoted manual close command, return "result".
-6. Return "other" for everything else: commentary, chat, partial follow-ups, incomplete ideas, or anything that is not clearly one of the categories above.
+5. If the text explicitly says close/closed but does NOT mention TP, take profit, SL, stop loss, target reached, тейк, стоп, or similar hit markers, prefer "close" over "result".
+6. If the text contains result markers such as TP/SL outcome markers, target reached markers, profit/loss, PNL, duration/period, or performance summary, return "result".
+7. Return "other" for everything else: commentary, chat, partial follow-ups, incomplete ideas, or anything that is not clearly one of the categories above.
 
 Priority:
-- quoted manual close > close
+- explicit manual close wording > close
 - quoted re-entry/update > reentry
 - fresh full setup > signal
 - outcome/performance report > result
@@ -251,7 +252,7 @@ Be conservative: if unsure, return "other".`;
     const apiKey = await this.settings.get('OPENROUTER_API_KEY');
     if (!apiKey) {
       return {
-        kind: this.classifyHeuristic(text),
+        kind: this.classifyMessageHeuristic(text),
         reason: 'OPENROUTER_API_KEY is missing, fallback to heuristic',
         debug: {
           request: JSON.stringify(requestPayload),
@@ -265,7 +266,7 @@ Be conservative: if unsure, return "other".`;
       (await this.settings.get('OPENROUTER_MODEL_DEFAULT'));
     if (!model) {
       return {
-        kind: this.classifyHeuristic(text),
+        kind: this.classifyMessageHeuristic(text),
         reason: 'OpenRouter model is missing, fallback to heuristic',
         debug: {
           request: JSON.stringify(requestPayload),
@@ -303,7 +304,7 @@ Be conservative: if unsure, return "other".`;
             ? parsed.result.error
             : 'Classifier parse returned non-error result';
         return {
-          kind: this.classifyHeuristic(text),
+          kind: this.classifyMessageHeuristic(text),
           reason,
           debug: {
             model,
@@ -333,7 +334,7 @@ Be conservative: if unsure, return "other".`;
         };
       }
       return {
-        kind: this.classifyHeuristic(text),
+        kind: this.classifyMessageHeuristic(text),
         reason: 'Classifier returned unknown kind',
         debug: {
           model,
@@ -344,7 +345,7 @@ Be conservative: if unsure, return "other".`;
       };
     } catch (e) {
       return {
-        kind: this.classifyHeuristic(text),
+        kind: this.classifyMessageHeuristic(text),
         reason: this.formatOpenRouterError(e),
         debug: {
           model,
@@ -1163,5 +1164,30 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       return 'result';
     }
     return 'other';
+  }
+
+  private classifyMessageHeuristic(
+    text: string,
+  ): 'signal' | 'close' | 'reentry' | 'result' | 'other' {
+    const t = text.toLowerCase();
+    const hasCloseWord =
+      /\b(close|closed|cancel(?:led)?|force close)\b/u.test(t) ||
+      /(?<!\p{L})(закрыт|закрыта|закрыто|закрыли|закрываем|отмена|отменен|отмена)(?!\p{L})/u.test(
+        t,
+      );
+    const hasTpOrSl =
+      /\b(tp|take[\s-]?profit|sl|stop[\s-]?loss|target(?:\s+\d+)?\s+reached)\b/u.test(t) ||
+      /(?<!\p{L})(тейк|стоп|цель|цели)(?!\p{L})/u.test(t) ||
+      /✅|❌|🟢|🔴/.test(text);
+    if (hasCloseWord && !hasTpOrSl) {
+      return 'close';
+    }
+    if (
+      /\b(re[-\s]?entry|reentry|re[\s-]enter)\b/u.test(t) ||
+      /(?<!\p{L})(перезаход|перезаходим|перезайти)(?!\p{L})/u.test(t)
+    ) {
+      return 'reentry';
+    }
+    return this.classifyHeuristic(text);
   }
 }

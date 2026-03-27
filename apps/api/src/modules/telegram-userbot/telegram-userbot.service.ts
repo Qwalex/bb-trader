@@ -400,12 +400,17 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   }
 
   async listFilterGroups() {
-    const [chatRows, patternRows] = await Promise.all([
+    const [chatRows, exampleRows, filterRows] = await Promise.all([
       this.prisma.tgUserbotChat.findMany({
         orderBy: { title: 'asc' },
         select: { title: true, chatId: true },
       }),
       this.prisma.tgUserbotFilterExample.findMany({
+        where: { enabled: true },
+        orderBy: { groupName: 'asc' },
+        select: { groupName: true },
+      }),
+      this.prisma.tgUserbotFilterPattern.findMany({
         where: { enabled: true },
         orderBy: { groupName: 'asc' },
         select: { groupName: true },
@@ -416,7 +421,11 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       const v = typeof row.title === 'string' ? row.title.trim() : '';
       if (v) names.add(String(v));
     }
-    for (const row of patternRows) {
+    for (const row of exampleRows) {
+      const v = typeof row.groupName === 'string' ? row.groupName.trim() : '';
+      if (v) names.add(String(v));
+    }
+    for (const row of filterRows) {
       const v = typeof row.groupName === 'string' ? row.groupName.trim() : '';
       if (v) names.add(String(v));
     }
@@ -434,6 +443,21 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         groupName: true,
         kind: true,
         example: true,
+        createdAt: true,
+      },
+    });
+    return { items: rows };
+  }
+
+  async listFilterPatterns() {
+    const rows = await this.prisma.tgUserbotFilterPattern.findMany({
+      where: { enabled: true },
+      orderBy: [{ groupName: 'asc' }, { kind: 'asc' }, { createdAt: 'asc' }],
+      select: {
+        id: true,
+        groupName: true,
+        kind: true,
+        pattern: true,
         createdAt: true,
       },
     });
@@ -466,6 +490,38 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
   async deleteFilterExample(id: string) {
     await this.prisma.tgUserbotFilterExample.update({
+      where: { id },
+      data: { enabled: false },
+    });
+    return { ok: true };
+  }
+
+  async createFilterPattern(body: {
+    groupName?: string;
+    kind?: 'signal' | 'close' | 'result' | 'reentry';
+    pattern?: string;
+  }) {
+    const groupName = body.groupName?.trim() ?? '';
+    const kind = body.kind;
+    const pattern = body.pattern?.trim() ?? '';
+    if (!groupName) {
+      return { ok: false, error: 'groupName обязателен' };
+    }
+    if (kind !== 'signal' && kind !== 'close' && kind !== 'result' && kind !== 'reentry') {
+      return { ok: false, error: 'kind должен быть signal | close | result | reentry' };
+    }
+    if (pattern.length < 2) {
+      return { ok: false, error: 'pattern слишком короткий (минимум 2 символа)' };
+    }
+    const created = await this.prisma.tgUserbotFilterPattern.create({
+      data: { groupName, kind, pattern, enabled: true },
+      select: { id: true, groupName: true, kind: true, pattern: true, createdAt: true },
+    });
+    return { ok: true, item: created };
+  }
+
+  async deleteFilterPattern(id: string) {
+    await this.prisma.tgUserbotFilterPattern.update({
       where: { id },
       data: { enabled: false },
     });
@@ -910,7 +966,10 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         select: { title: true },
       });
       const groupName = chatMeta?.title?.trim() || ingest.chatId;
-      const patternKind = await this.matchFilterKindByExamples(groupName, text);
+      const filterKind = await this.matchFilterKindByPatterns(groupName, text);
+      const exampleKind = filterKind
+        ? undefined
+        : await this.matchFilterKindByExamples(groupName, text);
 
       const useAiClassifier = await this.getBoolSetting(
         'TELEGRAM_USERBOT_USE_AI_CLASSIFIER',
@@ -923,7 +982,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       const cls = await this.classifyMessage(
         text,
         useAiClassifier,
-        patternKind,
+        filterKind ?? exampleKind,
+        filterKind ? 'group_filter_pattern' : exampleKind ? 'group_filter_example' : undefined,
         groupName,
         replyToMessageId,
         quotedText,
@@ -934,7 +994,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       const hasQuotedSource = Boolean(replyToMessageId);
       this.appendIngestStageLog('info', 'Userbot: classification resolved', ingest, {
         groupName,
-        patternKind: patternKind ?? null,
+        filterKind: filterKind ?? null,
+        exampleKind: exampleKind ?? null,
         useAiClassifier,
         kind,
         hasQuotedSource,
@@ -1350,6 +1411,37 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       return undefined;
     }
     return bestScore >= USERBOT_FILTER_MATCH_THRESHOLD ? bestKind : undefined;
+  }
+
+  private async matchFilterKindByPatterns(
+    groupName: string,
+    text: string,
+  ): Promise<UserbotFilterKind | undefined> {
+    const rows = await this.prisma.tgUserbotFilterPattern.findMany({
+      where: { enabled: true },
+      orderBy: [{ groupName: 'asc' }, { createdAt: 'asc' }],
+      select: { groupName: true, kind: true, pattern: true },
+    });
+    const target = groupName.trim().toLowerCase();
+    const normalizedText = text.toLowerCase().replace(/\s+/g, ' ').trim();
+    for (const row of rows) {
+      const name = typeof row.groupName === 'string' ? row.groupName.trim().toLowerCase() : '';
+      const kind = row.kind as UserbotFilterKind;
+      const pattern =
+        typeof row.pattern === 'string'
+          ? String(row.pattern).trim().toLowerCase()
+          : '';
+      if (name !== target || !pattern) {
+        continue;
+      }
+      if (kind !== 'signal' && kind !== 'close' && kind !== 'result' && kind !== 'reentry') {
+        continue;
+      }
+      if (normalizedText.includes(pattern)) {
+        return kind;
+      }
+    }
+    return undefined;
   }
 
   private async tryReentryFromReply(params: {
@@ -2198,6 +2290,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     text: string,
     useAiClassifier: boolean,
     preferredKind?: UserbotFilterKind,
+    preferredKindSource?: 'group_filter_pattern' | 'group_filter_example',
     groupName?: string,
     replyToMessageId?: string,
     quotedText?: string,
@@ -2208,7 +2301,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         aiRequest: this.limitTrace(
           JSON.stringify({
             operation: 'classifyMessage',
-            source: 'group_filter_example',
+            source: preferredKindSource ?? 'group_filter_example',
             groupName: groupName ?? null,
             preferredKind,
           }),
@@ -2216,7 +2309,10 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         aiResponse: this.limitTrace(
           JSON.stringify({
             forcedKind: preferredKind,
-            reason: 'matched by user examples for group',
+            reason:
+              preferredKindSource === 'group_filter_pattern'
+                ? 'matched by user filter pattern for group'
+                : 'matched by user examples for group',
           }),
         ),
       };

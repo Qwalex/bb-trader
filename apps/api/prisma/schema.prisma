@@ -127,3 +127,16 @@ model TgUserbotFilterExample {
   @@index([groupName, kind, enabled])
   @@index([createdAt])
 }
+
+model TgUserbotFilterPattern {
+  id         String   @id @default(cuid())
+  groupName  String
+  kind       String // signal | close | result | reentry
+  pattern    String
+  enabled    Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([groupName, kind, enabled])
+  @@index([createdAt])
+}
