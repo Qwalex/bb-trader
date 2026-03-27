@@ -84,6 +84,7 @@ export default function FiltersPage() {
   const [patternKind, setPatternKind] = useState<FilterKind>('result');
   const [pattern, setPattern] = useState('');
   const [patternRequiresQuote, setPatternRequiresQuote] = useState(false);
+  const [activeFilterGroup, setActiveFilterGroup] = useState('');
   const [generatedPatterns, setGeneratedPatterns] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
@@ -133,6 +134,43 @@ export default function FiltersPage() {
     }
     return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0], 'ru'));
   }, [patternItems]);
+
+  const filterGroupTabs = useMemo(() => {
+    const names = new Set<string>();
+    for (const [name] of groupedPatterns) {
+      names.add(name);
+    }
+    for (const [name] of groupedExamples) {
+      names.add(name);
+    }
+    return Array.from(names).sort((a, b) => a.localeCompare(b, 'ru'));
+  }, [groupedPatterns, groupedExamples]);
+
+  const activePatternEntry = useMemo(
+    () => groupedPatterns.find(([name]) => name === activeFilterGroup),
+    [groupedPatterns, activeFilterGroup],
+  );
+
+  const activeExampleEntry = useMemo(
+    () => groupedExamples.find(([name]) => name === activeFilterGroup),
+    [groupedExamples, activeFilterGroup],
+  );
+
+  useEffect(() => {
+    if (filterGroupTabs.length === 0) {
+      if (activeFilterGroup) {
+        setActiveFilterGroup('');
+      }
+      return;
+    }
+    const exists = filterGroupTabs.includes(activeFilterGroup);
+    if (!exists) {
+      const firstGroup = filterGroupTabs[0];
+      if (firstGroup) {
+        setActiveFilterGroup(firstGroup);
+      }
+    }
+  }, [filterGroupTabs, activeFilterGroup]);
 
   async function addExample() {
     const g = groupName.trim();
@@ -638,104 +676,124 @@ export default function FiltersPage() {
         </button>
       </div>
 
-      {groupedPatterns.length === 0 ? (
-        <p style={{ color: 'var(--muted)' }}>Пока нет сохраненных фильтров-паттернов.</p>
+      {filterGroupTabs.length === 0 ? (
+        <p style={{ color: 'var(--muted)' }}>Пока нет сохраненных фильтров.</p>
       ) : (
         <div style={{ display: 'grid', gap: '1rem', marginBottom: '1rem' }}>
-          {groupedPatterns.map(([name, byKind], groupIdx) => (
-            <details
-              key={`patterns-${name}`}
-              className="card"
-              open={groupIdx === 0}
-              style={{ padding: '0.85rem 1rem' }}
-            >
-              <summary
-                style={{
-                  cursor: 'pointer',
-                  fontWeight: 600,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: '0.75rem',
-                }}
-              >
-                <span>{name}</span>
-                <span style={{ color: 'var(--muted)', fontWeight: 500, fontSize: '0.9rem' }}>
-                  {Object.values(byKind).reduce((sum, items) => sum + items.length, 0)} паттернов
-                </span>
-              </summary>
-              <div style={{ marginTop: '0.85rem' }}>
-                {(['signal', 'close', 'result', 'reentry'] as const).map((k) => (
-                  <div key={`${name}-pattern-${k}`} style={{ marginBottom: '0.9rem' }}>
-                    <strong style={{ fontSize: '0.9rem' }}>{KIND_LABEL[k]}</strong>
-                    {byKind[k].length === 0 ? (
-                      <p style={{ color: 'var(--muted)', marginTop: '0.3rem' }}>Нет паттернов</p>
-                    ) : (
-                      <div style={{ display: 'grid', gap: '0.5rem', marginTop: '0.4rem' }}>
-                        {byKind[k].map((it) => (
-                          <div
-                            key={it.id}
-                            style={{
-                              border: '1px solid var(--border)',
-                              borderRadius: 8,
-                              padding: '0.55rem 0.6rem',
-                              background: 'rgba(255,255,255,0.02)',
-                            }}
-                          >
-                            <pre
-                              style={{
-                                margin: 0,
-                                whiteSpace: 'pre-wrap',
-                                color: 'var(--foreground)',
-                                fontFamily: 'var(--font-geist-mono), monospace',
-                                fontSize: '0.78rem',
-                                lineHeight: 1.35,
-                              }}
-                            >
-                              {it.pattern}
-                            </pre>
-                            {it.requiresQuote && (
-                              <div style={{ marginTop: '0.35rem', color: 'var(--muted)' }}>
-                                Только с цитатой
-                              </div>
-                            )}
-                            <div style={{ marginTop: '0.45rem' }}>
-                              <button
-                                className="btn btnSecondary btnSm"
-                                type="button"
-                                disabled={busy !== null}
-                                onClick={() => void removePattern(it.id)}
-                              >
-                                {busy === `del-pattern:${it.id}` ? 'Удаление…' : 'Удалить'}
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </details>
-          ))}
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            {filterGroupTabs.map((name) => {
+              const patternsCount = groupedPatterns
+                .find(([group]) => group === name)?.[1]
+                ? Object.values(groupedPatterns.find(([group]) => group === name)![1]).reduce(
+                    (sum, items) => sum + items.length,
+                    0,
+                  )
+                : 0;
+              const examplesCount = groupedExamples
+                .find(([group]) => group === name)?.[1]
+                ? Object.values(groupedExamples.find(([group]) => group === name)![1]).reduce(
+                    (sum, items) => sum + items.length,
+                    0,
+                  )
+                : 0;
+              const active = name === activeFilterGroup;
+              return (
+                <button
+                  key={`filters-tab-${name}`}
+                  type="button"
+                  className="btn btnSecondary btnSm"
+                  onClick={() => setActiveFilterGroup(name)}
+                  style={{
+                    borderColor: active ? 'var(--accent)' : undefined,
+                    color: active ? 'var(--accent)' : undefined,
+                    background: active ? 'rgba(0, 200, 255, 0.08)' : undefined,
+                  }}
+                >
+                  {name} (P:{patternsCount} / E:{examplesCount})
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 
-      {groupedExamples.length === 0 ? (
+      {filterGroupTabs.length > 0 && (
+        <div style={{ display: 'grid', gap: '1rem', marginBottom: '1rem' }}>
+          <div className="card" style={{ padding: '0.85rem 1rem' }}>
+            <h3 style={{ marginBottom: '0.7rem' }}>{activeFilterGroup} · Фильтры-паттерны</h3>
+            {activePatternEntry ? (
+              (['signal', 'close', 'result', 'reentry'] as const).map((k) => (
+                <div key={`${activeFilterGroup}-pattern-${k}`} style={{ marginBottom: '0.9rem' }}>
+                  <strong style={{ fontSize: '0.9rem' }}>{KIND_LABEL[k]}</strong>
+                  {activePatternEntry[1][k].length === 0 ? (
+                    <p style={{ color: 'var(--muted)', marginTop: '0.3rem' }}>Нет паттернов</p>
+                  ) : (
+                    <div style={{ display: 'grid', gap: '0.5rem', marginTop: '0.4rem' }}>
+                      {activePatternEntry[1][k].map((it) => (
+                        <div
+                          key={it.id}
+                          style={{
+                            border: '1px solid var(--border)',
+                            borderRadius: 8,
+                            padding: '0.55rem 0.6rem',
+                            background: 'rgba(255,255,255,0.02)',
+                          }}
+                        >
+                          <pre
+                            style={{
+                              margin: 0,
+                              whiteSpace: 'pre-wrap',
+                              color: 'var(--foreground)',
+                              fontFamily: 'var(--font-geist-mono), monospace',
+                              fontSize: '0.78rem',
+                              lineHeight: 1.35,
+                            }}
+                          >
+                            {it.pattern}
+                          </pre>
+                          {it.requiresQuote && (
+                            <div style={{ marginTop: '0.35rem', color: 'var(--muted)' }}>
+                              Только с цитатой
+                            </div>
+                          )}
+                          <div style={{ marginTop: '0.45rem' }}>
+                            <button
+                              className="btn btnSecondary btnSm"
+                              type="button"
+                              disabled={busy !== null}
+                              onClick={() => void removePattern(it.id)}
+                            >
+                              {busy === `del-pattern:${it.id}` ? 'Удаление…' : 'Удалить'}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))
+            ) : (
+              <p style={{ color: 'var(--muted)' }}>Для этой группы нет паттернов.</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {filterGroupTabs.length === 0 ? (
         <p style={{ color: 'var(--muted)' }}>Пока нет сохраненных примеров для AI.</p>
       ) : (
         <div style={{ display: 'grid', gap: '1rem' }}>
-          {groupedExamples.map(([name, byKind]) => (
-            <div key={name} className="card">
-              <h3 style={{ marginBottom: '0.6rem' }}>{name} · Примеры для AI</h3>
-              {(['signal', 'close', 'result', 'reentry'] as const).map((k) => (
-                <div key={`${name}-${k}`} style={{ marginBottom: '0.9rem' }}>
+          <div key={activeFilterGroup} className="card">
+            <h3 style={{ marginBottom: '0.6rem' }}>{activeFilterGroup} · Примеры для AI</h3>
+            {activeExampleEntry ? (
+              (['signal', 'close', 'result', 'reentry'] as const).map((k) => (
+                <div key={`${activeFilterGroup}-${k}`} style={{ marginBottom: '0.9rem' }}>
                   <strong style={{ fontSize: '0.9rem' }}>{KIND_LABEL[k]}</strong>
-                  {byKind[k].length === 0 ? (
+                  {activeExampleEntry[1][k].length === 0 ? (
                     <p style={{ color: 'var(--muted)', marginTop: '0.3rem' }}>Нет примеров</p>
                   ) : (
                     <div style={{ display: 'grid', gap: '0.5rem', marginTop: '0.4rem' }}>
-                      {byKind[k].map((it) => (
+                      {activeExampleEntry[1][k].map((it) => (
                         <div
                           key={it.id}
                           style={{
@@ -795,9 +853,11 @@ export default function FiltersPage() {
                     </div>
                   )}
                 </div>
-              ))}
-            </div>
-          ))}
+              ))
+            ) : (
+              <p style={{ color: 'var(--muted)' }}>Для этой группы нет примеров.</p>
+            )}
+          </div>
         </div>
       )}
     </>
