@@ -1,5 +1,6 @@
 services:
   api:
+    image: ${API_IMAGE:-bb-trade-api:local}
     build:
       context: .
       dockerfile: Dockerfile.api
@@ -22,6 +23,7 @@ services:
       start_period: 15s
 
   web:
+    image: ${WEB_IMAGE:-bb-trade-web:local}
     build:
       context: .
       dockerfile: Dockerfile.web

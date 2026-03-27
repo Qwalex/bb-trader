@@ -46,19 +46,25 @@ cleanup() {
 trap on_error ERR
 trap cleanup EXIT
 
-# Пишем весь вывод в лог, но сохраняем вывод и в консоль GitHub Actions/SSH.
 exec > >(tee -a "$LOG_FILE") 2>&1
 
-docker system prune -a --volumes
+# Опционально: перед pull из приватного GHCR задать на сервере или передать из CI:
+#   echo "$GHCR_TOKEN" | docker login ghcr.io -u USERNAME --password-stdin
+if [[ -n "${GHCR_TOKEN:-}" && -n "${GHCR_USERNAME:-}" ]]; then
+  echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+fi
+
 git fetch
 git reset --hard HEAD
 git pull
 
-# 1) Остановить и удалить контейнеры этого compose-проекта
-docker compose down --remove-orphans
-# 2) Пересобрать образы без кэша (и с обновлением базового образа)
-docker compose build --no-cache --pull
-# 3) Поднять заново
-docker compose up -d
+# Деплой из registry (CI задаёт API_IMAGE и WEB_IMAGE): короткий простой — pull + recreate.
+# Локально без образов в registry: сборка на месте с кэшем слоёв.
+if [[ -n "${API_IMAGE:-}" && -n "${WEB_IMAGE:-}" ]]; then
+  docker compose pull
+  docker compose up -d
+else
+  docker compose up -d --build
+fi
 
 notify "✅ Проект ${PROJECT_NAME} обновлён без ошибок."
