@@ -12,7 +12,6 @@ import {
 } from '@repo/shared';
 
 import { AppLogService } from '../app-log/app-log.service';
-import { BybitService } from '../bybit/bybit.service';
 import { sanitizeForOpenRouterLog } from '../app-log/log-sanitize';
 import { SettingsService } from '../settings/settings.service';
 import { SignalParseDto } from './dto/signal-parse.dto';
@@ -207,7 +206,6 @@ export class TranscriptService {
   constructor(
     private readonly settings: SettingsService,
     private readonly appLog: AppLogService,
-    private readonly bybit: BybitService,
   ) {}
 
   async classifyTradingMessage(
