@@ -22,22 +22,26 @@ export function TradesFilters({ sourceOptions }: Props) {
   const sp = useSearchParams();
 
   const initial = useMemo(() => {
+    const signalId = cleanString(sp.get('signalId') ?? '');
     const source = cleanString(sp.get('source') ?? '');
     const pair = cleanString(sp.get('pair') ?? '');
     const status = cleanString(sp.get('status') ?? '');
     const includeDeleted = sp.get('includeDeleted') === '1' || sp.get('includeDeleted') === 'true';
-    return { source, pair, status, includeDeleted };
+    return { signalId, source, pair, status, includeDeleted };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const [signalId, setSignalId] = useState(initial.signalId);
   const [source, setSource] = useState(initial.source);
   const [pair, setPair] = useState(initial.pair);
   const [status, setStatus] = useState(initial.status);
   const [includeDeleted, setIncludeDeleted] = useState(initial.includeDeleted);
 
+  const signalIdTimer = useRef<number | null>(null);
   const pairTimer = useRef<number | null>(null);
 
   function replaceQuery(next: {
+    signalId?: string;
     source?: string;
     pair?: string;
     status?: string;
@@ -45,6 +49,12 @@ export function TradesFilters({ sourceOptions }: Props) {
   }) {
     const q = new URLSearchParams(sp.toString());
 
+    if (next.signalId !== undefined) {
+      const v = cleanString(next.signalId);
+      if (v) q.set('signalId', v);
+      else q.delete('signalId');
+      q.delete('page');
+    }
     if (next.source !== undefined) {
       const v = cleanString(next.source);
       if (v) q.set('source', v);
@@ -75,12 +85,31 @@ export function TradesFilters({ sourceOptions }: Props) {
 
   useEffect(() => {
     return () => {
+      if (signalIdTimer.current) window.clearTimeout(signalIdTimer.current);
       if (pairTimer.current) window.clearTimeout(pairTimer.current);
     };
   }, []);
 
   return (
     <div className="filters">
+      <label>
+        ID сделки
+        <input
+          value={signalId}
+          onChange={(e) => {
+            const v = e.target.value;
+            setSignalId(v);
+            if (signalIdTimer.current) window.clearTimeout(signalIdTimer.current);
+            signalIdTimer.current = window.setTimeout(() => {
+              replaceQuery({ signalId: v });
+            }, 250);
+          }}
+          placeholder="напр. cm9ab123 или полный cuid"
+          inputMode="text"
+          autoComplete="off"
+        />
+      </label>
+
       <label>
         Источник
         <select
@@ -158,6 +187,7 @@ export function TradesFilters({ sourceOptions }: Props) {
         type="button"
         className="btn btnSecondary"
         onClick={() => {
+          setSignalId('');
           setSource('');
           setPair('');
           setStatus('');

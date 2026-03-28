@@ -31,6 +31,7 @@ export class OrdersController {
 
   @Get('trades')
   async trades(
+    @Query('signalId') signalId?: string,
     @Query('source') source?: string,
     @Query('pair') pair?: string,
     @Query('status') status?: string,
@@ -41,6 +42,7 @@ export class OrdersController {
     @Query('pageSize') pageSize?: string,
   ) {
     return this.orders.listTrades({
+      signalId,
       source,
       pair,
       status,
