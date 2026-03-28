@@ -10,10 +10,13 @@ import { Context, Markup, Telegraf } from 'telegraf';
 
 import type { SignalDto } from '@repo/shared';
 
+import type { Order, Signal } from '@prisma/client';
+
 import { formatError } from '../../common/format-error';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppLogService } from '../app-log/app-log.service';
 import { BybitService } from '../bybit/bybit.service';
+import { OrdersService } from '../orders/orders.service';
 import { SettingsService } from '../settings/settings.service';
 import {
   mergePartialSignals,
@@ -68,6 +71,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     private readonly transcript: TranscriptService,
     @Inject(forwardRef(() => BybitService))
     private readonly bybit: BybitService,
+    @Inject(forwardRef(() => OrdersService))
+    private readonly orders: OrdersService,
     private readonly appLog: AppLogService,
     private readonly prisma: PrismaService,
   ) {}
@@ -590,6 +595,195 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     return { ok: true, deliveredTo };
   }
 
+  private tgEsc(s: string): string {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  private mainMenuKeyboard() {
+    return Markup.keyboard([['Сводка', 'Рейтинги', 'Сделки']]).resize();
+  }
+
+  private splitTelegramHtml(text: string, max = 3900): string[] {
+    const t = text.trim();
+    if (t.length === 0) {
+      return [];
+    }
+    if (t.length <= max) {
+      return [t];
+    }
+    const parts: string[] = [];
+    let rest = t;
+    while (rest.length > max) {
+      const slice = rest.slice(0, max);
+      const lastBreak = slice.lastIndexOf('\n');
+      const cut = lastBreak > max * 0.4 ? lastBreak : max;
+      parts.push(rest.slice(0, cut).trimEnd());
+      rest = rest.slice(cut).trimStart();
+    }
+    if (rest.length) {
+      parts.push(rest);
+    }
+    return parts;
+  }
+
+  private formatRuDate(d: Date): string {
+    return new Date(d).toLocaleString('ru-RU', {
+      day: '2-digit',
+      month: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }
+
+  private tradeCanCancelFromTelegram(status: string): boolean {
+    return (
+      status === 'ORDERS_PLACED' ||
+      status === 'OPEN' ||
+      status === 'PARSED'
+    );
+  }
+
+  private async replyHtmlChunks(ctx: Context, html: string): Promise<void> {
+    const parts = this.splitTelegramHtml(html);
+    for (const part of parts) {
+      await ctx.reply(part, { parse_mode: 'HTML' });
+    }
+  }
+
+  private async handleMenuSummary(ctx: Context): Promise<void> {
+    const balance = await this.bybit.getUnifiedUsdtBalance();
+    const balStr =
+      balance !== undefined && Number.isFinite(balance)
+        ? `${balance.toFixed(2)} USDT`
+        : '—';
+    const stats = await this.orders.getDashboardStats();
+    const top = await this.orders.getTopSources({ limit: 5 });
+    const best = top.bestWinrate;
+    const worst = top.worstWinrate;
+    let lines =
+      `<b>Сводка</b>\n` +
+      `Баланс USDT (Bybit): <b>${this.tgEsc(balStr)}</b>\n` +
+      `Winrate: <b>${stats.winrate.toFixed(1)}%</b>\n` +
+      `Всего PnL: <b>${stats.totalPnl.toFixed(2)}</b>\n` +
+      `Закрыто сделок: ${stats.totalClosed} (W/L: ${stats.wins}/${stats.losses})\n` +
+      `Открытые сигналы: ${stats.openSignals}\n`;
+    if (best) {
+      lines += `\nЛучший winrate по источнику: <b>${best.winrate.toFixed(1)}%</b> — ${this.tgEsc(best.source ?? '—')} (W/L ${best.wL})`;
+    }
+    if (worst) {
+      lines += `\nХудший winrate по источнику: <b>${worst.winrate.toFixed(1)}%</b> — ${this.tgEsc(worst.source ?? '—')} (W/L ${worst.wL})`;
+    }
+    await this.replyHtmlChunks(ctx, lines);
+  }
+
+  private async handleMenuRatings(ctx: Context): Promise<void> {
+    const top = await this.orders.getTopSources({ limit: 5 });
+    const fmt = (
+      label: string,
+      rows: Awaited<ReturnType<OrdersService['getTopSources']>>['byPnl'],
+    ) => {
+      if (rows.length === 0) {
+        return `<b>${this.tgEsc(label)}</b>\nнет данных`;
+      }
+      const lines = rows.map((r, i) => {
+        const src = this.tgEsc(r.source ?? '—');
+        return `${i + 1}. ${src} — PnL ${r.totalPnl.toFixed(2)} · WR ${r.winrate.toFixed(1)}% · W/L ${r.wL} · закр. ${r.totalClosed} · откр. ${r.openSignals}`;
+      });
+      return `<b>${this.tgEsc(label)}</b>\n` + lines.join('\n');
+    };
+    const sections = [
+      fmt('Топ по PnL', top.byPnl),
+      fmt('Топ по Winrate', top.byWinrate),
+      fmt('Худший PnL', top.byWorstPnl),
+      fmt('Худший Winrate', top.byWorstWinrate),
+    ];
+    await this.replyHtmlChunks(ctx, sections.join('\n\n'));
+  }
+
+  private async handleMenuTrades(ctx: Context): Promise<void> {
+    const { items } = await this.orders.listTrades({
+      page: 1,
+      pageSize: 20,
+    });
+    if (items.length === 0) {
+      await ctx.reply('Сделок пока нет.');
+      return;
+    }
+    const rows = items.map((s) => {
+      const label = `${s.pair} · ${this.formatRuDate(s.createdAt)}`.slice(0, 62);
+      return [Markup.button.callback(label, `td:${s.id}`)];
+    });
+    const header =
+      `<b>Последние ${items.length} сделок</b>\n` +
+      `Нажмите на строку для подробностей.`;
+    await ctx.reply(header, {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard(rows),
+    });
+  }
+
+  private formatTradeDetailHtml(signal: Signal & { orders: Order[] }): string {
+    let entries: string;
+    let tps: string;
+    try {
+      const e = JSON.parse(signal.entries) as unknown;
+      entries = Array.isArray(e) ? e.map((x) => String(x)).join(', ') : signal.entries;
+    } catch {
+      entries = signal.entries;
+    }
+    try {
+      const t = JSON.parse(signal.takeProfits) as unknown;
+      tps = Array.isArray(t) ? t.map((x) => String(x)).join(', ') : signal.takeProfits;
+    } catch {
+      tps = signal.takeProfits;
+    }
+    const ordersLines = signal.orders
+      .map(
+        (o) =>
+          `• ${o.orderKind} ${o.side} ${o.status ?? '—'}${o.bybitOrderId != null ? ` · ${o.bybitOrderId}` : ''}`,
+      )
+      .join('\n');
+    return (
+      `<b>Сделка</b>\n` +
+      `Пара: <code>${this.tgEsc(signal.pair)}</code>\n` +
+      `Направление: <code>${this.tgEsc(signal.direction)}</code>\n` +
+      `Статус: <code>${this.tgEsc(signal.status)}</code>\n` +
+      `Входы: <code>${this.tgEsc(entries)}</code>\n` +
+      `SL: <code>${signal.stopLoss}</code>\n` +
+      `TP: <code>${this.tgEsc(tps)}</code>\n` +
+      `Плечо: <code>${signal.leverage}x</code>\n` +
+      `Размер: <code>${signal.orderUsd > 0 ? `$${signal.orderUsd}` : `${signal.capitalPercent}%`}</code>\n` +
+      `Источник (группа): ${this.tgEsc(signal.source ?? '—')}\n` +
+      `Создана: ${this.tgEsc(this.formatRuDate(signal.createdAt))}\n` +
+      `signalId: <code>${this.tgEsc(signal.id)}</code>\n` +
+      (signal.realizedPnl != null ? `PnL: <code>${signal.realizedPnl.toFixed(2)}</code>\n` : '') +
+      `\n<b>Ордера</b>\n${ordersLines || '—'}`
+    );
+  }
+
+  private async handleTradeDetailCallback(
+    ctx: Context,
+    signalId: string,
+  ): Promise<void> {
+    const row = await this.orders.getSignalWithOrders(signalId);
+    if (!row) {
+      await ctx.answerCbQuery('Сделка не найдена', { show_alert: true });
+      return;
+    }
+    await ctx.answerCbQuery();
+    const text = this.formatTradeDetailHtml(row);
+    if (this.tradeCanCancelFromTelegram(row.status)) {
+      await ctx.reply(text, {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('Отменить', `ub_stale_cancel:${signalId}`)],
+        ]),
+      });
+    } else {
+      await ctx.reply(text, { parse_mode: 'HTML' });
+    }
+  }
+
   private registerHandlers(): void {
     if (!this.bot) return;
 
@@ -631,6 +825,25 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         return;
       }
       return next();
+    });
+
+    this.bot.hears(/^Сводка$/i, async (ctx) => {
+      await this.handleMenuSummary(ctx);
+    });
+    this.bot.hears(/^Рейтинги$/i, async (ctx) => {
+      await this.handleMenuRatings(ctx);
+    });
+    this.bot.hears(/^Сделки$/i, async (ctx) => {
+      await this.handleMenuTrades(ctx);
+    });
+
+    this.bot.action(/^td:(.+)$/i, async (ctx) => {
+      const sid = ctx.match?.[1]?.trim();
+      if (!sid) {
+        await ctx.answerCbQuery();
+        return;
+      }
+      await this.handleTradeDetailCallback(ctx, sid);
     });
 
     this.bot.action('sig_confirm', async (ctx) => {
@@ -875,7 +1088,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
               'Отправьте сигнал текстом, фото или голосом. Если чего-то не хватает — бот задаст вопросы; отвечайте сообщениями, контекст сохраняется до подтверждения.\n' +
                 'После полного разбора проверьте таблицу, при необходимости пришлите правки текстом, затем «Подтвердить».\n' +
                 'Источник сигнала (канал/приложение, для статистики): задайте в настройках API или командой /source Название.\n' +
-                'Команды: /cancel — отменить черновик',
+                'Команды: /cancel — отменить черновик; /menu — меню (Сводка, Рейтинги, Сделки).',
+              this.mainMenuKeyboard(),
+            );
+          } else if (text === '/menu') {
+            await ctx.reply(
+              'Выберите раздел кнопками ниже или отправьте: Сводка, Рейтинги, Сделки.',
+              this.mainMenuKeyboard(),
             );
           } else if (text === '/cancel') {
             if (this.drafts.delete(uid)) {

@@ -32,6 +32,7 @@ type TopSources = {
   byWorstPnl: SourceStatsItem[];
   byWorstWinrate: SourceStatsItem[];
   worstWinrate: SourceStatsItem | null;
+  bestWinrate: SourceStatsItem | null;
 };
 type SettingsRaw = {
   settings: { key: string; value: string }[];
@@ -190,6 +191,15 @@ export default async function Home({
               <div className="value">{top.worstWinrate.winrate.toFixed(1)}%</div>
               <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
                 {top.worstWinrate.source ?? '—'} | W/L: {top.worstWinrate.wL}
+              </p>
+            </div>
+          )}
+          {top?.bestWinrate && (
+            <div className="card">
+              <h3>Лучший winrate</h3>
+              <div className="value">{top.bestWinrate.winrate.toFixed(1)}%</div>
+              <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
+                {top.bestWinrate.source ?? '—'} | W/L: {top.bestWinrate.wL}
               </p>
             </div>
           )}

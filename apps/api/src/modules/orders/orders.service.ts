@@ -796,8 +796,17 @@ export class OrdersService {
       .slice(0, limit);
     const worstWinrate =
       byWorstWinrate.length > 0 ? (byWorstWinrate[0] ?? null) : null;
+    const bestWinrate =
+      byWinrate.length > 0 ? (byWinrate[0] ?? null) : null;
 
-    return { byPnl, byWinrate, byWorstPnl, byWorstWinrate, worstWinrate };
+    return {
+      byPnl,
+      byWinrate,
+      byWorstPnl,
+      byWorstWinrate,
+      worstWinrate,
+      bestWinrate,
+    };
   }
 
   async listTrades(f: TradesFilter) {
