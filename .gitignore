@@ -8,6 +8,10 @@ node_modules
 # Local env files
 .env
 .env.local
+# VPS: последний успешный деплой (restart.sh), не коммитить
+.last-good-deploy.env
+.deploy-history.log
+.deploy-compose-failure.log
 .env.development.local
 .env.test.local
 .env.production.local
