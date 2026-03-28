@@ -1,6 +1,4 @@
 import {
-  forwardRef,
-  Inject,
   Injectable,
   Logger,
   OnModuleDestroy,
@@ -66,7 +64,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly settings: SettingsService,
     private readonly transcript: TranscriptService,
-    @Inject(forwardRef(() => BybitService))
     private readonly bybit: BybitService,
     private readonly appLog: AppLogService,
     private readonly prisma: PrismaService,
@@ -436,138 +433,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         ok: false,
         deliveredTo: 0,
         error: 'Не удалось доставить ошибку ни одному пользователю',
-      };
-    }
-    return { ok: true, deliveredTo };
-  }
-
-  async notifyUserbotResultWithoutEntry(params: {
-    ingestId: string;
-    chatId: string;
-    groupTitle?: string;
-    pair: string;
-    signalId: string;
-    resultMessageText: string;
-    quotedSnippet?: string;
-  }): Promise<{ ok: boolean; deliveredTo: number; error?: string }> {
-    if (!this.bot) {
-      return { ok: false, deliveredTo: 0, error: 'Telegram bot не запущен' };
-    }
-    const ids = await this.getWhitelistUserIds();
-    if (ids.length === 0) {
-      return { ok: false, deliveredTo: 0, error: 'TELEGRAM_WHITELIST пуст' };
-    }
-    const pair = (params.pair ?? '').trim().toUpperCase();
-    const sourceLine =
-      params.groupTitle && params.groupTitle.trim().length > 0
-        ? `Группа / канал: ${params.groupTitle.trim()}\n`
-        : `Источник (chatId): ${params.chatId}\n`;
-    const resultBody = (params.resultMessageText ?? '').trim() || '—';
-    const quoteBody = (params.quotedSnippet ?? '').trim();
-    const quoteBlock =
-      quoteBody.length > 0 ? `\nЦитата из группы\n\`\`\`\n${quoteBody}\n\`\`\`\n` : '\n';
-    const msg =
-      `Возможно ваш ордер для монеты ${pair} не актуален\n` +
-      sourceLine +
-      `Получен результат\n` +
-      `\`\`\`\n${resultBody}\n\`\`\`` +
-      quoteBlock +
-      `А вход так и не был осуществлен по сделке (${params.signalId})\n\n` +
-      `ingestId: ${params.ingestId}`;
-
-    let deliveredTo = 0;
-    for (const uid of ids) {
-      try {
-        await this.bot.telegram.sendMessage(uid, msg);
-        deliveredTo += 1;
-      } catch (e) {
-        this.logger.warn(`notifyUserbotResultWithoutEntry -> ${uid}: ${formatError(e)}`);
-      }
-    }
-
-    if (deliveredTo === 0) {
-      return {
-        ok: false,
-        deliveredTo: 0,
-        error: 'Не удалось доставить уведомление о result без входа ни одному пользователю',
-      };
-    }
-    return { ok: true, deliveredTo };
-  }
-
-  async notifyApiTradeCancelled(params: {
-    signalId: string;
-    pair: string;
-    direction: string;
-    entries: number[];
-    stopLoss: number;
-    takeProfits: number[];
-    leverage: number;
-    orderUsd: number;
-    capitalPercent: number;
-    source?: string | null;
-    reason?: string;
-  }): Promise<{ ok: boolean; deliveredTo: number; error?: string }> {
-    const enabled =
-      (await this.settings.get('TELEGRAM_NOTIFY_API_TRADE_CANCELLED'))?.toLowerCase() ===
-      'true';
-    if (!enabled) {
-      return { ok: true, deliveredTo: 0 };
-    }
-    if (!this.bot) {
-      return { ok: false, deliveredTo: 0, error: 'Telegram bot не запущен' };
-    }
-    const ids = await this.getWhitelistUserIds();
-    if (ids.length === 0) {
-      return { ok: false, deliveredTo: 0, error: 'TELEGRAM_WHITELIST пуст' };
-    }
-    const esc = (value: string) =>
-      value.replace(/([_*\[\]()~`>#+\-=|{}.!\\])/g, '\\$1');
-    const pair = esc((params.pair ?? '').trim().toUpperCase());
-    const signalId = esc((params.signalId ?? '').trim());
-    const direction = esc((params.direction ?? '').trim().toUpperCase());
-    const entries = esc(
-      params.entries.length > 0 ? params.entries.map((v) => String(v)).join(', ') : '—',
-    );
-    const stopLoss = esc(String(params.stopLoss));
-    const takeProfits = esc(
-      params.takeProfits.length > 0
-        ? params.takeProfits.map((v) => String(v)).join(', ')
-        : '—',
-    );
-    const leverage = esc(`${params.leverage}x`);
-    const size =
-      params.capitalPercent > 0
-        ? esc(`${params.capitalPercent}% от депозита`)
-        : esc(`$${params.orderUsd} USDT`);
-    const source = params.source ? esc(params.source) : '—';
-    const reason = params.reason ? `\n- *Причина:* ${esc(params.reason)}` : '';
-    const msg =
-      `*Сделка отменена*\n` +
-      `- *Пара:* \`${pair}\`\n` +
-      `- *ID сделки:* \`${signalId}\`\n` +
-      `- *Направление:* \`${direction}\`\n` +
-      `- *Входы:* \`${entries}\`\n` +
-      `- *Stop Loss:* \`${stopLoss}\`\n` +
-      `- *Take Profit:* \`${takeProfits}\`\n` +
-      `- *Плечо:* \`${leverage}\`\n` +
-      `- *Размер:* \`${size}\`\n` +
-      `- *Источник:* \`${source}\`${reason}`;
-
-    let deliveredTo = 0;
-    for (const uid of ids) {
-      try {
-        await this.bot.telegram.sendMessage(uid, msg, { parse_mode: 'MarkdownV2' });
-        deliveredTo += 1;
-      } catch (e) {
-        this.logger.warn(`notifyApiTradeCancelled -> ${uid}: ${formatError(e)}`);
-      }
-    }
-    if (deliveredTo === 0) {
-      return {
-        ok: false,
-        deliveredTo: 0,
-        error: 'Не удалось доставить уведомление об отмене сделки',
       };
     }
     return { ok: true, deliveredTo };

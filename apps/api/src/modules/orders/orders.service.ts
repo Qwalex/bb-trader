@@ -14,7 +14,6 @@ import { BybitService } from '../bybit/bybit.service';
 import { SettingsService } from '../settings/settings.service';
 
 export interface TradesFilter {
-  signalId?: string;
   source?: string;
   pair?: string;
   from?: Date;
@@ -781,38 +780,29 @@ export class OrdersService {
     if (!f.includeDeleted) {
       where.deletedAt = null;
     }
-    const signalId = f.signalId?.trim();
-    if (signalId) {
-      if (signalId.length >= 25) {
-        where.id = signalId;
+    if (f.source) {
+      if (f.source === '—') {
+        where.source = null;
       } else {
-        where.id = { startsWith: signalId };
+        where.source = f.source;
       }
-    } else {
-      if (f.source) {
-        if (f.source === '—') {
-          where.source = null;
-        } else {
-          where.source = f.source;
-        }
+    }
+    if (f.pair) {
+      const want = normalizeTradingPair(f.pair);
+      where.pair = {
+        contains: want,
+      };
+    }
+    if (f.status) {
+      where.status = f.status;
+    }
+    if (f.from || f.to) {
+      where.createdAt = {};
+      if (f.from) {
+        where.createdAt.gte = f.from;
       }
-      if (f.pair) {
-        const want = normalizeTradingPair(f.pair);
-        where.pair = {
-          contains: want,
-        };
-      }
-      if (f.status) {
-        where.status = f.status;
-      }
-      if (f.from || f.to) {
-        where.createdAt = {};
-        if (f.from) {
-          where.createdAt.gte = f.from;
-        }
-        if (f.to) {
-          where.createdAt.lte = f.to;
-        }
+      if (f.to) {
+        where.createdAt.lte = f.to;
       }
     }
     const [items, total] = await Promise.all([
