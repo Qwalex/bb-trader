@@ -295,6 +295,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     ]);
   }
 
+  /** Кнопка отмены ордеров по сделке из уведомления «result без входа». */
+  private staleResultCancelKeyboard(signalId: string) {
+    return Markup.inlineKeyboard([
+      [Markup.button.callback('Отменить', `ub_stale_cancel:${signalId}`)],
+    ]);
+  }
+
   private sourceSelectionKeyboard(sources: string[]) {
     const rows = sources.map((s, i) => [
       Markup.button.callback(s, `src_pick:${i}`),
@@ -481,7 +488,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     let deliveredTo = 0;
     for (const uid of ids) {
       try {
-        await this.bot.telegram.sendMessage(uid, msg, { parse_mode: 'HTML' });
+        await this.bot.telegram.sendMessage(uid, msg, {
+          parse_mode: 'HTML',
+          ...this.staleResultCancelKeyboard(params.signalId),
+        });
         deliveredTo += 1;
       } catch (e) {
         this.logger.warn(`notifyUserbotResultWithoutEntry -> ${uid}: ${formatError(e)}`);
@@ -789,6 +799,43 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         })
         .catch(() => undefined);
       await ctx.reply('Сигнал отклонён.');
+    });
+
+    this.bot.action(/^ub_stale_cancel:(.+)$/i, async (ctx) => {
+      const uid = ctx.from?.id;
+      const signalId = ctx.match?.[1]?.trim();
+      if (!uid || !signalId) {
+        await ctx.answerCbQuery();
+        return;
+      }
+      await ctx.answerCbQuery('Отменяю ордера…');
+      await clearInlineKeyboard(ctx);
+      try {
+        const closed = await this.bybit.closeSignalManually(signalId);
+        if (closed.ok) {
+          void this.appLog.append('info', 'telegram', 'Result без входа: отмена по кнопке', {
+            userId: uid,
+            signalId,
+            cancelledOrders: closed.cancelledOrders,
+            closedPositions: closed.closedPositions,
+          });
+          await ctx.reply(`Ордера по сделке отменены. signalId=${signalId}`);
+        } else {
+          const err =
+            closed.error ??
+            closed.details ??
+            'Не удалось отменить ордера на Bybit';
+          void this.appLog.append('warn', 'telegram', 'Result без входа: отмена по кнопке не удалась', {
+            userId: uid,
+            signalId,
+            error: err,
+          });
+          await ctx.reply(`Не удалось отменить: ${err}`);
+        }
+      } catch (e) {
+        this.logger.warn(`ub_stale_cancel signalId=${signalId}: ${formatError(e)}`);
+        await ctx.reply(`Ошибка: ${formatError(e)}`);
+      }
     });
 
     this.bot.on('text', async (ctx) => {
