@@ -2124,16 +2124,33 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     if (this.hasFilledEntryOrders(signal.orders)) {
       return { ok: true, mode: 'result_ignored_has_entry', signalId: signal.id };
     }
-    const alreadyNotified = await this.prisma.signalEvent.findFirst({
+    // Дедупликация только повторной обработки того же сообщения в чате (ретраи ingest).
+    // Разные сообщения о результате по одному сигналу (TP1, TP2, …) — отдельные messageId → уведомляем снова.
+    const priorResultEvents = await this.prisma.signalEvent.findMany({
       where: {
         signalId: signal.id,
         type: 'USERBOT_RESULT_WITHOUT_ENTRY',
       },
-      select: { id: true },
-      orderBy: { createdAt: 'desc' },
+      select: { payload: true },
     });
-    if (alreadyNotified) {
-      return { ok: true, mode: 'result_ignored_duplicate', signalId: signal.id };
+    for (const row of priorResultEvents) {
+      if (!row.payload) {
+        continue;
+      }
+      try {
+        const p = JSON.parse(row.payload) as {
+          resultMessageId?: string;
+          sourceChatId?: string;
+        };
+        if (
+          p.resultMessageId === params.messageId &&
+          (p.sourceChatId ?? '') === params.chatId
+        ) {
+          return { ok: true, mode: 'result_ignored_duplicate', signalId: signal.id };
+        }
+      } catch {
+        // ignore malformed payload
+      }
     }
     const notifyEnabled = await this.getBoolSetting(
       'TELEGRAM_USERBOT_NOTIFY_RESULT_WITHOUT_ENTRY',
