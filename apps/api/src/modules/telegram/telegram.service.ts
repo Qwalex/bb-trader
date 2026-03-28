@@ -600,10 +600,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   private mainMenuKeyboard() {
+    // resize — компактнее; пустая зона под клавиатурой задаётся клиентом Telegram, убрать полностью нельзя
     return Markup.keyboard([
       ['Сводка', 'Рейтинги', 'Сделки'],
       ['Диагностика', 'Логи'],
-    ]).resize();
+    ])
+      .resize()
+      .persistent();
   }
 
   private startOfToday(): Date {
@@ -688,18 +691,25 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const best = top.bestWinrate;
     const worst = top.worstWinrate;
     let lines =
-      `<b>Сводка</b>\n` +
-      `Баланс USDT (Bybit): <b>${this.tgEsc(balStr)}</b>\n` +
-      `PnL за сегодня (закрытые): <b>${this.tgEsc(todayPnlStr)}</b>\n` +
-      `Winrate: <b>${stats.winrate.toFixed(1)}%</b>\n` +
-      `Всего PnL: <b>${stats.totalPnl.toFixed(2)}</b>\n` +
-      `Закрыто сделок: ${stats.totalClosed} (W/L: ${stats.wins}/${stats.losses})\n` +
-      `Открытые сигналы: ${stats.openSignals}\n`;
+      `<b>📊 Сводка</b>\n` +
+      `<i>Как на дашборде · все источники</i>\n\n` +
+      `<b>💵 Баланс</b> (Bybit)\n<code>${this.tgEsc(balStr)}</code>\n\n` +
+      `<b>📅 PnL за сегодня</b> (закрытые)\n<code>${this.tgEsc(todayPnlStr)}</code>\n\n` +
+      `<b>📈 Winrate</b>\n<code>${stats.winrate.toFixed(1)}%</code>\n\n` +
+      `<b>Σ PnL всего</b>\n<code>${stats.totalPnl.toFixed(2)}</code>\n\n` +
+      `<b>Закрыто</b> · ${stats.totalClosed} <i>(W ${stats.wins} / L ${stats.losses})</i>\n` +
+      `<b>Открытые сигналы</b> · ${stats.openSignals}\n`;
     if (best) {
-      lines += `\nЛучший winrate по источнику: <b>${best.winrate.toFixed(1)}%</b> — ${this.tgEsc(best.source ?? '—')} (W/L ${best.wL})`;
+      lines +=
+        `\n────────────\n<b>▲ Лучший WR</b> по источнику\n` +
+        `<code>${this.tgEsc(best.source ?? '—')}</code>\n` +
+        `<b>${best.winrate.toFixed(1)}%</b> · W/L ${best.wL}`;
     }
     if (worst) {
-      lines += `\nХудший winrate по источнику: <b>${worst.winrate.toFixed(1)}%</b> — ${this.tgEsc(worst.source ?? '—')} (W/L ${worst.wL})`;
+      lines +=
+        `\n────────────\n<b>▼ Худший WR</b> по источнику\n` +
+        `<code>${this.tgEsc(worst.source ?? '—')}</code>\n` +
+        `<b>${worst.winrate.toFixed(1)}%</b> · W/L ${worst.wL}`;
     }
     const parts = this.splitTelegramHtml(lines);
     const refreshKb = Markup.inlineKeyboard([
@@ -718,28 +728,42 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private formatRatingSection(
+    emoji: string,
+    title: string,
+    rows: Awaited<ReturnType<OrdersService['getTopSources']>>['byPnl'],
+  ): string {
+    if (rows.length === 0) {
+      return `<b>${emoji} ${this.tgEsc(title)}</b>\n<i>нет данных</i>`;
+    }
+    const blocks = rows.map((r, i) => {
+      const src = this.tgEsc(r.source ?? '—');
+      return (
+        `<b>${i + 1}.</b> <code>${src}</code>\n` +
+        `├ PnL <b>${r.totalPnl.toFixed(2)}</b> · WR <b>${r.winrate.toFixed(1)}%</b>\n` +
+        `└ W/L ${r.wL} · закр. ${r.totalClosed} · откр. ${r.openSignals}`
+      );
+    });
+    return `<b>${emoji} ${this.tgEsc(title)}</b>\n\n` + blocks.join('\n\n');
+  }
+
   private async handleMenuRatings(ctx: Context): Promise<void> {
     const top = await this.orders.getTopSources({ limit: 5 });
-    const fmt = (
-      label: string,
-      rows: Awaited<ReturnType<OrdersService['getTopSources']>>['byPnl'],
-    ) => {
-      if (rows.length === 0) {
-        return `<b>${this.tgEsc(label)}</b>\nнет данных`;
-      }
-      const lines = rows.map((r, i) => {
-        const src = this.tgEsc(r.source ?? '—');
-        return `${i + 1}. ${src} — PnL ${r.totalPnl.toFixed(2)} · WR ${r.winrate.toFixed(1)}% · W/L ${r.wL} · закр. ${r.totalClosed} · откр. ${r.openSignals}`;
-      });
-      return `<b>${this.tgEsc(label)}</b>\n` + lines.join('\n');
-    };
-    const sections = [
-      fmt('Топ по PnL', top.byPnl),
-      fmt('Топ по Winrate', top.byWinrate),
-      fmt('Худший PnL', top.byWorstPnl),
-      fmt('Худший Winrate', top.byWorstWinrate),
+    await ctx.reply(
+      '<b>⭐ Рейтинги</b>\n<i>Топ-5 в каждом блоке · ниже — по одному сообщению на блок</i>',
+      { parse_mode: 'HTML' },
+    );
+    const blocks: [string, string, Awaited<ReturnType<OrdersService['getTopSources']>>['byPnl']][] = [
+      ['💰', 'Топ по PnL', top.byPnl],
+      ['📈', 'Топ по Winrate', top.byWinrate],
+      ['📉', 'Худший PnL', top.byWorstPnl],
+      ['⚠️', 'Худший Winrate', top.byWorstWinrate],
     ];
-    await this.replyHtmlChunks(ctx, sections.join('\n\n'));
+    for (const [emoji, title, rows] of blocks) {
+      await ctx.reply(this.formatRatingSection(emoji, title, rows), {
+        parse_mode: 'HTML',
+      });
+    }
   }
 
   private async handleMenuDiagnostics(ctx: Context): Promise<void> {
@@ -797,36 +821,53 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       },
     });
     const html =
-      `<b>Диагностика</b>\n` +
+      `<b>🔧 Диагностика</b>\n` +
+      `<i>Снимок состояния API / userbot / биржи</i>\n\n` +
       `<b>Userbot</b>\n` +
-      `Включён: ${userbotEnabled ? 'да' : 'нет'}\n` +
-      `API ID / Hash / сессия: ${apiId?.trim() ? 'да' : 'нет'} / ${apiHash?.trim() ? 'да' : 'нет'} / ${session?.trim() ? 'да' : 'нет'}\n` +
-      `Чаты: ${chatsEnabled} вкл. / ${chatsTotal} всего\n` +
-      `<b>Сегодня (ingest)</b>\n` +
-      `Сообщений: ${ingestTotal} · классиф. «сигнал»: ${ingestSignal} · placed: ${ingestPlaced}\n` +
-      `parse_incomplete: ${parseIncomplete} · parse_error: ${parseError}\n` +
-      `<b>Баланс / лимит</b>\n` +
-      `USDT: ${balance !== undefined ? balance.toFixed(2) : '—'} · порог ${Number.isFinite(minBal) ? minBal.toFixed(2) : '—'}\n` +
-      `Пауза автоторговли (ниже порога): ${paused ? 'да' : 'нет'}\n` +
+      `├ Включён: <b>${userbotEnabled ? 'да' : 'нет'}</b>\n` +
+      `├ Креды: API ID ${apiId?.trim() ? '✓' : '✗'} · Hash ${apiHash?.trim() ? '✓' : '✗'} · сессия ${session?.trim() ? '✓' : '✗'}\n` +
+      `└ Чаты: <b>${chatsEnabled}</b> вкл. / <b>${chatsTotal}</b> всего\n\n` +
+      `<b>Ingest за сегодня</b>\n` +
+      `├ Всего сообщений: <b>${ingestTotal}</b>\n` +
+      `├ Класс «сигнал»: <b>${ingestSignal}</b> · placed: <b>${ingestPlaced}</b>\n` +
+      `└ parse_incomplete: <b>${parseIncomplete}</b> · parse_error: <b>${parseError}</b>\n\n` +
+      `<b>Баланс</b>\n` +
+      `├ USDT: <code>${balance !== undefined ? balance.toFixed(2) : '—'}</code>\n` +
+      `├ Порог: <code>${Number.isFinite(minBal) ? minBal.toFixed(2) : '—'}</code>\n` +
+      `└ Пауза автоторговли: <b>${paused ? 'да' : 'нет'}</b>\n\n` +
       `<b>Bybit</b>\n` +
-      `Ключи: ${live.bybitConnected ? 'подключены' : 'нет'}\n` +
-      `Открытых записей в БД: ${openDb}\n` +
-      `Сигналов с ордером/позицией на бирже: ${live.items.length}`;
+      `├ Ключи: <b>${live.bybitConnected ? 'подключены' : 'нет'}</b>\n` +
+      `├ Открытых сигналов в БД: <b>${openDb}</b>\n` +
+      `└ С экспозицией на бирже: <b>${live.items.length}</b>`;
     await this.replyHtmlChunks(ctx, html);
   }
 
   private async handleMenuLogs(ctx: Context): Promise<void> {
-    const rows = await this.appLog.list({ limit: 15, category: 'all' });
+    const rows = await this.appLog.list({ limit: 12, category: 'all' });
     if (rows.length === 0) {
       await ctx.reply('В логе пока нет записей.');
       return;
     }
-    const lines = rows.map((r) => {
-      const msg = r.message.replace(/\s+/g, ' ').slice(0, 200);
-      const t = r.createdAt.toISOString().slice(5, 16).replace('T', ' ');
-      return `${t} [${r.level}/${r.category}] ${this.tgEsc(msg)}`;
+    const blocks = rows.map((r) => {
+      const msg = r.message.replace(/\s+/g, ' ').slice(0, 320);
+      const when = new Date(r.createdAt).toLocaleString('ru-RU', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+      return (
+        `<code>${this.tgEsc(r.level)}</code> · <code>${this.tgEsc(r.category)}</code>\n` +
+        `<i>${this.tgEsc(when)}</i>\n` +
+        `${this.tgEsc(msg)}`
+      );
     });
-    await this.replyHtmlChunks(ctx, `<b>Лог (последние ${rows.length})</b>\n` + lines.join('\n'));
+    const body =
+      `<b>📋 Журнал</b> · записей: <b>${rows.length}</b>\n` +
+      `<i>Сначала новее</i>\n\n` +
+      blocks.join('\n\n────────────\n\n');
+    await this.replyHtmlChunks(ctx, body);
   }
 
   private async handleSignalEvents(ctx: Context, signalId: string): Promise<void> {
@@ -856,13 +897,50 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     const lines = ev.map((e) => {
-      const payload = e.payload ? this.tgEsc(e.payload.slice(0, 500)) : '—';
-      return `${this.formatRuDate(e.createdAt)} · <b>${this.tgEsc(e.type)}</b>\n${payload}`;
+      const payload = e.payload ? this.tgEsc(e.payload.slice(0, 480)) : '—';
+      return (
+        `<b>${this.tgEsc(e.type)}</b>\n` +
+        `<i>${this.tgEsc(this.formatRuDate(e.createdAt))}</i>\n` +
+        `${payload}`
+      );
     });
     await this.replyHtmlChunks(
       ctx,
-      `<b>События сделки</b>\n<code>${this.tgEsc(sid)}</code>\n\n` + lines.join('\n\n'),
+      `<b>📌 События сделки</b>\n<code>${this.tgEsc(sid)}</code>\n\n` +
+        lines.join('\n\n────────────\n\n'),
     );
+  }
+
+  private formatTradesListHtml(items: Signal[]): string {
+    const n = items.length;
+    const head =
+      `<b>📑 Сделки</b> · <b>${n}</b> шт.\n` +
+      `<i>Последние ${n} по времени · в списке сначала <b>старые</b>, ниже — новее</i>\n\n`;
+    const parts: string[] = [head];
+    items.forEach((s, i) => {
+      const dir = this.tgEsc((s.direction ?? '').toUpperCase());
+      const src = this.tgEsc(s.source ?? '—');
+      const st = this.tgEsc(s.status);
+      parts.push(
+        `<b>${i + 1}.</b> <code>${this.tgEsc(s.pair)}</code> · <b>${dir}</b>`,
+        `🆔 <code>${this.tgEsc(s.id)}</code>`,
+        `📅 ${this.tgEsc(this.formatRuDate(s.createdAt))} · <code>${st}</code>`,
+        `📁 ${src}`,
+        '',
+      );
+    });
+    return parts.join('\n');
+  }
+
+  private buildTradesNumberKeyboard(items: Array<{ id: string }>) {
+    const buttons = items.map((s, i) =>
+      Markup.button.callback(String(i + 1), `td:${s.id}`),
+    );
+    const grid: (typeof buttons)[] = [];
+    for (let i = 0; i < buttons.length; i += 5) {
+      grid.push(buttons.slice(i, i + 5));
+    }
+    return Markup.inlineKeyboard(grid);
   }
 
   private async handleMenuTrades(ctx: Context): Promise<void> {
@@ -874,17 +952,19 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       await ctx.reply('Сделок пока нет.');
       return;
     }
-    const rows = items.map((s) => {
-      const label = `${s.pair} · ${this.formatRuDate(s.createdAt)}`.slice(0, 62);
-      return [Markup.button.callback(label, `td:${s.id}`)];
-    });
-    const header =
-      `<b>Последние ${items.length} сделок</b>\n` +
-      `Нажмите на строку для подробностей.`;
-    await ctx.reply(header, {
-      parse_mode: 'HTML',
-      ...Markup.inlineKeyboard(rows),
-    });
+    const ordered = [...items].reverse();
+    const listHtml = this.formatTradesListHtml(ordered);
+    const chunks = this.splitTelegramHtml(listHtml);
+    for (const part of chunks) {
+      await ctx.reply(part, { parse_mode: 'HTML' });
+    }
+    await ctx.reply(
+      '<b>Открыть карточку</b>\n<i>Номер совпадает с пунктом в списке выше (1 — самый верхний)</i>',
+      {
+        parse_mode: 'HTML',
+        ...this.buildTradesNumberKeyboard(ordered),
+      },
+    );
   }
 
   private formatTradeDetailHtml(signal: Signal & { orders: Order[] }): string {
@@ -908,20 +988,24 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           `• ${o.orderKind} ${o.side} ${o.status ?? '—'}${o.bybitOrderId != null ? ` · ${o.bybitOrderId}` : ''}`,
       )
       .join('\n');
+    const dir = this.tgEsc((signal.direction ?? '').toUpperCase());
     return (
-      `<b>Сделка</b>\n` +
-      `Пара: <code>${this.tgEsc(signal.pair)}</code>\n` +
-      `Направление: <code>${this.tgEsc(signal.direction)}</code>\n` +
-      `Статус: <code>${this.tgEsc(signal.status)}</code>\n` +
-      `Входы: <code>${this.tgEsc(entries)}</code>\n` +
-      `SL: <code>${signal.stopLoss}</code>\n` +
-      `TP: <code>${this.tgEsc(tps)}</code>\n` +
-      `Плечо: <code>${signal.leverage}x</code>\n` +
-      `Размер: <code>${signal.orderUsd > 0 ? `$${signal.orderUsd}` : `${signal.capitalPercent}%`}</code>\n` +
-      `Источник (группа): ${this.tgEsc(signal.source ?? '—')}\n` +
-      `Создана: ${this.tgEsc(this.formatRuDate(signal.createdAt))}\n` +
-      `signalId: <code>${this.tgEsc(signal.id)}</code>\n` +
-      (signal.realizedPnl != null ? `PnL: <code>${signal.realizedPnl.toFixed(2)}</code>\n` : '') +
+      `<b>📌 Сделка</b>\n` +
+      `<code>${this.tgEsc(signal.id)}</code>\n\n` +
+      `<b>Пара</b> · <code>${this.tgEsc(signal.pair)}</code>\n` +
+      `<b>Сторона</b> · <b>${dir}</b>\n` +
+      `<b>Статус</b> · <code>${this.tgEsc(signal.status)}</code>\n\n` +
+      `<b>Параметры</b>\n` +
+      `├ Входы: <code>${this.tgEsc(entries)}</code>\n` +
+      `├ SL: <code>${signal.stopLoss}</code>\n` +
+      `├ TP: <code>${this.tgEsc(tps)}</code>\n` +
+      `├ Плечо: <code>${signal.leverage}x</code>\n` +
+      `└ Размер: <code>${signal.orderUsd > 0 ? `$${signal.orderUsd}` : `${signal.capitalPercent}%`}</code>\n\n` +
+      `<b>Источник</b>\n${this.tgEsc(signal.source ?? '—')}\n\n` +
+      `<b>Создана</b>\n<i>${this.tgEsc(this.formatRuDate(signal.createdAt))}</i>\n` +
+      (signal.realizedPnl != null
+        ? `\n<b>PnL</b> · <code>${signal.realizedPnl.toFixed(2)}</code>\n`
+        : '') +
       `\n<b>Ордера</b>\n${ordersLines || '—'}`
     );
   }
