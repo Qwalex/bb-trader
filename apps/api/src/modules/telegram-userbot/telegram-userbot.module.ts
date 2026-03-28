@@ -7,9 +7,17 @@ import { TelegramModule } from '../telegram/telegram.module';
 import { TranscriptModule } from '../transcript/transcript.module';
 import { TelegramUserbotController } from './telegram-userbot.controller';
 import { TelegramUserbotService } from './telegram-userbot.service';
+import { UserbotSignalHashModule } from './userbot-signal-hash.module';
 
 @Module({
-  imports: [SettingsModule, TranscriptModule, BybitModule, AppLogModule, TelegramModule],
+  imports: [
+    SettingsModule,
+    TranscriptModule,
+    BybitModule,
+    AppLogModule,
+    TelegramModule,
+    UserbotSignalHashModule,
+  ],
   controllers: [TelegramUserbotController],
   providers: [TelegramUserbotService],
   exports: [TelegramUserbotService],

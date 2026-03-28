@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { normalizeTradingPair, type SignalDto } from '@repo/shared';
@@ -15,6 +13,8 @@ import { BybitService } from '../bybit/bybit.service';
 import { SettingsService } from '../settings/settings.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { TranscriptService } from '../transcript/transcript.service';
+import { UserbotSignalHashService } from './userbot-signal-hash.service';
+import { parseSignalPriceArrayJson } from './userbot-signal-hash.util';
 
 type MessageKind = 'signal' | 'close' | 'reentry' | 'result' | 'other';
 type UserbotFilterKind = 'signal' | 'close' | 'result' | 'reentry';
@@ -129,6 +129,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     private readonly bybit: BybitService,
     private readonly appLog: AppLogService,
     private readonly telegramBot: TelegramService,
+    private readonly userbotSignalHash: UserbotSignalHashService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -1370,12 +1371,12 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
-      const signalHash = this.computeSignalHash(signal);
+      const signalHash = this.userbotSignalHash.computeHash(signal);
       const canReuseExistingHash =
         ingest.signalHash === signalHash && ingest.status !== 'placed';
       const isNewSignal = canReuseExistingHash
         ? true
-        : await this.tryCreateSignalHash(signalHash);
+        : await this.userbotSignalHash.tryCreate(signalHash);
       if (!isNewSignal) {
         this.appendIngestStageLog('warn', 'Userbot: duplicate signal hash', ingest, {
           signalHash,
@@ -1953,9 +1954,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     return {
       pair: prev.pair,
       direction,
-      entries: this.parseEntriesJson(prev.entries),
+      entries: parseSignalPriceArrayJson(prev.entries),
       stopLoss: prev.stopLoss,
-      takeProfits: this.parseEntriesJson(prev.takeProfits),
+      takeProfits: parseSignalPriceArrayJson(prev.takeProfits),
       leverage: prev.leverage,
       orderUsd: prev.orderUsd,
       capitalPercent: prev.capitalPercent,
@@ -2041,7 +2042,6 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         };
       }
       this.setCloseCooldown(closeSignal.pair, closeSignal.direction);
-      await this.releaseSignalHash(this.computeSignalHash(closeSignal));
       await this.prisma.signalEvent.create({
         data: {
           signalId: signal.id,
@@ -2197,7 +2197,6 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         };
       }
       this.setCloseCooldown(closeSignal.pair, closeSignal.direction);
-      await this.releaseSignalHash(this.computeSignalHash(closeSignal));
       await this.prisma.signalEvent.create({
         data: {
           signalId: signal.id,
@@ -2479,20 +2478,6 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     return meta.text;
   }
 
-  private parseEntriesJson(raw: string): number[] {
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      if (!Array.isArray(parsed)) {
-        return [];
-      }
-      return parsed
-        .map((x) => Number(x))
-        .filter((x) => Number.isFinite(x) && x > 0);
-    } catch {
-      return [];
-    }
-  }
-
   private isEntryCloseEnough(
     fromQuoted: number | undefined,
     fromDb: number | undefined,
@@ -2650,22 +2635,6 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       await new Promise((resolve) => setTimeout(resolve, pollMs));
     }
     return { waited: true, timedOut: true, waitedMs: Date.now() - startedAt };
-  }
-
-  private async releaseSignalHash(hash: string): Promise<void> {
-    try {
-      await this.prisma.tgUserbotSignalHash.deleteMany({
-        where: { hash },
-      });
-      void this.appLog.append('debug', 'telegram', 'Userbot: released signal hash after close', {
-        signalHash: hash,
-      });
-    } catch (e) {
-      void this.appLog.append('warn', 'telegram', 'Userbot: failed to release signal hash after close', {
-        signalHash: hash,
-        error: formatError(e),
-      });
-    }
   }
 
   private async notifySignalFailureToBot(params: {
@@ -2842,32 +2811,6 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       };
     }
     return Date.now() - createdAt.getTime() <= maxAgeMs;
-  }
-
-  private async tryCreateSignalHash(hash: string): Promise<boolean> {
-    try {
-      await this.prisma.tgUserbotSignalHash.create({ data: { hash } });
-      return true;
-    } catch (e) {
-      if (this.isUniqueConstraintError(e)) {
-        return false;
-      }
-      throw e;
-    }
-  }
-
-  private computeSignalHash(signal: SignalDto): string {
-    const normalized = {
-      pair: signal.pair.trim().toUpperCase(),
-      direction: signal.direction,
-      leverage: Number(signal.leverage),
-      entries: signal.entries.map((v) => Number(v).toFixed(8)),
-      stopLoss: Number(signal.stopLoss).toFixed(8),
-      takeProfits: signal.takeProfits.map((v) => Number(v).toFixed(8)),
-    };
-    return createHash('sha256')
-      .update(JSON.stringify(normalized))
-      .digest('hex');
   }
 
   private async tryCreateIngestRow(data: {

@@ -12,6 +12,7 @@ import { normalizeTradingPair, type SignalDto } from '@repo/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { BybitService } from '../bybit/bybit.service';
 import { SettingsService } from '../settings/settings.service';
+import { UserbotSignalHashService } from '../telegram-userbot/userbot-signal-hash.service';
 
 export interface TradesFilter {
   signalId?: string;
@@ -32,6 +33,7 @@ export class OrdersService {
     private readonly settings: SettingsService,
     @Inject(forwardRef(() => BybitService))
     private readonly bybit: BybitService,
+    private readonly userbotSignalHash: UserbotSignalHashService,
   ) {}
 
   private static readonly ACTIVE_SIGNAL_STATUSES = new Set([
@@ -89,6 +91,16 @@ export class OrdersService {
     });
     if (res.count === 0) {
       throw new NotFoundException('Сделка не найдена');
+    }
+    const row = await this.prisma.signal.findUnique({
+      where: { id },
+      select: { status: true },
+    });
+    if (
+      row?.status &&
+      OrdersService.CLOSED_SIGNAL_STATUSES.has(row.status)
+    ) {
+      void this.userbotSignalHash.releaseForSignalId(id);
     }
     return res;
   }
@@ -296,6 +308,8 @@ export class OrdersService {
         closedAt: signal.closedAt ?? new Date(),
       },
     });
+
+    void this.userbotSignalHash.releaseForSignalId(signalId);
 
     return {
       ok: true,

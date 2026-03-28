@@ -457,28 +457,31 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (ids.length === 0) {
       return { ok: false, deliveredTo: 0, error: 'TELEGRAM_WHITELIST пуст' };
     }
-    const pair = (params.pair ?? '').trim().toUpperCase();
+    const escHtml = (s: string) =>
+      s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const pair = escHtml((params.pair ?? '').trim().toUpperCase());
     const sourceLine =
       params.groupTitle && params.groupTitle.trim().length > 0
-        ? `Группа / канал: ${params.groupTitle.trim()}\n`
-        : `Источник (chatId): ${params.chatId}\n`;
+        ? `Группа / канал: ${escHtml(params.groupTitle.trim())}\n`
+        : `Источник (chatId): ${escHtml(String(params.chatId))}\n`;
     const resultBody = (params.resultMessageText ?? '').trim() || '—';
     const quoteBody = (params.quotedSnippet ?? '').trim();
     const quoteBlock =
-      quoteBody.length > 0 ? `\nЦитата из группы\n\`\`\`\n${quoteBody}\n\`\`\`\n` : '\n';
+      quoteBody.length > 0
+        ? `\n\nЦитата из группы:\n<pre>${escHtml(quoteBody)}</pre>\n`
+        : '\n';
     const msg =
-      `Возможно ваш ордер для монеты ${pair} не актуален\n` +
+      `Возможно ваш ордер для монеты <b>${pair}</b> не актуален\n` +
       sourceLine +
-      `Получен результат\n` +
-      `\`\`\`\n${resultBody}\n\`\`\`` +
+      `\nПолучен результат:\n<pre>${escHtml(resultBody)}</pre>` +
       quoteBlock +
-      `А вход так и не был осуществлен по сделке (${params.signalId})\n\n` +
-      `ingestId: ${params.ingestId}`;
+      `\nА вход так и не был осуществлен по сделке (<code>${escHtml(params.signalId)}</code>)\n\n` +
+      `ingestId: <code>${escHtml(params.ingestId)}</code>`;
 
     let deliveredTo = 0;
     for (const uid of ids) {
       try {
-        await this.bot.telegram.sendMessage(uid, msg);
+        await this.bot.telegram.sendMessage(uid, msg, { parse_mode: 'HTML' });
         deliveredTo += 1;
       } catch (e) {
         this.logger.warn(`notifyUserbotResultWithoutEntry -> ${uid}: ${formatError(e)}`);
