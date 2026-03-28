@@ -67,6 +67,19 @@ type IngestProcessJob = {
   options?: ProcessIngestOptions;
 };
 
+type ActiveSignalLookup = {
+  id: string;
+  pair: string;
+  direction: string;
+  entries: string;
+  stopLoss: number;
+  takeProfits: string;
+  leverage: number;
+  orderUsd: number;
+  capitalPercent: number;
+  source: string | null;
+};
+
 const USERBOT_POLL_INTERVAL_MS = 2000;
 const USERBOT_POLL_FETCH_LIMIT = 20;
 const USERBOT_PROCESSING_CONCURRENCY = 4;
@@ -1213,6 +1226,33 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
+      if (kind === 'result') {
+        const resultNotify = await this.tryNotifyResultWithoutEntryFromReply({
+          ingestId: ingest.id,
+          chatId: ingest.chatId,
+          messageId: ingest.messageId,
+          text,
+          replyToMessageId,
+          quotedText,
+        });
+        this.appendIngestStageLog(
+          resultNotify.ok ? 'info' : 'warn',
+          'Userbot: result processing finished',
+          ingest,
+          resultNotify.ok
+            ? { mode: resultNotify.mode, signalId: resultNotify.signalId ?? null, replyToMessageId }
+            : { error: resultNotify.error, replyToMessageId },
+        );
+        await this.updateIngest(ingest.id, {
+          classification: 'result',
+          status: resultNotify.ok ? resultNotify.mode : 'ignored',
+          error: resultNotify.ok ? null : resultNotify.error,
+          aiRequest,
+          aiResponse,
+        });
+        return;
+      }
+
       if (kind !== 'signal') {
         this.appendIngestStageLog('info', 'Userbot: ignored after classification', ingest, {
           classification: kind,
@@ -1643,54 +1683,16 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     if (!replyToMessageId) {
       return { ok: false, error: 'Сообщение о перезаходе без цитаты исходного сигнала' };
     }
-    const rootSource = await this.resolveRootSignalSourceMessageId(
-      params.chatId,
+    const lookup = await this.findActiveSignalFromReply({
+      chatId: params.chatId,
       replyToMessageId,
-    );
-
-    const prev = await this.prisma.signal.findFirst({
-      where: {
-        deletedAt: null,
-        sourceChatId: params.chatId,
-        sourceMessageId: rootSource.messageId,
-        status: { in: ['ORDERS_PLACED', 'OPEN', 'PARSED'] },
-      },
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        pair: true,
-        direction: true,
-        entries: true,
-        stopLoss: true,
-        takeProfits: true,
-        leverage: true,
-        orderUsd: true,
-        capitalPercent: true,
-        source: true,
-      },
+      flowLabel: 'Reentry',
     });
-    if (!prev) {
-      const lookup = await this.collectSignalLookupDiagnostics(
-        params.chatId,
-        rootSource.messageId,
-        rootSource.chain,
-      );
-      void this.appLog.append('warn', 'telegram', 'Reentry: active signal not found for resolved root', {
-        sourceChatId: params.chatId,
-        quotedMessageId: replyToMessageId,
-        rootSourceMessageId: rootSource.messageId,
-        rootResolution: {
-          chain: rootSource.chain,
-          matchedSignalMessageIds: rootSource.matchedSignalMessageIds,
-          stopReason: rootSource.stopReason,
-        },
-        lookup,
-      });
-      return {
-        ok: false,
-        error: `Для цитаты ${params.chatId}:${replyToMessageId} активный сигнал не найден (root: ${rootSource.messageId})`,
-      };
+    if (!lookup.ok) {
+      return { ok: false, error: lookup.error };
     }
+    const rootSource = lookup.rootSource;
+    const prev = lookup.signal;
     const base = this.signalFromDb(prev);
     const closeCooldownMs = this.getCloseCooldownRemainingMs(base.pair, base.direction);
     if (closeCooldownMs > 0) {
@@ -2008,54 +2010,16 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     if (!replyToMessageId) {
       return { ok: false, error: 'Сообщение о закрытии без цитаты исходного сигнала' };
     }
-    const rootSource = await this.resolveRootSignalSourceMessageId(
-      params.chatId,
+    const lookup = await this.findActiveSignalFromReply({
+      chatId: params.chatId,
       replyToMessageId,
-    );
-
-    const signal = await this.prisma.signal.findFirst({
-      where: {
-        deletedAt: null,
-        sourceChatId: params.chatId,
-        sourceMessageId: rootSource.messageId,
-        status: { in: ['ORDERS_PLACED', 'OPEN', 'PARSED'] },
-      },
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        pair: true,
-        direction: true,
-        entries: true,
-        stopLoss: true,
-        takeProfits: true,
-        leverage: true,
-        orderUsd: true,
-        capitalPercent: true,
-        source: true,
-      },
+      flowLabel: 'Close',
     });
-    if (!signal) {
-      const lookup = await this.collectSignalLookupDiagnostics(
-        params.chatId,
-        rootSource.messageId,
-        rootSource.chain,
-      );
-      void this.appLog.append('warn', 'telegram', 'Close: active signal not found for resolved root', {
-        sourceChatId: params.chatId,
-        quotedMessageId: replyToMessageId,
-        rootSourceMessageId: rootSource.messageId,
-        rootResolution: {
-          chain: rootSource.chain,
-          matchedSignalMessageIds: rootSource.matchedSignalMessageIds,
-          stopReason: rootSource.stopReason,
-        },
-        lookup,
-      });
-      return {
-        ok: false,
-        error: `Для цитаты ${params.chatId}:${replyToMessageId} активный сигнал не найден (root: ${rootSource.messageId})`,
-      };
+    if (!lookup.ok) {
+      return { ok: false, error: lookup.error };
     }
+    const rootSource = lookup.rootSource;
+    const signal = lookup.signal;
     void this.appLog.append('debug', 'telegram', 'Close: resolved root source message', {
       sourceChatId: params.chatId,
       quotedMessageId: replyToMessageId,
@@ -2107,6 +2071,233 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     } finally {
       this.endPairDirectionTransition(closeSignal.pair, closeSignal.direction);
     }
+  }
+
+  private async tryNotifyResultWithoutEntryFromReply(params: {
+    ingestId: string;
+    chatId: string;
+    messageId: string;
+    text: string;
+    replyToMessageId?: string;
+    quotedText?: string;
+  }): Promise<
+    | {
+        ok: true;
+        mode:
+          | 'result_without_entry_notified'
+          | 'result_without_entry_cancelled'
+          | 'result_ignored_has_entry'
+          | 'result_ignored_duplicate'
+          | 'result_notify_disabled';
+        signalId?: string;
+      }
+    | { ok: false; error: string }
+  > {
+    const replyToMessageId = params.replyToMessageId?.trim();
+    if (!replyToMessageId) {
+      return { ok: false, error: 'Сообщение о результате без цитаты исходного сигнала' };
+    }
+    const lookup = await this.findActiveSignalFromReply({
+      chatId: params.chatId,
+      replyToMessageId,
+      flowLabel: 'Result',
+    });
+    if (!lookup.ok) {
+      return { ok: false, error: lookup.error };
+    }
+    const signal = await this.prisma.signal.findUnique({
+      where: { id: lookup.signal.id },
+      select: {
+        id: true,
+        pair: true,
+        orders: {
+          select: {
+            orderKind: true,
+            status: true,
+          },
+        },
+      },
+    });
+    if (!signal) {
+      return { ok: false, error: `Сигнал ${lookup.signal.id} не найден` };
+    }
+    if (this.hasFilledEntryOrders(signal.orders)) {
+      return { ok: true, mode: 'result_ignored_has_entry', signalId: signal.id };
+    }
+    const alreadyNotified = await this.prisma.signalEvent.findFirst({
+      where: {
+        signalId: signal.id,
+        type: 'USERBOT_RESULT_WITHOUT_ENTRY',
+      },
+      select: { id: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (alreadyNotified) {
+      return { ok: true, mode: 'result_ignored_duplicate', signalId: signal.id };
+    }
+    const notifyEnabled = await this.getBoolSetting(
+      'TELEGRAM_USERBOT_NOTIFY_RESULT_WITHOUT_ENTRY',
+      true,
+    );
+    if (!notifyEnabled) {
+      return { ok: true, mode: 'result_notify_disabled', signalId: signal.id };
+    }
+
+    const chatMeta = await this.prisma.tgUserbotChat.findUnique({
+      where: { chatId: params.chatId },
+      select: { title: true },
+    });
+    const notify = await this.telegramBot.notifyUserbotResultWithoutEntry({
+      ingestId: params.ingestId,
+      chatId: params.chatId,
+      groupTitle: chatMeta?.title?.trim() || undefined,
+      pair: signal.pair,
+      signalId: signal.id,
+      resultMessageText: params.text,
+      quotedSnippet: params.quotedText,
+    });
+    if (!notify.ok) {
+      return {
+        ok: false,
+        error: notify.error ?? 'Не удалось отправить уведомление result без входа',
+      };
+    }
+    await this.prisma.signalEvent.create({
+      data: {
+        signalId: signal.id,
+        type: 'USERBOT_RESULT_WITHOUT_ENTRY',
+        payload: JSON.stringify({
+          sourceChatId: params.chatId,
+          sourceMessageId: lookup.rootSource.messageId,
+          resultMessageId: params.messageId,
+          replyToMessageId,
+          ingestId: params.ingestId,
+        }),
+      },
+    });
+    const autoCancel = await this.getBoolSetting(
+      'TELEGRAM_USERBOT_CANCEL_STALE_ORDERS_ON_RESULT_WITHOUT_ENTRY',
+      false,
+    );
+    if (!autoCancel) {
+      return { ok: true, mode: 'result_without_entry_notified', signalId: signal.id };
+    }
+
+    const closeSignal = this.signalFromDb(lookup.signal);
+    this.beginPairDirectionTransition(closeSignal.pair, closeSignal.direction, 'result stale cancel');
+    try {
+      const closed = await this.bybit.closeSignalManually(signal.id);
+      if (!closed.ok) {
+        return {
+          ok: false,
+          error:
+            closed.error ??
+            closed.details ??
+            'Не удалось отменить ордера для result без входа',
+        };
+      }
+      this.setCloseCooldown(closeSignal.pair, closeSignal.direction);
+      await this.releaseSignalHash(this.computeSignalHash(closeSignal));
+      await this.prisma.signalEvent.create({
+        data: {
+          signalId: signal.id,
+          type: 'USERBOT_RESULT_WITHOUT_ENTRY_CANCELLED',
+          payload: JSON.stringify({
+            sourceChatId: params.chatId,
+            sourceMessageId: lookup.rootSource.messageId,
+            resultMessageId: params.messageId,
+            ingestId: params.ingestId,
+            reason: 'Автоматическая отмена ордеров: result получен без фактического входа',
+          }),
+        },
+      });
+      return { ok: true, mode: 'result_without_entry_cancelled', signalId: signal.id };
+    } finally {
+      this.endPairDirectionTransition(closeSignal.pair, closeSignal.direction);
+    }
+  }
+
+  private hasFilledEntryOrders(
+    orders: Array<{ orderKind: string; status: string | null }>,
+  ): boolean {
+    return orders.some((order) => {
+      if (order.orderKind !== 'ENTRY' && order.orderKind !== 'DCA') {
+        return false;
+      }
+      return (order.status ?? '').trim().toLowerCase() === 'filled';
+    });
+  }
+
+  private async findActiveSignalFromReply(params: {
+    chatId: string;
+    replyToMessageId: string;
+    flowLabel: 'Close' | 'Reentry' | 'Result';
+  }): Promise<
+    | {
+        ok: true;
+        signal: ActiveSignalLookup;
+        rootSource: {
+          messageId: string;
+          chain: string[];
+          matchedSignalMessageIds: string[];
+          stopReason: string;
+        };
+      }
+    | { ok: false; error: string }
+  > {
+    const rootSource = await this.resolveRootSignalSourceMessageId(
+      params.chatId,
+      params.replyToMessageId,
+    );
+    const signal = await this.prisma.signal.findFirst({
+      where: {
+        deletedAt: null,
+        sourceChatId: params.chatId,
+        sourceMessageId: rootSource.messageId,
+        status: { in: ['ORDERS_PLACED', 'OPEN', 'PARSED'] },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        pair: true,
+        direction: true,
+        entries: true,
+        stopLoss: true,
+        takeProfits: true,
+        leverage: true,
+        orderUsd: true,
+        capitalPercent: true,
+        source: true,
+      },
+    });
+    if (!signal) {
+      const lookup = await this.collectSignalLookupDiagnostics(
+        params.chatId,
+        rootSource.messageId,
+        rootSource.chain,
+      );
+      void this.appLog.append(
+        'warn',
+        'telegram',
+        `${params.flowLabel}: active signal not found for resolved root`,
+        {
+          sourceChatId: params.chatId,
+          quotedMessageId: params.replyToMessageId,
+          rootSourceMessageId: rootSource.messageId,
+          rootResolution: {
+            chain: rootSource.chain,
+            matchedSignalMessageIds: rootSource.matchedSignalMessageIds,
+            stopReason: rootSource.stopReason,
+          },
+          lookup,
+        },
+      );
+      return {
+        ok: false,
+        error: `Для цитаты ${params.chatId}:${params.replyToMessageId} активный сигнал не найден (root: ${rootSource.messageId})`,
+      };
+    }
+    return { ok: true, signal, rootSource };
   }
 
   private async resolveRootSignalSourceMessageId(

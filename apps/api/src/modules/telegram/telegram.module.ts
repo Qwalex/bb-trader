@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 
 import { AppLogModule } from '../app-log/app-log.module';
 import { BybitModule } from '../bybit/bybit.module';
@@ -7,7 +7,7 @@ import { TranscriptModule } from '../transcript/transcript.module';
 import { TelegramService } from './telegram.service';
 
 @Module({
-  imports: [SettingsModule, TranscriptModule, BybitModule, AppLogModule],
+  imports: [SettingsModule, TranscriptModule, forwardRef(() => BybitModule), AppLogModule],
   providers: [TelegramService],
   exports: [TelegramService],
 })
