@@ -75,6 +75,16 @@ const KEYS = [
       'Userbot: присылать ошибки обработки сигнала в бота (true/false)',
   },
   {
+    key: 'TELEGRAM_USERBOT_CANCEL_STALE_ORDERS_ON_RESULT_WITHOUT_ENTRY',
+    label:
+      'Userbot: отменять возможно не актуальные ордера при result без входа (true/false)',
+  },
+  {
+    key: 'TELEGRAM_NOTIFY_API_TRADE_CANCELLED',
+    label:
+      'Telegram: уведомлять, когда сделка/ордера отменены (true/false)',
+  },
+  {
     key: 'SIGNAL_SOURCE',
     label:
       'Источник сигналов (канал / приложение, для статистики: Binance Killers, Crypto Signals, …)',
@@ -90,6 +100,8 @@ const BOOLEAN_KEYS = new Set<string>([
   'TELEGRAM_USERBOT_USE_AI_CLASSIFIER',
   'TELEGRAM_USERBOT_REQUIRE_CONFIRMATION',
   'TELEGRAM_USERBOT_NOTIFY_FAILURES',
+  'TELEGRAM_USERBOT_CANCEL_STALE_ORDERS_ON_RESULT_WITHOUT_ENTRY',
+  'TELEGRAM_NOTIFY_API_TRADE_CANCELLED',
 ]);
 const MODEL_KEYS = new Set<string>(
   KEYS.map(({ key }) => key).filter((key) => key.startsWith('OPENROUTER_MODEL_')),
@@ -148,6 +160,8 @@ const SETTINGS_SECTIONS: { id: string; title: string; keys: string[] }[] = [
       'TELEGRAM_USERBOT_REQUIRE_CONFIRMATION',
       'TELEGRAM_USERBOT_MIN_BALANCE_USD',
       'TELEGRAM_USERBOT_NOTIFY_FAILURES',
+      'TELEGRAM_USERBOT_CANCEL_STALE_ORDERS_ON_RESULT_WITHOUT_ENTRY',
+      'TELEGRAM_NOTIFY_API_TRADE_CANCELLED',
       'SIGNAL_SOURCE',
       'TELEGRAM_WHITELIST',
     ],

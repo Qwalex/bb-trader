@@ -7,6 +7,7 @@ import { formatError } from '../../common/format-error';
 import { AppLogService } from '../app-log/app-log.service';
 import { OrdersService } from '../orders/orders.service';
 import { SettingsService } from '../settings/settings.service';
+import { TelegramService } from '../telegram/telegram.service';
 
 export interface PlaceOrdersResult {
   ok: boolean;
@@ -132,6 +133,8 @@ export class BybitService {
     private readonly settings: SettingsService,
     @Inject(forwardRef(() => OrdersService))
     private readonly orders: OrdersService,
+    @Inject(forwardRef(() => TelegramService))
+    private readonly telegram: TelegramService,
     private readonly appLog: AppLogService,
   ) {}
 
@@ -1366,6 +1369,7 @@ export class BybitService {
       cancelledOrders: flatResult.cancelledOrders,
       closedPositions: flatResult.closedPositions,
     });
+    await this.notifyApiTradeCancelled(signal, 'Удаление сделки');
 
     return {
       ok: true,
@@ -1468,6 +1472,7 @@ export class BybitService {
       cancelledOrders,
       closedPositions,
     });
+    await this.notifyApiTradeCancelled(signal, 'Отмена ордеров/позиции');
 
     return {
       ok: true,
@@ -1476,6 +1481,64 @@ export class BybitService {
       cancelledOrders,
       closedPositions,
     };
+  }
+
+  private parseNumArray(raw: string | null | undefined): number[] {
+    if (!raw || typeof raw !== 'string') {
+      return [];
+    }
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
+      return parsed
+        .map((item) => Number(item))
+        .filter((item) => Number.isFinite(item));
+    } catch {
+      return [];
+    }
+  }
+
+  private async notifyApiTradeCancelled(
+    signal: {
+      id: string;
+      pair: string;
+      direction: string;
+      entries: string;
+      stopLoss: number;
+      takeProfits: string;
+      leverage: number;
+      orderUsd: number;
+      capitalPercent: number;
+      source: string | null;
+    },
+    reason: string,
+  ): Promise<void> {
+    try {
+      const res = await this.telegram.notifyApiTradeCancelled({
+        signalId: signal.id,
+        pair: signal.pair,
+        direction: signal.direction,
+        entries: this.parseNumArray(signal.entries),
+        stopLoss: signal.stopLoss,
+        takeProfits: this.parseNumArray(signal.takeProfits),
+        leverage: signal.leverage,
+        orderUsd: signal.orderUsd,
+        capitalPercent: signal.capitalPercent,
+        source: signal.source,
+        reason,
+      });
+      if (!res.ok) {
+        this.logger.warn(
+          `notifyApiTradeCancelled failed signalId=${signal.id}: ${res.error ?? 'unknown'}`,
+        );
+      }
+    } catch (e) {
+      this.logger.warn(
+        `notifyApiTradeCancelled exception signalId=${signal.id}: ${formatError(e)}`,
+      );
+    }
   }
 
   private async waitForSymbolToBeFlat(
