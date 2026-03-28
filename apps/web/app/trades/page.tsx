@@ -59,7 +59,6 @@ export default async function TradesPage({
 }) {
   const sp = await searchParams;
   const q = new URLSearchParams();
-  const signalId = typeof sp.signalId === 'string' ? sp.signalId : '';
   const source = typeof sp.source === 'string' ? sp.source : '';
   const pair = typeof sp.pair === 'string' ? sp.pair : '';
   const status = typeof sp.status === 'string' ? sp.status : '';
@@ -68,7 +67,6 @@ export default async function TradesPage({
       ? sp.includeDeleted === '1' || sp.includeDeleted === 'true'
       : false;
   const page = typeof sp.page === 'string' ? sp.page : '1';
-  if (signalId) q.set('signalId', signalId);
   if (source) q.set('source', source);
   if (pair) q.set('pair', pair);
   if (status) q.set('status', status);
