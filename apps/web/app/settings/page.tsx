@@ -75,6 +75,11 @@ const KEYS = [
       'Userbot: присылать ошибки обработки сигнала в бота (true/false)',
   },
   {
+    key: 'TELEGRAM_USERBOT_NOTIFY_RESULT_WITHOUT_ENTRY',
+    label:
+      'Userbot: уведомлять о возможно неактуальном ордере (в группе result по сигналу, а входа в позицию ещё не было) (true/false)',
+  },
+  {
     key: 'TELEGRAM_USERBOT_CANCEL_STALE_ORDERS_ON_RESULT_WITHOUT_ENTRY',
     label:
       'Userbot: отменять возможно не актуальные ордера при result без входа (true/false)',
@@ -82,7 +87,7 @@ const KEYS = [
   {
     key: 'TELEGRAM_NOTIFY_API_TRADE_CANCELLED',
     label:
-      'Telegram: уведомлять, когда сделка/ордера отменены (true/false)',
+      'Telegram: уведомлять об отмене сделки/ордеров (по умолчанию да; false / 0 / off — отключить)',
   },
   {
     key: 'SIGNAL_SOURCE',
@@ -100,6 +105,7 @@ const BOOLEAN_KEYS = new Set<string>([
   'TELEGRAM_USERBOT_USE_AI_CLASSIFIER',
   'TELEGRAM_USERBOT_REQUIRE_CONFIRMATION',
   'TELEGRAM_USERBOT_NOTIFY_FAILURES',
+  'TELEGRAM_USERBOT_NOTIFY_RESULT_WITHOUT_ENTRY',
   'TELEGRAM_USERBOT_CANCEL_STALE_ORDERS_ON_RESULT_WITHOUT_ENTRY',
   'TELEGRAM_NOTIFY_API_TRADE_CANCELLED',
 ]);
@@ -160,6 +166,7 @@ const SETTINGS_SECTIONS: { id: string; title: string; keys: string[] }[] = [
       'TELEGRAM_USERBOT_REQUIRE_CONFIRMATION',
       'TELEGRAM_USERBOT_MIN_BALANCE_USD',
       'TELEGRAM_USERBOT_NOTIFY_FAILURES',
+      'TELEGRAM_USERBOT_NOTIFY_RESULT_WITHOUT_ENTRY',
       'TELEGRAM_USERBOT_CANCEL_STALE_ORDERS_ON_RESULT_WITHOUT_ENTRY',
       'TELEGRAM_NOTIFY_API_TRADE_CANCELLED',
       'SIGNAL_SOURCE',

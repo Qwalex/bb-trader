@@ -511,10 +511,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     source?: string | null;
     reason?: string;
   }): Promise<{ ok: boolean; deliveredTo: number; error?: string }> {
-    const enabled =
-      (await this.settings.get('TELEGRAM_NOTIFY_API_TRADE_CANCELLED'))?.toLowerCase() ===
-      'true';
-    if (!enabled) {
+    const raw = (await this.settings.get('TELEGRAM_NOTIFY_API_TRADE_CANCELLED'))
+      ?.trim()
+      .toLowerCase();
+    const explicitlyOff =
+      raw === 'false' || raw === '0' || raw === 'no' || raw === 'off';
+    if (explicitlyOff) {
       return { ok: true, deliveredTo: 0 };
     }
     if (!this.bot) {
@@ -524,43 +526,45 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (ids.length === 0) {
       return { ok: false, deliveredTo: 0, error: 'TELEGRAM_WHITELIST пуст' };
     }
-    const esc = (value: string) =>
-      value.replace(/([_*\[\]()~`>#+\-=|{}.!\\])/g, '\\$1');
-    const pair = esc((params.pair ?? '').trim().toUpperCase());
-    const signalId = esc((params.signalId ?? '').trim());
-    const direction = esc((params.direction ?? '').trim().toUpperCase());
-    const entries = esc(
+    const escHtml = (value: string) =>
+      value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const pair = escHtml((params.pair ?? '').trim().toUpperCase());
+    const signalId = escHtml((params.signalId ?? '').trim());
+    const direction = escHtml((params.direction ?? '').trim().toUpperCase());
+    const entries = escHtml(
       params.entries.length > 0 ? params.entries.map((v) => String(v)).join(', ') : '—',
     );
-    const stopLoss = esc(String(params.stopLoss));
-    const takeProfits = esc(
+    const stopLoss = escHtml(String(params.stopLoss));
+    const takeProfits = escHtml(
       params.takeProfits.length > 0
         ? params.takeProfits.map((v) => String(v)).join(', ')
         : '—',
     );
-    const leverage = esc(`${params.leverage}x`);
+    const leverage = escHtml(`${params.leverage}x`);
     const size =
       params.capitalPercent > 0
-        ? esc(`${params.capitalPercent}% от депозита`)
-        : esc(`$${params.orderUsd} USDT`);
-    const source = params.source ? esc(params.source) : '—';
-    const reason = params.reason ? `\n- *Причина:* ${esc(params.reason)}` : '';
+        ? escHtml(`${params.capitalPercent}% от депозита`)
+        : escHtml(`$${params.orderUsd} USDT`);
+    const source = params.source ? escHtml(params.source) : '—';
+    const reasonLine = params.reason
+      ? `\nПричина: ${escHtml(params.reason)}`
+      : '';
     const msg =
-      `*Сделка отменена*\n` +
-      `- *Пара:* \`${pair}\`\n` +
-      `- *ID сделки:* \`${signalId}\`\n` +
-      `- *Направление:* \`${direction}\`\n` +
-      `- *Входы:* \`${entries}\`\n` +
-      `- *Stop Loss:* \`${stopLoss}\`\n` +
-      `- *Take Profit:* \`${takeProfits}\`\n` +
-      `- *Плечо:* \`${leverage}\`\n` +
-      `- *Размер:* \`${size}\`\n` +
-      `- *Источник:* \`${source}\`${reason}`;
+      `<b>Сделка отменена</b>\n` +
+      `Пара: <code>${pair}</code>\n` +
+      `ID сделки: <code>${signalId}</code>\n` +
+      `Направление: <code>${direction}</code>\n` +
+      `Входы: <code>${entries}</code>\n` +
+      `Stop Loss: <code>${stopLoss}</code>\n` +
+      `Take Profit: <code>${takeProfits}</code>\n` +
+      `Плечо: <code>${leverage}</code>\n` +
+      `Размер: <code>${size}</code>\n` +
+      `Источник: <code>${source}</code>${reasonLine}`;
 
     let deliveredTo = 0;
     for (const uid of ids) {
       try {
-        await this.bot.telegram.sendMessage(uid, msg, { parse_mode: 'MarkdownV2' });
+        await this.bot.telegram.sendMessage(uid, msg, { parse_mode: 'HTML' });
         deliveredTo += 1;
       } catch (e) {
         this.logger.warn(`notifyApiTradeCancelled -> ${uid}: ${formatError(e)}`);

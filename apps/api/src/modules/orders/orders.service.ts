@@ -489,11 +489,12 @@ export class OrdersService {
 
   /**
    * Биржа по API «чиста» по этой стороне, а в БД остался ORDERS_PLACED — помечаем закрытыми (ручное закрытие на бирже).
+   * Возвращает id сделок, переведённых в CLOSED_MIXED (для Telegram и т.п.).
    */
   async reconcileStaleOpenSignalsForPairAndDirection(
     pair: string,
     direction: 'long' | 'short',
-  ): Promise<number> {
+  ): Promise<string[]> {
     const want = normalizeTradingPair(pair);
     const open = await this.prisma.signal.findMany({
       where: { deletedAt: null, status: 'ORDERS_PLACED', direction },
@@ -503,7 +504,7 @@ export class OrdersService {
       .filter((r) => normalizeTradingPair(r.pair) === want)
       .map((r) => r.id);
     if (ids.length === 0) {
-      return 0;
+      return [];
     }
     const res = await this.prisma.signal.updateMany({
       where: { id: { in: ids }, deletedAt: null },
@@ -513,7 +514,18 @@ export class OrdersService {
         realizedPnl: null,
       },
     });
-    return res.count;
+    if (res.count === 0) {
+      return [];
+    }
+    const updated = await this.prisma.signal.findMany({
+      where: {
+        id: { in: ids },
+        deletedAt: null,
+        status: 'CLOSED_MIXED',
+      },
+      select: { id: true },
+    });
+    return updated.map((r) => r.id);
   }
 
   async getDashboardStats(params?: { source?: string }) {

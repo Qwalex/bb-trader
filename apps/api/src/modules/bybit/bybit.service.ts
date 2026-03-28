@@ -1541,6 +1541,26 @@ export class BybitService {
     }
   }
 
+  /** Уведомление при авто‑закрытии ORDERS_PLACED после синхронизации с «чистой» биржей (без ручного closeSignalManually). */
+  private async notifyStaleReconcileTradeCancelled(
+    signalIds: string[],
+    reason: string,
+  ): Promise<void> {
+    for (const signalId of signalIds) {
+      try {
+        const signal = await this.orders.getSignalWithOrders(signalId);
+        if (!signal) {
+          continue;
+        }
+        await this.notifyApiTradeCancelled(signal, reason);
+      } catch (e) {
+        this.logger.warn(
+          `notifyStaleReconcileTradeCancelled signalId=${signalId}: ${formatError(e)}`,
+        );
+      }
+    }
+  }
+
   private async waitForSymbolToBeFlat(
     client: RestClientV5,
     symbol: string,
@@ -3048,10 +3068,10 @@ export class BybitService {
           continue;
         }
 
-        const reconciled =
+        const reconciledIds =
           await this.orders.reconcileStaleOpenSignalsForPairAndDirection(pair, direction);
         this.staleFlatPollCounts.delete(reconcileKey);
-        if (reconciled > 0) {
+        if (reconciledIds.length > 0) {
           void this.appLog.append(
             'info',
             'bybit',
@@ -3059,8 +3079,12 @@ export class BybitService {
             {
               symbol: pair,
               direction,
-              signalsUpdated: reconciled,
+              signalsUpdated: reconciledIds.length,
             },
+          );
+          void this.notifyStaleReconcileTradeCancelled(
+            reconciledIds,
+            'Синхронизация с Bybit: на бирже нет ордеров/позиции, сделка закрыта в учёте',
           );
         } else {
           void this.appLog.append(
@@ -3304,11 +3328,11 @@ export class BybitService {
       }
     }
 
-    const reconciled = await this.orders.reconcileStaleOpenSignalsForPairAndDirection(
+    const reconciledIds = await this.orders.reconcileStaleOpenSignalsForPairAndDirection(
       symbol,
       direction,
     );
-    if (reconciled > 0) {
+    if (reconciledIds.length > 0) {
       this.staleFlatPollCounts.delete(reconcileKey);
       void this.appLog.append(
         'info',
@@ -3319,11 +3343,15 @@ export class BybitService {
           direction,
           reason,
           cleanObservations,
-          signalsUpdated: reconciled,
+          signalsUpdated: reconciledIds.length,
         },
       );
+      void this.notifyStaleReconcileTradeCancelled(
+        reconciledIds,
+        'Синхронизация с Bybit: на бирже нет ордеров/позиции, сделка закрыта в учёте',
+      );
     }
-    return reconciled;
+    return reconciledIds.length;
   }
 
   suspendStaleReconcile(
