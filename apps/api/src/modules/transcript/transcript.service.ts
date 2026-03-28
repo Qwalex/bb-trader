@@ -39,7 +39,7 @@ const TRANSCRIPT_RESPONSE_JSON_SCHEMA = {
         pair: {
           type: ['string', 'null'],
           description:
-            'Trading pair as in the message (any case/separator); null if unknown — normalized server-side',
+            'USDT linear perp symbol BASEUSDT (e.g. BTCUSDT). If the message names only the base (BTC), output BTCUSDT. Null if unknown — separators/case normalized server-side',
         },
         direction: { type: ['string', 'null'], enum: ['long', 'short', null] },
         entries: { type: ['array', 'null'], items: { type: 'number' }, minItems: 1 },
@@ -152,7 +152,7 @@ Required fields for a valid fresh setup:
 - takeProfits
 
 Field rules:
-- pair: symbol as written in the message (e.g. BTCUSDT, ethusdt, ETH/USDT, BTC-USDT); casing and separators do not matter because the system normalizes it later.
+- pair: always the USDT linear perpetual symbol as BASEUSDT (e.g. BTCUSDT, ETHUSDT, 1000PEPEUSDT). If the message names only the base asset without a quote (BTC, ETH, SOL, PEPE), append USDT. Forms like ETH/USDT, BTC-USDT, ethusdt are fine; casing and separators are normalized server-side.
 - direction must be long or short.
 - entries and leverage are optional.
 - entries: first price is main entry; following prices are DCA levels.
