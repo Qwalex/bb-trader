@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { getApiBase } from '../../lib/api';
 
@@ -116,6 +116,18 @@ const LABEL_BY_KEY = Object.fromEntries(KEYS.map(({ key, label }) => [key, label
   string,
   string
 >;
+
+const EXTRA_LABELS: Record<string, string> = {
+  SOURCE_LIST: 'Список источников (source)',
+  SOURCE_EXCLUDE_LIST: 'Исключённые источники (аналитика)',
+  [DIAGNOSTIC_MODELS_KEY]: 'Модели для диагностики',
+  [MODEL_HISTORY_KEY]: 'История моделей OpenRouter (автообновление)',
+};
+
+function labelForKey(key: string): string {
+  return LABEL_BY_KEY[key] ?? EXTRA_LABELS[key] ?? key;
+}
+
 const SETTINGS_SECTIONS: { id: string; title: string; keys: string[] }[] = [
   {
     id: 'openrouter',
@@ -175,6 +187,15 @@ const SETTINGS_SECTIONS: { id: string; title: string; keys: string[] }[] = [
   },
 ];
 
+/** Порядок PUT при сохранении: поля из KEYS, затем списки, в конце — история моделей. */
+const PUT_ORDER: string[] = [
+  ...KEYS.map(({ key }) => key),
+  'SOURCE_LIST',
+  'SOURCE_EXCLUDE_LIST',
+  DIAGNOSTIC_MODELS_KEY,
+  MODEL_HISTORY_KEY,
+];
+
 function parseModelHistory(raw: string): string[] {
   if (!raw.trim()) return [];
   try {
@@ -195,10 +216,137 @@ function mergeModelHistory(current: string[], value: string): string[] {
   return [v, ...current.filter((item) => item !== v)].slice(0, 50);
 }
 
+type Row = { key: string; value: string };
+
+function valueFor(rows: Row[], key: string): string {
+  return rows.find((r) => r.key === key)?.value ?? '';
+}
+
+function upsertRow(list: Row[], key: string, value: string): Row[] {
+  const i = list.findIndex((r) => r.key === key);
+  if (i >= 0) {
+    const next = [...list];
+    next[i] = { key, value };
+    return next;
+  }
+  return [...list, { key, value }];
+}
+
+function normCompare(a: string, b: string): boolean {
+  return a.trim() === b.trim();
+}
+
+/** История моделей после сохранения изменённых полей моделей (как при последовательных PUT). */
+function computeNextModelHistoryString(saved: Row[], draft: Row[]): string {
+  let hist = parseModelHistory(valueFor(saved, MODEL_HISTORY_KEY));
+  for (const { key } of KEYS) {
+    if (!MODEL_KEYS.has(key)) continue;
+    const newV = valueFor(draft, key).trim();
+    const oldV = valueFor(saved, key).trim();
+    if (newV && newV !== oldV) {
+      hist = mergeModelHistory(hist, newV);
+    }
+  }
+  return JSON.stringify(hist);
+}
+
+function isSensitiveKey(key: string): boolean {
+  const u = key.toUpperCase();
+  return (
+    u.includes('SECRET') ||
+    u.includes('TOKEN') ||
+    u.includes('PASSWORD') ||
+    u === 'OPENROUTER_API_KEY' ||
+    u.includes('API_HASH') ||
+    u.includes('2FA')
+  );
+}
+
+function formatPreviewValue(key: string, value: string): string {
+  if (!value) return '(пусто)';
+  if (isSensitiveKey(key)) return '•••• (скрыто)';
+  const t = value.length > 200 ? `${value.slice(0, 200)}…` : value;
+  return t;
+}
+
+type PendingChange = {
+  key: string;
+  label: string;
+  before: string;
+  after: string;
+};
+
+function collectPendingChanges(saved: Row[], draft: Row[]): PendingChange[] {
+  const out: PendingChange[] = [];
+
+  for (const { key } of KEYS) {
+    if (normCompare(valueFor(draft, key), valueFor(saved, key))) continue;
+    out.push({
+      key,
+      label: labelForKey(key),
+      before: formatPreviewValue(key, valueFor(saved, key)),
+      after: formatPreviewValue(key, valueFor(draft, key)),
+    });
+  }
+
+  for (const ek of ['SOURCE_LIST', 'SOURCE_EXCLUDE_LIST', DIAGNOSTIC_MODELS_KEY] as const) {
+    if (normCompare(valueFor(draft, ek), valueFor(saved, ek))) continue;
+    out.push({
+      key: ek,
+      label: labelForKey(ek),
+      before: formatPreviewValue(ek, valueFor(saved, ek)),
+      after: formatPreviewValue(ek, valueFor(draft, ek)),
+    });
+  }
+
+  const nextHist = computeNextModelHistoryString(saved, draft);
+  if (!normCompare(nextHist, valueFor(saved, MODEL_HISTORY_KEY))) {
+    out.push({
+      key: MODEL_HISTORY_KEY,
+      label: labelForKey(MODEL_HISTORY_KEY),
+      before: formatPreviewValue(MODEL_HISTORY_KEY, valueFor(saved, MODEL_HISTORY_KEY)),
+      after: formatPreviewValue(MODEL_HISTORY_KEY, nextHist),
+    });
+  }
+
+  const orderKey = (k: string) => {
+    const i = PUT_ORDER.indexOf(k);
+    return i >= 0 ? i : 999;
+  };
+  return [...out].sort((a, b) => orderKey(a.key) - orderKey(b.key));
+}
+
+function buildPutOperations(saved: Row[], draft: Row[]): { key: string; value: string }[] {
+  const ops: { key: string; value: string }[] = [];
+
+  for (const { key } of KEYS) {
+    if (normCompare(valueFor(draft, key), valueFor(saved, key))) continue;
+    ops.push({ key, value: valueFor(draft, key).trim() });
+  }
+
+  for (const ek of ['SOURCE_LIST', 'SOURCE_EXCLUDE_LIST', DIAGNOSTIC_MODELS_KEY] as const) {
+    if (normCompare(valueFor(draft, ek), valueFor(saved, ek))) continue;
+    ops.push({ key: ek, value: valueFor(draft, ek) });
+  }
+
+  const nextHist = computeNextModelHistoryString(saved, draft);
+  if (!normCompare(nextHist, valueFor(saved, MODEL_HISTORY_KEY))) {
+    ops.push({ key: MODEL_HISTORY_KEY, value: nextHist });
+  }
+
+  const orderIndex = (k: string) => {
+    const i = PUT_ORDER.indexOf(k);
+    return i >= 0 ? i : 999;
+  };
+  ops.sort((a, b) => orderIndex(a.key) - orderIndex(b.key));
+  return ops;
+}
+
 export default function SettingsPage() {
-  const [rows, setRows] = useState<{ key: string; value: string }[]>([]);
+  const [savedRows, setSavedRows] = useState<Row[]>([]);
+  const [draftRows, setDraftRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'ok' | 'err'; text: string } | null>(
     null,
   );
@@ -214,9 +362,11 @@ export default function SettingsPage() {
         const res = await fetch(`${getApiBase()}/settings/raw`);
         if (!res.ok) throw new Error(String(res.status));
         const j = (await res.json()) as {
-          settings: { key: string; value: string }[];
+          settings: Row[];
         };
-        setRows(j.settings ?? []);
+        const list = j.settings ?? [];
+        setSavedRows(list);
+        setDraftRows(list);
       } catch {
         setMessage({ type: 'err', text: 'Не удалось загрузить настройки' });
       } finally {
@@ -225,9 +375,18 @@ export default function SettingsPage() {
     })();
   }, []);
 
-  const valueFor = (key: string) => rows.find((r) => r.key === key)?.value ?? '';
-  const boolValueFor = (key: string) => valueFor(key).toLowerCase() === 'true';
-  const modelHistory = parseModelHistory(valueFor(MODEL_HISTORY_KEY));
+  const pendingChanges = useMemo(
+    () => collectPendingChanges(savedRows, draftRows),
+    [savedRows, draftRows],
+  );
+  const hasPendingChanges = pendingChanges.length > 0;
+
+  const valueForDraft = (key: string) => valueFor(draftRows, key);
+  const boolValueFor = (key: string) => valueForDraft(key).toLowerCase() === 'true';
+  const modelHistory = useMemo(
+    () => parseModelHistory(valueForDraft(MODEL_HISTORY_KEY)),
+    [draftRows],
+  );
 
   function parseStringList(raw: string): string[] {
     const t = raw.trim();
@@ -242,76 +401,58 @@ export default function SettingsPage() {
     } catch {
       // ignore
     }
-    // Fallback: split by newline/comma
     return t
       .split(/[\n,]/g)
       .map((v) => v.trim())
       .filter((v) => v.length > 0);
   }
 
-  const sourceList = parseStringList(valueFor('SOURCE_LIST'));
+  const sourceList = parseStringList(valueForDraft('SOURCE_LIST'));
   const sourceListSorted = Array.from(new Set(sourceList)).sort((a, b) =>
     a.localeCompare(b, 'ru'),
   );
-  const excludedSourceList = parseStringList(valueFor('SOURCE_EXCLUDE_LIST'));
+  const excludedSourceList = parseStringList(valueForDraft('SOURCE_EXCLUDE_LIST'));
   const excludedSourceListSorted = Array.from(new Set(excludedSourceList)).sort((a, b) =>
     a.localeCompare(b, 'ru'),
   );
-  const diagnosticModels = parseStringList(valueFor(DIAGNOSTIC_MODELS_KEY));
+  const diagnosticModels = parseStringList(valueForDraft(DIAGNOSTIC_MODELS_KEY));
   const diagnosticModelsSorted = Array.from(new Set(diagnosticModels)).sort((a, b) =>
     a.localeCompare(b, 'ru'),
   );
 
-  function upsertRow(
-    list: { key: string; value: string }[],
-    key: string,
-    value: string,
-  ) {
-    const i = list.findIndex((r) => r.key === key);
-    if (i >= 0) {
-      const next = [...list];
-      next[i] = { key, value };
-      return next;
-    }
-    return [...list, { key, value }];
+  function setDraftKey(key: string, value: string) {
+    setDraftRows((prev) => upsertRow(prev, key, value));
   }
 
-  async function save(key: string, value: string) {
-    setSaving(key);
+  async function saveAll() {
+    const ops = buildPutOperations(savedRows, draftRows);
+    if (ops.length === 0) return;
+    setSaving(true);
     setMessage(null);
     try {
-      const res = await fetch(`${getApiBase()}/settings`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key, value }),
-      });
-      if (!res.ok) throw new Error(String(res.status));
-      let nextRows = upsertRow(rows, key, value);
-
-      if (MODEL_KEYS.has(key) && value.trim()) {
-        const nextHistory = mergeModelHistory(modelHistory, value);
-        const nextHistoryRaw = JSON.stringify(nextHistory);
-        if (nextHistoryRaw !== valueFor(MODEL_HISTORY_KEY)) {
-          const historyRes = await fetch(`${getApiBase()}/settings`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              key: MODEL_HISTORY_KEY,
-              value: nextHistoryRaw,
-            }),
-          });
-          if (!historyRes.ok) throw new Error(String(historyRes.status));
-          nextRows = upsertRow(nextRows, MODEL_HISTORY_KEY, nextHistoryRaw);
-        }
+      let next = [...savedRows];
+      for (const { key, value } of ops) {
+        const res = await fetch(`${getApiBase()}/settings`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key, value }),
+        });
+        if (!res.ok) throw new Error(String(res.status));
+        next = upsertRow(next, key, value);
       }
-
-      setRows(nextRows);
-      setMessage({ type: 'ok', text: 'Сохранено' });
+      setSavedRows(next);
+      setDraftRows(next);
+      setMessage({ type: 'ok', text: 'Настройки сохранены' });
     } catch {
       setMessage({ type: 'err', text: 'Ошибка сохранения' });
     } finally {
-      setSaving(null);
+      setSaving(false);
     }
+  }
+
+  function revertDraft() {
+    setDraftRows([...savedRows]);
+    setMessage(null);
   }
 
   async function resetDatabase() {
@@ -335,7 +476,8 @@ export default function SettingsPage() {
         const t = await res.text();
         throw new Error(t || String(res.status));
       }
-      setRows([]);
+      setSavedRows([]);
+      setDraftRows([]);
       setMessage({
         type: 'ok',
         text: 'База данных очищена. Обновите страницу при необходимости.',
@@ -351,49 +493,43 @@ export default function SettingsPage() {
     return <p style={{ color: 'var(--muted)' }}>Загрузка…</p>;
   }
 
-  async function addSource() {
+  function addSource() {
     const v = newSource.trim();
     if (!v) return;
     const next = Array.from(new Set([...sourceListSorted, v]));
-    const raw = JSON.stringify(next);
     setNewSource('');
-    await save('SOURCE_LIST', raw);
+    setDraftKey('SOURCE_LIST', JSON.stringify(next));
   }
 
-  async function removeSource(v: string) {
+  function removeSource(v: string) {
     const next = sourceListSorted.filter((x) => x !== v);
-    const raw = JSON.stringify(next);
-    await save('SOURCE_LIST', raw);
+    setDraftKey('SOURCE_LIST', JSON.stringify(next));
   }
 
-  async function addExcludedSource() {
+  function addExcludedSource() {
     const v = newExcludedSource.trim();
     if (!v) return;
     const next = Array.from(new Set([...excludedSourceListSorted, v]));
-    const raw = JSON.stringify(next);
     setNewExcludedSource('');
-    await save('SOURCE_EXCLUDE_LIST', raw);
+    setDraftKey('SOURCE_EXCLUDE_LIST', JSON.stringify(next));
   }
 
-  async function removeExcludedSource(v: string) {
+  function removeExcludedSource(v: string) {
     const next = excludedSourceListSorted.filter((x) => x !== v);
-    const raw = JSON.stringify(next);
-    await save('SOURCE_EXCLUDE_LIST', raw);
+    setDraftKey('SOURCE_EXCLUDE_LIST', JSON.stringify(next));
   }
 
-  async function addDiagnosticModel() {
+  function addDiagnosticModel() {
     const v = newDiagnosticModel.trim();
     if (!v) return;
     const next = Array.from(new Set([...diagnosticModelsSorted, v]));
-    const raw = JSON.stringify(next);
     setNewDiagnosticModel('');
-    await save(DIAGNOSTIC_MODELS_KEY, raw);
+    setDraftKey(DIAGNOSTIC_MODELS_KEY, JSON.stringify(next));
   }
 
-  async function removeDiagnosticModel(model: string) {
-    const next = diagnosticModelsSorted.filter((v) => v !== model);
-    const raw = JSON.stringify(next);
-    await save(DIAGNOSTIC_MODELS_KEY, raw);
+  function removeDiagnosticModel(model: string) {
+    const next = diagnosticModelsSorted.filter((x) => x !== model);
+    setDraftKey(DIAGNOSTIC_MODELS_KEY, JSON.stringify(next));
   }
 
   async function resetStats() {
@@ -439,25 +575,21 @@ export default function SettingsPage() {
             aria-checked={boolValueFor(key)}
             aria-label={label}
             className={`switch ${boolValueFor(key) ? 'on' : 'off'}`}
-            disabled={saving === key}
+            disabled={saving}
             onClick={() => {
               const next = boolValueFor(key) ? 'false' : 'true';
-              void save(key, next);
+              setDraftKey(key, next);
             }}
           >
             <span className="switchThumb" />
           </button>
         ) : (
           <input
-            key={`${key}:${valueFor(key)}`}
-            defaultValue={valueFor(key)}
+            value={valueForDraft(key)}
             name={key}
             list={isModel ? `${key}-history` : undefined}
             autoComplete="off"
-            onBlur={(e) => {
-              const v = e.target.value.trim();
-              if (v !== valueFor(key)) void save(key, v);
-            }}
+            onChange={(e) => setDraftKey(key, e.target.value)}
           />
         )}
         {isModel && modelHistory.length > 0 && (
@@ -479,8 +611,8 @@ export default function SettingsPage() {
                 <button
                   key={`${key}-chip-${model}`}
                   type="button"
-                  disabled={saving === key}
-                  onClick={() => void save(key, model)}
+                  disabled={saving}
+                  onClick={() => setDraftKey(key, model)}
                   style={{
                     padding: '0.2rem 0.45rem',
                     fontSize: '0.75rem',
@@ -497,11 +629,6 @@ export default function SettingsPage() {
             </div>
           </>
         )}
-        {saving === key && (
-          <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
-            сохранение…
-          </span>
-        )}
       </label>
     );
   }
@@ -512,6 +639,7 @@ export default function SettingsPage() {
       <p style={{ color: 'var(--muted)', marginBottom: '1rem' }}>
         Значения хранятся в SQLite на сервере API. Чувствительные поля не
         отображаются в списке GET /settings (только в raw для этой страницы).
+        Изменения применяются на сервере только после нажатия «Сохранить».
       </p>
       {message && (
         <p className={`msg ${message.type === 'ok' ? 'ok' : 'err'}`}>
@@ -551,11 +679,11 @@ export default function SettingsPage() {
               />
               <button
                 type="button"
-                onClick={() => void addSource()}
-                disabled={saving === 'SOURCE_LIST' || !newSource.trim()}
+                onClick={() => addSource()}
+                disabled={saving || !newSource.trim()}
                 className="btn"
               >
-                {saving === 'SOURCE_LIST' ? 'Добавление…' : 'Добавить'}
+                Добавить
               </button>
             </div>
             {sourceListSorted.length > 0 && (
@@ -564,18 +692,18 @@ export default function SettingsPage() {
                   <button
                     key={v}
                     type="button"
-                    onClick={() => void removeSource(v)}
+                    onClick={() => removeSource(v)}
                     style={{
                       padding: '0.2rem 0.45rem',
                       borderRadius: 999,
                       border: '1px solid var(--border, #444)',
                       background: 'transparent',
                       color: 'var(--muted)',
-                      cursor: saving === 'SOURCE_LIST' ? 'not-allowed' : 'pointer',
-                      opacity: saving === 'SOURCE_LIST' ? 0.7 : 1,
+                      cursor: saving ? 'not-allowed' : 'pointer',
+                      opacity: saving ? 0.7 : 1,
                       fontSize: '0.85rem',
                     }}
-                    disabled={saving === 'SOURCE_LIST'}
+                    disabled={saving}
                     title="Удалить из списка"
                   >
                     {v} ×
@@ -614,11 +742,11 @@ export default function SettingsPage() {
                 />
                 <button
                   type="button"
-                  onClick={() => void addExcludedSource()}
-                  disabled={saving === 'SOURCE_EXCLUDE_LIST' || !newExcludedSource.trim()}
+                  onClick={() => addExcludedSource()}
+                  disabled={saving || !newExcludedSource.trim()}
                   className="btn btnSecondary"
                 >
-                  {saving === 'SOURCE_EXCLUDE_LIST' ? 'Добавление…' : 'Добавить в исключения'}
+                  Добавить в исключения
                 </button>
               </div>
               {excludedSourceListSorted.length > 0 && (
@@ -627,18 +755,18 @@ export default function SettingsPage() {
                     <button
                       key={`excluded-${v}`}
                       type="button"
-                      onClick={() => void removeExcludedSource(v)}
+                      onClick={() => removeExcludedSource(v)}
                       style={{
                         padding: '0.2rem 0.45rem',
                         borderRadius: 999,
                         border: '1px solid var(--border, #444)',
                         background: 'transparent',
                         color: 'var(--muted)',
-                        cursor: saving === 'SOURCE_EXCLUDE_LIST' ? 'not-allowed' : 'pointer',
-                        opacity: saving === 'SOURCE_EXCLUDE_LIST' ? 0.7 : 1,
+                        cursor: saving ? 'not-allowed' : 'pointer',
+                        opacity: saving ? 0.7 : 1,
                         fontSize: '0.85rem',
                       }}
-                      disabled={saving === 'SOURCE_EXCLUDE_LIST'}
+                      disabled={saving}
                       title="Убрать из исключений"
                     >
                       {v} ×
@@ -673,11 +801,11 @@ export default function SettingsPage() {
               />
               <button
                 type="button"
-                onClick={() => void addDiagnosticModel()}
-                disabled={saving === DIAGNOSTIC_MODELS_KEY || !newDiagnosticModel.trim()}
+                onClick={() => addDiagnosticModel()}
+                disabled={saving || !newDiagnosticModel.trim()}
                 className="btn"
               >
-                {saving === DIAGNOSTIC_MODELS_KEY ? 'Добавление…' : 'Добавить модель'}
+                Добавить модель
               </button>
             </div>
             {diagnosticModelsSorted.length > 0 && (
@@ -686,18 +814,18 @@ export default function SettingsPage() {
                   <button
                     key={`diagnostic-model-${model}`}
                     type="button"
-                    onClick={() => void removeDiagnosticModel(model)}
+                    onClick={() => removeDiagnosticModel(model)}
                     style={{
                       padding: '0.2rem 0.45rem',
                       borderRadius: 999,
                       border: '1px solid var(--border, #444)',
                       background: 'transparent',
                       color: 'var(--muted)',
-                      cursor: saving === DIAGNOSTIC_MODELS_KEY ? 'not-allowed' : 'pointer',
-                      opacity: saving === DIAGNOSTIC_MODELS_KEY ? 0.7 : 1,
+                      cursor: saving ? 'not-allowed' : 'pointer',
+                      opacity: saving ? 0.7 : 1,
                       fontSize: '0.85rem',
                     }}
-                    disabled={saving === DIAGNOSTIC_MODELS_KEY}
+                    disabled={saving}
                     title="Удалить модель из диагностики"
                   >
                     {model} ×
@@ -735,6 +863,69 @@ export default function SettingsPage() {
             </div>
           </div>
         </details>
+      </div>
+
+      <div
+        className="card"
+        style={{
+          marginTop: '1.25rem',
+          padding: '1rem 1.1rem',
+          position: 'sticky',
+          bottom: 0,
+          zIndex: 2,
+          boxShadow: '0 -4px 24px rgba(0,0,0,0.25)',
+        }}
+      >
+        <h2 style={{ fontSize: '1rem', marginBottom: '0.65rem' }}>Сохранение</h2>
+        {hasPendingChanges ? (
+          <>
+            <p style={{ color: 'var(--muted)', fontSize: '0.88rem', marginBottom: '0.6rem' }}>
+              Будут записаны в SQLite следующие отличия от последнего сохранённого состояния:
+            </p>
+            <ul
+              style={{
+                margin: '0 0 0.85rem 0',
+                paddingLeft: '1.2rem',
+                fontSize: '0.88rem',
+                maxHeight: 'min(40vh, 320px)',
+                overflowY: 'auto',
+              }}
+            >
+              {pendingChanges.map((c) => (
+                <li key={c.key} style={{ marginBottom: '0.45rem' }}>
+                  <strong>{c.label}</strong>
+                  <div style={{ color: 'var(--muted)', marginTop: '0.15rem' }}>
+                    <span style={{ textDecoration: 'line-through', opacity: 0.85 }}>{c.before}</span>
+                    {' → '}
+                    <span>{c.after}</span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : (
+          <p style={{ color: 'var(--muted)', fontSize: '0.88rem', marginBottom: '0.85rem' }}>
+            Нет несохранённых изменений.
+          </p>
+        )}
+        <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          <button
+            type="button"
+            className="btn"
+            disabled={saving || !hasPendingChanges}
+            onClick={() => void saveAll()}
+          >
+            {saving ? 'Сохранение…' : 'Сохранить'}
+          </button>
+          <button
+            type="button"
+            className="btn btnSecondary"
+            disabled={saving || !hasPendingChanges}
+            onClick={revertDraft}
+          >
+            Отменить изменения
+          </button>
+        </div>
       </div>
     </>
   );
