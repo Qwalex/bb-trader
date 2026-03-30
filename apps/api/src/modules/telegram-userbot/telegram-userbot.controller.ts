@@ -145,10 +145,15 @@ export class TelegramUserbotController {
   }
 
   @Put('chats/:chatId')
-  async setChatEnabled(
+  async updateChat(
     @Param('chatId') chatId: string,
-    @Body() body: { enabled?: boolean },
+    @Body()
+    body: {
+      enabled?: boolean;
+      defaultLeverage?: number | null;
+      defaultEntryUsd?: string | null;
+    },
   ) {
-    return this.userbot.setChatEnabled(chatId, body.enabled === true);
+    return this.userbot.updateChat(chatId, body);
   }
 }

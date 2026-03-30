@@ -42,6 +42,8 @@ type UserbotChat = {
   title: string;
   username: string | null;
   enabled: boolean;
+  defaultLeverage: number | null;
+  defaultEntryUsd: string | null;
 };
 
 type TodayMetrics = {
@@ -85,6 +87,9 @@ export default function TelegramUserbotPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [globalEntry, setGlobalEntry] = useState('');
+  const [globalLev, setGlobalLev] = useState('');
+  const [globalDefaultsLoaded, setGlobalDefaultsLoaded] = useState(false);
 
   const qrVisible = useMemo(
     () => status?.qr.phase === 'waiting_scan' || status?.qr.phase === 'starting',
@@ -149,14 +154,20 @@ export default function TelegramUserbotPage() {
   }, [filteredRecent, groupByChat]);
 
   async function loadAll() {
-    const [s, c, m] = await Promise.all([
+    const [s, c, m, raw] = await Promise.all([
       fetch(`${getApiBase()}/telegram-userbot/status`).then((r) => r.json()),
       fetch(`${getApiBase()}/telegram-userbot/chats`).then((r) => r.json()),
       fetch(`${getApiBase()}/telegram-userbot/metrics/today`).then((r) => r.json()),
+      fetch(`${getApiBase()}/settings/raw`).then((r) => r.json()),
     ]);
     setStatus(s as BotStatus);
     setChats(c as UserbotChat[]);
     setMetrics(m as TodayMetrics);
+    const rows = (raw as { settings?: { key: string; value: string }[] })?.settings ?? [];
+    const byKey = new Map(rows.map((r) => [r.key, r.value]));
+    setGlobalEntry(byKey.get('DEFAULT_ORDER_USD') ?? '');
+    setGlobalLev(byKey.get('DEFAULT_LEVERAGE') ?? '');
+    setGlobalDefaultsLoaded(true);
   }
 
   useEffect(() => {
@@ -335,6 +346,66 @@ export default function TelegramUserbotPage() {
         <p style={{ color: 'var(--muted)', marginTop: '0.35rem' }}>
           Обработка сообщений: только за текущий день.
         </p>
+      </div>
+
+      <div className="card" style={{ marginBottom: '1rem' }}>
+        <h3 style={{ marginBottom: '0.5rem' }}>Общие дефолты для сигналов</h3>
+        <p style={{ color: 'var(--muted)', fontSize: '0.9rem', marginBottom: '0.75rem' }}>
+          Применяются ко всем источникам, если для чата не заданы свои значения. Сумму можно задать в
+          USDT или в процентах от суммарного баланса на Bybit (как на дашборде выше), например{' '}
+          <code>10%</code> при балансе 80 USDT даст 8 USDT номинала.
+        </p>
+        {globalDefaultsLoaded && (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+              gap: '0.75rem',
+              alignItems: 'end',
+            }}
+          >
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+              DEFAULT_ORDER_USD (глобально)
+              <input
+                value={globalEntry}
+                onChange={(e) => setGlobalEntry(e.target.value)}
+                placeholder="10 или 10%"
+                autoComplete="off"
+              />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+              DEFAULT_LEVERAGE
+              <input
+                value={globalLev}
+                onChange={(e) => setGlobalLev(e.target.value)}
+                placeholder="10"
+                autoComplete="off"
+              />
+            </label>
+            <button
+              className="btn"
+              type="button"
+              disabled={busy !== null}
+              onClick={() =>
+                void runAction('save-global-defaults', async () => {
+                  await fetch(`${getApiBase()}/settings`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key: 'DEFAULT_ORDER_USD', value: globalEntry.trim() }),
+                  });
+                  await fetch(`${getApiBase()}/settings`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key: 'DEFAULT_LEVERAGE', value: globalLev.trim() }),
+                  });
+                  setMsg({ type: 'ok', text: 'Общие дефолты сохранены' });
+                })
+              }
+            >
+              {busy === 'save-global-defaults' ? 'Сохранение…' : 'Сохранить'}
+            </button>
+          </div>
+        )}
       </div>
 
       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
@@ -980,6 +1051,11 @@ export default function TelegramUserbotPage() {
         </p>
       )}
 
+      <h3 style={{ marginBottom: '0.35rem' }}>Группы и дефолты по источникам</h3>
+      <p style={{ color: 'var(--muted)', fontSize: '0.9rem', marginBottom: '0.65rem' }}>
+        Пустое плечо или сумма входа — берутся из общих DEFAULT_LEVERAGE и DEFAULT_ORDER_USD выше.
+      </p>
+
       <div
         className="tableWrap mobileStackTable userbotChatsTable"
         style={{ maxHeight: 500, overflowY: 'auto' }}
@@ -991,19 +1067,21 @@ export default function TelegramUserbotPage() {
               <th>Название</th>
               <th>Username</th>
               <th>Chat ID</th>
+              <th>Плечо</th>
+              <th>Сумма входа</th>
             </tr>
           </thead>
           <tbody>
             {chats.length === 0 && (
               <tr>
-                <td colSpan={4} style={{ color: 'var(--muted)' }}>
+                <td colSpan={6} style={{ color: 'var(--muted)' }}>
                   Пока нет чатов. Нажмите «Синхронизировать группы» после авторизации.
                 </td>
               </tr>
             )}
             {chats.length > 0 && filteredChats.length === 0 && (
               <tr>
-                <td colSpan={4} style={{ color: 'var(--muted)' }}>
+                <td colSpan={6} style={{ color: 'var(--muted)' }}>
                   По запросу ничего не найдено.
                 </td>
               </tr>
@@ -1054,6 +1132,92 @@ export default function TelegramUserbotPage() {
                 </td>
                 <td data-label="Username">{chat.username ? `@${chat.username}` : '-'}</td>
                 <td data-label="Chat ID">{chat.chatId}</td>
+                <td data-label="Плечо">
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    style={{ width: '100%', maxWidth: '110px' }}
+                    key={`lev-${chat.chatId}-${chat.defaultLeverage ?? 'x'}`}
+                    defaultValue={chat.defaultLeverage ?? ''}
+                    placeholder="—"
+                    title="Пусто — общий DEFAULT_LEVERAGE"
+                    onBlur={(e) => {
+                      const v = e.target.value.trim();
+                      const num =
+                        v === '' ? null : Number.parseInt(v, 10);
+                      if (
+                        v !== '' &&
+                        (!Number.isFinite(num) || num === null || num < 1)
+                      ) {
+                        setMsg({
+                          type: 'err',
+                          text: 'Плечо: целое число не меньше 1 или пусто',
+                        });
+                        return;
+                      }
+                      const same =
+                        (num === null && chat.defaultLeverage === null) ||
+                        num === chat.defaultLeverage;
+                      if (same) return;
+                      void runAction(`lev-${chat.chatId}`, async () => {
+                        const res = await fetch(
+                          `${getApiBase()}/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
+                          {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ defaultLeverage: num }),
+                          },
+                        );
+                        if (!res.ok) {
+                          throw new Error(`Ошибка сохранения (${res.status})`);
+                        }
+                        setChats((prev) =>
+                          prev.map((row) =>
+                            row.id === chat.id ? { ...row, defaultLeverage: num } : row,
+                          ),
+                        );
+                        setMsg({ type: 'ok', text: 'Плечо для источника сохранено' });
+                      });
+                    }}
+                  />
+                </td>
+                <td data-label="Сумма входа">
+                  <input
+                    style={{ width: '100%', maxWidth: '130px' }}
+                    key={`ent-${chat.chatId}-${chat.defaultEntryUsd ?? 'x'}`}
+                    defaultValue={chat.defaultEntryUsd ?? ''}
+                    placeholder="—"
+                    title="USDT или %, например 10 или 10%. Пусто — общий DEFAULT_ORDER_USD"
+                    onBlur={(e) => {
+                      const v = e.target.value.trim();
+                      const next = v === '' ? null : v;
+                      const same =
+                        (next === null && chat.defaultEntryUsd === null) ||
+                        next === chat.defaultEntryUsd;
+                      if (same) return;
+                      void runAction(`ent-${chat.chatId}`, async () => {
+                        const res = await fetch(
+                          `${getApiBase()}/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
+                          {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ defaultEntryUsd: next }),
+                          },
+                        );
+                        if (!res.ok) {
+                          throw new Error(`Ошибка сохранения (${res.status})`);
+                        }
+                        setChats((prev) =>
+                          prev.map((row) =>
+                            row.id === chat.id ? { ...row, defaultEntryUsd: next } : row,
+                          ),
+                        );
+                        setMsg({ type: 'ok', text: 'Сумма входа для источника сохранена' });
+                      });
+                    }}
+                  />
+                </td>
               </tr>
             ))}
           </tbody>

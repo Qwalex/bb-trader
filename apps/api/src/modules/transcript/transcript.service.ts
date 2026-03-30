@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
 import { OpenRouter } from '@openrouter/sdk';
@@ -13,6 +13,7 @@ import {
 
 import { AppLogService } from '../app-log/app-log.service';
 import { sanitizeForOpenRouterLog } from '../app-log/log-sanitize';
+import { BybitService } from '../bybit/bybit.service';
 import { SettingsService } from '../settings/settings.service';
 import { SignalParseDto } from './dto/signal-parse.dto';
 import {
@@ -23,6 +24,12 @@ import {
   normalizePartialSignal,
   sanitizeSignalSource,
 } from './partial-signal.util';
+
+/** Опциональные дефолты для разбора (userbot: по чату). */
+export type TranscriptParseOverrides = {
+  defaultOrderUsd?: number;
+  leverageDefault?: number;
+};
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_SITE_URL = 'https://signals-bot.local';
@@ -206,7 +213,23 @@ export class TranscriptService {
   constructor(
     private readonly settings: SettingsService,
     private readonly appLog: AppLogService,
+    @Inject(forwardRef(() => BybitService))
+    private readonly bybit: BybitService,
   ) {}
+
+  private async resolveDefaultOrderUsdForParse(
+    overrides?: TranscriptParseOverrides,
+  ): Promise<number> {
+    if (
+      overrides?.defaultOrderUsd != null &&
+      Number.isFinite(overrides.defaultOrderUsd) &&
+      overrides.defaultOrderUsd > 0
+    ) {
+      return overrides.defaultOrderUsd;
+    }
+    const details = await this.bybit.getUnifiedUsdtBalanceDetails();
+    return this.settings.getDefaultOrderUsd(details?.totalUsd);
+  }
 
   async classifyTradingMessage(
     text: string,
@@ -490,6 +513,7 @@ Task:
   async applyCorrection(
     current: SignalDto,
     userComment: string,
+    overrides?: TranscriptParseOverrides,
   ): Promise<TranscriptResult> {
     const apiKey = await this.settings.get('OPENROUTER_API_KEY');
     if (!apiKey) {
@@ -507,7 +531,9 @@ Task:
       };
     }
 
-    const defaultOrderUsd: number = await this.settings.getDefaultOrderUsd();
+    const defaultOrderUsd: number = await this.resolveDefaultOrderUsdForParse(
+      overrides,
+    );
     const correctionPrompt = `You are editing a trading signal. The user provides the current signal as JSON and a correction in natural language (possibly Russian).
 ${buildJsonSchemaRules(defaultOrderUsd)}
 Merge the user's correction into the signal. Keep fields unchanged if the user did not ask to change them.`;
@@ -530,7 +556,9 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       });
       const ms = Date.now() - t0;
       this.logger.log(`applyCorrection: OpenRouter ok in ${ms}ms`);
-      const levOpts = await this.getLeverageFieldOptions();
+      const levOpts = await this.getLeverageFieldOptions(
+        overrides?.leverageDefault,
+      );
       const result = this.finishTranscriptResult(
         this.parseModelContent(content, levOpts, defaultOrderUsd),
         levOpts,
@@ -555,6 +583,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     partial: Partial<SignalDto>,
     userTurns: string[],
     newMessage: string,
+    overrides?: TranscriptParseOverrides,
   ): Promise<TranscriptResult> {
     const apiKey = await this.settings.get('OPENROUTER_API_KEY');
     if (!apiKey) {
@@ -576,7 +605,9 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       ? `Previous user messages (in order):\n${userTurns.map((t, i) => `${i + 1}. ${t}`).join('\n')}\n\n`
       : '';
 
-    const defaultOrderUsd: number = await this.settings.getDefaultOrderUsd();
+    const defaultOrderUsd: number = await this.resolveDefaultOrderUsdForParse(
+      overrides,
+    );
     const userBlock =
       `${historyBlock}Current known partial signal (JSON):\n${JSON.stringify({ signal: partial })}\n\n` +
       `Latest user message:\n${newMessage}\n\n` +
@@ -599,7 +630,9 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       });
       const ms = Date.now() - t0;
       this.logger.log(`continueSignalDraft: OpenRouter ok in ${ms}ms`);
-      const levOpts = await this.getLeverageFieldOptions();
+      const levOpts = await this.getLeverageFieldOptions(
+        overrides?.leverageDefault,
+      );
       const result = this.finishTranscriptResult(
         this.parseModelContent(content, levOpts, defaultOrderUsd),
         levOpts,
@@ -637,6 +670,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
         userTurns: string[];
       };
     },
+    overrides?: TranscriptParseOverrides,
   ): Promise<TranscriptResult> {
     const apiKey = await this.settings.get('OPENROUTER_API_KEY');
     if (!apiKey) {
@@ -659,7 +693,9 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       };
     }
 
-    const defaultOrderUsd: number = await this.settings.getDefaultOrderUsd();
+    const defaultOrderUsd: number = await this.resolveDefaultOrderUsdForParse(
+      overrides,
+    );
     if (
       kind === 'text' &&
       typeof payload.text === 'string' &&
@@ -694,7 +730,9 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       this.logger.log(
         `parse: OpenRouter ok in ${ms}ms (primary=${model}${fallbackModels[0] ? `, fallback=${fallbackModels[0]}` : ''})`,
       );
-      const levOpts = await this.getLeverageFieldOptions();
+      const levOpts = await this.getLeverageFieldOptions(
+        overrides?.leverageDefault,
+      );
       const parsed = this.finishTranscriptResult(
         this.parseModelContent(content, levOpts, defaultOrderUsd),
         levOpts,
@@ -972,16 +1010,24 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
   }
 
   /** Настройки плеча из SQLite / env: опциональная подстановка или обязательное поле в сигнале. */
-  private async getLeverageFieldOptions(): Promise<LeverageFieldOptions> {
+  private async getLeverageFieldOptions(
+    overrideDefaultLeverage?: number | null,
+  ): Promise<LeverageFieldOptions> {
     const defRaw = await this.settings.get('DEFAULT_LEVERAGE');
     const parsed =
       defRaw != null && String(defRaw).trim() !== ''
         ? Number(String(defRaw).trim().replace(',', '.'))
         : NaN;
-    const defaultLeverage =
+    let defaultLeverage =
       Number.isFinite(parsed) && parsed >= 1 ? Math.round(parsed) : 1;
 
-    if (!Number.isFinite(parsed) || parsed < 1) {
+    if (
+      overrideDefaultLeverage != null &&
+      Number.isFinite(overrideDefaultLeverage) &&
+      overrideDefaultLeverage >= 1
+    ) {
+      defaultLeverage = Math.round(overrideDefaultLeverage);
+    } else if (!Number.isFinite(parsed) || parsed < 1) {
       this.logger.warn(
         'DEFAULT_LEVERAGE is not set or invalid; fallback leverage 1x will be used',
       );

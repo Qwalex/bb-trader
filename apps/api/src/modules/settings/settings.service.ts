@@ -3,6 +3,11 @@ import { ConfigService } from '@nestjs/config';
 
 import { PrismaService } from '../../prisma/prisma.service';
 
+import {
+  parseDefaultEntryRaw,
+  resolveDefaultEntryToUsd,
+} from './entry-sizing.util';
+
 const ENV_FALLBACK: Record<string, string> = {
   /** Номинал по умолчанию, если в БД и .env ключ не задан */
   DEFAULT_ORDER_USD: '10',
@@ -33,15 +38,38 @@ export class SettingsService {
 
   /**
    * Номинал позиции в USDT, если в сигнале не заданы ни сумма, ни % депозита.
-   * Берётся из SQLite → env → 10.
+   * Строка настройки: число USDT ("10") или процент от equity ("10%").
+   * Для режима % нужен balanceTotalUsd (суммарный USDT на счёте); иначе — fallback 10.
    */
-  async getDefaultOrderUsd(): Promise<number> {
+  async getDefaultOrderUsd(balanceTotalUsd?: number | null): Promise<number> {
     const raw = await this.get('DEFAULT_ORDER_USD');
-    const n =
-      raw != null && String(raw).trim() !== ''
-        ? Number(String(raw).trim().replace(',', '.'))
-        : Number.NaN;
-    return Number.isFinite(n) && n > 0 ? n : 10;
+    return this.resolveDefaultEntryUsdFromRaw(raw, balanceTotalUsd);
+  }
+
+  /**
+   * Дефолт входа: глобальная настройка или переопределение по чату (строка как в DEFAULT_ORDER_USD).
+   */
+  async resolveDefaultEntryUsd(opts: {
+    rawOverride?: string | null;
+    balanceTotalUsd?: number | null;
+  }): Promise<number> {
+    const raw =
+      opts.rawOverride != null && String(opts.rawOverride).trim() !== ''
+        ? String(opts.rawOverride).trim()
+        : await this.get('DEFAULT_ORDER_USD');
+    return this.resolveDefaultEntryUsdFromRaw(raw, opts.balanceTotalUsd);
+  }
+
+  resolveDefaultEntryUsdFromRaw(
+    raw: string | undefined,
+    balanceTotalUsd?: number | null,
+  ): number {
+    const spec = parseDefaultEntryRaw(raw);
+    const fbRaw = ENV_FALLBACK.DEFAULT_ORDER_USD ?? '10';
+    const fbSpec = parseDefaultEntryRaw(fbRaw);
+    const fallbackUsd =
+      fbSpec.kind === 'fixed' && fbSpec.usd > 0 ? fbSpec.usd : 10;
+    return resolveDefaultEntryToUsd(spec, balanceTotalUsd, fallbackUsd);
   }
 
   async set(key: string, value: string): Promise<void> {

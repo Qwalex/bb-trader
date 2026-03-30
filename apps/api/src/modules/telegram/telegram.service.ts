@@ -77,6 +77,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
   ) {}
 
+  /** Дефолт номинала с учётом DEFAULT_ORDER_USD и процента от equity. */
+  private async getResolvedDefaultOrderUsd(): Promise<number> {
+    const d = await this.bybit.getUnifiedUsdtBalanceDetails();
+    return this.settings.getDefaultOrderUsd(d?.totalUsd);
+  }
+
   async onModuleInit(): Promise<void> {
     const token = await this.settings.get('TELEGRAM_BOT_TOKEN');
     if (!token) {
@@ -371,7 +377,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     });
 
     let deliveredTo = 0;
-    const defaultOrderUsd = await this.settings.getDefaultOrderUsd();
+    const defaultOrderUsd = await this.getResolvedDefaultOrderUsd();
     const msg = this.formatExternalSignalTable(params.signal, defaultOrderUsd);
     for (const uid of ids) {
       try {
@@ -1201,7 +1207,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       this.drafts.set(uid, { phase: 'ready', signal: draft.signal, userTurns: draft.userTurns });
       await ctx.answerCbQuery(`Источник: ${chosen}`);
       await clearInlineKeyboard(ctx);
-      const defaultOrderUsd = await this.settings.getDefaultOrderUsd();
+      const defaultOrderUsd = await this.getResolvedDefaultOrderUsd();
       await ctx.reply(this.formatSignalTable(draft.signal, defaultOrderUsd), {
         ...this.confirmKeyboard(),
       });
@@ -1219,7 +1225,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       this.drafts.set(uid, { phase: 'ready', signal: draft.signal, userTurns: draft.userTurns });
       await ctx.answerCbQuery('Без источника');
       await clearInlineKeyboard(ctx);
-      const defaultOrderUsd = await this.settings.getDefaultOrderUsd();
+      const defaultOrderUsd = await this.getResolvedDefaultOrderUsd();
       await ctx.reply(this.formatSignalTable(draft.signal, defaultOrderUsd), {
         ...this.confirmKeyboard(),
       });
@@ -1632,7 +1638,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           pair: res.signal.pair,
           sources: existingSources,
         });
-        const defaultOrderUsd = await this.settings.getDefaultOrderUsd();
+        const defaultOrderUsd = await this.getResolvedDefaultOrderUsd();
         await ctx.reply(
           this.formatSignalTable(res.signal, defaultOrderUsd) +
             '\n\nВыберите источник сигнала или продолжите без него:',
@@ -1656,7 +1662,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       direction: res.signal.direction,
       orderUsd: res.signal.orderUsd,
     });
-    const defaultOrderUsd = await this.settings.getDefaultOrderUsd();
+    const defaultOrderUsd = await this.getResolvedDefaultOrderUsd();
     await ctx.reply(this.formatSignalTable(res.signal, defaultOrderUsd), {
       ...this.confirmKeyboard(),
     });
@@ -1676,7 +1682,28 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (!text) {
       return { ok: false, error: 'Текст сообщения для подтверждения не найден' };
     }
-    const parsed = await this.transcript.parse('text', { text });
+    const [chat, details] = await Promise.all([
+      row?.chatId
+        ? this.prisma.tgUserbotChat.findUnique({
+            where: { chatId: row.chatId },
+            select: { title: true, defaultLeverage: true, defaultEntryUsd: true },
+          })
+        : Promise.resolve(null),
+      this.bybit.getUnifiedUsdtBalanceDetails(),
+    ]);
+    const defaultOrderUsd = await this.settings.resolveDefaultEntryUsd({
+      rawOverride: chat?.defaultEntryUsd,
+      balanceTotalUsd: details?.totalUsd,
+    });
+    const leverageDefault =
+      chat?.defaultLeverage != null && chat.defaultLeverage >= 1
+        ? chat.defaultLeverage
+        : undefined;
+    const parsed = await this.transcript.parse(
+      'text',
+      { text },
+      { defaultOrderUsd, leverageDefault },
+    );
     if (parsed.ok !== true) {
       return {
         ok: false,
@@ -1686,12 +1713,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
             : `Сигнал неполный: ${parsed.prompt}`,
       };
     }
-    const chat = row?.chatId
-      ? await this.prisma.tgUserbotChat.findUnique({
-          where: { chatId: row.chatId },
-          select: { title: true },
-        })
-      : null;
     if (chat?.title) {
       parsed.signal.source = chat.title;
     }

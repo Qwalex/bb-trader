@@ -1741,8 +1741,11 @@ export class BybitService {
         orderUsd: signal.orderUsd,
         leverage: signal.leverage,
       });
-      const balance = await this.getUsdtBalance(client);
-      const defaultOrderUsd = await this.settings.getDefaultOrderUsd();
+      const balanceDetails = await this.getUsdtBalanceDetails(client);
+      const balance = balanceDetails.availableUsd;
+      const defaultOrderUsd = await this.settings.getDefaultOrderUsd(
+        balanceDetails.totalUsd,
+      );
       const minCapitalRaw = await this.settings.get('MIN_CAPITAL_AMOUNT');
       const minCapitalParsed =
         minCapitalRaw != null && minCapitalRaw.trim() !== ''

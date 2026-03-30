@@ -12,7 +12,10 @@ import { AppLogService } from '../app-log/app-log.service';
 import { BybitService } from '../bybit/bybit.service';
 import { SettingsService } from '../settings/settings.service';
 import { TelegramService } from '../telegram/telegram.service';
-import { TranscriptService } from '../transcript/transcript.service';
+import {
+  TranscriptService,
+  type TranscriptParseOverrides,
+} from '../transcript/transcript.service';
 import { UserbotSignalHashService } from './userbot-signal-hash.service';
 import { parseSignalPriceArrayJson } from './userbot-signal-hash.util';
 
@@ -859,14 +862,70 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async setChatEnabled(chatId: string, enabled: boolean) {
+  async updateChat(
+    chatId: string,
+    body: {
+      enabled?: boolean;
+      defaultLeverage?: number | null;
+      defaultEntryUsd?: string | null;
+    },
+  ) {
+    const entryNorm =
+      body.defaultEntryUsd !== undefined
+        ? body.defaultEntryUsd === null || body.defaultEntryUsd.trim() === ''
+          ? null
+          : body.defaultEntryUsd.trim()
+        : undefined;
+    const levNorm =
+      body.defaultLeverage === undefined
+        ? undefined
+        : body.defaultLeverage === null
+          ? null
+          : body.defaultLeverage >= 1
+            ? Math.floor(body.defaultLeverage)
+            : null;
+
     await this.prisma.tgUserbotChat.upsert({
       where: { chatId },
-      create: { chatId, title: chatId, enabled },
-      update: { enabled },
+      create: {
+        chatId,
+        title: chatId,
+        enabled: body.enabled === true,
+        defaultLeverage: levNorm ?? null,
+        defaultEntryUsd: entryNorm ?? null,
+      },
+      update: {
+        ...(body.enabled !== undefined ? { enabled: body.enabled } : {}),
+        ...(levNorm !== undefined ? { defaultLeverage: levNorm } : {}),
+        ...(entryNorm !== undefined ? { defaultEntryUsd: entryNorm } : {}),
+      },
     });
     await this.refreshEnabledChatsCache();
     return { ok: true };
+  }
+
+  private async buildTranscriptParseOverrides(
+    chatId: string,
+  ): Promise<TranscriptParseOverrides> {
+    const [chat, details] = await Promise.all([
+      this.prisma.tgUserbotChat.findUnique({
+        where: { chatId },
+        select: { defaultLeverage: true, defaultEntryUsd: true },
+      }),
+      this.bybit.getUnifiedUsdtBalanceDetails(),
+    ]);
+    const defaultOrderUsd = await this.settings.resolveDefaultEntryUsd({
+      rawOverride: chat?.defaultEntryUsd,
+      balanceTotalUsd: details?.totalUsd,
+    });
+    const leverageDefault =
+      chat?.defaultLeverage != null && chat.defaultLeverage >= 1
+        ? chat.defaultLeverage
+        : undefined;
+    return {
+      defaultOrderUsd,
+      leverageDefault,
+    };
   }
 
   private async attachClient(client: TelegramClient): Promise<void> {
@@ -1272,7 +1331,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       this.appendIngestStageLog('debug', 'Userbot: parse started', ingest, {
         kind,
       });
-      const parsed = await this.transcript.parse('text', { text });
+      const parseOverrides = await this.buildTranscriptParseOverrides(ingest.chatId);
+      const parsed = await this.transcript.parse('text', { text }, parseOverrides);
       if (parsed.ok !== true) {
         const parseError = parsed.ok === false ? parsed.error : parsed.prompt;
         this.appendIngestStageLog('warn', 'Userbot: parse did not produce a signal', ingest, {
@@ -1720,15 +1780,20 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           ? this.fetchChatMessageText(params.chatId, replyToMessageId)
           : Promise.resolve(undefined),
       ]);
-      const parsed = await this.transcript.parse('text', {
-        text: params.text,
-        reentryContext: {
-          baseSignal: base,
-          rootSourceMessageId: rootSource.messageId,
-          originalMessageText,
-          quotedMessageText,
+      const reentryOverrides = await this.buildTranscriptParseOverrides(params.chatId);
+      const parsed = await this.transcript.parse(
+        'text',
+        {
+          text: params.text,
+          reentryContext: {
+            baseSignal: base,
+            rootSourceMessageId: rootSource.messageId,
+            originalMessageText,
+            quotedMessageText,
+          },
         },
-      });
+        reentryOverrides,
+      );
       if (parsed.ok === false) {
         return { ok: false, error: parsed.error };
       }
