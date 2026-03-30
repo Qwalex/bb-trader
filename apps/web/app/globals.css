@@ -665,6 +665,113 @@ h1.pageTitle {
   margin: 0;
 }
 
+/* Userbot: группы — карточки вместо таблицы */
+.userbotChatCards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr));
+  gap: 1rem;
+  align-content: start;
+  max-height: min(75vh, 920px);
+  overflow-y: auto;
+  padding: 0.15rem 0.1rem 0.5rem;
+}
+
+.userbotChatCard {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 1rem 1.15rem;
+  margin: 0;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.userbotChatCard:hover {
+  border-color: rgba(139, 148, 158, 0.35);
+}
+
+.userbotChatCardHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.userbotChatCardTitle {
+  font-weight: 600;
+  font-size: 1rem;
+  line-height: 1.35;
+  margin: 0;
+  word-break: break-word;
+  flex: 1;
+  min-width: 0;
+}
+
+.userbotChatCardToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.userbotChatCardToggle .inlineCheckbox {
+  margin: 0;
+}
+
+.userbotChatCardMeta {
+  font-size: 0.82rem;
+  color: var(--muted);
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.userbotChatCardMeta code {
+  font-size: 0.78rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.userbotChatCardParams {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding-top: 0.25rem;
+  border-top: 1px dashed var(--border);
+}
+
+.userbotChatCardParamLabel {
+  display: block;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-bottom: 0.35rem;
+}
+
+.userbotChatCard .userbotCellInput {
+  max-width: 8rem;
+}
+
+.userbotChatEmpty {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  text-align: center;
+  padding: 2rem 1rem;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
 .userbotThParam {
   width: 1%;
   white-space: nowrap;
@@ -1220,16 +1327,6 @@ h1.pageTitle {
     width: 100%;
     margin-right: 0 !important;
     min-height: 40px;
-  }
-
-  .userbotChatsTable .mobileStackDataRow td[data-label='Включено'] {
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  .userbotChatsTable .mobileStackDataRow td[data-label='Включено']::before {
-    margin-right: 0.4rem;
   }
 
   .pnl {

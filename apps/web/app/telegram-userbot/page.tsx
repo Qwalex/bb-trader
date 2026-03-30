@@ -1115,155 +1115,147 @@ export default function TelegramUserbotPage() {
         </p>
       </div>
 
-      <div
-        className="tableWrap mobileStackTable userbotChatsTable"
-        style={{ maxHeight: 500, overflowY: 'auto' }}
-      >
-        <table>
-          <thead>
-            <tr>
-              <th>Включено</th>
-              <th>Название</th>
-              <th>Username</th>
-              <th>Chat ID</th>
-              <th className="userbotThParam">Плечо</th>
-              <th className="userbotThParam">Сумма</th>
-            </tr>
-          </thead>
-          <tbody>
-            {chats.length === 0 && (
-              <tr>
-                <td colSpan={6} style={{ color: 'var(--muted)' }}>
-                  Пока нет чатов. Нажмите «Синхронизировать группы» после авторизации.
-                </td>
-              </tr>
-            )}
-            {chats.length > 0 && filteredChats.length === 0 && (
-              <tr>
-                <td colSpan={6} style={{ color: 'var(--muted)' }}>
-                  По запросу ничего не найдено.
-                </td>
-              </tr>
-            )}
-            {filteredChats.map((chat) => (
-              <tr key={chat.id} className="mobileStackDataRow">
-                <td data-label="Включено">
-                  <input
-                    className="inlineCheckbox"
-                    type="checkbox"
-                    checked={chat.enabled}
-                    onChange={(e) => {
-                      const checked = e.target.checked;
-                      void runAction(`toggle-${chat.chatId}`, async () => {
-                        const res = await fetch(
-                          `${getApiBase()}/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
-                          {
-                            method: 'PUT',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ enabled: checked }),
-                          },
-                        );
-                        if (!res.ok) {
-                          throw new Error(`Ошибка сохранения (${res.status})`);
-                        }
-                        setChats((prev) =>
-                          prev.map((row) =>
-                            row.id === chat.id ? { ...row, enabled: checked } : row,
-                          ),
-                        );
-                        setStatus((prev) =>
-                          prev
-                            ? {
-                                ...prev,
-                                chatsEnabled: Math.max(
-                                  0,
-                                  prev.chatsEnabled + (checked ? 1 : -1),
-                                ),
-                              }
-                            : prev,
-                        );
-                      });
-                    }}
-                  />
-                </td>
-                <td data-label="Название">
-                  <span className="chatName">{chat.title}</span>
-                </td>
-                <td data-label="Username">{chat.username ? `@${chat.username}` : '-'}</td>
-                <td data-label="Chat ID">{chat.chatId}</td>
-                <td data-label="Плечо" className="userbotChatCellInput">
-                  <input
-                    className="userbotCellInput"
-                    type="number"
-                    min={1}
-                    step={1}
-                    key={`lev-${chat.chatId}-${chat.defaultLeverage ?? 'x'}`}
-                    defaultValue={chat.defaultLeverage ?? ''}
-                    placeholder="авто"
-                    title="Пусто — общий DEFAULT_LEVERAGE"
-                    onBlur={(e) => {
-                      const v = e.target.value.trim();
-                      const num =
-                        v === '' ? null : Number.parseInt(v, 10);
-                      if (
-                        v !== '' &&
-                        (!Number.isFinite(num) || num === null || num < 1)
-                      ) {
-                        setMsg({
-                          type: 'err',
-                          text: 'Плечо: целое число не меньше 1 или пусто',
-                        });
-                        return;
+      <div className="userbotChatCards">
+        {chats.length === 0 && (
+          <p className="userbotChatEmpty">
+            Пока нет чатов. Нажмите «Синхронизировать группы» после авторизации.
+          </p>
+        )}
+        {chats.length > 0 && filteredChats.length === 0 && (
+          <p className="userbotChatEmpty">По запросу ничего не найдено.</p>
+        )}
+        {filteredChats.map((chat) => (
+          <article key={chat.id} className="userbotChatCard">
+            <div className="userbotChatCardHeader">
+              <h4 className="userbotChatCardTitle">{chat.title}</h4>
+              <label className="userbotChatCardToggle">
+                <input
+                  className="inlineCheckbox"
+                  type="checkbox"
+                  checked={chat.enabled}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    void runAction(`toggle-${chat.chatId}`, async () => {
+                      const res = await fetch(
+                        `${getApiBase()}/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
+                        {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ enabled: checked }),
+                        },
+                      );
+                      if (!res.ok) {
+                        throw new Error(`Ошибка сохранения (${res.status})`);
                       }
-                      const same =
-                        (num === null && chat.defaultLeverage === null) ||
-                        num === chat.defaultLeverage;
-                      if (same) return;
-                      void runAction(`lev-${chat.chatId}`, async () => {
-                        const res = await fetch(
-                          `${getApiBase()}/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
-                          {
-                            method: 'PUT',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ defaultLeverage: num }),
-                          },
-                        );
-                        if (!res.ok) {
-                          throw new Error(`Ошибка сохранения (${res.status})`);
-                        }
-                        setChats((prev) =>
-                          prev.map((row) =>
-                            row.id === chat.id ? { ...row, defaultLeverage: num } : row,
-                          ),
-                        );
-                        setMsg({ type: 'ok', text: 'Плечо для источника сохранено' });
+                      setChats((prev) =>
+                        prev.map((row) =>
+                          row.id === chat.id ? { ...row, enabled: checked } : row,
+                        ),
+                      );
+                      setStatus((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              chatsEnabled: Math.max(
+                                0,
+                                prev.chatsEnabled + (checked ? 1 : -1),
+                              ),
+                            }
+                          : prev,
+                      );
+                    });
+                  }}
+                />
+                <span>Включено</span>
+              </label>
+            </div>
+            <div className="userbotChatCardMeta">
+              {chat.username ? (
+                <>
+                  <span>@{chat.username}</span>
+                  <span aria-hidden="true"> · </span>
+                </>
+              ) : (
+                <span>— · </span>
+              )}
+              <code>{chat.chatId}</code>
+            </div>
+            <div className="userbotChatCardParams">
+              <div>
+                <span className="userbotChatCardParamLabel">Плечо</span>
+                <input
+                  className="userbotCellInput"
+                  type="number"
+                  min={1}
+                  step={1}
+                  key={`lev-${chat.chatId}-${chat.defaultLeverage ?? 'x'}`}
+                  defaultValue={chat.defaultLeverage ?? ''}
+                  placeholder="авто"
+                  title="Пусто — общий DEFAULT_LEVERAGE"
+                  onBlur={(e) => {
+                    const v = e.target.value.trim();
+                    const num = v === '' ? null : Number.parseInt(v, 10);
+                    if (
+                      v !== '' &&
+                      (!Number.isFinite(num) || num === null || num < 1)
+                    ) {
+                      setMsg({
+                        type: 'err',
+                        text: 'Плечо: целое число не меньше 1 или пусто',
                       });
-                    }}
-                  />
-                </td>
-                <td data-label="Сумма входа" className="userbotChatCellInput">
-                  <EntrySizingControl
-                    compact
-                    mode={entryByChat[chat.chatId]?.mode ?? parseStoredEntry(chat.defaultEntryUsd).mode}
-                    amount={
-                      entryByChat[chat.chatId]?.amount ??
-                      parseStoredEntry(chat.defaultEntryUsd).amount
+                      return;
                     }
-                    disabled={busy !== null}
-                    onChange={(m, amt) => {
-                      setEntryByChat((prev) => ({
-                        ...prev,
-                        [chat.chatId]: { mode: m, amount: amt },
-                      }));
-                    }}
-                    onBlur={(m, amt) => void commitChatDefaultEntry(chat, m, amt)}
-                    onModeChange={(m, amt) => void commitChatDefaultEntry(chat, m, amt)}
-                  />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                    const same =
+                      (num === null && chat.defaultLeverage === null) ||
+                      num === chat.defaultLeverage;
+                    if (same) return;
+                    void runAction(`lev-${chat.chatId}`, async () => {
+                      const res = await fetch(
+                        `${getApiBase()}/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
+                        {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ defaultLeverage: num }),
+                        },
+                      );
+                      if (!res.ok) {
+                        throw new Error(`Ошибка сохранения (${res.status})`);
+                      }
+                      setChats((prev) =>
+                        prev.map((row) =>
+                          row.id === chat.id ? { ...row, defaultLeverage: num } : row,
+                        ),
+                      );
+                      setMsg({ type: 'ok', text: 'Плечо для источника сохранено' });
+                    });
+                  }}
+                />
+              </div>
+              <div>
+                <span className="userbotChatCardParamLabel">Сумма входа</span>
+                <EntrySizingControl
+                  mode={
+                    entryByChat[chat.chatId]?.mode ??
+                    parseStoredEntry(chat.defaultEntryUsd).mode
+                  }
+                  amount={
+                    entryByChat[chat.chatId]?.amount ??
+                    parseStoredEntry(chat.defaultEntryUsd).amount
+                  }
+                  disabled={busy !== null}
+                  onChange={(m, amt) => {
+                    setEntryByChat((prev) => ({
+                      ...prev,
+                      [chat.chatId]: { mode: m, amount: amt },
+                    }));
+                  }}
+                  onBlur={(m, amt) => void commitChatDefaultEntry(chat, m, amt)}
+                  onModeChange={(m, amt) => void commitChatDefaultEntry(chat, m, amt)}
+                />
+              </div>
+            </div>
+          </article>
+        ))}
       </div>
     </>
   );
