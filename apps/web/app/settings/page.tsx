@@ -2,7 +2,9 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
+import { EntrySizingControl } from '../components/EntrySizingControl';
 import { getApiBase } from '../../lib/api';
+import { parseStoredEntry, serializeEntry } from '../../lib/entry-sizing';
 
 const MODEL_HISTORY_KEY = 'OPENROUTER_MODEL_HISTORY';
 const DIAGNOSTIC_MODELS_KEY = 'OPENROUTER_DIAGNOSTIC_MODELS';
@@ -35,8 +37,7 @@ const KEYS = [
   },
   {
     key: 'DEFAULT_ORDER_USD',
-    label:
-      'Дефолт суммы входа: USDT (например 10) или % от суммарного баланса на Bybit (например 10%). Если в сигнале не указан размер и не задан % депозита (capitalPercent)',
+    label: 'Дефолт суммы входа (если в сигнале не указан размер)',
   },
   {
     key: 'DEFAULT_LEVERAGE_ENABLED',
@@ -562,6 +563,27 @@ export default function SettingsPage() {
   }
 
   function renderSettingField(key: string) {
+    if (key === 'DEFAULT_ORDER_USD') {
+      const raw = valueForDraft(key);
+      const p = parseStoredEntry(raw);
+      return (
+        <div key={key} style={{ gridColumn: '1 / -1' }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            <span>{LABEL_BY_KEY[key] ?? key}</span>
+            <p style={{ color: 'var(--muted)', fontSize: '0.88rem', margin: 0 }}>
+              Переключатель: номинал в USDT или доля в процентах от суммарного баланса Bybit. В поле —
+              только число.
+            </p>
+            <EntrySizingControl
+              mode={p.mode}
+              amount={p.amount}
+              disabled={saving}
+              onChange={(m, amt) => setDraftKey(key, serializeEntry(m, amt))}
+            />
+          </label>
+        </div>
+      );
+    }
     const label = LABEL_BY_KEY[key] ?? key;
     const isBoolean = BOOLEAN_KEYS.has(key);
     const isModel = MODEL_KEYS.has(key);

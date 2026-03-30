@@ -2,7 +2,10 @@
 
 import { Fragment, useEffect, useMemo, useState } from 'react';
 
+import { EntrySizingControl } from '../components/EntrySizingControl';
 import { getApiBase } from '../../lib/api';
+import type { EntrySizingMode } from '../../lib/entry-sizing';
+import { parseStoredEntry, serializeEntry } from '../../lib/entry-sizing';
 import { formatTimeRu } from '../../lib/datetime';
 
 type BotStatus = {
@@ -87,9 +90,13 @@ export default function TelegramUserbotPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
-  const [globalEntry, setGlobalEntry] = useState('');
+  const [globalEntryMode, setGlobalEntryMode] = useState<EntrySizingMode>('usdt');
+  const [globalEntryAmount, setGlobalEntryAmount] = useState('');
   const [globalLev, setGlobalLev] = useState('');
   const [globalDefaultsLoaded, setGlobalDefaultsLoaded] = useState(false);
+  const [entryByChat, setEntryByChat] = useState<
+    Record<string, { mode: EntrySizingMode; amount: string }>
+  >({});
 
   const qrVisible = useMemo(
     () => status?.qr.phase === 'waiting_scan' || status?.qr.phase === 'starting',
@@ -161,11 +168,17 @@ export default function TelegramUserbotPage() {
       fetch(`${getApiBase()}/settings/raw`).then((r) => r.json()),
     ]);
     setStatus(s as BotStatus);
-    setChats(c as UserbotChat[]);
+    const chatsList = c as UserbotChat[];
+    setChats(chatsList);
     setMetrics(m as TodayMetrics);
     const rows = (raw as { settings?: { key: string; value: string }[] })?.settings ?? [];
     const byKey = new Map(rows.map((r) => [r.key, r.value]));
-    setGlobalEntry(byKey.get('DEFAULT_ORDER_USD') ?? '');
+    const ge = parseStoredEntry(byKey.get('DEFAULT_ORDER_USD'));
+    setGlobalEntryMode(ge.mode);
+    setGlobalEntryAmount(ge.amount);
+    setEntryByChat(
+      Object.fromEntries(chatsList.map((x) => [x.chatId, parseStoredEntry(x.defaultEntryUsd)])),
+    );
     setGlobalLev(byKey.get('DEFAULT_LEVERAGE') ?? '');
     setGlobalDefaultsLoaded(true);
   }
@@ -226,6 +239,39 @@ export default function TelegramUserbotPage() {
     } finally {
       setBusy(null);
     }
+  }
+
+  async function commitChatDefaultEntry(
+    chat: UserbotChat,
+    mode: EntrySizingMode,
+    amount: string,
+  ) {
+    const raw = serializeEntry(mode, amount);
+    const next = raw === '' ? null : raw;
+    const same =
+      (next === null && chat.defaultEntryUsd === null) || next === chat.defaultEntryUsd;
+    if (same) return;
+    await runAction(`ent-${chat.chatId}`, async () => {
+      const res = await fetch(
+        `${getApiBase()}/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ defaultEntryUsd: next }),
+        },
+      );
+      if (!res.ok) {
+        throw new Error(`Ошибка сохранения (${res.status})`);
+      }
+      setChats((prev) =>
+        prev.map((row) => (row.id === chat.id ? { ...row, defaultEntryUsd: next } : row)),
+      );
+      setEntryByChat((prev) => ({
+        ...prev,
+        [chat.chatId]: parseStoredEntry(next),
+      }));
+      setMsg({ type: 'ok', text: 'Сумма входа для источника сохранена' });
+    });
   }
 
   function renderPipelineStatus(row: TodayMetrics['recent'][number]): string {
@@ -348,63 +394,73 @@ export default function TelegramUserbotPage() {
         </p>
       </div>
 
-      <div className="card" style={{ marginBottom: '1rem' }}>
-        <h3 style={{ marginBottom: '0.5rem' }}>Общие дефолты для сигналов</h3>
-        <p style={{ color: 'var(--muted)', fontSize: '0.9rem', marginBottom: '0.75rem' }}>
-          Применяются ко всем источникам, если для чата не заданы свои значения. Сумму можно задать в
-          USDT или в процентах от суммарного баланса на Bybit (как на дашборде выше), например{' '}
-          <code>10%</code> при балансе 80 USDT даст 8 USDT номинала.
+      <div className="card userbotDefaultsCard" style={{ marginBottom: '1rem' }}>
+        <h3 className="sectionTitle">Общие дефолты для сигналов</h3>
+        <p className="userbotDefaultsIntro">
+          Используются для всех источников, пока у чата нет своих значений. Сумма входа: переключатель
+          USDT или % от суммарного баланса Bybit, в поле — только число (например при 10% и балансе 80
+          USDT номинал будет 8 USDT).
         </p>
         {globalDefaultsLoaded && (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
-              gap: '0.75rem',
-              alignItems: 'end',
-            }}
-          >
-            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              DEFAULT_ORDER_USD (глобально)
-              <input
-                value={globalEntry}
-                onChange={(e) => setGlobalEntry(e.target.value)}
-                placeholder="10 или 10%"
-                autoComplete="off"
-              />
-            </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              DEFAULT_LEVERAGE
-              <input
-                value={globalLev}
-                onChange={(e) => setGlobalLev(e.target.value)}
-                placeholder="10"
-                autoComplete="off"
-              />
-            </label>
-            <button
-              className="btn"
-              type="button"
-              disabled={busy !== null}
-              onClick={() =>
-                void runAction('save-global-defaults', async () => {
-                  await fetch(`${getApiBase()}/settings`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ key: 'DEFAULT_ORDER_USD', value: globalEntry.trim() }),
-                  });
-                  await fetch(`${getApiBase()}/settings`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ key: 'DEFAULT_LEVERAGE', value: globalLev.trim() }),
-                  });
-                  setMsg({ type: 'ok', text: 'Общие дефолты сохранены' });
-                })
-              }
-            >
-              {busy === 'save-global-defaults' ? 'Сохранение…' : 'Сохранить'}
-            </button>
-          </div>
+          <>
+            <div className="userbotDefaultsGrid">
+              <div className="userbotDefaultsField">
+                <span className="userbotDefaultsFieldLabel">Сумма входа</span>
+                <span className="userbotDefaultsFieldName">Глобально</span>
+                <span className="userbotDefaultsFieldHint">USDT или % — переключатель и число</span>
+                <EntrySizingControl
+                  mode={globalEntryMode}
+                  amount={globalEntryAmount}
+                  disabled={busy !== null}
+                  onChange={(m, amt) => {
+                    setGlobalEntryMode(m);
+                    setGlobalEntryAmount(amt);
+                  }}
+                />
+              </div>
+              <div className="userbotDefaultsField">
+                <span className="userbotDefaultsFieldLabel">Плечо</span>
+                <span className="userbotDefaultsFieldName">Глобально</span>
+                <span className="userbotDefaultsFieldHint">Целое число, напр. 5 или 10</span>
+                <input
+                  className="userbotDefaultsInput"
+                  value={globalLev}
+                  onChange={(e) => setGlobalLev(e.target.value)}
+                  placeholder="10"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  aria-label="Дефолт кредитного плеча"
+                />
+              </div>
+            </div>
+            <div className="userbotDefaultsActions">
+              <button
+                className="btn"
+                type="button"
+                disabled={busy !== null}
+                onClick={() =>
+                  void runAction('save-global-defaults', async () => {
+                    await fetch(`${getApiBase()}/settings`, {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        key: 'DEFAULT_ORDER_USD',
+                        value: serializeEntry(globalEntryMode, globalEntryAmount),
+                      }),
+                    });
+                    await fetch(`${getApiBase()}/settings`, {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ key: 'DEFAULT_LEVERAGE', value: globalLev.trim() }),
+                    });
+                    setMsg({ type: 'ok', text: 'Общие дефолты сохранены' });
+                  })
+                }
+              >
+                {busy === 'save-global-defaults' ? 'Сохранение…' : 'Сохранить'}
+              </button>
+            </div>
+          </>
         )}
       </div>
 
@@ -1051,10 +1107,13 @@ export default function TelegramUserbotPage() {
         </p>
       )}
 
-      <h3 style={{ marginBottom: '0.35rem' }}>Группы и дефолты по источникам</h3>
-      <p style={{ color: 'var(--muted)', fontSize: '0.9rem', marginBottom: '0.65rem' }}>
-        Пустое плечо или сумма входа — берутся из общих DEFAULT_LEVERAGE и DEFAULT_ORDER_USD выше.
-      </p>
+      <div className="userbotSourcesBlock">
+        <h3 className="sectionTitle">Группы и дефолты по источникам</h3>
+        <p className="userbotSourcesBlockIntro">
+          Для каждого чата можно задать своё плечо и сумму входа. Пустое поле — подставляются общие
+          значения из блока выше.
+        </p>
+      </div>
 
       <div
         className="tableWrap mobileStackTable userbotChatsTable"
@@ -1067,8 +1126,8 @@ export default function TelegramUserbotPage() {
               <th>Название</th>
               <th>Username</th>
               <th>Chat ID</th>
-              <th>Плечо</th>
-              <th>Сумма входа</th>
+              <th className="userbotThParam">Плечо</th>
+              <th className="userbotThParam">Сумма</th>
             </tr>
           </thead>
           <tbody>
@@ -1132,15 +1191,15 @@ export default function TelegramUserbotPage() {
                 </td>
                 <td data-label="Username">{chat.username ? `@${chat.username}` : '-'}</td>
                 <td data-label="Chat ID">{chat.chatId}</td>
-                <td data-label="Плечо">
+                <td data-label="Плечо" className="userbotChatCellInput">
                   <input
+                    className="userbotCellInput"
                     type="number"
                     min={1}
                     step={1}
-                    style={{ width: '100%', maxWidth: '110px' }}
                     key={`lev-${chat.chatId}-${chat.defaultLeverage ?? 'x'}`}
                     defaultValue={chat.defaultLeverage ?? ''}
-                    placeholder="—"
+                    placeholder="авто"
                     title="Пусто — общий DEFAULT_LEVERAGE"
                     onBlur={(e) => {
                       const v = e.target.value.trim();
@@ -1182,40 +1241,23 @@ export default function TelegramUserbotPage() {
                     }}
                   />
                 </td>
-                <td data-label="Сумма входа">
-                  <input
-                    style={{ width: '100%', maxWidth: '130px' }}
-                    key={`ent-${chat.chatId}-${chat.defaultEntryUsd ?? 'x'}`}
-                    defaultValue={chat.defaultEntryUsd ?? ''}
-                    placeholder="—"
-                    title="USDT или %, например 10 или 10%. Пусто — общий DEFAULT_ORDER_USD"
-                    onBlur={(e) => {
-                      const v = e.target.value.trim();
-                      const next = v === '' ? null : v;
-                      const same =
-                        (next === null && chat.defaultEntryUsd === null) ||
-                        next === chat.defaultEntryUsd;
-                      if (same) return;
-                      void runAction(`ent-${chat.chatId}`, async () => {
-                        const res = await fetch(
-                          `${getApiBase()}/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
-                          {
-                            method: 'PUT',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ defaultEntryUsd: next }),
-                          },
-                        );
-                        if (!res.ok) {
-                          throw new Error(`Ошибка сохранения (${res.status})`);
-                        }
-                        setChats((prev) =>
-                          prev.map((row) =>
-                            row.id === chat.id ? { ...row, defaultEntryUsd: next } : row,
-                          ),
-                        );
-                        setMsg({ type: 'ok', text: 'Сумма входа для источника сохранена' });
-                      });
+                <td data-label="Сумма входа" className="userbotChatCellInput">
+                  <EntrySizingControl
+                    compact
+                    mode={entryByChat[chat.chatId]?.mode ?? parseStoredEntry(chat.defaultEntryUsd).mode}
+                    amount={
+                      entryByChat[chat.chatId]?.amount ??
+                      parseStoredEntry(chat.defaultEntryUsd).amount
+                    }
+                    disabled={busy !== null}
+                    onChange={(m, amt) => {
+                      setEntryByChat((prev) => ({
+                        ...prev,
+                        [chat.chatId]: { mode: m, amount: amt },
+                      }));
                     }}
+                    onBlur={(m, amt) => void commitChatDefaultEntry(chat, m, amt)}
+                    onModeChange={(m, amt) => void commitChatDefaultEntry(chat, m, amt)}
                   />
                 </td>
               </tr>
