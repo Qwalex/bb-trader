@@ -41,7 +41,7 @@ const SECTION_TITLE_STYLE = {
 } as const;
 
 const KIND_TITLE_STYLE = {
-  fontSize: '0.9rem',
+  fontSize: '0.8rem',
   display: 'inline-block',
   marginBottom: '0.25rem',
   padding: '0.15rem 0.45rem',
@@ -479,7 +479,6 @@ export default function FiltersPage() {
             >
               <div
                 style={{
-                  display: 'flex',
                   justifyContent: 'space-between',
                   gap: '0.5rem',
                   alignItems: 'center',

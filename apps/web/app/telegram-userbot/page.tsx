@@ -1,13 +1,12 @@
 'use client';
 
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 
 import { EntrySizingControl } from '../components/EntrySizingControl';
 import { UserbotMessageCard } from '../components/UserbotMessageCard';
 import { getApiBase } from '../../lib/api';
 import type { EntrySizingMode } from '../../lib/entry-sizing';
 import { parseStoredEntry, serializeEntry } from '../../lib/entry-sizing';
-import { formatTimeRu } from '../../lib/datetime';
 
 type BotStatus = {
   connected: boolean;
@@ -84,6 +83,10 @@ export default function TelegramUserbotPage() {
   const [status, setStatus] = useState<BotStatus | null>(null);
   const [chats, setChats] = useState<UserbotChat[]>([]);
   const [metrics, setMetrics] = useState<TodayMetrics | null>(null);
+  const [sourceStatsBySource, setSourceStatsBySource] = useState<
+    Record<string, { winrate: number; totalPnl: number }>
+  >({});
+  const sourceStatsInFlightRef = useRef<Set<string>>(new Set());
   const [search, setSearch] = useState('');
   const [onlySignals, setOnlySignals] = useState(true);
   const [groupByChat, setGroupByChat] = useState(true);
@@ -160,6 +163,61 @@ export default function TelegramUserbotPage() {
       }))
       .sort((a, b) => a.chatId.localeCompare(b.chatId));
   }, [filteredRecent, groupByChat]);
+
+  useEffect(() => {
+    if (!groupByChat || !recentByChatAccordion) return;
+
+    const sources = Array.from(
+      new Set(
+        recentByChatAccordion
+          .map((g) => chatTitleById.get(g.chatId) ?? g.chatId)
+          .map((s) => s.trim())
+          .filter(Boolean),
+      ),
+    );
+    if (sources.length === 0) return;
+
+    const missing = sources.filter((s) => sourceStatsBySource[s] == null).filter((s) => !sourceStatsInFlightRef.current.has(s));
+    if (missing.length === 0) return;
+
+    for (const s of missing) sourceStatsInFlightRef.current.add(s);
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const results = await Promise.all(
+          missing.map(async (source) => {
+            const res = await fetch(
+              `${getApiBase()}/orders/stats?source=${encodeURIComponent(source)}`,
+            );
+            if (!res.ok) {
+              return { source, winrate: 0, totalPnl: 0 };
+            }
+            const j = (await res.json()) as { winrate?: number; totalPnl?: number };
+            return {
+              source,
+              winrate: typeof j.winrate === 'number' ? j.winrate : 0,
+              totalPnl: typeof j.totalPnl === 'number' ? j.totalPnl : 0,
+            };
+          }),
+        );
+
+        if (cancelled) return;
+        setSourceStatsBySource((prev) => ({
+          ...prev,
+          ...Object.fromEntries(
+            results.map((r) => [r.source, { winrate: r.winrate, totalPnl: r.totalPnl }]),
+          ),
+        }));
+      } finally {
+        for (const s of missing) sourceStatsInFlightRef.current.delete(s);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [groupByChat, recentByChatAccordion, chatTitleById, sourceStatsBySource]);
 
   async function loadAll() {
     const [s, c, m, raw] = await Promise.all([
@@ -313,10 +371,6 @@ export default function TelegramUserbotPage() {
   return (
     <>
       <h1 className="pageTitle">Telegram Userbot</h1>
-      <p style={{ color: 'var(--muted)', marginBottom: '1rem' }}>
-        Userbot читает сообщения в выбранных группах, отделяет сигналы от результатов и
-        отправляет сигналы в существующий pipeline (OpenRouter -&gt; Bybit).
-      </p>
       {msg && (
         <p className={`msg ${msg.type === 'ok' ? 'ok' : 'err'}`} style={{ marginBottom: '1rem' }}>
           {msg.text}
@@ -365,7 +419,7 @@ export default function TelegramUserbotPage() {
                 ? `${status.balanceGuard.totalBalanceUsd.toFixed(2)}$`
                 : '—'}
             </div>
-            <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
+            <p style={{ color: 'var(--muted)', marginTop: '0.5rem', fontSize: '0.8rem' }}>
               Суммарный USDT
             </p>
           </div>
@@ -379,7 +433,7 @@ export default function TelegramUserbotPage() {
                 ? `${status.balanceGuard.balanceUsd.toFixed(2)}$`
                 : '—'}
             </div>
-            <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
+            <p style={{ color: 'var(--muted)', marginTop: '0.5rem', fontSize: '0.8rem' }}>
               Порог автоторговли: {(status?.balanceGuard?.minBalanceUsd ?? 3).toFixed(2)}$
             </p>
           </div>
@@ -390,7 +444,7 @@ export default function TelegramUserbotPage() {
               `Автоматическая установка ордеров приостановлена: доступный баланс ниже порога ${(status?.balanceGuard?.minBalanceUsd ?? 3).toFixed(2)}$`}
           </p>
         )}
-        <p style={{ color: 'var(--muted)', marginTop: '0.35rem' }}>
+        <p style={{ color: 'var(--muted)', marginTop: '0.5rem' }}>
           Обработка сообщений: только за текущий день.
         </p>
       </div>
@@ -629,8 +683,8 @@ export default function TelegramUserbotPage() {
           <div className="value">{metrics?.noSignals ?? 0}</div>
         </div>
       </div>
-
-      <div className="card" style={{ marginBottom: '1rem' }}>
+      <div style={{ height: 30 }} ></div>
+      <div>
         <h3 style={{ marginBottom: '0.5rem' }}>Последние сообщения</h3>
         <div className="filters" style={{ marginBottom: '0.75rem' }}>
           <label className="inlineCheckboxLabel">
@@ -656,12 +710,26 @@ export default function TelegramUserbotPage() {
           <div className="userbotRecentScroll">
             {recentByChatAccordion.map((group) => {
               const chatTitle = chatTitleById.get(group.chatId) ?? group.chatId;
+              const chatTitleKey = chatTitle.trim();
               const rows = group.rows;
+              const st = sourceStatsBySource[chatTitleKey];
+              const pnlStr =
+                st?.totalPnl != null
+                  ? `${st.totalPnl >= 0 ? '+' : ''}${st.totalPnl.toFixed(2)}`
+                  : '—';
+              const winrateStr = st ? `${st.winrate.toFixed(1)}%` : '—';
               return (
                 <details key={group.chatId} className="userbotRecentGroup">
                   <summary title={group.chatId}>
                     <span>{chatTitle}</span>
-                    <span className="userbotRecentGroupBadge">{rows.length} сообщ.</span>
+                    <span
+                      className="userbotRecentGroupBadge"
+                      style={{ display: 'flex', gap: '0.65rem', alignItems: 'baseline' }}
+                    >
+                      <span>{rows.length} сообщ.</span>
+                      <span title={`PnL: ${pnlStr}`}>PnL {pnlStr}</span>
+                      <span title={`Winrate: ${winrateStr}`}>WR {winrateStr}</span>
+                    </span>
                   </summary>
                   <div className="userbotMessageCardList">
                     {rows.map((row, idx) => {
@@ -936,14 +1004,6 @@ export default function TelegramUserbotPage() {
           Найдено: {filteredChats.length} из {chats.length}
         </p>
       )}
-
-      <div className="userbotSourcesBlock">
-        <h3 className="sectionTitle">Группы и дефолты по источникам</h3>
-        <p className="userbotSourcesBlockIntro">
-          Для каждого чата можно задать своё плечо и сумму входа. Пустое поле — подставляются общие
-          значения из блока выше.
-        </p>
-      </div>
 
       <div className="userbotChatCards">
         {chats.length === 0 && (
