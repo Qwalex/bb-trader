@@ -6,6 +6,18 @@ import { PwaRegister } from './components/PwaRegister';
 
 import './globals.css';
 
+function normalizeBasePath(raw: string | undefined): string {
+  const t = (raw ?? '').trim();
+  if (!t || t === '/') return '';
+  return (t.startsWith('/') ? t : `/${t}`).replace(/\/+$/, '');
+}
+
+const basePath = normalizeBasePath(process.env.NEXT_PUBLIC_BASE_PATH);
+function withBasePath(url: string): string {
+  if (!url.startsWith('/')) return url;
+  return `${basePath}${url}`;
+}
+
 const geistSans = localFont({
   src: './fonts/GeistVF.woff',
   variable: '--font-geist-sans',
@@ -19,7 +31,7 @@ export const metadata: Metadata = {
   title: 'SignalsBot',
   description: 'Полуавтоматическая торговля по сигналам',
   applicationName: 'SignalsBot',
-  manifest: '/manifest.webmanifest',
+  manifest: withBasePath('/manifest.webmanifest'),
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',
@@ -27,12 +39,28 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
-      { url: '/icons/icons/icon-192x192.png', type: 'image/png', sizes: '192x192' },
-      { url: '/icons/icons/icon-512x512.png', type: 'image/png', sizes: '512x512' },
+      {
+        url: withBasePath('/icons/icons/icon-192x192.png'),
+        type: 'image/png',
+        sizes: '192x192',
+      },
+      {
+        url: withBasePath('/icons/icons/icon-512x512.png'),
+        type: 'image/png',
+        sizes: '512x512',
+      },
     ],
     apple: [
-      { url: '/icons/icons/icon-152x152.png', type: 'image/png', sizes: '152x152' },
-      { url: '/icons/icons/icon-192x192.png', type: 'image/png', sizes: '192x192' },
+      {
+        url: withBasePath('/icons/icons/icon-152x152.png'),
+        type: 'image/png',
+        sizes: '152x152',
+      },
+      {
+        url: withBasePath('/icons/icons/icon-192x192.png'),
+        type: 'image/png',
+        sizes: '192x192',
+      },
     ],
   },
 };
