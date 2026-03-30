@@ -681,7 +681,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async handleMenuSummary(ctx: Context): Promise<void> {
+  private async handleMenuSummary(
+    ctx: Context,
+    opts?: { edit?: { chatId: number; messageId: number } },
+  ): Promise<void> {
     const details = await this.bybit.getUnifiedUsdtBalanceDetails();
     const balStr =
       details !== undefined && Number.isFinite(details.availableUsd)
@@ -721,17 +724,28 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const refreshKb = Markup.inlineKeyboard([
       [Markup.button.callback('Обновить сводку', 'menu_refresh:summary')],
     ]);
-    for (let i = 0; i < parts.length; i++) {
-      const chunk = parts[i];
-      if (chunk === undefined) {
-        continue;
+    const first = parts[0] ?? lines;
+    const body =
+      parts.length > 1
+        ? `${first}\n\n<i>…сокращено (слишком длинная сводка для одного сообщения)</i>`
+        : first;
+
+    if (opts?.edit) {
+      try {
+        await ctx.telegram.editMessageText(
+          opts.edit.chatId,
+          opts.edit.messageId,
+          undefined,
+          body,
+          { parse_mode: 'HTML', ...refreshKb },
+        );
+        return;
+      } catch {
+        // Если нельзя редактировать (старое/удалено/нет прав) — шлём новую сводку
       }
-      const isFirst = i === 0;
-      await ctx.reply(chunk, {
-        parse_mode: 'HTML',
-        ...(isFirst ? refreshKb : {}),
-      });
     }
+
+    await ctx.reply(body, { parse_mode: 'HTML', ...refreshKb });
   }
 
   private formatRatingSection(
@@ -1102,7 +1116,15 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     this.bot.action(/^menu_refresh:summary$/, async (ctx) => {
       await ctx.answerCbQuery('Обновляю…');
-      await this.handleMenuSummary(ctx);
+      const m = ctx.callbackQuery?.message;
+      // Пришло не из сообщения (например inline) — просто отправим новую сводку
+      if (!m || !('message_id' in m) || !m.chat || typeof m.chat.id !== 'number') {
+        await this.handleMenuSummary(ctx);
+        return;
+      }
+      const chatId = m.chat.id;
+      const messageId = m.message_id;
+      await this.handleMenuSummary(ctx, { edit: { chatId, messageId } });
     });
 
     this.bot.action(/^ev:(.+)$/i, async (ctx) => {
