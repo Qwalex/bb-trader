@@ -540,6 +540,9 @@ export class OrdersService {
         totalClosed: 0,
         totalPnl: 0,
         openSignals: 0,
+        avgProfitPnl: 0,
+        avgLossPnl: 0,
+        closedPerDayAvg: 0,
       };
     }
     const closed = await this.prisma.signal.findMany({
@@ -561,6 +564,34 @@ export class OrdersService {
       (acc, s) => acc + (s.realizedPnl ?? 0),
       0,
     );
+
+    const pnls = closedFiltered
+      .map((s) => s.realizedPnl)
+      .filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+    const profitPnls = pnls.filter((v) => v > 0);
+    const lossPnls = pnls.filter((v) => v < 0);
+    const avgProfitPnl =
+      profitPnls.length > 0
+        ? profitPnls.reduce((a, b) => a + b, 0) / profitPnls.length
+        : 0;
+    const avgLossPnl =
+      lossPnls.length > 0
+        ? lossPnls.reduce((a, b) => a + b, 0) / lossPnls.length
+        : 0;
+
+    const closedAtDates = closedFiltered
+      .map((s) => s.closedAt)
+      .filter((d): d is Date => d instanceof Date && !Number.isNaN(d.getTime()));
+    const now = Date.now();
+    const startMs =
+      statsResetAt?.getTime() ??
+      (closedAtDates.length > 0
+        ? Math.min(...closedAtDates.map((d) => d.getTime()))
+        : now);
+    const dayMs = 86_400_000;
+    const days = Math.max(1, Math.ceil((now - startMs) / dayMs));
+    const closedPerDayAvg = total / days;
+
     const openRows = await this.prisma.signal.findMany({
       where: {
         deletedAt: null,
@@ -580,6 +611,9 @@ export class OrdersService {
       totalClosed: total,
       totalPnl,
       openSignals: open,
+      avgProfitPnl,
+      avgLossPnl,
+      closedPerDayAvg,
     };
   }
 

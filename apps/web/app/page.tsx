@@ -14,6 +14,9 @@ type Stats = {
   totalClosed: number;
   totalPnl: number;
   openSignals: number;
+  avgProfitPnl: number;
+  avgLossPnl: number;
+  closedPerDayAvg: number;
 };
 
 type PnlPoint = { date: string; pnl: number };
@@ -129,6 +132,22 @@ export default async function Home({
     // История баланса опциональна.
   }
   const guard = userbotStatus?.balanceGuard;
+  const equity = guard?.totalBalanceUsd ?? null;
+  const wr = stats?.winrate ?? 0;
+  const avgProfit = stats?.avgProfitPnl ?? 0;
+  const avgLoss = stats?.avgLossPnl ?? 0; // отрицательное число (если есть)
+  const tradesPerDay = stats?.closedPerDayAvg ?? 0;
+
+  const avgProfitPct =
+    equity && equity > 0 ? (avgProfit / equity) * 100 : null;
+  const avgLossPct =
+    equity && equity > 0 ? (avgLoss / equity) * 100 : null;
+  const evPerTrade =
+    (wr / 100) * avgProfit + (1 - wr / 100) * avgLoss; // USDT (loss отрицательный)
+  const forecastDay = tradesPerDay * evPerTrade;
+  const forecastWeek = forecastDay * 7;
+  const forecastMonth = forecastDay * 30;
+  const forecastYear = forecastDay * 365;
 
   return (
     <>
@@ -229,6 +248,43 @@ export default async function Home({
           <div className="card">
             <h3>Открытые сигналы{source ? ' (источник)' : ''}</h3>
             <div className="value">{stats.openSignals}</div>
+          </div>
+          <div className="card">
+            <h3>Средний доход (сделка)</h3>
+            <div className="value">{stats.avgProfitPnl.toFixed(2)}</div>
+            <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
+              {avgProfitPct != null ? `${avgProfitPct.toFixed(2)}% от equity` : 'процент недоступен (нет equity)'}
+            </p>
+          </div>
+          <div className="card">
+            <h3>Средний убыток (сделка)</h3>
+            <div className="value">{stats.avgLossPnl.toFixed(2)}</div>
+            <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
+              {avgLossPct != null ? `${avgLossPct.toFixed(2)}% от equity` : 'процент недоступен (нет equity)'}
+            </p>
+          </div>
+          <div className="card">
+            <h3>Сделок в сутки (среднее)</h3>
+            <div className="value">{stats.closedPerDayAvg.toFixed(2)}</div>
+          </div>
+          <div className="card">
+            <h3>Прогноз за сутки</h3>
+            <div className="value">{Number.isFinite(forecastDay) ? forecastDay.toFixed(2) : '—'}</div>
+            <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
+              EV/сделка: {evPerTrade.toFixed(2)} · WR {wr.toFixed(1)}%
+            </p>
+          </div>
+          <div className="card">
+            <h3>Прогноз за неделю</h3>
+            <div className="value">{Number.isFinite(forecastWeek) ? forecastWeek.toFixed(2) : '—'}</div>
+          </div>
+          <div className="card">
+            <h3>Прогноз за месяц</h3>
+            <div className="value">{Number.isFinite(forecastMonth) ? forecastMonth.toFixed(2) : '—'}</div>
+          </div>
+          <div className="card">
+            <h3>Прогноз за год</h3>
+            <div className="value">{Number.isFinite(forecastYear) ? forecastYear.toFixed(2) : '—'}</div>
           </div>
           <div className="card">
             <h3>Баланс (Bybit)</h3>
