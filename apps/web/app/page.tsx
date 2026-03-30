@@ -144,10 +144,22 @@ export default async function Home({
     equity && equity > 0 ? (avgLoss / equity) * 100 : null;
   const evPerTrade =
     (wr / 100) * avgProfit + (1 - wr / 100) * avgLoss; // USDT (loss отрицательный)
-  const forecastDay = tradesPerDay * evPerTrade;
-  const forecastWeek = forecastDay * 7;
-  const forecastMonth = forecastDay * 30;
-  const forecastYear = forecastDay * 365;
+  /** Ожидаемый PnL за календарный день (USDT), далее — база для дневной доходности. */
+  const expectedPnlPerDay = tradesPerDay * evPerTrade;
+  const equityNum = equity != null && equity > 0 ? equity : null;
+  /** Дневная доходность как доля от equity: r = PnL_день / equity → баланс через n дней = equity × (1+r)^n */
+  const rDaily =
+    equityNum != null && equityNum > 0 ? expectedPnlPerDay / equityNum : null;
+
+  const compoundBalanceForecast = (days: number): number | null => {
+    if (equityNum == null || rDaily == null) return null;
+    return equityNum * Math.pow(1 + rDaily, days);
+  };
+
+  const balanceDay = compoundBalanceForecast(1);
+  const balanceWeek = compoundBalanceForecast(7);
+  const balanceMonth = compoundBalanceForecast(30);
+  const balanceYear = compoundBalanceForecast(365);
 
   return (
     <>
@@ -268,23 +280,43 @@ export default async function Home({
             <div className="value">{stats.closedPerDayAvg.toFixed(2)}</div>
           </div>
           <div className="card">
-            <h3>Прогноз за сутки</h3>
-            <div className="value">{Number.isFinite(forecastDay) ? forecastDay.toFixed(2) : '—'}</div>
+            <h3>Баланс через 1 день</h3>
+            <div className="value">
+              {balanceDay != null && Number.isFinite(balanceDay)
+                ? `${balanceDay.toFixed(2)}$`
+                : '—'}
+            </div>
             <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
-              EV/сделка: {evPerTrade.toFixed(2)} · WR {wr.toFixed(1)}%
+              EV/сделка: {evPerTrade.toFixed(2)} · WR {wr.toFixed(1)}% · ожид. PnL/день:{' '}
+              {Number.isFinite(expectedPnlPerDay) ? expectedPnlPerDay.toFixed(2) : '—'} USDT
             </p>
           </div>
           <div className="card">
-            <h3>Прогноз за неделю</h3>
-            <div className="value">{Number.isFinite(forecastWeek) ? forecastWeek.toFixed(2) : '—'}</div>
+            <h3>Баланс через 7 дней</h3>
+            <div className="value">
+              {balanceWeek != null && Number.isFinite(balanceWeek)
+                ? `${balanceWeek.toFixed(2)}$`
+                : '—'}
+            </div>
+            <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
+              Сложный %: equity × (1+r)^n, r = PnL/день ÷ equity
+            </p>
           </div>
           <div className="card">
-            <h3>Прогноз за месяц</h3>
-            <div className="value">{Number.isFinite(forecastMonth) ? forecastMonth.toFixed(2) : '—'}</div>
+            <h3>Баланс через 30 дней</h3>
+            <div className="value">
+              {balanceMonth != null && Number.isFinite(balanceMonth)
+                ? `${balanceMonth.toFixed(2)}$`
+                : '—'}
+            </div>
           </div>
           <div className="card">
-            <h3>Прогноз за год</h3>
-            <div className="value">{Number.isFinite(forecastYear) ? forecastYear.toFixed(2) : '—'}</div>
+            <h3>Баланс через 365 дней</h3>
+            <div className="value">
+              {balanceYear != null && Number.isFinite(balanceYear)
+                ? `${balanceYear.toFixed(2)}$`
+                : '—'}
+            </div>
           </div>
           <div className="card">
             <h3>Баланс (Bybit)</h3>
