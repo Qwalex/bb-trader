@@ -231,23 +231,33 @@ export default async function Home({
             <div className="value">{stats.openSignals}</div>
           </div>
           <div className="card">
-            <h3>USDT (Bybit)</h3>
+            <h3>Баланс (Bybit)</h3>
             <div className="value">
               {guard?.totalBalanceUsd != null ? `${guard.totalBalanceUsd.toFixed(2)}$` : '—'}
             </div>
-            <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>Баланс</p>
-            <p style={{ color: 'var(--muted)', marginTop: '0.5rem', fontSize: '0.85rem' }}>
-              Доступный баланс:{' '}
-              <strong style={{ color: 'var(--foreground)' }}>
-                {guard?.balanceUsd != null ? `${guard.balanceUsd.toFixed(2)}$` : '—'}
-              </strong>
+            <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
+              Суммарный USDT (equity)
             </p>
-            <p style={{ color: 'var(--muted)', marginTop: '0.25rem', fontSize: '0.8rem' }}>
-              Порог автоторговли (по доступному): {(guard?.minBalanceUsd ?? 3).toFixed(2)}$
+          </div>
+          <div className="card">
+            <h3>Доступный баланс (Bybit)</h3>
+            <div className="value">
+              {guard?.balanceUsd != null ? `${guard.balanceUsd.toFixed(2)}$` : '—'}
+            </div>
+            <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
+              Порог автоторговли: {(guard?.minBalanceUsd ?? 3).toFixed(2)}$
             </p>
           </div>
         </div>
       )}
+      <div>
+        <h2 className="pageTitle" style={{ fontSize: '1.1rem', marginTop: '1.25rem' }}>
+          Суммарный баланс USDT
+        </h2>
+        <div className="chartWrap">
+          <BalanceChart data={balanceHistory} />
+        </div>
+      </div>
       {top && (
         <div className="grid topSources" style={{ marginTop: '1rem' }}>
           <div className="card" style={{ gridColumn: 'span 5' }}>
@@ -381,15 +391,6 @@ export default async function Home({
       </h2>
       <div className="chartWrap">
         <PnlChart data={pnl} />
-      </div>
-      <h2 className="pageTitle" style={{ fontSize: '1.1rem', marginTop: '1.25rem' }}>
-        Суммарный баланс USDT (Bybit)
-      </h2>
-      <p style={{ color: 'var(--muted)', fontSize: '0.88rem', marginBottom: '0.5rem' }}>
-        История из SQLite: один снимок суммарного баланса в сутки (запись по расписанию API).
-      </p>
-      <div className="chartWrap">
-        <BalanceChart data={balanceHistory} />
       </div>
       <LiveExposurePanel />
     </>

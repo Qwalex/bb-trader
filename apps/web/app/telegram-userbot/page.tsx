@@ -289,26 +289,43 @@ export default function TelegramUserbotPage() {
           <strong>{Math.max(1, Math.round((status?.pollMs ?? 2000) / 1000))}с</strong>{' '}
           {status?.pollingInFlight ? '(идёт цикл чтения...)' : ''}
         </p>
-        <p>
-          Баланс USDT:{' '}
-          <strong>
-            {status?.balanceGuard?.totalBalanceUsd != null
-              ? `${status.balanceGuard.totalBalanceUsd.toFixed(2)}$`
-              : 'недоступен'}
-          </strong>
-        </p>
-        <p>
-          Доступный баланс:{' '}
-          <strong>
-            {status?.balanceGuard?.balanceUsd != null
-              ? `${status.balanceGuard.balanceUsd.toFixed(2)}$`
-              : '—'}
-          </strong>
-        </p>
-        <p>
-          Порог автоторговли:{' '}
-          <strong>{(status?.balanceGuard?.minBalanceUsd ?? 3).toFixed(2)}$</strong>
-        </p>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+            gap: '0.75rem',
+            marginTop: '0.75rem',
+          }}
+        >
+          <div
+            className="card"
+            style={{ margin: 0, padding: '0.85rem 1rem' }}
+          >
+            <h4 style={{ fontSize: '0.95rem', marginBottom: '0.35rem' }}>Баланс (Bybit)</h4>
+            <div style={{ fontSize: '1.35rem', fontWeight: 700 }}>
+              {status?.balanceGuard?.totalBalanceUsd != null
+                ? `${status.balanceGuard.totalBalanceUsd.toFixed(2)}$`
+                : '—'}
+            </div>
+            <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
+              Суммарный USDT
+            </p>
+          </div>
+          <div
+            className="card"
+            style={{ margin: 0, padding: '0.85rem 1rem' }}
+          >
+            <h4 style={{ fontSize: '0.95rem', marginBottom: '0.35rem' }}>Доступный баланс (Bybit)</h4>
+            <div style={{ fontSize: '1.35rem', fontWeight: 700 }}>
+              {status?.balanceGuard?.balanceUsd != null
+                ? `${status.balanceGuard.balanceUsd.toFixed(2)}$`
+                : '—'}
+            </div>
+            <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
+              Порог автоторговли: {(status?.balanceGuard?.minBalanceUsd ?? 3).toFixed(2)}$
+            </p>
+          </div>
+        </div>
         {status?.balanceGuard?.paused && (
           <p className="msg err" style={{ marginTop: '0.5rem' }}>
             {status.balanceGuard.reason ??
