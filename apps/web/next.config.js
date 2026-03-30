@@ -19,6 +19,9 @@ const nextConfig = {
   },
   allowedDevOrigins: ['http://localhost:3000'],
   basePath,
+  env: {
+    NEXT_PUBLIC_BASE_PATH: basePath,
+  },
 };
 
 export default nextConfig;
