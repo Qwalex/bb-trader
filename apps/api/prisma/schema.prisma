@@ -156,6 +156,40 @@ model TgUserbotFilterPattern {
   @@index([createdAt])
 }
 
+model TgUserbotPublishGroup {
+  id            String   @id @default(cuid())
+  title         String
+  chatId        String   @unique
+  enabled       Boolean  @default(true)
+  publishEveryN Int      @default(1)
+  signalCounter Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model TgUserbotMirrorMessage {
+  id                     String   @id @default(cuid())
+  publishGroupId         String
+  ingestId               String
+  sourceChatId           String
+  sourceMessageId        String
+  rootSourceChatId       String?
+  rootSourceMessageId    String?
+  kind                   String // signal | result | cancel
+  status                 String // posted | skipped_by_n | skipped_no_root | failed
+  targetChatId           String
+  targetMessageId        String?
+  replyToTargetMessageId String?
+  error                  String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@unique([publishGroupId, ingestId, kind])
+  @@index([publishGroupId, sourceChatId, sourceMessageId, kind])
+  @@index([publishGroupId, rootSourceChatId, rootSourceMessageId, kind])
+  @@index([createdAt])
+}
+
 model DiagnosticRun {
   id          String   @id @default(cuid())
   status      String // running | completed | failed

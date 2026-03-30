@@ -97,6 +97,30 @@ export class TelegramUserbotController {
     return this.userbot.listFilterPatterns();
   }
 
+  @Get('publish-groups')
+  async listPublishGroups() {
+    return this.userbot.listPublishGroups();
+  }
+
+  @Post('publish-groups')
+  async createOrUpdatePublishGroup(
+    @Body()
+    body: {
+      id?: string;
+      title?: string;
+      chatId?: string;
+      enabled?: boolean;
+      publishEveryN?: number;
+    },
+  ) {
+    return this.userbot.createOrUpdatePublishGroup(body);
+  }
+
+  @Post('publish-groups/:id/delete')
+  async deletePublishGroup(@Param('id') id: string) {
+    return this.userbot.deletePublishGroup(id);
+  }
+
   @Post('filters/examples')
   async createFilterExample(
     @Body()
