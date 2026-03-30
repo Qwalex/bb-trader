@@ -69,6 +69,15 @@ model Setting {
   updatedAt DateTime @updatedAt
 }
 
+/// Один снимок суммарного USDT-баланса (equity) в сутки — для графика на дашборде.
+model BalanceSnapshot {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  totalUsd  Float
+
+  @@index([createdAt])
+}
+
 model AppLog {
   id        String   @id @default(cuid())
   level     String // info | warn | error | debug

@@ -112,6 +112,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     | {
         checkedAtMs: number;
         balanceUsd: number | undefined;
+        totalBalanceUsd: number | undefined;
         minBalanceUsd: number;
       }
     | undefined;
@@ -2759,7 +2760,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         ignore: true,
         reason:
           snapshot.reason ??
-          `Баланс USDT ниже порога ${snapshot.minBalanceUsd.toFixed(2)} — сообщение пропущено`,
+          `Доступный баланс USDT ниже порога ${snapshot.minBalanceUsd.toFixed(2)} — сообщение пропущено`,
       };
     }
     return { ignore: false };
@@ -2768,6 +2769,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   private async getBalanceGuardSnapshot(): Promise<{
     minBalanceUsd: number;
     balanceUsd: number | null;
+    totalBalanceUsd: number | null;
     paused: boolean;
     reason?: string;
   }> {
@@ -2778,15 +2780,24 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     );
     const now = Date.now();
     let balanceUsd: number | undefined;
+    let totalBalanceUsd: number | undefined;
     if (
       this.balanceCheckCache &&
       now - this.balanceCheckCache.checkedAtMs < USERBOT_BALANCE_CHECK_CACHE_MS &&
       this.balanceCheckCache.minBalanceUsd === minBalanceUsd
     ) {
       balanceUsd = this.balanceCheckCache.balanceUsd;
+      totalBalanceUsd = this.balanceCheckCache.totalBalanceUsd;
     } else {
-      balanceUsd = await this.bybit.getUnifiedUsdtBalance();
-      this.balanceCheckCache = { checkedAtMs: now, balanceUsd, minBalanceUsd };
+      const details = await this.bybit.getUnifiedUsdtBalanceDetails();
+      balanceUsd = details?.availableUsd;
+      totalBalanceUsd = details?.totalUsd;
+      this.balanceCheckCache = {
+        checkedAtMs: now,
+        balanceUsd,
+        totalBalanceUsd,
+        minBalanceUsd,
+      };
     }
 
     const paused =
@@ -2797,11 +2808,12 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       balanceUsd !== undefined &&
       Number.isFinite(balanceUsd) &&
       balanceUsd < minBalanceUsd
-        ? `Автоматическая установка ордеров приостановлена: баланс ${balanceUsd.toFixed(2)}$ ниже допустимого порога ${minBalanceUsd.toFixed(2)}$`
+        ? `Автоматическая установка ордеров приостановлена: доступный баланс ${balanceUsd.toFixed(2)}$ ниже порога ${minBalanceUsd.toFixed(2)}$`
         : undefined;
     return {
       minBalanceUsd,
       balanceUsd: balanceUsd ?? null,
+      totalBalanceUsd: totalBalanceUsd ?? null,
       paused,
       reason,
     };

@@ -4,6 +4,7 @@ import { AppLogModule } from '../app-log/app-log.module';
 import { OrdersModule } from '../orders/orders.module';
 import { SettingsModule } from '../settings/settings.module';
 import { TelegramModule } from '../telegram/telegram.module';
+import { BalanceSnapshotService } from './balance-snapshot.service';
 import { BybitController } from './bybit.controller';
 import { BybitPollService } from './bybit-poll.service';
 import { BybitService } from './bybit.service';
@@ -16,7 +17,7 @@ import { BybitService } from './bybit.service';
     AppLogModule,
   ],
   controllers: [BybitController],
-  providers: [BybitService, BybitPollService],
-  exports: [BybitService],
+  providers: [BybitService, BybitPollService, BalanceSnapshotService],
+  exports: [BybitService, BalanceSnapshotService],
 })
 export class BybitModule {}

@@ -30,6 +30,7 @@ type BotStatus = {
   balanceGuard?: {
     minBalanceUsd: number;
     balanceUsd: number | null;
+    totalBalanceUsd: number | null;
     paused: boolean;
     reason?: string;
   };
@@ -266,7 +267,7 @@ export default function TelegramUserbotPage() {
       {status?.balanceGuard?.paused && (
         <p className="msg err" style={{ marginBottom: '1rem' }}>
           {status.balanceGuard.reason ??
-            `Автоматическая установка ордеров приостановлена: баланс ниже допустимого порога ${(status?.balanceGuard?.minBalanceUsd ?? 3).toFixed(2)}$`}
+            `Автоматическая установка ордеров приостановлена: доступный баланс ниже порога ${(status?.balanceGuard?.minBalanceUsd ?? 3).toFixed(2)}$`}
         </p>
       )}
       <div className="card" style={{ marginBottom: '1rem' }}>
@@ -291,9 +292,17 @@ export default function TelegramUserbotPage() {
         <p>
           Баланс USDT:{' '}
           <strong>
+            {status?.balanceGuard?.totalBalanceUsd != null
+              ? `${status.balanceGuard.totalBalanceUsd.toFixed(2)}$`
+              : 'недоступен'}
+          </strong>
+        </p>
+        <p>
+          Доступный баланс:{' '}
+          <strong>
             {status?.balanceGuard?.balanceUsd != null
               ? `${status.balanceGuard.balanceUsd.toFixed(2)}$`
-              : 'недоступен'}
+              : '—'}
           </strong>
         </p>
         <p>
@@ -303,7 +312,7 @@ export default function TelegramUserbotPage() {
         {status?.balanceGuard?.paused && (
           <p className="msg err" style={{ marginTop: '0.5rem' }}>
             {status.balanceGuard.reason ??
-              `Автоматическая установка ордеров приостановлена: баланс ниже допустимого порога ${(status?.balanceGuard?.minBalanceUsd ?? 3).toFixed(2)}$`}
+              `Автоматическая установка ордеров приостановлена: доступный баланс ниже порога ${(status?.balanceGuard?.minBalanceUsd ?? 3).toFixed(2)}$`}
           </p>
         )}
         <p style={{ color: 'var(--muted)', marginTop: '0.35rem' }}>

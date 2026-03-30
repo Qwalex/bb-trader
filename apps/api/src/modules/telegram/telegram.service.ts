@@ -676,10 +676,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async handleMenuSummary(ctx: Context): Promise<void> {
-    const balance = await this.bybit.getUnifiedUsdtBalance();
+    const details = await this.bybit.getUnifiedUsdtBalanceDetails();
     const balStr =
-      balance !== undefined && Number.isFinite(balance)
-        ? `${balance.toFixed(2)} USDT`
+      details !== undefined && Number.isFinite(details.availableUsd)
+        ? `баланс ${details.totalUsd.toFixed(2)} · доступный баланс ${details.availableUsd.toFixed(2)} USDT`
         : '—';
     const stats = await this.orders.getDashboardStats();
     const pnlDay = await this.orders.getPnlSeries('day');
@@ -693,7 +693,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     let lines =
       `<b>📊 Сводка</b>\n` +
       `<i>Как на дашборде · все источники</i>\n\n` +
-      `<b>💵 Баланс</b> (Bybit)\n<code>${this.tgEsc(balStr)}</code>\n\n` +
+      `<b>💵 USDT</b> (Bybit)\n<code>${this.tgEsc(balStr)}</code>\n\n` +
       `<b>📅 PnL за сегодня</b> (закрытые)\n<code>${this.tgEsc(todayPnlStr)}</code>\n\n` +
       `<b>📈 Winrate</b>\n<code>${stats.winrate.toFixed(1)}%</code>\n\n` +
       `<b>Σ PnL всего</b>\n<code>${stats.totalPnl.toFixed(2)}</code>\n\n` +
@@ -801,7 +801,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           where: { createdAt: { gte: start }, status: 'parse_error' },
         }),
       ]);
-    const balance = await this.bybit.getUnifiedUsdtBalance();
+    const details = await this.bybit.getUnifiedUsdtBalanceDetails();
+    const balance = details?.availableUsd;
+    const totalBal = details?.totalUsd;
     const minBal = Number(minBalRaw ?? '3');
     const paused =
       balance !== undefined &&
@@ -831,8 +833,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       `├ Всего сообщений: <b>${ingestTotal}</b>\n` +
       `├ Класс «сигнал»: <b>${ingestSignal}</b> · placed: <b>${ingestPlaced}</b>\n` +
       `└ parse_incomplete: <b>${parseIncomplete}</b> · parse_error: <b>${parseError}</b>\n\n` +
-      `<b>Баланс</b>\n` +
-      `├ USDT: <code>${balance !== undefined ? balance.toFixed(2) : '—'}</code>\n` +
+      `<b>Баланс USDT</b>\n` +
+      `├ Баланс: <code>${totalBal !== undefined ? totalBal.toFixed(2) : '—'}</code>\n` +
+      `├ Доступный баланс: <code>${balance !== undefined ? balance.toFixed(2) : '—'}</code>\n` +
       `├ Порог: <code>${Number.isFinite(minBal) ? minBal.toFixed(2) : '—'}</code>\n` +
       `└ Пауза автоторговли: <b>${paused ? 'да' : 'нет'}</b>\n\n` +
       `<b>Bybit</b>\n` +
@@ -1372,10 +1375,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
             if (text === '/stats' || text === '/сводка') {
               await this.handleMenuSummary(ctx);
             } else if (text === '/balance' || text === '/баланс') {
-              const b = await this.bybit.getUnifiedUsdtBalance();
+              const d = await this.bybit.getUnifiedUsdtBalanceDetails();
               await ctx.reply(
-                b !== undefined && Number.isFinite(b)
-                  ? `Баланс USDT: ${b.toFixed(2)}`
+                d !== undefined && Number.isFinite(d.availableUsd)
+                  ? `Баланс: ${d.totalUsd.toFixed(2)} USDT\nДоступный баланс: ${d.availableUsd.toFixed(2)} USDT`
                   : 'Баланс недоступен (проверьте ключи Bybit).',
               );
             } else if (text === '/diag' || text === '/диагностика') {

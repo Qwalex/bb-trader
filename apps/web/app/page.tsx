@@ -1,3 +1,4 @@
+import { BalanceChart, type BalancePoint } from './components/BalanceChart';
 import { PnlChart } from './components/PnlChart';
 import { LiveExposurePanel } from './components/LiveExposurePanel';
 
@@ -41,6 +42,7 @@ type UserbotStatus = {
   balanceGuard?: {
     minBalanceUsd: number;
     balanceUsd: number | null;
+    totalBalanceUsd: number | null;
     paused: boolean;
     reason?: string;
   };
@@ -114,10 +116,17 @@ export default async function Home({
   } catch (e) {
     err = e instanceof Error ? e.message : 'Ошибка API';
   }
+  let balanceHistory: BalancePoint[] = [];
   try {
     userbotStatus = await fetchJson<UserbotStatus>('/telegram-userbot/status');
   } catch {
     // Userbot status is optional for dashboard render.
+  }
+  try {
+    const bh = await fetchJson<{ points: BalancePoint[] }>('/bybit/balance-history?days=30');
+    balanceHistory = bh.points ?? [];
+  } catch {
+    // История баланса опциональна.
   }
   const guard = userbotStatus?.balanceGuard;
 
@@ -132,7 +141,7 @@ export default async function Home({
       {guard?.paused && (
         <p className="msg err" style={{ marginBottom: '1rem' }}>
           {guard.reason ??
-            `Автоматическая установка ордеров приостановлена: баланс ниже допустимого порога ${guard.minBalanceUsd.toFixed(2)}$`}
+            `Автоматическая установка ордеров приостановлена: доступный баланс ниже порога ${guard.minBalanceUsd.toFixed(2)}$`}
         </p>
       )}
       <form className="filters" method="get" action="/trade">
@@ -222,12 +231,19 @@ export default async function Home({
             <div className="value">{stats.openSignals}</div>
           </div>
           <div className="card">
-            <h3>Баланс USDT</h3>
+            <h3>USDT (Bybit)</h3>
             <div className="value">
-              {guard?.balanceUsd != null ? `${guard.balanceUsd.toFixed(2)}$` : '—'}
+              {guard?.totalBalanceUsd != null ? `${guard.totalBalanceUsd.toFixed(2)}$` : '—'}
             </div>
-            <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
-              Порог автоторговли: {(guard?.minBalanceUsd ?? 3).toFixed(2)}$
+            <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>Баланс</p>
+            <p style={{ color: 'var(--muted)', marginTop: '0.5rem', fontSize: '0.85rem' }}>
+              Доступный баланс:{' '}
+              <strong style={{ color: 'var(--foreground)' }}>
+                {guard?.balanceUsd != null ? `${guard.balanceUsd.toFixed(2)}$` : '—'}
+              </strong>
+            </p>
+            <p style={{ color: 'var(--muted)', marginTop: '0.25rem', fontSize: '0.8rem' }}>
+              Порог автоторговли (по доступному): {(guard?.minBalanceUsd ?? 3).toFixed(2)}$
             </p>
           </div>
         </div>
@@ -365,6 +381,15 @@ export default async function Home({
       </h2>
       <div className="chartWrap">
         <PnlChart data={pnl} />
+      </div>
+      <h2 className="pageTitle" style={{ fontSize: '1.1rem', marginTop: '1.25rem' }}>
+        Суммарный баланс USDT (Bybit)
+      </h2>
+      <p style={{ color: 'var(--muted)', fontSize: '0.88rem', marginBottom: '0.5rem' }}>
+        История из SQLite: один снимок суммарного баланса в сутки (запись по расписанию API).
+      </p>
+      <div className="chartWrap">
+        <BalanceChart data={balanceHistory} />
       </div>
       <LiveExposurePanel />
     </>

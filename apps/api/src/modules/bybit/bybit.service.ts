@@ -209,23 +209,33 @@ export class BybitService {
     });
   }
 
-  /** Текущий USDT-баланс (best-effort) для внешних guard-проверок. */
+  /** Текущий USDT-баланс (best-effort) для внешних guard-проверок — доступные средства. */
   async getUnifiedUsdtBalance(): Promise<number | undefined> {
+    const d = await this.getUnifiedUsdtBalanceDetails();
+    return d?.availableUsd;
+  }
+
+  /** Доступный и суммарный (equity) USDT в unified-кошельке. */
+  async getUnifiedUsdtBalanceDetails(): Promise<
+    { availableUsd: number; totalUsd: number } | undefined
+  > {
     const client = await this.getClient();
     if (!client) {
       return undefined;
     }
     try {
-      const balance = await this.getUsdtBalance(client);
-      return Number.isFinite(balance) ? balance : undefined;
+      const d = await this.getUsdtBalanceDetails(client);
+      return Number.isFinite(d.availableUsd) && Number.isFinite(d.totalUsd) ? d : undefined;
     } catch (e) {
-      this.logger.warn(`getUnifiedUsdtBalance failed: ${formatError(e)}`);
+      this.logger.warn(`getUnifiedUsdtBalanceDetails failed: ${formatError(e)}`);
       return undefined;
     }
   }
 
-  /** USDT balance in unified derivatives wallet (best-effort). */
-  private async getUsdtBalance(client: RestClientV5): Promise<number> {
+  /** USDT: доступно для торговли и суммарный баланс (equity / wallet). */
+  private async getUsdtBalanceDetails(
+    client: RestClientV5,
+  ): Promise<{ availableUsd: number; totalUsd: number }> {
     const accountTypes: Array<'UNIFIED' | 'CONTRACT'> = ['UNIFIED', 'CONTRACT'];
     const parseFinite = (v: unknown): number | undefined => {
       if (v == null || String(v).trim() === '') return undefined;
@@ -241,54 +251,80 @@ export class BybitService {
       const res = await client.getWalletBalance({ accountType });
       const list = res.result?.list?.[0];
       const coin = list?.coin?.find((c) => c.coin === 'USDT');
+      if (!coin) continue;
+
+      const coinRec = coin as unknown as Record<string, unknown>;
 
       // 1) Прямые поля "доступно к использованию"
       const candidates: unknown[] = [
-        coin?.availableToWithdraw,
-        (coin as Record<string, unknown> | undefined)?.availableToTransfer,
-        (coin as Record<string, unknown> | undefined)?.transferBalance,
+        coin.availableToWithdraw,
+        coinRec.availableToTransfer,
+        coinRec.transferBalance,
       ];
+      let available: number | undefined;
       for (const candidate of candidates) {
         const parsed = parseFinite(candidate);
         if (parsed !== undefined) {
-          return nonNegative(parsed) ?? parsed;
+          available = nonNegative(parsed) ?? parsed;
+          break;
         }
       }
 
-      // 2) Вычисляемый fallback доступной маржи:
-      // available ~= equity - totalOrderIM - totalPositionIM
-      const equity =
-        parseFinite(coin?.equity) ?? parseFinite(coin?.walletBalance);
-      const totalOrderIM =
-        parseFinite((coin as Record<string, unknown> | undefined)?.totalOrderIM) ?? 0;
-      const totalPositionIM =
-        parseFinite((coin as Record<string, unknown> | undefined)?.totalPositionIM) ?? 0;
-      if (equity !== undefined) {
-        const computedAvailable = equity - totalOrderIM - totalPositionIM;
-        const normalized = nonNegative(computedAvailable);
-        if (normalized !== undefined) {
-          return normalized;
+      // 2) Вычисляемый fallback доступной маржи
+      if (available === undefined) {
+        const equity =
+          parseFinite(coin.equity) ?? parseFinite(coin.walletBalance);
+        const totalOrderIM = parseFinite(coinRec.totalOrderIM) ?? 0;
+        const totalPositionIM = parseFinite(coinRec.totalPositionIM) ?? 0;
+        if (equity !== undefined) {
+          const computedAvailable = equity - totalOrderIM - totalPositionIM;
+          available = nonNegative(computedAvailable);
         }
       }
 
-      // 3) Последний fallback: суммарные/кошелек поля
-      const fallbackCandidates: unknown[] = [
-        list?.totalAvailableBalance,
-        coin?.availableToBorrow,
-        coin?.walletBalance,
-        coin?.equity,
-        list?.totalWalletBalance,
-        list?.totalEquity,
-      ];
-      for (const candidate of fallbackCandidates) {
-        const parsed = parseFinite(candidate);
-        if (parsed !== undefined) {
-          return nonNegative(parsed) ?? parsed;
+      // 3) Последний fallback для доступного
+      if (available === undefined) {
+        const fallbackCandidates: unknown[] = [
+          list?.totalAvailableBalance,
+          coin.availableToBorrow,
+          coin.walletBalance,
+          coin.equity,
+          list?.totalWalletBalance,
+          list?.totalEquity,
+        ];
+        for (const candidate of fallbackCandidates) {
+          const parsed = parseFinite(candidate);
+          if (parsed !== undefined) {
+            available = nonNegative(parsed) ?? parsed;
+            break;
+          }
         }
+      }
+
+      if (available !== undefined && Number.isFinite(available)) {
+        const totalUsdRaw =
+          parseFinite(coin.equity) ??
+          parseFinite(coin.walletBalance) ??
+          parseFinite(list?.totalEquity) ??
+          parseFinite(list?.totalWalletBalance);
+        const totalFromEquity = nonNegative(totalUsdRaw) ?? totalUsdRaw;
+        const totalUsd =
+          totalFromEquity !== undefined &&
+          Number.isFinite(totalFromEquity) &&
+          totalFromEquity > 0
+            ? Math.max(totalFromEquity, available)
+            : available;
+        return { availableUsd: available, totalUsd };
       }
     }
 
     throw new Error('USDT balance is unavailable for current Bybit account');
+  }
+
+  /** USDT balance in unified derivatives wallet (best-effort) — только доступно. */
+  private async getUsdtBalance(client: RestClientV5): Promise<number> {
+    const d = await this.getUsdtBalanceDetails(client);
+    return d.availableUsd;
   }
 
   /** Лот, мин. объём и шаг цены (для TP limit / trading-stop). */

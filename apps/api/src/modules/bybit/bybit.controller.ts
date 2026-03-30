@@ -1,14 +1,26 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 
+import { BalanceSnapshotService } from './balance-snapshot.service';
 import { BybitService } from './bybit.service';
 
 @Controller('bybit')
 export class BybitController {
-  constructor(private readonly bybit: BybitService) {}
+  constructor(
+    private readonly bybit: BybitService,
+    private readonly balanceSnapshots: BalanceSnapshotService,
+  ) {}
 
   @Get('live')
   async live() {
     return this.bybit.getLiveExposureSnapshot();
+  }
+
+  /** Дневные снимки суммарного USDT в SQLite (cron), без запросов к Bybit. Дашборд: график. */
+  @Get('balance-history')
+  async balanceHistory(@Query('days') days?: string) {
+    const d = days != null ? Number.parseInt(String(days), 10) : 30;
+    const points = await this.balanceSnapshots.listRecent(Number.isFinite(d) ? d : 30);
+    return { points };
   }
 
   @Get('signal/:signalId')
