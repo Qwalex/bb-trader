@@ -772,6 +772,238 @@ h1.pageTitle {
   background: rgba(255, 255, 255, 0.02);
 }
 
+/* Userbot: последние сообщения — карточки */
+.userbotRecentScroll {
+  max-height: min(75vh, 720px);
+  overflow-y: auto;
+  padding-right: 0.15rem;
+}
+
+.userbotRecentGroup {
+  margin-bottom: 1rem;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+}
+
+.userbotRecentGroup > summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  padding: 0.85rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-weight: 600;
+  background: var(--card);
+  border-bottom: 1px solid transparent;
+}
+
+.userbotRecentGroup[open] > summary {
+  border-bottom-color: var(--border);
+}
+
+.userbotRecentGroup > summary::-webkit-details-marker {
+  display: none;
+}
+
+.userbotRecentGroupBadge {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.userbotMessageCardList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem 1rem;
+}
+
+.userbotMessageCard {
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  padding: 0.85rem 1rem;
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.08);
+}
+
+.userbotMessageCardTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.userbotMessageCardTopMain {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.userbotMessageCardTime {
+  font-weight: 600;
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.userbotMessageCardClass {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+
+.userbotMessageCardMsgId {
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.userbotMessageCardChatLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.6rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.userbotMessageCardChatTitle {
+  font-weight: 500;
+  color: var(--foreground);
+}
+
+.userbotMessageCardChatId {
+  font-size: 0.75rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.userbotMessageCardText {
+  margin-bottom: 0.65rem;
+  min-width: 0;
+}
+
+.userbotMessageCardDetails {
+  margin: 0;
+}
+
+.userbotMessageCardSummary {
+  cursor: pointer;
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+.userbotMessageCardFullText {
+  margin-top: 0.4rem;
+  white-space: pre-wrap;
+  line-height: 1.45;
+  font-size: 0.85rem;
+  color: var(--muted);
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.userbotMessageCardNoText {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.userbotMessageCardBottom {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding-top: 0.65rem;
+  border-top: 1px dashed var(--border);
+}
+
+@media (min-width: 640px) {
+  .userbotMessageCardBottom {
+    flex-direction: row;
+    align-items: flex-end;
+    justify-content: space-between;
+  }
+}
+
+.userbotMessageCardPipeline {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--muted);
+  flex: 1;
+  min-width: 0;
+}
+
+.userbotMessageCardActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.userbotMessageDayDivider {
+  text-align: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  padding: 0.45rem 0.5rem;
+  margin: 0.15rem 0;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.userbotMessageChatDivider {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding: 0.65rem 0.85rem;
+  margin-bottom: 0.5rem;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.userbotMessageChatDividerTitle {
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.userbotMessageChatDividerMeta {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.userbotMessageListFlat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.userbotRecentEmpty {
+  color: var(--muted);
+  text-align: center;
+  padding: 2rem 1rem;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+}
+
 .userbotThParam {
   width: 1%;
   white-space: nowrap;
