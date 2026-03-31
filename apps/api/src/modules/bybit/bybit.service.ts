@@ -2755,9 +2755,14 @@ export class BybitService {
     rows: unknown[],
     ourIds: Set<string>,
     signalCreatedAt: Date,
+    signalClosedAt?: Date | null,
   ): { totalPnl: number; hadParsedPnl: boolean } {
     const createdAtMs = signalCreatedAt.getTime();
     const createdFloorMs = createdAtMs - 60_000;
+    const closedCeilMs =
+      signalClosedAt && Number.isFinite(signalClosedAt.getTime())
+        ? signalClosedAt.getTime() + 5 * 60_000
+        : undefined;
 
     const parsedRows = rows.map((row) => {
       const orderId = BybitService.extractClosedPnlOrderId(row);
@@ -2778,6 +2783,13 @@ export class BybitService {
     );
 
     const candidates = parsedRows.filter((r) => {
+      if (
+        closedCeilMs !== undefined &&
+        r.ts !== undefined &&
+        r.ts > closedCeilMs
+      ) {
+        return false;
+      }
       if (r.orderId.length > 0 && ourIds.has(r.orderId)) {
         return true;
       }
@@ -2854,8 +2866,13 @@ export class BybitService {
     symbol: string;
     direction: string;
     createdAt: Date;
+    closedAt?: Date | null;
   }): Promise<number | undefined> {
     const createdFloorMs = params.createdAt.getTime() - 60_000;
+    const closedCeilMs =
+      params.closedAt && Number.isFinite(params.closedAt.getTime())
+        ? params.closedAt.getTime() + 5 * 60_000
+        : undefined;
     const rows: Array<{ side: string; qty: number; value: number; fee: number; ts: number }> = [];
     let cursor: string | undefined;
     const MAX_PAGES = 8;
@@ -2874,6 +2891,9 @@ export class BybitService {
       for (const ex of list) {
         const ts = Number(ex.execTime ?? 0);
         if (!Number.isFinite(ts) || ts < createdFloorMs) {
+          continue;
+        }
+        if (closedCeilMs !== undefined && ts > closedCeilMs) {
           continue;
         }
         const qty = Number.parseFloat(String(ex.execQty ?? 0));
@@ -2927,10 +2947,10 @@ export class BybitService {
     if (!Number.isFinite(avgBuy) || !Number.isFinite(avgSell)) {
       return undefined;
     }
-    const pnl =
-      params.direction === 'short'
-        ? (avgBuy - avgSell) * matchedQty
-        : (avgSell - avgBuy) * matchedQty;
+    // Для matchedQty достаточно одной формулы:
+    // realized PnL = sellValue - buyValue (до комиссий),
+    // и для long, и для short.
+    const pnl = (avgSell - avgBuy) * matchedQty;
     const netPnl = pnl - totalFees;
     return Number.isFinite(netPnl) ? netPnl : undefined;
   }
@@ -3047,6 +3067,7 @@ export class BybitService {
           rows,
           ourIds,
           sig.createdAt,
+          sig.closedAt,
         );
 
         let nextPnl: number | undefined;
@@ -3061,6 +3082,7 @@ export class BybitService {
             symbol,
             direction: sig.direction,
             createdAt: sig.createdAt,
+            closedAt: sig.closedAt,
           });
         }
         if (nextPnl === undefined) {
@@ -3380,6 +3402,7 @@ export class BybitService {
                 symbol: symNorm,
                 direction: fresh.direction,
                 createdAt: fresh.createdAt,
+                closedAt: new Date(),
               });
               if (estimatedPnl !== undefined) {
                 await this.orders.updateSignalStatus(fresh.id, {
