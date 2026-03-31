@@ -2694,6 +2694,16 @@ export class BybitService {
     return v != null && String(v).length > 0 ? String(v) : '';
   }
 
+  private static parseFiniteNumber(
+    value: unknown,
+  ): number | undefined {
+    if (value == null || String(value).trim() === '') {
+      return undefined;
+    }
+    const parsed = Number.parseFloat(String(value));
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+
   /** В разных эндпоинтах Bybit время приходит в разных полях/форматах. */
   private static extractClosedPnlTimestampMs(
     row: unknown,
@@ -2737,12 +2747,15 @@ export class BybitService {
     const parsedRows = rows.map((row) => {
       const orderId = BybitService.extractClosedPnlOrderId(row);
       const ts = BybitService.extractClosedPnlTimestampMs(row);
-      const cp = (row as { closedPnl?: unknown }).closedPnl;
-      const pnl =
-        cp != null && String(cp).trim() !== ''
-          ? Number.parseFloat(String(cp))
-          : Number.NaN;
-      return { orderId, ts, pnl };
+      const rec = row as Record<string, unknown>;
+      const pnlGross =
+        BybitService.parseFiniteNumber(rec.closedPnl) ?? Number.NaN;
+      const openFee = Math.abs(BybitService.parseFiniteNumber(rec.openFee) ?? 0);
+      const closeFee = Math.abs(BybitService.parseFiniteNumber(rec.closeFee) ?? 0);
+      const execFee = Math.abs(BybitService.parseFiniteNumber(rec.execFee) ?? 0);
+      const fee = openFee + closeFee + execFee;
+      const pnlNet = Number.isFinite(pnlGross) ? pnlGross - fee : Number.NaN;
+      return { orderId, ts, pnl: pnlNet };
     });
 
     const hasTrackedRows = parsedRows.some(
@@ -2828,7 +2841,7 @@ export class BybitService {
     createdAt: Date;
   }): Promise<number | undefined> {
     const createdFloorMs = params.createdAt.getTime() - 60_000;
-    const rows: Array<{ side: string; qty: number; value: number; ts: number }> = [];
+    const rows: Array<{ side: string; qty: number; value: number; fee: number; ts: number }> = [];
     let cursor: string | undefined;
     const MAX_PAGES = 8;
 
@@ -2851,6 +2864,7 @@ export class BybitService {
         const qty = Number.parseFloat(String(ex.execQty ?? 0));
         const valueRaw = Number.parseFloat(String(ex.execValue ?? 0));
         const priceRaw = Number.parseFloat(String(ex.execPrice ?? 0));
+        const feeRaw = Number.parseFloat(String(ex.execFee ?? 0));
         const value =
           Number.isFinite(valueRaw) && valueRaw > 0
             ? valueRaw
@@ -2864,6 +2878,7 @@ export class BybitService {
           side: String(ex.side ?? '').toLowerCase(),
           qty,
           value,
+          fee: Number.isFinite(feeRaw) ? Math.abs(feeRaw) : 0,
           ts,
         });
       }
@@ -2877,7 +2892,9 @@ export class BybitService {
     let buyValue = 0;
     let sellQty = 0;
     let sellValue = 0;
+    let totalFees = 0;
     for (const row of rows) {
+      totalFees += row.fee;
       if (row.side === 'buy') {
         buyQty += row.qty;
         buyValue += row.value;
@@ -2899,7 +2916,8 @@ export class BybitService {
       params.direction === 'short'
         ? (avgBuy - avgSell) * matchedQty
         : (avgSell - avgBuy) * matchedQty;
-    return Number.isFinite(pnl) ? pnl : undefined;
+    const netPnl = pnl - totalFees;
+    return Number.isFinite(netPnl) ? netPnl : undefined;
   }
 
   async recalcClosedSignalsPnl(params?: {

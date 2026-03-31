@@ -152,7 +152,7 @@ export default async function TradesPage({
           Критично для статистики: пересчёт `realizedPnl` учитывает SL, даже если у него другой
           `orderId` (dry-run → затем запись в БД).
         </p>
-        <RecalcClosedPnlButton limit={500} />
+        <RecalcClosedPnlButton limit={0} />
       </div>
       {data && (
         <>

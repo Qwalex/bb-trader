@@ -434,14 +434,30 @@ export class OrdersService {
   }
 
   async listClosedSignalsForPnlRecalc(params?: { limit?: number }) {
-    const limit = Math.min(Math.max(params?.limit ?? 200, 1), 2000);
-    return this.prisma.signal.findMany({
+    const rawLimit = params?.limit;
+    const where = {
+      deletedAt: null,
+      status: { in: ['CLOSED_WIN', 'CLOSED_LOSS', 'CLOSED_MIXED'] },
+    };
+    const include = { orders: true };
+    const orderBy = { closedAt: 'desc' as const };
+
+    // limit=0 => пересчитать все закрытые сделки (без ограничений take)
+    if (rawLimit === 0) {
+      return this.prisma.signal.findMany({
       where: {
-        deletedAt: null,
-        status: { in: ['CLOSED_WIN', 'CLOSED_LOSS', 'CLOSED_MIXED'] },
+          ...where,
       },
-      include: { orders: true },
-      orderBy: { closedAt: 'desc' },
+        include,
+        orderBy,
+      });
+    }
+
+    const limit = Math.min(Math.max(rawLimit ?? 200, 1), 2000);
+    return this.prisma.signal.findMany({
+      where,
+      include,
+      orderBy,
       take: limit,
     });
   }

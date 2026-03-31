@@ -34,6 +34,8 @@ export type TranscriptParseOverrides = {
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_SITE_URL = 'https://signals-bot.local';
 const OPENROUTER_APP_TITLE = 'SignalsBot';
+const OPENROUTER_MAX_RETRIES = 5;
+const OPENROUTER_RETRY_DELAY_MS = 1_000;
 
 const TRANSCRIPT_RESPONSE_JSON_SCHEMA = {
   type: 'object',
@@ -930,22 +932,54 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     });
 
     try {
-      const res = await client.chat.send({
-        httpReferer: OPENROUTER_SITE_URL,
-        xTitle: OPENROUTER_APP_TITLE,
-        chatGenerationParams: {
-          model,
-          models:
-            ctx.fallbackModels && ctx.fallbackModels.length > 0
-              ? [model, ...ctx.fallbackModels]
-              : undefined,
-          messages: messages as never,
-          responseFormat,
-          stream: false,
-        },
-      });
+      let res: unknown;
+      let lastError: unknown;
+      for (let attempt = 1; attempt <= OPENROUTER_MAX_RETRIES; attempt += 1) {
+        try {
+          res = await client.chat.send({
+            httpReferer: OPENROUTER_SITE_URL,
+            xTitle: OPENROUTER_APP_TITLE,
+            chatGenerationParams: {
+              model,
+              models:
+                ctx.fallbackModels && ctx.fallbackModels.length > 0
+                  ? [model, ...ctx.fallbackModels]
+                  : undefined,
+              messages: messages as never,
+              responseFormat,
+              stream: false,
+            },
+          });
+          break;
+        } catch (attemptError) {
+          lastError = attemptError;
+          const errText = this.formatOpenRouterError(attemptError);
+          this.logger.warn(
+            `OpenRouter ${ctx.operation} attempt ${attempt}/${OPENROUTER_MAX_RETRIES} failed: ${errText}`,
+          );
+          if (attempt < OPENROUTER_MAX_RETRIES) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, OPENROUTER_RETRY_DELAY_MS),
+            );
+          }
+        }
+      }
+      if (res == null) {
+        throw (
+          lastError ??
+          new Error(
+            `OpenRouter request failed after ${OPENROUTER_MAX_RETRIES} attempts`,
+          )
+        );
+      }
+      const typedRes = res as {
+        id?: string;
+        model?: string;
+        usage?: unknown;
+        choices?: Array<{ message?: { content?: unknown } }>;
+      };
 
-      const rawContent = res.choices?.[0]?.message?.content;
+      const rawContent = typedRes.choices?.[0]?.message?.content;
       const responsePreview =
         typeof rawContent === 'string'
           ? rawContent.length > 24_000
@@ -960,10 +994,10 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
         assistantContent: responsePreview,
         /** Метаданные ответа OpenRouter (без дублирования полного текста) */
         responseMeta: {
-          id: res.id,
-          model: res.model,
-          usage: res.usage,
-          choicesCount: res.choices?.length ?? 0,
+          id: typedRes.id,
+          model: typedRes.model,
+          usage: typedRes.usage,
+          choicesCount: typedRes.choices?.length ?? 0,
         },
       });
 
@@ -986,6 +1020,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
         {
           operation: ctx.operation,
           error: this.formatOpenRouterError(e),
+          retries: OPENROUTER_MAX_RETRIES,
           status: errObj.status ?? errObj.statusCode,
           responseBody: sanitizeForOpenRouterLog(
             errObj.error ?? errObj.cause ?? errObj.body,
