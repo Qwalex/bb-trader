@@ -96,6 +96,8 @@ model TgUserbotChat {
   title     String
   username  String?
   enabled   Boolean  @default(false)
+  /// Приоритет источника для замены активного сигнала: больше = приоритетнее
+  sourcePriority Int @default(0)
   /// Переопределение плеча для сигналов из этого чата; null = брать DEFAULT_LEVERAGE
   defaultLeverage Int?
   /// Дефолт суммы входа: USDT или процент от equity, как DEFAULT_ORDER_USD (например "10" или "10%"); null = только глобальная настройка

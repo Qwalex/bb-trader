@@ -81,6 +81,8 @@ type ActiveSignalLookup = {
   orderUsd: number;
   capitalPercent: number;
   source: string | null;
+  sourceChatId: string | null;
+  sourceMessageId: string | null;
 };
 
 type SourceMartingaleMap = Record<string, number>;
@@ -435,6 +437,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     ]);
     return rows.map((row) => ({
       ...row,
+      sourcePriority: this.normalizeSourcePriority((row as { sourcePriority?: number }).sourcePriority),
       martingaleMultiplier:
         bySource[row.title.trim().toLowerCase()] ?? null,
     }));
@@ -973,6 +976,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       defaultLeverage?: number | null;
       defaultEntryUsd?: string | null;
       martingaleMultiplier?: number | null;
+      sourcePriority?: number | null;
     },
   ) {
     const entryNorm =
@@ -998,24 +1002,36 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
               body.martingaleMultiplier > 1
             ? Math.round(body.martingaleMultiplier * 1_000_000) / 1_000_000
             : null;
+    const sourcePriorityNorm =
+      body.sourcePriority === undefined
+        ? undefined
+        : body.sourcePriority === null
+          ? 0
+          : Number.isFinite(body.sourcePriority)
+            ? Math.max(0, Math.floor(body.sourcePriority))
+            : 0;
 
-    const row = await this.prisma.tgUserbotChat.upsert({
+    const prismaAny = this.prisma as any;
+    const row = await prismaAny.tgUserbotChat.upsert({
       where: { chatId },
       create: {
         chatId,
         title: chatId,
         enabled: body.enabled === true,
+        sourcePriority: sourcePriorityNorm ?? 0,
         defaultLeverage: levNorm ?? null,
         defaultEntryUsd: entryNorm ?? null,
       },
       update: {
         ...(body.enabled !== undefined ? { enabled: body.enabled } : {}),
+        ...(sourcePriorityNorm !== undefined ? { sourcePriority: sourcePriorityNorm } : {}),
         ...(levNorm !== undefined ? { defaultLeverage: levNorm } : {}),
         ...(entryNorm !== undefined ? { defaultEntryUsd: entryNorm } : {}),
       },
     });
     if (martingaleNorm !== undefined) {
-      await this.setSourceMartingaleMultiplier(row.title, martingaleNorm);
+      const rowTitle = String(row?.title ?? chatId);
+      await this.setSourceMartingaleMultiplier(rowTitle, martingaleNorm);
     }
     await this.refreshEnabledChatsCache();
     return { ok: true };
@@ -1258,10 +1274,13 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         }
       }
 
-      const chatMeta = await this.prisma.tgUserbotChat.findUnique({
+      const chatMetaRaw = await (this.prisma as any).tgUserbotChat.findUnique({
         where: { chatId: ingest.chatId },
-        select: { title: true },
+        select: { title: true, sourcePriority: true },
       });
+      const chatMeta = chatMetaRaw as
+        | { title?: string | null; sourcePriority?: number | null }
+        | null;
       const groupName = chatMeta?.title?.trim() || ingest.chatId;
       const replyToMessageId = meta?.replyToMessageId?.trim() || undefined;
       const hasQuotedSource = Boolean(replyToMessageId);
@@ -1518,11 +1537,11 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       }
 
       const signal = parsed.signal;
-      signal.source = chatMeta?.title;
+      signal.source = chatMeta?.title ?? undefined;
       await this.publishSignalToMirrorGroups({
         ingest: { id: ingest.id, chatId: ingest.chatId, messageId: ingest.messageId },
         signal,
-        sourceChatTitle: chatMeta?.title,
+        sourceChatTitle: chatMeta?.title ?? undefined,
       });
       this.appendIngestStageLog('info', 'Userbot: parse produced signal', ingest, {
         pair: signal.pair,
@@ -1580,18 +1599,111 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           signal.direction,
         )
       ) {
-        this.appendIngestStageLog('warn', 'Userbot: duplicate active pair/direction', ingest, {
-          pair: signal.pair,
-          direction: signal.direction,
-        });
-        await this.updateIngest(ingest.id, {
-          classification: 'signal',
-          status: 'duplicate_signal',
-          error: `Активная позиция/сигнал по паре ${signal.pair} (${signal.direction})`,
-          aiRequest,
-          aiResponse,
-        });
-        return;
+        const incomingSourceName = (chatMeta?.title ?? ingest.chatId).trim();
+        const incomingPriority = this.normalizeSourcePriority(chatMeta?.sourcePriority);
+        const activeSignal = await this.findActiveSignalForPairAndDirection(
+          signal.pair,
+          signal.direction,
+        );
+
+        if (activeSignal) {
+          const activeSource = await this.resolveSourcePriorityForSignal(activeSignal);
+          if (incomingPriority > activeSource.priority) {
+            this.appendIngestStageLog(
+              'warn',
+              'Userbot: replacing active signal by source priority',
+              ingest,
+              {
+                pair: signal.pair,
+                direction: signal.direction,
+                incomingSourceName,
+                incomingPriority,
+                replacedSignalId: activeSignal.id,
+                replacedSourceName: activeSource.sourceName,
+                replacedPriority: activeSource.priority,
+              },
+            );
+            const closed = await this.bybit.closeSignalManually(activeSignal.id);
+            if (!closed.ok) {
+              await this.updateIngest(ingest.id, {
+                classification: 'signal',
+                status: 'duplicate_signal',
+                error: `Более приоритетный источник ${incomingSourceName} (${incomingPriority}) найден, но отмена предыдущего сигнала не удалась: ${closed.error ?? 'unknown'}`,
+                aiRequest,
+                aiResponse,
+              });
+              return;
+            }
+            const reasonText = `сигнал отменен по преоритету - ${incomingPriority} (${incomingSourceName})`;
+            await this.prisma.signalEvent.create({
+              data: {
+                signalId: activeSignal.id,
+                type: 'SIGNAL_CANCELLED_BY_SOURCE_PRIORITY',
+                payload: JSON.stringify({
+                  reason: reasonText,
+                  incomingSourceName,
+                  incomingPriority,
+                  replacedSourceName: activeSource.sourceName,
+                  replacedPriority: activeSource.priority,
+                  replacedBySignal: {
+                    sourceChatId: ingest.chatId,
+                    sourceMessageId: ingest.messageId,
+                    pair: signal.pair,
+                    direction: signal.direction,
+                  },
+                }),
+              },
+            });
+            this.appendIngestStageLog(
+              'info',
+              'Userbot: previous signal cancelled by higher-priority source',
+              ingest,
+              {
+                replacedSignalId: activeSignal.id,
+                incomingSourceName,
+                incomingPriority,
+                replacedSourceName: activeSource.sourceName,
+                replacedPriority: activeSource.priority,
+              },
+            );
+          } else {
+            this.appendIngestStageLog(
+              'warn',
+              'Userbot: duplicate blocked by source priority',
+              ingest,
+              {
+                pair: signal.pair,
+                direction: signal.direction,
+                incomingSourceName,
+                incomingPriority,
+                activeSignalId: activeSignal.id,
+                activeSourceName: activeSource.sourceName,
+                activePriority: activeSource.priority,
+              },
+            );
+            await this.updateIngest(ingest.id, {
+              classification: 'signal',
+              status: 'duplicate_signal',
+              error: `Активный сигнал по паре ${signal.pair} (${signal.direction}) имеет приоритет ${activeSource.priority} (${activeSource.sourceName ?? 'неизвестный источник'}), входящий источник ${incomingSourceName} с приоритетом ${incomingPriority} отклонен`,
+              aiRequest,
+              aiResponse,
+            });
+            return;
+          }
+        } else {
+          this.appendIngestStageLog('warn', 'Userbot: duplicate active pair/direction', ingest, {
+            pair: signal.pair,
+            direction: signal.direction,
+          });
+          await this.updateIngest(ingest.id, {
+            classification: 'signal',
+            status: 'duplicate_signal',
+            error: `Активная позиция/сигнал по паре ${signal.pair} (${signal.direction})`,
+            aiRequest,
+            aiResponse,
+          });
+          return;
+        }
       }
 
       const signalHash = this.userbotSignalHash.computeHash(signal);
@@ -2512,6 +2624,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         orderUsd: true,
         capitalPercent: true,
         source: true,
+        sourceChatId: true,
+        sourceMessageId: true,
       },
     });
     if (!signal) {
@@ -2721,6 +2835,69 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   ): Promise<string | undefined> {
     const meta = await this.fetchChatMessageMeta(chatId, messageId);
     return meta.text;
+  }
+
+  private normalizeSourcePriority(raw: unknown): number {
+    const n = Number(raw);
+    if (!Number.isFinite(n)) {
+      return 0;
+    }
+    return Math.max(0, Math.floor(n));
+  }
+
+  private async findActiveSignalForPairAndDirection(
+    pair: string,
+    direction: 'long' | 'short',
+  ): Promise<ActiveSignalLookup | null> {
+    const wantPair = normalizeTradingPair(pair);
+    const rows = await this.prisma.signal.findMany({
+      where: {
+        deletedAt: null,
+        status: { in: ['ORDERS_PLACED', 'OPEN', 'PARSED'] },
+        direction,
+      },
+      select: {
+        id: true,
+        pair: true,
+        direction: true,
+        entries: true,
+        stopLoss: true,
+        takeProfits: true,
+        leverage: true,
+        orderUsd: true,
+        capitalPercent: true,
+        source: true,
+        sourceChatId: true,
+        sourceMessageId: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return (
+      rows.find((row) => normalizeTradingPair(row.pair) === wantPair) ??
+      null
+    );
+  }
+
+  private async resolveSourcePriorityForSignal(signal: {
+    source: string | null;
+    sourceChatId: string | null;
+  }): Promise<{ priority: number; sourceName: string | null }> {
+    const sourceName = signal.source?.trim() || null;
+    const chatId = signal.sourceChatId?.trim() || null;
+    if (!chatId) {
+      return { priority: 0, sourceName };
+    }
+    const chatRaw = await (this.prisma as any).tgUserbotChat.findUnique({
+      where: { chatId },
+      select: { title: true, sourcePriority: true },
+    });
+    const chat = chatRaw as
+      | { title?: string | null; sourcePriority?: number | null }
+      | null;
+    return {
+      priority: this.normalizeSourcePriority(chat?.sourcePriority),
+      sourceName: chat?.title?.trim() || sourceName || chatId,
+    };
   }
 
   private isEntryCloseEnough(

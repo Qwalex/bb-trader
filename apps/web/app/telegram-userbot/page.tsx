@@ -45,6 +45,7 @@ type UserbotChat = {
   title: string;
   username: string | null;
   enabled: boolean;
+  sourcePriority: number;
   defaultLeverage: number | null;
   defaultEntryUsd: string | null;
   martingaleMultiplier: number | null;
@@ -1098,6 +1099,51 @@ export default function TelegramUserbotPage() {
               <code>{chat.chatId}</code>
             </div>
             <div className="userbotChatCardParams">
+              <div>
+                <span className="userbotChatCardParamLabel">Приоритет</span>
+                <input
+                  className="userbotCellInput"
+                  type="number"
+                  min={0}
+                  step={1}
+                  key={`prio-${chat.chatId}-${chat.sourcePriority ?? 0}`}
+                  defaultValue={chat.sourcePriority ?? 0}
+                  placeholder="0"
+                  title="Чем больше число, тем выше приоритет источника"
+                  onBlur={(e) => {
+                    const v = e.target.value.trim();
+                    const num = v === '' ? 0 : Number.parseInt(v, 10);
+                    if (!Number.isFinite(num) || num < 0) {
+                      setMsg({
+                        type: 'err',
+                        text: 'Приоритет: целое число не меньше 0',
+                      });
+                      return;
+                    }
+                    const normalized = Math.floor(num);
+                    if (normalized === (chat.sourcePriority ?? 0)) return;
+                    void runAction(`prio-${chat.chatId}`, async () => {
+                      const res = await fetch(
+                        `${getApiBase()}/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
+                        {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ sourcePriority: normalized }),
+                        },
+                      );
+                      if (!res.ok) {
+                        throw new Error(`Ошибка сохранения (${res.status})`);
+                      }
+                      setChats((prev) =>
+                        prev.map((row) =>
+                          row.id === chat.id ? { ...row, sourcePriority: normalized } : row,
+                        ),
+                      );
+                      setMsg({ type: 'ok', text: 'Приоритет источника сохранен' });
+                    });
+                  }}
+                />
+              </div>
               <div>
                 <span className="userbotChatCardParamLabel">Плечо</span>
                 <input
