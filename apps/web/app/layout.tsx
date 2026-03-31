@@ -86,6 +86,7 @@ export default function RootLayout({
             <Link href="/">Дашборд</Link>
             <Link href="/trades">Сделки</Link>
             <Link href="/logs">Логи</Link>
+            <Link href="/ai">AI</Link>
             <Link href="/diagnostics">Диагностика</Link>
             <Link href="/telegram-userbot">Userbot</Link>
             <Link href="/my-group">Моя группа</Link>

@@ -10,6 +10,7 @@ import { DiagnosticsController } from './diagnostics.controller';
 import { DiagnosticsMetricsVerifier } from './diagnostics.metrics-verifier';
 import { DiagnosticsService } from './diagnostics.service';
 import { DiagnosticsTraceBuilder } from './diagnostics.trace-builder';
+import { TradingAiAdvisorService } from './trading-ai-advisor.service';
 
 @Module({
   imports: [PrismaModule, SettingsModule, OrdersModule, BybitModule, TranscriptModule],
@@ -19,6 +20,7 @@ import { DiagnosticsTraceBuilder } from './diagnostics.trace-builder';
     DiagnosticsTraceBuilder,
     DiagnosticsAiService,
     DiagnosticsMetricsVerifier,
+    TradingAiAdvisorService,
   ],
 })
 export class DiagnosticsModule {}

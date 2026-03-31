@@ -10,10 +10,14 @@ import {
 } from '@nestjs/common';
 
 import { DiagnosticsService } from './diagnostics.service';
+import { TradingAiAdvisorService } from './trading-ai-advisor.service';
 
 @Controller('diagnostics')
 export class DiagnosticsController {
-  constructor(private readonly diagnostics: DiagnosticsService) {}
+  constructor(
+    private readonly diagnostics: DiagnosticsService,
+    private readonly tradingAdvisor: TradingAiAdvisorService,
+  ) {}
 
   private assertSameOriginBrowserRequest(
     hostHeader?: string,
@@ -94,5 +98,19 @@ export class DiagnosticsController {
   ) {
     this.assertSameOriginBrowserRequest(host, origin, referer, secFetchSite);
     return this.diagnostics.getRunDetails(id);
+  }
+
+  @Post('trading-advice')
+  async tradingAdvice(
+    @Body() body?: { closedLimit?: number },
+    @Headers('host') host?: string,
+    @Headers('origin') origin?: string,
+    @Headers('referer') referer?: string,
+    @Headers('sec-fetch-site') secFetchSite?: string,
+  ) {
+    this.assertSameOriginBrowserRequest(host, origin, referer, secFetchSite);
+    return this.tradingAdvisor.generateAdvice({
+      closedLimit: body?.closedLimit,
+    });
   }
 }

@@ -18,6 +18,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Docker cleanup (before build)
+        run: |
+          docker buildx prune -af || true
+          docker system prune -af --volumes || true
+
       - name: Image name (lowercase for GHCR)
         id: meta
         run: echo "lower_repo=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
@@ -59,6 +64,12 @@ jobs:
             ${{ env.REGISTRY }}/${{ steps.meta.outputs.lower_repo }}/web:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Docker cleanup (after build)
+        if: always()
+        run: |
+          docker buildx prune -af || true
+          docker system prune -af --volumes || true
 
   deploy:
     needs: build-and-push
