@@ -38,11 +38,26 @@ export class BybitController {
 
   @Post('recalc-closed-pnl')
   async recalcClosedPnl(
-    @Body() body?: { limit?: number; dryRun?: boolean },
+    @Body() body?: { limit?: number; dryRun?: boolean; async?: boolean },
   ) {
+    if (body?.async !== false) {
+      return this.bybit.startRecalcClosedSignalsPnlJob({
+        limit: body?.limit,
+        dryRun: body?.dryRun ?? true,
+      });
+    }
     return this.bybit.recalcClosedSignalsPnl({
       limit: body?.limit,
       dryRun: body?.dryRun ?? true,
     });
+  }
+
+  @Get('recalc-closed-pnl/:jobId')
+  async recalcClosedPnlJobStatus(@Param('jobId') jobId: string) {
+    const status = this.bybit.getRecalcClosedPnlJobStatus(jobId);
+    if (!status) {
+      return { ok: false, error: 'Job not found', jobId };
+    }
+    return { ok: true, ...status };
   }
 }

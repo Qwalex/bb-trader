@@ -79,6 +79,18 @@ export interface RecalcClosedPnlResult {
   errors: { signalId: string; error: string }[];
 }
 
+export interface RecalcClosedPnlJobStatus {
+  jobId: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  dryRun: boolean;
+  limit: number;
+  createdAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  result?: RecalcClosedPnlResult;
+  error?: string;
+}
+
 export interface SignalExecutionDebugSnapshot {
   ok: boolean;
   signalId: string;
@@ -128,6 +140,9 @@ export class BybitService {
   private readonly staleFlatPollCounts = new Map<string, number>();
   private readonly staleReconcileSuspensions = new Map<string, { count: number; reason?: string }>();
   private static readonly STALE_RECONCILE_REQUIRED_CLEAN_POLLS = 3;
+  private recalcQueue: Promise<void> = Promise.resolve();
+  private readonly recalcJobs = new Map<string, RecalcClosedPnlJobStatus>();
+  private readonly recalcJobOrder: string[] = [];
 
   constructor(
     private readonly settings: SettingsService,
@@ -2918,6 +2933,63 @@ export class BybitService {
         : (avgSell - avgBuy) * matchedQty;
     const netPnl = pnl - totalFees;
     return Number.isFinite(netPnl) ? netPnl : undefined;
+  }
+
+  startRecalcClosedSignalsPnlJob(params?: {
+    limit?: number;
+    dryRun?: boolean;
+  }): RecalcClosedPnlJobStatus {
+    const dryRun = params?.dryRun ?? true;
+    const limit = params?.limit ?? 200;
+    const jobId = `recalc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const createdAt = new Date().toISOString();
+    const job: RecalcClosedPnlJobStatus = {
+      jobId,
+      status: 'queued',
+      dryRun,
+      limit,
+      createdAt,
+    };
+    this.recalcJobs.set(jobId, job);
+    this.recalcJobOrder.push(jobId);
+    this.pruneOldRecalcJobs();
+
+    this.recalcQueue = this.recalcQueue
+      .catch(() => undefined)
+      .then(async () => {
+        const current = this.recalcJobs.get(jobId);
+        if (!current) return;
+        current.status = 'running';
+        current.startedAt = new Date().toISOString();
+        try {
+          const result = await this.recalcClosedSignalsPnl({ dryRun, limit });
+          current.status = 'completed';
+          current.result = result;
+          current.finishedAt = new Date().toISOString();
+        } catch (e) {
+          current.status = 'failed';
+          current.error = formatError(e);
+          current.finishedAt = new Date().toISOString();
+          this.logger.error(`recalc job ${jobId} failed: ${current.error}`);
+        }
+      });
+
+    return { ...job };
+  }
+
+  getRecalcClosedPnlJobStatus(jobId: string): RecalcClosedPnlJobStatus | null {
+    const job = this.recalcJobs.get(jobId);
+    return job ? { ...job } : null;
+  }
+
+  private pruneOldRecalcJobs(): void {
+    const MAX = 50;
+    while (this.recalcJobOrder.length > MAX) {
+      const oldId = this.recalcJobOrder.shift();
+      if (oldId) {
+        this.recalcJobs.delete(oldId);
+      }
+    }
   }
 
   async recalcClosedSignalsPnl(params?: {
