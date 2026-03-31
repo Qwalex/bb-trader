@@ -2977,17 +2977,31 @@ export class BybitService {
           sig.createdAt,
         );
 
-        if (!hadParsedPnl) {
+        let nextPnl: number | undefined;
+        if (hadParsedPnl) {
+          nextPnl = totalPnl;
+        } else {
+          // В recalc повторяем fallback из poll:
+          // если closedPnL не удалось связать по orderId, считаем по execution list
+          // и обязательно вычитаем комиссии исполнений (execFee).
+          nextPnl = await this.estimateClosedPnlFromExecutions({
+            client,
+            symbol,
+            direction: sig.direction,
+            createdAt: sig.createdAt,
+          });
+        }
+        if (nextPnl === undefined) {
           skippedNoClosedPnl += 1;
           continue;
         }
 
-        const nextStatus = totalPnl >= 0 ? 'CLOSED_WIN' : 'CLOSED_LOSS';
+        const nextStatus = nextPnl >= 0 ? 'CLOSED_WIN' : 'CLOSED_LOSS';
         const prevPnl = sig.realizedPnl;
         const pnlChanged =
           prevPnl === null ||
           prevPnl === undefined ||
-          Math.abs(prevPnl - totalPnl) > 1e-9;
+          Math.abs(prevPnl - nextPnl) > 1e-9;
         const statusChanged = sig.status !== nextStatus;
 
         if (!pnlChanged && !statusChanged) {
@@ -2998,7 +3012,7 @@ export class BybitService {
         if (!dryRun) {
           await this.orders.updateSignalStatus(sig.id, {
             status: nextStatus,
-            realizedPnl: totalPnl,
+            realizedPnl: nextPnl,
             closedAt: sig.closedAt ?? new Date(),
           });
         }
