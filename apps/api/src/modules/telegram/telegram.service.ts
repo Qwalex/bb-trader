@@ -59,6 +59,8 @@ type ExternalConfirmationRequest = {
 export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TelegramService.name);
   private bot: Telegraf | null = null;
+  private botLaunchRetryTimer: NodeJS.Timeout | null = null;
+  private shuttingDown = false;
   /** Один черновик сигнала на пользователя (до подтверждения или отмены). */
   private readonly drafts = new Map<number, DraftSession>();
   /** Переопределение «канал/приложение» для сигналов (важнее настройки SIGNAL_SOURCE). */
@@ -111,12 +113,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     });
 
     this.registerHandlers();
-    void this.bot.launch().then(async () => {
-      this.logger.log(
-        'Telegram bot started (long polling, handlerTimeout=180s)',
-      );
-      await this.sendStartupGreeting();
-    });
+    this.shuttingDown = false;
+    void this.launchBotWithRetry();
   }
 
   /** Уведомление пользователей из whitelist при старте (нужен хотя бы один /start от пользователя ранее). */
@@ -190,7 +188,41 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy(): Promise<void> {
+    this.shuttingDown = true;
+    if (this.botLaunchRetryTimer) {
+      clearTimeout(this.botLaunchRetryTimer);
+      this.botLaunchRetryTimer = null;
+    }
     this.bot?.stop('SIGTERM');
+  }
+
+  private async launchBotWithRetry(): Promise<void> {
+    if (!this.bot || this.shuttingDown) {
+      return;
+    }
+    try {
+      await this.bot.launch();
+      this.logger.log(
+        'Telegram bot started (long polling, handlerTimeout=180s)',
+      );
+      await this.sendStartupGreeting();
+    } catch (e) {
+      const err = formatError(e);
+      this.logger.error(`Telegram bot launch failed: ${err}`);
+      if (this.shuttingDown) {
+        return;
+      }
+      if (this.botLaunchRetryTimer) {
+        clearTimeout(this.botLaunchRetryTimer);
+      }
+      // Транзиентные DNS/сеть (например EAI_AGAIN) не должны падать фатально:
+      // переподнимаем launch через короткий интервал.
+      this.botLaunchRetryTimer = setTimeout(() => {
+        this.botLaunchRetryTimer = null;
+        void this.launchBotWithRetry();
+      }, 10_000);
+      this.logger.warn('Telegram launch retry scheduled in 10s');
+    }
   }
 
   /**
