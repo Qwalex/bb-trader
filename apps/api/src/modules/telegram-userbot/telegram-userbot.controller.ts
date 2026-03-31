@@ -176,6 +176,7 @@ export class TelegramUserbotController {
       enabled?: boolean;
       defaultLeverage?: number | null;
       defaultEntryUsd?: string | null;
+      martingaleMultiplier?: number | null;
     },
   ) {
     return this.userbot.updateChat(chatId, body);

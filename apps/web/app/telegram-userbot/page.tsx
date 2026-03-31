@@ -47,6 +47,7 @@ type UserbotChat = {
   enabled: boolean;
   defaultLeverage: number | null;
   defaultEntryUsd: string | null;
+  martingaleMultiplier: number | null;
 };
 
 type TodayMetrics = {
@@ -97,6 +98,7 @@ export default function TelegramUserbotPage() {
   const [globalEntryMode, setGlobalEntryMode] = useState<EntrySizingMode>('usdt');
   const [globalEntryAmount, setGlobalEntryAmount] = useState('');
   const [globalLev, setGlobalLev] = useState('');
+  const [globalMartingaleDefault, setGlobalMartingaleDefault] = useState('');
   const [globalDefaultsLoaded, setGlobalDefaultsLoaded] = useState(false);
   const [entryByChat, setEntryByChat] = useState<
     Record<string, { mode: EntrySizingMode; amount: string }>
@@ -239,6 +241,7 @@ export default function TelegramUserbotPage() {
       Object.fromEntries(chatsList.map((x) => [x.chatId, parseStoredEntry(x.defaultEntryUsd)])),
     );
     setGlobalLev(byKey.get('DEFAULT_LEVERAGE') ?? '');
+    setGlobalMartingaleDefault(byKey.get('SOURCE_MARTINGALE_DEFAULT_MULTIPLIER') ?? '');
     setGlobalDefaultsLoaded(true);
   }
 
@@ -487,6 +490,22 @@ export default function TelegramUserbotPage() {
                   aria-label="Дефолт кредитного плеча"
                 />
               </div>
+              <div className="userbotDefaultsField">
+                <span className="userbotDefaultsFieldLabel">Мартингейл</span>
+                <span className="userbotDefaultsFieldName">Глобально (дефолт)</span>
+                <span className="userbotDefaultsFieldHint">
+                  Множитель после убыточной сделки, напр. 1.2 (пусто = выключено)
+                </span>
+                <input
+                  className="userbotDefaultsInput"
+                  value={globalMartingaleDefault}
+                  onChange={(e) => setGlobalMartingaleDefault(e.target.value)}
+                  placeholder="1.2"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  aria-label="Дефолтный множитель мартингейла"
+                />
+              </div>
             </div>
             <div className="userbotDefaultsActions">
               <button
@@ -507,6 +526,14 @@ export default function TelegramUserbotPage() {
                       method: 'PUT',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ key: 'DEFAULT_LEVERAGE', value: globalLev.trim() }),
+                    });
+                    await fetch(`${getApiBase()}/settings`, {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        key: 'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',
+                        value: globalMartingaleDefault.trim(),
+                      }),
                     });
                     setMsg({ type: 'ok', text: 'Общие дефолты сохранены' });
                   })
@@ -1117,6 +1144,53 @@ export default function TelegramUserbotPage() {
                         ),
                       );
                       setMsg({ type: 'ok', text: 'Плечо для источника сохранено' });
+                    });
+                  }}
+                />
+              </div>
+              <div>
+                <span className="userbotChatCardParamLabel">Мартингейл</span>
+                <input
+                  className="userbotCellInput"
+                  type="number"
+                  min={1}
+                  step={0.01}
+                  key={`mrt-${chat.chatId}-${chat.martingaleMultiplier ?? 'x'}`}
+                  defaultValue={chat.martingaleMultiplier ?? ''}
+                  placeholder="дефолт"
+                  title="Пусто — дефолтный множитель из настроек"
+                  onBlur={(e) => {
+                    const v = e.target.value.trim();
+                    const num = v === '' ? null : Number.parseFloat(v);
+                    if (v !== '' && (!Number.isFinite(num) || num === null || num <= 1)) {
+                      setMsg({
+                        type: 'err',
+                        text: 'Мартингейл: число больше 1 или пусто',
+                      });
+                      return;
+                    }
+                    const same =
+                      (num === null && chat.martingaleMultiplier === null) ||
+                      num === chat.martingaleMultiplier;
+                    if (same) return;
+                    void runAction(`mrt-${chat.chatId}`, async () => {
+                      const res = await fetch(
+                        `${getApiBase()}/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
+                        {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ martingaleMultiplier: num }),
+                        },
+                      );
+                      if (!res.ok) {
+                        throw new Error(`Ошибка сохранения (${res.status})`);
+                      }
+                      setChats((prev) =>
+                        prev.map((row) =>
+                          row.id === chat.id ? { ...row, martingaleMultiplier: num } : row,
+                        ),
+                      );
+                      setMsg({ type: 'ok', text: 'Мартингейл для источника сохранен' });
                     });
                   }}
                 />

@@ -83,6 +83,8 @@ type ActiveSignalLookup = {
   source: string | null;
 };
 
+type SourceMartingaleMap = Record<string, number>;
+
 const USERBOT_POLL_INTERVAL_MS = 2000;
 const USERBOT_POLL_FETCH_LIMIT = 20;
 const USERBOT_PROCESSING_CONCURRENCY = 4;
@@ -425,9 +427,64 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   }
 
   async listChats() {
-    return this.prisma.tgUserbotChat.findMany({
-      orderBy: [{ enabled: 'desc' }, { title: 'asc' }],
-    });
+    const [rows, bySource] = await Promise.all([
+      this.prisma.tgUserbotChat.findMany({
+        orderBy: [{ enabled: 'desc' }, { title: 'asc' }],
+      }),
+      this.getSourceMartingaleMap(),
+    ]);
+    return rows.map((row) => ({
+      ...row,
+      martingaleMultiplier:
+        bySource[row.title.trim().toLowerCase()] ?? null,
+    }));
+  }
+
+  private parseSourceMartingaleMap(raw: string | undefined): SourceMartingaleMap {
+    const out: SourceMartingaleMap = {};
+    const text = String(raw ?? '').trim();
+    if (!text) {
+      return out;
+    }
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return out;
+      }
+      for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+        const key = String(k ?? '').trim().toLowerCase();
+        const n = Number(v);
+        if (!key || !Number.isFinite(n) || n <= 1) {
+          continue;
+        }
+        out[key] = n;
+      }
+    } catch {
+      return {};
+    }
+    return out;
+  }
+
+  private async getSourceMartingaleMap(): Promise<SourceMartingaleMap> {
+    const raw = await this.settings.get('SOURCE_MARTINGALE_MULTIPLIERS');
+    return this.parseSourceMartingaleMap(raw);
+  }
+
+  private async setSourceMartingaleMultiplier(
+    sourceName: string,
+    multiplier: number | null,
+  ): Promise<void> {
+    const source = sourceName.trim().toLowerCase();
+    if (!source) {
+      return;
+    }
+    const map = await this.getSourceMartingaleMap();
+    if (multiplier == null || !Number.isFinite(multiplier) || multiplier <= 1) {
+      delete map[source];
+    } else {
+      map[source] = Math.round(multiplier * 1_000_000) / 1_000_000;
+    }
+    await this.settings.set('SOURCE_MARTINGALE_MULTIPLIERS', JSON.stringify(map));
   }
 
   async listPublishGroups() {
@@ -915,6 +972,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       enabled?: boolean;
       defaultLeverage?: number | null;
       defaultEntryUsd?: string | null;
+      martingaleMultiplier?: number | null;
     },
   ) {
     const entryNorm =
@@ -931,8 +989,17 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           : body.defaultLeverage >= 1
             ? Math.floor(body.defaultLeverage)
             : null;
+    const martingaleNorm =
+      body.martingaleMultiplier === undefined
+        ? undefined
+        : body.martingaleMultiplier === null
+          ? null
+          : Number.isFinite(body.martingaleMultiplier) &&
+              body.martingaleMultiplier > 1
+            ? Math.round(body.martingaleMultiplier * 1_000_000) / 1_000_000
+            : null;
 
-    await this.prisma.tgUserbotChat.upsert({
+    const row = await this.prisma.tgUserbotChat.upsert({
       where: { chatId },
       create: {
         chatId,
@@ -947,6 +1014,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         ...(entryNorm !== undefined ? { defaultEntryUsd: entryNorm } : {}),
       },
     });
+    if (martingaleNorm !== undefined) {
+      await this.setSourceMartingaleMultiplier(row.title, martingaleNorm);
+    }
     await this.refreshEnabledChatsCache();
     return { ok: true };
   }
@@ -3134,8 +3204,11 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           where: { id: g.id },
           select: { signalCounter: true, publishEveryN: true },
         });
-        const current = row?.signalCounter ?? 0;
-        const n = Math.max(1, row?.publishEveryN ?? g.publishEveryN ?? 1);
+        const current = Number(row?.signalCounter ?? 0) || 0;
+        const n = Math.max(
+          1,
+          Number(row?.publishEveryN ?? g.publishEveryN ?? 1) || 1,
+        );
         const next = current + 1;
         await txAny.tgUserbotPublishGroup.update({
           where: { id: g.id },

@@ -946,6 +946,27 @@ export class OrdersService {
       .sort((a, b) => a.localeCompare(b, 'ru'));
   }
 
+  async getLatestClosedSignalBySource(source: string) {
+    const s = source.trim();
+    if (!s) {
+      return null;
+    }
+    return this.prisma.signal.findFirst({
+      where: {
+        deletedAt: null,
+        source: s,
+        status: { in: ['CLOSED_WIN', 'CLOSED_LOSS', 'CLOSED_MIXED'] },
+      },
+      orderBy: [{ closedAt: 'desc' }, { createdAt: 'desc' }],
+      select: {
+        id: true,
+        status: true,
+        realizedPnl: true,
+        closedAt: true,
+      },
+    });
+  }
+
   async statsByPair() {
     const rows = await this.prisma.signal.groupBy({
       by: ['pair', 'status'],

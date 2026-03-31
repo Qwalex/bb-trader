@@ -48,6 +48,10 @@ const KEYS = [
     key: 'DEFAULT_LEVERAGE',
     label: 'Кредитное плечо по умолчанию (целое число, например 10)',
   },
+  {
+    key: 'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',
+    label: 'Мартингейл: дефолтный множитель после убыточной сделки (например 1.2)',
+  },
   { key: 'BYBIT_API_KEY_TESTNET', label: 'Bybit API key (testnet)' },
   { key: 'BYBIT_API_SECRET_TESTNET', label: 'Bybit API secret (testnet)' },
   { key: 'BYBIT_API_KEY_MAINNET', label: 'Bybit API key (основной / боевой)' },
@@ -149,7 +153,14 @@ const SETTINGS_SECTIONS: { id: string; title: string; keys: string[] }[] = [
   {
     id: 'trading',
     title: 'Торговые параметры',
-    keys: ['MIN_CAPITAL_AMOUNT', 'DEFAULT_ORDER_USD', 'DEFAULT_LEVERAGE_ENABLED', 'DEFAULT_LEVERAGE', 'POLLING_INTERVAL_MS'],
+    keys: [
+      'MIN_CAPITAL_AMOUNT',
+      'DEFAULT_ORDER_USD',
+      'DEFAULT_LEVERAGE_ENABLED',
+      'DEFAULT_LEVERAGE',
+      'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',
+      'POLLING_INTERVAL_MS',
+    ],
   },
   {
     id: 'diagnostics',

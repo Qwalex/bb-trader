@@ -279,6 +279,8 @@ export class TradingAiAdvisorService {
         'DEFAULT_ORDER_USD',
         'DEFAULT_LEVERAGE_ENABLED',
         'DEFAULT_LEVERAGE',
+        'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',
+        'SOURCE_MARTINGALE_MULTIPLIERS',
         'MIN_CAPITAL_AMOUNT',
         'TELEGRAM_USERBOT_MIN_BALANCE_USD',
         'POLLING_INTERVAL_MS',
@@ -338,6 +340,28 @@ export class TradingAiAdvisorService {
     const sourceStatsByName = new Map(
       bySourceStats.map((s) => [String(s.source ?? ''), s]),
     );
+    const martingaleBySource = (() => {
+      const out: Record<string, number> = {};
+      const raw = String(settingsMany.SOURCE_MARTINGALE_MULTIPLIERS ?? '').trim();
+      if (!raw) {
+        return out;
+      }
+      try {
+        const parsed = JSON.parse(raw) as unknown;
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          return out;
+        }
+        for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+          const key = String(k ?? '').trim().toLowerCase();
+          const n = Number(v);
+          if (!key || !Number.isFinite(n) || n <= 1) continue;
+          out[key] = n;
+        }
+      } catch {
+        return out;
+      }
+      return out;
+    })();
     const groupConfigs = chats.map((chat) => {
       const sourceStat = sourceStatsByName.get(chat.title) ?? null;
       return {
@@ -346,6 +370,8 @@ export class TradingAiAdvisorService {
         enabled: chat.enabled,
         defaultLeverage: chat.defaultLeverage,
         defaultEntryUsd: chat.defaultEntryUsd,
+        martingaleMultiplier:
+          martingaleBySource[chat.title.trim().toLowerCase()] ?? null,
         stats: sourceStat
           ? {
               totalClosed: sourceStat.totalClosed,
@@ -368,6 +394,9 @@ export class TradingAiAdvisorService {
         defaultOrderUsd: settingsMany.DEFAULT_ORDER_USD ?? null,
         defaultLeverageEnabled: settingsMany.DEFAULT_LEVERAGE_ENABLED ?? null,
         defaultLeverage: settingsMany.DEFAULT_LEVERAGE ?? null,
+        martingaleDefaultMultiplier:
+          settingsMany.SOURCE_MARTINGALE_DEFAULT_MULTIPLIER ?? null,
+        martingaleBySource,
         minCapitalAmount: settingsMany.MIN_CAPITAL_AMOUNT ?? null,
         userbotMinBalanceUsd: settingsMany.TELEGRAM_USERBOT_MIN_BALANCE_USD ?? null,
         pollingIntervalMs: settingsMany.POLLING_INTERVAL_MS ?? null,

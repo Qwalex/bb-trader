@@ -1647,6 +1647,7 @@ export class BybitService {
     rawMessage: string | undefined,
     origin?: { chatId?: string; messageId?: string },
   ): Promise<PlaceOrdersResult> {
+    signal = await this.applySourceMartingaleSizing(signal);
     const symbol = normalizeTradingPair(signal.pair);
 
     const testnetMode =
@@ -2953,6 +2954,86 @@ export class BybitService {
     const pnl = (avgSell - avgBuy) * matchedQty;
     const netPnl = pnl - totalFees;
     return Number.isFinite(netPnl) ? netPnl : undefined;
+  }
+
+  private parseSourceMartingaleMap(raw: string | undefined): Map<string, number> {
+    const out = new Map<string, number>();
+    const text = String(raw ?? '').trim();
+    if (!text) {
+      return out;
+    }
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return out;
+      }
+      for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+        const key = String(k ?? '').trim().toLowerCase();
+        const val = Number(v);
+        if (!key || !Number.isFinite(val) || val <= 1) {
+          continue;
+        }
+        out.set(key, val);
+      }
+      return out;
+    } catch {
+      return out;
+    }
+  }
+
+  private async applySourceMartingaleSizing(signal: SignalDto): Promise<SignalDto> {
+    const sourceRaw = String(signal.source ?? '').trim();
+    if (!sourceRaw) {
+      return signal;
+    }
+
+    const [rawMap, rawDefault] = await Promise.all([
+      this.settings.get('SOURCE_MARTINGALE_MULTIPLIERS'),
+      this.settings.get('SOURCE_MARTINGALE_DEFAULT_MULTIPLIER'),
+    ]);
+    const bySource = this.parseSourceMartingaleMap(rawMap);
+    const defaultMultiplierParsed = Number(rawDefault);
+    const defaultMultiplier =
+      Number.isFinite(defaultMultiplierParsed) && defaultMultiplierParsed > 1
+        ? defaultMultiplierParsed
+        : undefined;
+    const multiplier = bySource.get(sourceRaw.toLowerCase()) ?? defaultMultiplier;
+    if (!multiplier || !Number.isFinite(multiplier) || multiplier <= 1) {
+      return signal;
+    }
+
+    const prev = await this.orders.getLatestClosedSignalBySource(sourceRaw);
+    if (!prev) {
+      return signal;
+    }
+    const isLoss =
+      prev.status === 'CLOSED_LOSS' ||
+      (typeof prev.realizedPnl === 'number' && prev.realizedPnl < 0);
+    if (!isLoss) {
+      return signal;
+    }
+
+    const round = (n: number) => Math.round(n * 1_000_000) / 1_000_000;
+    const next = { ...signal };
+    if (next.orderUsd > 0) {
+      next.orderUsd = round(next.orderUsd * multiplier);
+    } else if (next.capitalPercent > 0) {
+      next.capitalPercent = Math.min(100, round(next.capitalPercent * multiplier));
+    }
+
+    void this.appLog.append('info', 'bybit', 'martingale applied by source', {
+      source: sourceRaw,
+      multiplier,
+      prevSignalId: prev.id,
+      prevStatus: prev.status,
+      prevRealizedPnl: prev.realizedPnl,
+      orderUsdBefore: signal.orderUsd,
+      orderUsdAfter: next.orderUsd,
+      capitalPercentBefore: signal.capitalPercent,
+      capitalPercentAfter: next.capitalPercent,
+    });
+
+    return next;
   }
 
   startRecalcClosedSignalsPnlJob(params?: {
