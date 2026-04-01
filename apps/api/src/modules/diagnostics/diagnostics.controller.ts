@@ -8,7 +8,15 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import {
+  ApiBody,
+  ApiForbiddenResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiParam,
+  ApiQuery,
+  ApiTags,
+} from '@nestjs/swagger';
 
 import { DiagnosticsService } from './diagnostics.service';
 import { TradingAiAdvisorService } from './trading-ai-advisor.service';
@@ -65,6 +73,15 @@ export class DiagnosticsController {
     }
   }
 
+  @ApiOperation({ summary: 'Запустить диагностику по последним кейсам' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { limit: { type: 'number' } },
+    },
+  })
+  @ApiForbiddenResponse({ description: 'Запрос не того origin' })
+  @ApiOkResponse({ description: 'Диагностика запущена' })
   @Post('run-latest')
   async runLatest(
     @Body() body?: { limit?: number },
@@ -77,6 +94,10 @@ export class DiagnosticsController {
     return this.diagnostics.runLatestBatch({ limit: body?.limit });
   }
 
+  @ApiOperation({ summary: 'Список запусков диагностики' })
+  @ApiQuery({ name: 'limit', required: false })
+  @ApiForbiddenResponse({ description: 'Запрос не того origin' })
+  @ApiOkResponse({ description: 'Список запусков получен' })
   @Get('runs')
   async runs(
     @Query('limit') limit?: string,
@@ -90,6 +111,10 @@ export class DiagnosticsController {
     return this.diagnostics.listRuns(Number.isFinite(parsed) ? parsed : undefined);
   }
 
+  @ApiOperation({ summary: 'Детали запуска диагностики' })
+  @ApiParam({ name: 'id', description: 'ID запуска' })
+  @ApiForbiddenResponse({ description: 'Запрос не того origin' })
+  @ApiOkResponse({ description: 'Детали запуска получены' })
   @Get('runs/:id')
   async runDetails(
     @Param('id') id: string,
@@ -102,6 +127,15 @@ export class DiagnosticsController {
     return this.diagnostics.getRunDetails(id);
   }
 
+  @ApiOperation({ summary: 'Сгенерировать торговые рекомендации' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { closedLimit: { type: 'number' } },
+    },
+  })
+  @ApiForbiddenResponse({ description: 'Запрос не того origin' })
+  @ApiOkResponse({ description: 'Рекомендации сгенерированы' })
   @Post('trading-advice')
   async tradingAdvice(
     @Body() body?: { closedLimit?: number },
