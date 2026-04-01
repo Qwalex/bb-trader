@@ -20,6 +20,8 @@ async function bootstrap() {
     .setTitle('SignalsBot API')
     .setDescription('REST API для SignalsBot (NestJS)')
     .setVersion('1.0')
+    .addServer('/trade-api', 'Proxy base path')
+    .addServer('/', 'Direct API (local)')
     .build();
   const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('docs', app, swaggerDocument, {
