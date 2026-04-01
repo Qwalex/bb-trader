@@ -2793,17 +2793,20 @@ export class BybitService {
       const orderId = BybitService.extractClosedPnlOrderId(row);
       const ts = BybitService.extractClosedPnlTimestampMs(row);
       const rec = row as Record<string, unknown>;
-      const pnlGross =
+      // В Bybit поле closedPnl используем как финальный PnL сделки (источник истины).
+      const pnlFinalFromBybit =
         BybitService.parseFiniteNumber(rec.closedPnl) ?? Number.NaN;
       const openFee = Math.abs(BybitService.parseFiniteNumber(rec.openFee) ?? 0);
       const closeFee = Math.abs(BybitService.parseFiniteNumber(rec.closeFee) ?? 0);
       const execFee = Math.abs(BybitService.parseFiniteNumber(rec.execFee) ?? 0);
       const fee = openFee + closeFee + execFee;
-      const pnlNet = Number.isFinite(pnlGross) ? pnlGross - fee : Number.NaN;
+      const pnlGross = Number.isFinite(pnlFinalFromBybit)
+        ? pnlFinalFromBybit + fee
+        : Number.NaN;
       return {
         orderId,
         ts,
-        pnlNet,
+        pnlFinalFromBybit,
         pnlGross,
         openFee,
         closeFee,
@@ -2839,10 +2842,10 @@ export class BybitService {
     let totalExecFee = 0;
     let hadParsedPnl = false;
     for (const row of candidates) {
-      if (!Number.isFinite(row.pnlNet)) {
+      if (!Number.isFinite(row.pnlFinalFromBybit)) {
         continue;
       }
-      totalPnl += row.pnlNet;
+      totalPnl += row.pnlFinalFromBybit;
       if (Number.isFinite(row.pnlGross)) {
         grossPnl += row.pnlGross;
       }
@@ -3328,8 +3331,8 @@ export class BybitService {
           nextPnl = totalPnl;
         } else {
           // В recalc повторяем fallback из poll:
-          // если closedPnL не удалось связать по orderId, считаем по execution list
-          // и обязательно вычитаем комиссии исполнений (execFee).
+          // если closedPnL не удалось связать по orderId, считаем по execution list.
+          // Для execution fallback комиссии исполнений вычитаются явно.
           const fallback = await this.estimateClosedPnlFromExecutions({
             client,
             symbol,

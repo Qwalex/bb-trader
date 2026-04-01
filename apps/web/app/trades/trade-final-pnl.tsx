@@ -79,6 +79,9 @@ function buildTooltip(
     `Всего комиссий: ${formatNumber(breakdown.fees.total)}`,
   ];
 
+  if (breakdown.source === 'closed_pnl') {
+    rows.push('Источник расчёта: closed PnL Bybit');
+  }
   if (breakdown.source === 'execution_fallback') {
     rows.push('Источник расчёта: execution fallback (open/close fee могут быть недоступны отдельно)');
   }
