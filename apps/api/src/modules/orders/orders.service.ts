@@ -55,6 +55,11 @@ export class OrdersService {
   private static readonly PNL_EDIT_ALLOWED_STATUSES = new Set([
     ...Array.from(OrdersService.CLOSED_SIGNAL_STATUSES),
   ]);
+  private static readonly CLOSED_STATUSES = new Set([
+    'CLOSED_WIN',
+    'CLOSED_LOSS',
+    'CLOSED_MIXED',
+  ]);
 
   async createSignalRecord(
     signal: SignalDto,
@@ -1064,7 +1069,63 @@ export class OrdersService {
       ...item,
       martingaleStep: martingaleStepById.get(item.id) ?? 0,
     }));
-    return { items: itemsWithMartingale, total, page, pageSize };
+
+    const itemsWithPnlBreakdown = await Promise.all(
+      itemsWithMartingale.map(async (item) => {
+        let finalPnl = item.realizedPnl;
+        let pnlBreakdown: {
+          source: 'closed_pnl' | 'execution_fallback' | 'unavailable';
+          grossPnl: number | null;
+          fees: {
+            openFee: number | null;
+            closeFee: number | null;
+            execFee: number | null;
+            total: number | null;
+          };
+          details?: string;
+          error?: string;
+        } | null = null;
+
+        if (OrdersService.CLOSED_STATUSES.has(item.status)) {
+          const breakdown = await this.bybit.getTradePnlBreakdown(item.id);
+          finalPnl = breakdown.finalPnl ?? item.realizedPnl;
+          pnlBreakdown = {
+            source: breakdown.source,
+            grossPnl: breakdown.grossPnl,
+            fees: breakdown.fees,
+            details: breakdown.details,
+            error: breakdown.error,
+          };
+
+          if (typeof finalPnl === 'number' && Number.isFinite(finalPnl)) {
+            const shouldUpdateRealized =
+              item.realizedPnl === null ||
+              item.realizedPnl === undefined ||
+              Math.abs(item.realizedPnl - finalPnl) > 1e-9;
+            const nextStatus =
+              finalPnl > 0 ? 'CLOSED_WIN' : finalPnl < 0 ? 'CLOSED_LOSS' : 'CLOSED_MIXED';
+            const shouldUpdateStatus = item.status !== nextStatus;
+            if (shouldUpdateRealized || shouldUpdateStatus) {
+              await this.prisma.signal.update({
+                where: { id: item.id },
+                data: {
+                  realizedPnl: finalPnl,
+                  status: nextStatus,
+                },
+              });
+            }
+          }
+        }
+
+        return {
+          ...item,
+          finalPnl,
+          pnlBreakdown,
+        };
+      }),
+    );
+
+    return { items: itemsWithPnlBreakdown, total, page, pageSize };
   }
 
   async statsBySource() {

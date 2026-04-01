@@ -31,6 +31,19 @@ type Signal = {
   sourceChatId?: string | null;
   sourceMessageId?: string | null;
   realizedPnl: number | null;
+  finalPnl?: number | null;
+  pnlBreakdown?: {
+    source: 'closed_pnl' | 'execution_fallback' | 'unavailable';
+    grossPnl: number | null;
+    fees: {
+      openFee: number | null;
+      closeFee: number | null;
+      execFee: number | null;
+      total: number | null;
+    };
+    details?: string;
+    error?: string;
+  } | null;
   createdAt: string;
   deletedAt?: string | null;
   orders: Order[];

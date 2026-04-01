@@ -4,7 +4,6 @@ import { PnlEditControl } from './pnl-edit-control';
 import { RestoreTradeButton } from './restore-trade-button';
 import { SourceSelect } from './source-select';
 import { TelegramSourceLink } from './telegram-source-link';
-import { TradeFinalPnl } from './trade-final-pnl';
 import { TradeParamsBlock } from './trade-params-block';
 
 type TradeListItem = {
@@ -25,6 +24,19 @@ type TradeListItem = {
   orderUsd: number;
   capitalPercent: number;
   martingaleStep?: number | null;
+  finalPnl?: number | null;
+  pnlBreakdown?: {
+    source: 'closed_pnl' | 'execution_fallback' | 'unavailable';
+    grossPnl: number | null;
+    fees: {
+      openFee: number | null;
+      closeFee: number | null;
+      execFee: number | null;
+      total: number | null;
+    };
+    details?: string;
+    error?: string;
+  } | null;
   events?: Array<{
     id: string;
     type: string;
@@ -58,6 +70,56 @@ function getTradeOutcomeLabel(status: string, pnl: number | null | undefined): s
     if (pnl < 0) return 'убыток';
   }
   return status.toLowerCase();
+}
+
+function formatNum(v: number | null | undefined): string {
+  if (v === null || v === undefined || !Number.isFinite(v)) return '—';
+  return v.toFixed(4);
+}
+
+function buildPnlTooltip(s: TradeListItem): string {
+  const finalPnl = s.finalPnl ?? s.realizedPnl;
+  const base = [
+    `Итог сделки: ${getTradeOutcomeLabel(s.status, finalPnl ?? null)}`,
+    `Финальный PnL (Bybit): ${formatNum(finalPnl)}`,
+  ];
+  if (!s.pnlBreakdown) {
+    return base.join('\n');
+  }
+  const rows = [
+    ...base,
+    `PnL до комиссий (gross): ${formatNum(s.pnlBreakdown.grossPnl)}`,
+    `openFee: ${formatNum(s.pnlBreakdown.fees.openFee)}`,
+    `closeFee: ${formatNum(s.pnlBreakdown.fees.closeFee)}`,
+    `execFee: ${formatNum(s.pnlBreakdown.fees.execFee)}`,
+    `Всего комиссий: ${formatNum(s.pnlBreakdown.fees.total)}`,
+  ];
+  if (s.pnlBreakdown.source === 'closed_pnl') rows.push('Источник: closed PnL Bybit');
+  if (s.pnlBreakdown.source === 'execution_fallback') rows.push('Источник: execution fallback');
+  if (s.pnlBreakdown.details) rows.push(`Примечание: ${s.pnlBreakdown.details}`);
+  if (s.pnlBreakdown.error) rows.push(`Ошибка: ${s.pnlBreakdown.error}`);
+  return rows.join('\n');
+}
+
+function PnlDisplay({
+  pnl,
+  title,
+}: {
+  pnl: number | null | undefined;
+  title?: string;
+}) {
+  if (pnl === null || pnl === undefined) {
+    return <span title={title}>—</span>;
+  }
+  const classes = ['pnl'];
+  if (pnl > 0) classes.push('pnlPos');
+  else if (pnl < 0) classes.push('pnlNeg');
+  else classes.push('pnlZero');
+  return (
+    <span className={classes.join(' ')} title={title}>
+      {pnl.toFixed(4)}
+    </span>
+  );
 }
 
 function DirectionBadge({ direction }: { direction: string }) {
@@ -171,17 +233,18 @@ export function TradesList({ items, sourceOptions }: Props) {
                   realizedPnl={s.realizedPnl}
                   disabled={Boolean(s.deletedAt)}
                 >
-                  <TradeFinalPnl
-                    signalId={s.id}
-                    status={s.status}
-                    realizedPnl={s.realizedPnl}
+                  <PnlDisplay
+                    pnl={s.finalPnl ?? s.realizedPnl}
+                    title={buildPnlTooltip(s)}
                   />
                 </PnlEditControl>
               </span>
             </div>
             <div className="tradeCardMetaRow">
               <span className="tradeCardLabel">Итог сделки</span>
-              <span className="tradeCardValue">{getTradeOutcomeLabel(s.status, s.realizedPnl)}</span>
+              <span className="tradeCardValue">
+                {getTradeOutcomeLabel(s.status, s.finalPnl ?? s.realizedPnl)}
+              </span>
             </div>
           </div>
 
