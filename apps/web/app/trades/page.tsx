@@ -34,6 +34,10 @@ type Signal = {
   finalPnl?: number | null;
   pnlBreakdown?: {
     source: 'closed_pnl' | 'execution_fallback' | 'unavailable';
+    requestWindow: {
+      startTime: number;
+      endTime: number;
+    };
     grossPnl: number | null;
     fees: {
       openFee: number | null;

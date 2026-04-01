@@ -95,6 +95,10 @@ export interface TradePnlBreakdownResult {
   ok: boolean;
   signalId: string;
   source: 'closed_pnl' | 'execution_fallback' | 'unavailable';
+  requestWindow: {
+    startTime: number;
+    endTime: number;
+  };
   finalPnl: number | null;
   grossPnl: number | null;
   fees: {
@@ -2771,6 +2775,7 @@ export class BybitService {
   private sumClosedPnlForSignal(
     rows: unknown[],
     ourIds: Set<string>,
+    direction: string,
     signalCreatedAt: Date,
     signalClosedAt?: Date | null,
   ): {
@@ -2784,6 +2789,7 @@ export class BybitService {
   } {
     const createdAtMs = signalCreatedAt.getTime();
     const createdFloorMs = createdAtMs - 60_000;
+    const expectedCloseSide = direction === 'short' ? 'buy' : 'sell';
     const closedCeilMs =
       signalClosedAt && Number.isFinite(signalClosedAt.getTime())
         ? signalClosedAt.getTime() + 5 * 60_000
@@ -2793,6 +2799,7 @@ export class BybitService {
       const orderId = BybitService.extractClosedPnlOrderId(row);
       const ts = BybitService.extractClosedPnlTimestampMs(row);
       const rec = row as Record<string, unknown>;
+      const side = String(rec.side ?? '').trim().toLowerCase();
       // В Bybit поле closedPnl используем как финальный PnL сделки (источник истины).
       const pnlFinalFromBybit =
         BybitService.parseFiniteNumber(rec.closedPnl) ?? Number.NaN;
@@ -2805,6 +2812,7 @@ export class BybitService {
         : Number.NaN;
       return {
         orderId,
+        side,
         ts,
         pnlFinalFromBybit,
         pnlGross,
@@ -2819,6 +2827,11 @@ export class BybitService {
     );
 
     const candidates = parsedRows.filter((r) => {
+      // Для корректной привязки берём только закрывающую сторону:
+      // long -> Sell, short -> Buy.
+      if (r.side && r.side !== expectedCloseSide) {
+        return false;
+      }
       if (
         closedCeilMs !== undefined &&
         r.ts !== undefined &&
@@ -2869,17 +2882,13 @@ export class BybitService {
   private async fetchClosedPnlRowsForSymbol(
     client: RestClientV5,
     symbol: string,
-    createdAt: Date,
-    closedAt?: Date | null,
+    rangeStartMs: number,
+    rangeEndMs: number,
   ): Promise<unknown[]> {
     // Bybit closed-pnl endpoint ограничивает диапазон запроса 7 днями.
     // Поэтому читаем диапазон чанками (до 7 дней), чтобы корректно покрывать старые сделки.
-    const startMs = Math.max(0, createdAt.getTime() - 60_000);
-    const rawEndMs =
-      closedAt && Number.isFinite(closedAt.getTime())
-        ? closedAt.getTime() + 5 * 60_000
-        : Date.now();
-    const endMs = Math.max(startMs, rawEndMs);
+    const startMs = Math.max(0, rangeStartMs);
+    const endMs = Math.max(startMs, rangeEndMs);
     const maxRangeMs = 7 * 24 * 60 * 60 * 1000;
     const rows: unknown[] = [];
 
@@ -2917,6 +2926,18 @@ export class BybitService {
     }
 
     return rows;
+  }
+
+  private buildClosedPnlWindow(
+    signalCreatedAt: Date,
+    signalClosedAt?: Date | null,
+  ): { startTime: number; endTime: number } {
+    const startTime = Math.max(0, signalCreatedAt.getTime());
+    const rawEnd = signalClosedAt?.getTime() ?? Date.now();
+    const normalizedEnd = Number.isFinite(rawEnd) ? rawEnd : startTime;
+    // Добавляем 1 секунду, чтобы не терять граничные записи закрытия по endTime.
+    const endTime = Math.max(startTime, normalizedEnd + 1000);
+    return { startTime, endTime };
   }
 
   /**
@@ -3031,6 +3052,7 @@ export class BybitService {
         ok: false,
         signalId,
         source: 'unavailable',
+        requestWindow: { startTime: 0, endTime: 0 },
         finalPnl: null,
         grossPnl: null,
         fees: { openFee: null, closeFee: null, execFee: null, total: null },
@@ -3038,12 +3060,14 @@ export class BybitService {
       };
     }
 
+    const requestWindow = this.buildClosedPnlWindow(signal.createdAt, signal.closedAt);
     const client = await this.getClient();
     if (!client) {
       return {
         ok: false,
         signalId,
         source: 'unavailable',
+        requestWindow,
         finalPnl: signal.realizedPnl ?? null,
         grossPnl: null,
         fees: { openFee: null, closeFee: null, execFee: null, total: null },
@@ -3062,6 +3086,7 @@ export class BybitService {
         ok: false,
         signalId,
         source: 'unavailable',
+        requestWindow,
         finalPnl: signal.realizedPnl ?? null,
         grossPnl: null,
         fees: { openFee: null, closeFee: null, execFee: null, total: null },
@@ -3073,12 +3098,13 @@ export class BybitService {
       const rows = await this.fetchClosedPnlRowsForSymbol(
         client,
         symbol,
-        signal.createdAt,
-        signal.closedAt,
+        requestWindow.startTime,
+        requestWindow.endTime,
       );
       const parsed = this.sumClosedPnlForSignal(
         rows,
         ourIds,
+        signal.direction,
         signal.createdAt,
         signal.closedAt,
       );
@@ -3087,6 +3113,7 @@ export class BybitService {
           ok: true,
           signalId,
           source: 'closed_pnl',
+          requestWindow,
           finalPnl: parsed.totalPnl,
           grossPnl: parsed.grossPnl,
           fees: {
@@ -3110,6 +3137,7 @@ export class BybitService {
           ok: true,
           signalId,
           source: 'execution_fallback',
+          requestWindow,
           finalPnl: fallback.netPnl,
           grossPnl: fallback.grossPnl,
           fees: {
@@ -3126,6 +3154,7 @@ export class BybitService {
         ok: false,
         signalId,
         source: 'unavailable',
+        requestWindow,
         finalPnl: signal.realizedPnl ?? null,
         grossPnl: null,
         fees: { openFee: null, closeFee: null, execFee: null, total: null },
@@ -3136,6 +3165,7 @@ export class BybitService {
         ok: false,
         signalId,
         source: 'unavailable',
+        requestWindow,
         finalPnl: signal.realizedPnl ?? null,
         grossPnl: null,
         fees: { openFee: null, closeFee: null, execFee: null, total: null },
@@ -3327,15 +3357,17 @@ export class BybitService {
 
       try {
         const symbol = normalizeTradingPair(sig.pair);
+        const requestWindow = this.buildClosedPnlWindow(sig.createdAt, sig.closedAt);
         const rows = await this.fetchClosedPnlRowsForSymbol(
           client,
           symbol,
-          sig.createdAt,
-          sig.closedAt,
+          requestWindow.startTime,
+          requestWindow.endTime,
         );
         const { totalPnl, hadParsedPnl } = this.sumClosedPnlForSignal(
           rows,
           ourIds,
+          sig.direction,
           sig.createdAt,
           sig.closedAt,
         );
@@ -3626,15 +3658,17 @@ export class BybitService {
               .map((o) => (o.bybitOrderId ? String(o.bybitOrderId) : ''))
               .filter((id): id is string => id.length > 0),
           );
-          const pnlRes = await client.getClosedPnL({
-            category: 'linear',
-            symbol: symNorm,
-            limit: 50,
-          });
-          const rows = pnlRes.result?.list ?? [];
+          const requestWindow = this.buildClosedPnlWindow(fresh.createdAt, new Date());
+          const rows = await this.fetchClosedPnlRowsForSymbol(
+            client,
+            symNorm,
+            requestWindow.startTime,
+            requestWindow.endTime,
+          );
           const { totalPnl, hadParsedPnl } = this.sumClosedPnlForSignal(
             rows,
             ourIds,
+            fresh.direction,
             fresh.createdAt,
           );
           if (hadParsedPnl) {

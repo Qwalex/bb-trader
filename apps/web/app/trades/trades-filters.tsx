@@ -27,7 +27,8 @@ export function TradesFilters({ sourceOptions }: Props) {
     const pair = cleanString(sp.get('pair') ?? '');
     const status = cleanString(sp.get('status') ?? '');
     const includeDeleted = sp.get('includeDeleted') === '1' || sp.get('includeDeleted') === 'true';
-    const sortBy = sp.get('sortBy') === 'closedAt' ? 'closedAt' : 'createdAt';
+    const sortBy: 'createdAt' | 'closedAt' =
+      sp.get('sortBy') === 'closedAt' ? 'closedAt' : 'createdAt';
     return { signalId, source, pair, status, includeDeleted, sortBy };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

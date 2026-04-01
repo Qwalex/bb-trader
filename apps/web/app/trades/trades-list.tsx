@@ -27,6 +27,10 @@ type TradeListItem = {
   finalPnl?: number | null;
   pnlBreakdown?: {
     source: 'closed_pnl' | 'execution_fallback' | 'unavailable';
+    requestWindow: {
+      startTime: number;
+      endTime: number;
+    };
     grossPnl: number | null;
     fees: {
       openFee: number | null;
@@ -88,6 +92,8 @@ function buildPnlTooltip(s: TradeListItem): string {
   }
   const rows = [
     ...base,
+    `startTime: ${String(s.pnlBreakdown.requestWindow.startTime)}`,
+    `endTime: ${String(s.pnlBreakdown.requestWindow.endTime)}`,
     `PnL до комиссий (gross): ${formatNum(s.pnlBreakdown.grossPnl)}`,
     `openFee: ${formatNum(s.pnlBreakdown.fees.openFee)}`,
     `closeFee: ${formatNum(s.pnlBreakdown.fees.closeFee)}`,

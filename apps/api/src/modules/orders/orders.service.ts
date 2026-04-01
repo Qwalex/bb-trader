@@ -1080,6 +1080,10 @@ export class OrdersService {
         let finalPnl = item.realizedPnl;
         let pnlBreakdown: {
           source: 'closed_pnl' | 'execution_fallback' | 'unavailable';
+          requestWindow: {
+            startTime: number;
+            endTime: number;
+          };
           grossPnl: number | null;
           fees: {
             openFee: number | null;
@@ -1096,6 +1100,7 @@ export class OrdersService {
           finalPnl = breakdown.finalPnl ?? item.realizedPnl;
           pnlBreakdown = {
             source: breakdown.source,
+            requestWindow: breakdown.requestWindow,
             grossPnl: breakdown.grossPnl,
             fees: breakdown.fees,
             details: breakdown.details,
