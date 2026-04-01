@@ -82,12 +82,14 @@ export default async function TradesPage({
     typeof sp.includeDeleted === 'string'
       ? sp.includeDeleted === '1' || sp.includeDeleted === 'true'
       : false;
+  const sortBy = sp.sortBy === 'closedAt' ? 'closedAt' : 'createdAt';
   const page = typeof sp.page === 'string' ? sp.page : '1';
   if (signalId) q.set('signalId', signalId);
   if (source) q.set('source', source);
   if (pair) q.set('pair', pair);
   if (status) q.set('status', status);
   if (includeDeleted) q.set('includeDeleted', '1');
+  if (sortBy !== 'createdAt') q.set('sortBy', sortBy);
   q.set('page', page);
 
   let data: TradesRes | null = null;

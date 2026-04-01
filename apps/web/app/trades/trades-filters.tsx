@@ -27,7 +27,8 @@ export function TradesFilters({ sourceOptions }: Props) {
     const pair = cleanString(sp.get('pair') ?? '');
     const status = cleanString(sp.get('status') ?? '');
     const includeDeleted = sp.get('includeDeleted') === '1' || sp.get('includeDeleted') === 'true';
-    return { signalId, source, pair, status, includeDeleted };
+    const sortBy = sp.get('sortBy') === 'closedAt' ? 'closedAt' : 'createdAt';
+    return { signalId, source, pair, status, includeDeleted, sortBy };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -36,6 +37,7 @@ export function TradesFilters({ sourceOptions }: Props) {
   const [pair, setPair] = useState(initial.pair);
   const [status, setStatus] = useState(initial.status);
   const [includeDeleted, setIncludeDeleted] = useState(initial.includeDeleted);
+  const [sortBy, setSortBy] = useState<'createdAt' | 'closedAt'>(initial.sortBy);
 
   const signalIdTimer = useRef<number | null>(null);
   const pairTimer = useRef<number | null>(null);
@@ -46,6 +48,7 @@ export function TradesFilters({ sourceOptions }: Props) {
     pair?: string;
     status?: string;
     includeDeleted?: boolean;
+    sortBy?: 'createdAt' | 'closedAt';
   }) {
     const q = new URLSearchParams(sp.toString());
 
@@ -76,6 +79,11 @@ export function TradesFilters({ sourceOptions }: Props) {
     if (next.includeDeleted !== undefined) {
       if (next.includeDeleted) q.set('includeDeleted', '1');
       else q.delete('includeDeleted');
+      q.delete('page');
+    }
+    if (next.sortBy !== undefined) {
+      if (next.sortBy === 'closedAt') q.set('sortBy', 'closedAt');
+      else q.delete('sortBy');
       q.delete('page');
     }
 
@@ -183,6 +191,21 @@ export function TradesFilters({ sourceOptions }: Props) {
         </span>
       </label>
 
+      <label>
+        Сортировка
+        <select
+          value={sortBy}
+          onChange={(e) => {
+            const v = e.target.value === 'closedAt' ? 'closedAt' : 'createdAt';
+            setSortBy(v);
+            replaceQuery({ sortBy: v });
+          }}
+        >
+          <option value="createdAt">по дате создания</option>
+          <option value="closedAt">по дате закрытия</option>
+        </select>
+      </label>
+
       <button
         type="button"
         className="btn btnSecondary"
@@ -192,6 +215,7 @@ export function TradesFilters({ sourceOptions }: Props) {
           setPair('');
           setStatus('');
           setIncludeDeleted(false);
+          setSortBy('createdAt');
           router.replace(pathname);
         }}
       >

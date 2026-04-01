@@ -22,6 +22,7 @@ export interface TradesFilter {
   to?: Date;
   status?: string;
   includeDeleted?: boolean;
+  sortBy?: 'createdAt' | 'closedAt';
   page?: number;
   pageSize?: number;
 }
@@ -1004,6 +1005,7 @@ export class OrdersService {
   async listTrades(f: TradesFilter) {
     const page = f.page ?? 1;
     const pageSize = Math.min(f.pageSize ?? 20, 100);
+    const sortBy = f.sortBy === 'closedAt' ? 'closedAt' : 'createdAt';
     const where: Prisma.SignalWhereInput = {};
     if (!f.includeDeleted) {
       where.deletedAt = null;
@@ -1045,7 +1047,10 @@ export class OrdersService {
     const [items, total] = await Promise.all([
       this.prisma.signal.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy:
+          sortBy === 'closedAt'
+            ? [{ closedAt: 'desc' }, { createdAt: 'desc' }]
+            : [{ createdAt: 'desc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
         include: {

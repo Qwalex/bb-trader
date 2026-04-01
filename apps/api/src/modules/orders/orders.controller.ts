@@ -54,6 +54,7 @@ export class OrdersController {
   @ApiQuery({ name: 'from', required: false, description: 'ISO date' })
   @ApiQuery({ name: 'to', required: false, description: 'ISO date' })
   @ApiQuery({ name: 'includeDeleted', required: false })
+  @ApiQuery({ name: 'sortBy', required: false, enum: ['createdAt', 'closedAt'] })
   @ApiQuery({ name: 'page', required: false })
   @ApiQuery({ name: 'pageSize', required: false })
   @ApiOkResponse({ description: 'Список сделок успешно получен' })
@@ -66,6 +67,7 @@ export class OrdersController {
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('includeDeleted') includeDeleted?: string,
+    @Query('sortBy') sortBy?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
   ) {
@@ -77,6 +79,7 @@ export class OrdersController {
       from: from ? new Date(from) : undefined,
       to: to ? new Date(to) : undefined,
       includeDeleted: includeDeleted === '1' || includeDeleted === 'true',
+      sortBy: sortBy === 'closedAt' ? 'closedAt' : 'createdAt',
       page: page ? parseInt(page, 10) : 1,
       pageSize: pageSize ? parseInt(pageSize, 10) : 20,
     });
