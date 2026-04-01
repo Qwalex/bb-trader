@@ -2870,41 +2870,49 @@ export class BybitService {
     client: RestClientV5,
     symbol: string,
     createdAt: Date,
+    closedAt?: Date | null,
   ): Promise<unknown[]> {
-    const createdFloorMs = createdAt.getTime() - 60_000;
+    // Bybit closed-pnl endpoint ограничивает диапазон запроса 7 днями.
+    // Поэтому читаем диапазон чанками (до 7 дней), чтобы корректно покрывать старые сделки.
+    const startMs = Math.max(0, createdAt.getTime() - 60_000);
+    const rawEndMs =
+      closedAt && Number.isFinite(closedAt.getTime())
+        ? closedAt.getTime() + 5 * 60_000
+        : Date.now();
+    const endMs = Math.max(startMs, rawEndMs);
+    const maxRangeMs = 7 * 24 * 60 * 60 * 1000;
     const rows: unknown[] = [];
-    let cursor: string | undefined;
-    const MAX_PAGES = 20;
 
-    for (let page = 0; page < MAX_PAGES; page++) {
-      const res = await client.getClosedPnL({
-        category: 'linear',
-        symbol,
-        limit: 50,
-        cursor,
-      });
-      if (res.retCode !== 0) {
-        break;
-      }
+    for (
+      let rangeStart = startMs;
+      rangeStart <= endMs;
+      rangeStart += maxRangeMs + 1
+    ) {
+      const rangeEnd = Math.min(endMs, rangeStart + maxRangeMs);
+      let cursor: string | undefined;
+      const MAX_PAGES = 40;
 
-      const list = res.result?.list ?? [];
-      rows.push(...list);
-      cursor = res.result?.nextPageCursor || undefined;
-
-      if (!cursor || list.length === 0) {
-        break;
-      }
-
-      const oldestInPage = list.reduce<number | undefined>((acc, row) => {
-        const ts = BybitService.extractClosedPnlTimestampMs(row);
-        if (ts === undefined) {
-          return acc;
+      for (let page = 0; page < MAX_PAGES; page++) {
+        const res = await client.getClosedPnL({
+          category: 'linear',
+          symbol,
+          startTime: rangeStart,
+          endTime: rangeEnd,
+          limit: 100,
+          cursor,
+        });
+        if (res.retCode !== 0) {
+          break;
         }
-        return acc === undefined ? ts : Math.min(acc, ts);
-      }, undefined);
 
-      if (oldestInPage !== undefined && oldestInPage < createdFloorMs) {
-        break;
+        const list = res.result?.list ?? [];
+        if (list.length > 0) {
+          rows.push(...list);
+        }
+        cursor = res.result?.nextPageCursor || undefined;
+        if (!cursor || list.length === 0) {
+          break;
+        }
       }
     }
 
@@ -3062,7 +3070,12 @@ export class BybitService {
     }
 
     try {
-      const rows = await this.fetchClosedPnlRowsForSymbol(client, symbol, signal.createdAt);
+      const rows = await this.fetchClosedPnlRowsForSymbol(
+        client,
+        symbol,
+        signal.createdAt,
+        signal.closedAt,
+      );
       const parsed = this.sumClosedPnlForSignal(
         rows,
         ourIds,
@@ -3318,6 +3331,7 @@ export class BybitService {
           client,
           symbol,
           sig.createdAt,
+          sig.closedAt,
         );
         const { totalPnl, hadParsedPnl } = this.sumClosedPnlForSignal(
           rows,
