@@ -49,7 +49,7 @@ services:
   db-viewer:
     image: coleifer/sqlite-web:latest
     restart: unless-stopped
-    command: ["sqlite_web", "/data/dev.db", "--host", "0.0.0.0", "--port", "8080"]
+    command: ["sqlite_web", "/data/dev.db", "--host", "0.0.0.0", "--port", "8080", "--url-prefix", "/trade-db"]
     ports:
       - "127.0.0.1:8081:8080"
     volumes:
