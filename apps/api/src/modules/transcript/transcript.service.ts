@@ -167,6 +167,7 @@ Field rules:
 - If the user gives no entry price, treat it as market entry: set entries to null and do NOT ask for clarification only because entries are missing. The order will be placed at market at the execution stage.
 - If the message gives BOTH a market entry option and a limit entry (labels such as Entry market / Entry limit, маркет и лимит, market vs limit, two entry lines where one is market and the other has a price), ALWAYS prefer the limit: set entries to the limit price(s) only. Do NOT set entries to null because "market" is also mentioned alongside an explicit limit price.
 - If the message describes ONE entry zone as a range for the same purpose (e.g. "entry range 1 - 2", "buy zone 1-2", "диапазон входа 1 - 2"), use one entry equal to the midpoint, not two DCA levels.
+- If leverage is given as a range (e.g. "2 - 5"), use the midpoint and round up (2-5 => 4).
 - Extract prices only from explicit labels (Entry, Stop loss, SL, Targets/TP, etc.). Do not blend, infer, or average numbers from different fields.
 - Field labels without actual values (e.g. "Entry:", "SL:", "TP1:" with no number after them) do NOT count as known values.
 - takeProfits: one or more take-profit prices; several TPs mean equal split across levels.

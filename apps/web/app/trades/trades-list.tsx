@@ -53,10 +53,43 @@ function PnlDisplay({ pnl }: { pnl: number | null | undefined }) {
   else if (pnl < 0) classes.push('pnlNeg');
   else classes.push('pnlZero');
   return (
-    <span className={classes.join(' ')} title={`PnL: ${pnl}`}>
+    <span className={classes.join(' ')}>
       {pnl.toFixed(4)}
     </span>
   );
+}
+
+function getTradeOutcomeLabel(status: string, pnl: number | null | undefined): string {
+  if (status === 'CLOSED_WIN') return 'прибыль';
+  if (status === 'CLOSED_LOSS') return 'убыток';
+  if (status === 'CLOSED_MIXED') return 'смешанный результат';
+  if (status === 'FAILED') return 'ошибка';
+  if (status === 'ORDERS_PLACED' || status === 'OPEN' || status === 'PARSED') {
+    return 'в работе';
+  }
+  if (typeof pnl === 'number' && Number.isFinite(pnl)) {
+    if (pnl > 0) return 'прибыль';
+    if (pnl < 0) return 'убыток';
+  }
+  return status.toLowerCase();
+}
+
+function formatPnlValue(pnl: number | null | undefined): string {
+  if (pnl === null || pnl === undefined || !Number.isFinite(pnl)) {
+    return '—';
+  }
+  return pnl.toFixed(4);
+}
+
+function buildFinalPnlTooltip(status: string, pnl: number | null | undefined): string {
+  const outcome = getTradeOutcomeLabel(status, pnl);
+  const finalPnl = formatPnlValue(pnl);
+  return [
+    `Итог сделки: ${outcome}`,
+    `Финальный PnL (с комиссиями): ${finalPnl}`,
+    'Комиссии Bybit: openFee + closeFee + execFee',
+    'В текущем финальном PnL комиссии уже учтены.',
+  ].join('\n');
 }
 
 function DirectionBadge({ direction }: { direction: string }) {
@@ -162,7 +195,7 @@ export function TradesList({ items, sourceOptions }: Props) {
               <span className="tradeCardValue">{formatDateTimeRu(s.createdAt)}</span>
             </div>
             <div className="tradeCardMetaRow tradeCardPnlRow">
-              <span className="tradeCardLabel">PnL</span>
+              <span className="tradeCardLabel">Финальный PnL</span>
               <span className="tradeCardValue">
                 <PnlEditControl
                   signalId={s.id}
@@ -170,9 +203,15 @@ export function TradesList({ items, sourceOptions }: Props) {
                   realizedPnl={s.realizedPnl}
                   disabled={Boolean(s.deletedAt)}
                 >
-                  <PnlDisplay pnl={s.realizedPnl} />
+                  <span title={buildFinalPnlTooltip(s.status, s.realizedPnl)}>
+                    <PnlDisplay pnl={s.realizedPnl} />
+                  </span>
                 </PnlEditControl>
               </span>
+            </div>
+            <div className="tradeCardMetaRow">
+              <span className="tradeCardLabel">Итог сделки</span>
+              <span className="tradeCardValue">{getTradeOutcomeLabel(s.status, s.realizedPnl)}</span>
             </div>
           </div>
 
