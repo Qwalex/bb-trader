@@ -91,6 +91,22 @@ export interface RecalcClosedPnlJobStatus {
   error?: string;
 }
 
+export interface TradePnlBreakdownResult {
+  ok: boolean;
+  signalId: string;
+  source: 'closed_pnl' | 'execution_fallback' | 'unavailable';
+  finalPnl: number | null;
+  grossPnl: number | null;
+  fees: {
+    openFee: number | null;
+    closeFee: number | null;
+    execFee: number | null;
+    total: number | null;
+  };
+  details?: string;
+  error?: string;
+}
+
 export interface SignalExecutionDebugSnapshot {
   ok: boolean;
   signalId: string;
@@ -2757,7 +2773,15 @@ export class BybitService {
     ourIds: Set<string>,
     signalCreatedAt: Date,
     signalClosedAt?: Date | null,
-  ): { totalPnl: number; hadParsedPnl: boolean } {
+  ): {
+    totalPnl: number;
+    grossPnl: number;
+    hadParsedPnl: boolean;
+    openFee: number;
+    closeFee: number;
+    execFee: number;
+    totalFee: number;
+  } {
     const createdAtMs = signalCreatedAt.getTime();
     const createdFloorMs = createdAtMs - 60_000;
     const closedCeilMs =
@@ -2776,7 +2800,15 @@ export class BybitService {
       const execFee = Math.abs(BybitService.parseFiniteNumber(rec.execFee) ?? 0);
       const fee = openFee + closeFee + execFee;
       const pnlNet = Number.isFinite(pnlGross) ? pnlGross - fee : Number.NaN;
-      return { orderId, ts, pnl: pnlNet };
+      return {
+        orderId,
+        ts,
+        pnlNet,
+        pnlGross,
+        openFee,
+        closeFee,
+        execFee,
+      };
     });
 
     const hasTrackedRows = parsedRows.some(
@@ -2801,16 +2833,34 @@ export class BybitService {
     });
 
     let totalPnl = 0;
+    let grossPnl = 0;
+    let totalOpenFee = 0;
+    let totalCloseFee = 0;
+    let totalExecFee = 0;
     let hadParsedPnl = false;
     for (const row of candidates) {
-      if (!Number.isFinite(row.pnl)) {
+      if (!Number.isFinite(row.pnlNet)) {
         continue;
       }
-      totalPnl += row.pnl;
+      totalPnl += row.pnlNet;
+      if (Number.isFinite(row.pnlGross)) {
+        grossPnl += row.pnlGross;
+      }
+      totalOpenFee += row.openFee;
+      totalCloseFee += row.closeFee;
+      totalExecFee += row.execFee;
       hadParsedPnl = true;
     }
 
-    return { totalPnl, hadParsedPnl };
+    return {
+      totalPnl,
+      grossPnl,
+      hadParsedPnl,
+      openFee: totalOpenFee,
+      closeFee: totalCloseFee,
+      execFee: totalExecFee,
+      totalFee: totalOpenFee + totalCloseFee + totalExecFee,
+    };
   }
 
   private async fetchClosedPnlRowsForSymbol(
@@ -2868,7 +2918,7 @@ export class BybitService {
     direction: string;
     createdAt: Date;
     closedAt?: Date | null;
-  }): Promise<number | undefined> {
+  }): Promise<{ netPnl: number; grossPnl: number; totalFees: number } | undefined> {
     const createdFloorMs = params.createdAt.getTime() - 60_000;
     const closedCeilMs =
       params.closedAt && Number.isFinite(params.closedAt.getTime())
@@ -2953,7 +3003,129 @@ export class BybitService {
     // и для long, и для short.
     const pnl = (avgSell - avgBuy) * matchedQty;
     const netPnl = pnl - totalFees;
-    return Number.isFinite(netPnl) ? netPnl : undefined;
+    if (!Number.isFinite(netPnl)) {
+      return undefined;
+    }
+    return {
+      netPnl,
+      grossPnl: pnl,
+      totalFees,
+    };
+  }
+
+  async getTradePnlBreakdown(signalId: string): Promise<TradePnlBreakdownResult> {
+    const signal = await this.orders.getSignalWithOrders(signalId);
+    if (!signal) {
+      return {
+        ok: false,
+        signalId,
+        source: 'unavailable',
+        finalPnl: null,
+        grossPnl: null,
+        fees: { openFee: null, closeFee: null, execFee: null, total: null },
+        error: 'Сделка не найдена',
+      };
+    }
+
+    const client = await this.getClient();
+    if (!client) {
+      return {
+        ok: false,
+        signalId,
+        source: 'unavailable',
+        finalPnl: signal.realizedPnl ?? null,
+        grossPnl: null,
+        fees: { openFee: null, closeFee: null, execFee: null, total: null },
+        error: 'Нет подключенных ключей Bybit',
+      };
+    }
+
+    const symbol = normalizeTradingPair(signal.pair);
+    const ourIds = new Set<string>(
+      signal.orders
+        .map((o) => (o.bybitOrderId ? String(o.bybitOrderId) : ''))
+        .filter((id): id is string => id.length > 0),
+    );
+    if (ourIds.size === 0) {
+      return {
+        ok: false,
+        signalId,
+        source: 'unavailable',
+        finalPnl: signal.realizedPnl ?? null,
+        grossPnl: null,
+        fees: { openFee: null, closeFee: null, execFee: null, total: null },
+        details: 'Нет bybitOrderId у ордеров сделки',
+      };
+    }
+
+    try {
+      const rows = await this.fetchClosedPnlRowsForSymbol(client, symbol, signal.createdAt);
+      const parsed = this.sumClosedPnlForSignal(
+        rows,
+        ourIds,
+        signal.createdAt,
+        signal.closedAt,
+      );
+      if (parsed.hadParsedPnl) {
+        return {
+          ok: true,
+          signalId,
+          source: 'closed_pnl',
+          finalPnl: parsed.totalPnl,
+          grossPnl: parsed.grossPnl,
+          fees: {
+            openFee: parsed.openFee,
+            closeFee: parsed.closeFee,
+            execFee: parsed.execFee,
+            total: parsed.totalFee,
+          },
+        };
+      }
+
+      const fallback = await this.estimateClosedPnlFromExecutions({
+        client,
+        symbol,
+        direction: signal.direction,
+        createdAt: signal.createdAt,
+        closedAt: signal.closedAt,
+      });
+      if (fallback) {
+        return {
+          ok: true,
+          signalId,
+          source: 'execution_fallback',
+          finalPnl: fallback.netPnl,
+          grossPnl: fallback.grossPnl,
+          fees: {
+            openFee: null,
+            closeFee: null,
+            execFee: fallback.totalFees,
+            total: fallback.totalFees,
+          },
+          details: 'Расчёт по execution list (fallback)',
+        };
+      }
+
+      return {
+        ok: false,
+        signalId,
+        source: 'unavailable',
+        finalPnl: signal.realizedPnl ?? null,
+        grossPnl: null,
+        fees: { openFee: null, closeFee: null, execFee: null, total: null },
+        details: 'Не удалось получить комиссии и PnL из Bybit',
+      };
+    } catch (e) {
+      return {
+        ok: false,
+        signalId,
+        source: 'unavailable',
+        finalPnl: signal.realizedPnl ?? null,
+        grossPnl: null,
+        fees: { openFee: null, closeFee: null, execFee: null, total: null },
+        error: formatError(e),
+      };
+    }
   }
 
   private parseSourceMartingaleMap(raw: string | undefined): Map<string, number> {
@@ -3158,13 +3330,14 @@ export class BybitService {
           // В recalc повторяем fallback из poll:
           // если closedPnL не удалось связать по orderId, считаем по execution list
           // и обязательно вычитаем комиссии исполнений (execFee).
-          nextPnl = await this.estimateClosedPnlFromExecutions({
+          const fallback = await this.estimateClosedPnlFromExecutions({
             client,
             symbol,
             direction: sig.direction,
             createdAt: sig.createdAt,
             closedAt: sig.closedAt,
           });
+          nextPnl = fallback?.netPnl;
         }
         if (nextPnl === undefined) {
           skippedNoClosedPnl += 1;
@@ -3478,17 +3651,17 @@ export class BybitService {
                 },
               );
             } else if (!this.hasOpenEntryOrders(fresh.orders)) {
-              const estimatedPnl = await this.estimateClosedPnlFromExecutions({
+              const estimated = await this.estimateClosedPnlFromExecutions({
                 client,
                 symbol: symNorm,
                 direction: fresh.direction,
                 createdAt: fresh.createdAt,
                 closedAt: new Date(),
               });
-              if (estimatedPnl !== undefined) {
+              if (estimated !== undefined) {
                 await this.orders.updateSignalStatus(fresh.id, {
-                  status: estimatedPnl > 0 ? 'CLOSED_WIN' : estimatedPnl < 0 ? 'CLOSED_LOSS' : 'CLOSED_MIXED',
-                  realizedPnl: estimatedPnl,
+                  status: estimated.netPnl > 0 ? 'CLOSED_WIN' : estimated.netPnl < 0 ? 'CLOSED_LOSS' : 'CLOSED_MIXED',
+                  realizedPnl: estimated.netPnl,
                   closedAt: new Date(),
                 });
                 void this.appLog.append(
@@ -3498,7 +3671,7 @@ export class BybitService {
                   {
                     signalId: fresh.id,
                     pair: symNorm,
-                    estimatedPnl,
+                    estimatedPnl: estimated.netPnl,
                     trackedOrderIds: Array.from(ourIds),
                   },
                 );

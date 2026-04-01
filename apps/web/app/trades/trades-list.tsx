@@ -4,6 +4,7 @@ import { PnlEditControl } from './pnl-edit-control';
 import { RestoreTradeButton } from './restore-trade-button';
 import { SourceSelect } from './source-select';
 import { TelegramSourceLink } from './telegram-source-link';
+import { TradeFinalPnl } from './trade-final-pnl';
 import { TradeParamsBlock } from './trade-params-block';
 
 type TradeListItem = {
@@ -44,21 +45,6 @@ type Props = {
   sourceOptions: string[];
 };
 
-function PnlDisplay({ pnl }: { pnl: number | null | undefined }) {
-  if (pnl === null || pnl === undefined) {
-    return <>—</>;
-  }
-  const classes = ['pnl'];
-  if (pnl > 0) classes.push('pnlPos');
-  else if (pnl < 0) classes.push('pnlNeg');
-  else classes.push('pnlZero');
-  return (
-    <span className={classes.join(' ')}>
-      {pnl.toFixed(4)}
-    </span>
-  );
-}
-
 function getTradeOutcomeLabel(status: string, pnl: number | null | undefined): string {
   if (status === 'CLOSED_WIN') return 'прибыль';
   if (status === 'CLOSED_LOSS') return 'убыток';
@@ -72,24 +58,6 @@ function getTradeOutcomeLabel(status: string, pnl: number | null | undefined): s
     if (pnl < 0) return 'убыток';
   }
   return status.toLowerCase();
-}
-
-function formatPnlValue(pnl: number | null | undefined): string {
-  if (pnl === null || pnl === undefined || !Number.isFinite(pnl)) {
-    return '—';
-  }
-  return pnl.toFixed(4);
-}
-
-function buildFinalPnlTooltip(status: string, pnl: number | null | undefined): string {
-  const outcome = getTradeOutcomeLabel(status, pnl);
-  const finalPnl = formatPnlValue(pnl);
-  return [
-    `Итог сделки: ${outcome}`,
-    `Финальный PnL (с комиссиями): ${finalPnl}`,
-    'Комиссии Bybit: openFee + closeFee + execFee',
-    'В текущем финальном PnL комиссии уже учтены.',
-  ].join('\n');
 }
 
 function DirectionBadge({ direction }: { direction: string }) {
@@ -203,9 +171,11 @@ export function TradesList({ items, sourceOptions }: Props) {
                   realizedPnl={s.realizedPnl}
                   disabled={Boolean(s.deletedAt)}
                 >
-                  <span title={buildFinalPnlTooltip(s.status, s.realizedPnl)}>
-                    <PnlDisplay pnl={s.realizedPnl} />
-                  </span>
+                  <TradeFinalPnl
+                    signalId={s.id}
+                    status={s.status}
+                    realizedPnl={s.realizedPnl}
+                  />
                 </PnlEditControl>
               </span>
             </div>

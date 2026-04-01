@@ -1,6 +1,7 @@
 import Link from 'next/link';
 
 import { fetchJson } from '../../lib/api';
+import { DeleteAllTradesButton } from './delete-all-trades-button';
 import { RecalcClosedPnlButton } from './recalc-closed-pnl-button';
 import { TradesList } from './trades-list';
 import { TradesFilters } from './trades-filters';
@@ -148,11 +149,12 @@ export default async function TradesPage({
       <h1 className="pageTitle">История сделок</h1>
       {err && <p className="msg err">{err}</p>}
       <TradesFilters sourceOptions={sourceOptions} />
-      <div style={{ marginBottom: '1rem' }}>
+      <div style={{ marginBottom: '1rem', display: 'grid', gap: '0.75rem' }}>
         <p style={{ color: 'var(--muted)', fontSize: '0.85rem', marginBottom: '0.5rem' }}>
           Критично для статистики: пересчёт `realizedPnl` учитывает SL, даже если у него другой
           `orderId` (dry-run → затем запись в БД).
         </p>
+        <DeleteAllTradesButton />
         <RecalcClosedPnlButton limit={0} />
       </div>
       {data && (

@@ -374,7 +374,12 @@ export class OrdersService {
     });
   }
 
-  async deleteTrade(id: string): Promise<void> {
+  async deleteTrade(
+    id: string,
+    options?: {
+      allowActiveCleanup?: boolean;
+    },
+  ): Promise<void> {
     const row = await this.prisma.signal.findUnique({
       where: { id },
       select: { id: true, status: true, deletedAt: true },
@@ -385,12 +390,13 @@ export class OrdersService {
     if (row.deletedAt) {
       return;
     }
-    if (row.status === 'OPEN' || row.status === 'PARSED') {
+    const allowActiveCleanup = options?.allowActiveCleanup === true;
+    if ((row.status === 'OPEN' || row.status === 'PARSED') && !allowActiveCleanup) {
       throw new BadRequestException(
         'Нельзя удалить активную сделку: сначала закройте позицию/ордера на бирже',
       );
     }
-    if (row.status === 'ORDERS_PLACED') {
+    if (row.status === 'ORDERS_PLACED' || row.status === 'OPEN') {
       const cleanup = await this.bybit.cleanupExchangeBeforeDeletingPlacedSignal(id);
       if (!cleanup.ok) {
         const tail = cleanup.details ? `: ${cleanup.details}` : '';
@@ -403,6 +409,62 @@ export class OrdersService {
       where: { id },
       data: { deletedAt: new Date() },
     });
+    void this.userbotSignalHash.releaseForSignalId(id);
+  }
+
+  async deleteAllTradesSequential(): Promise<{
+    ok: boolean;
+    total: number;
+    deleted: number;
+    failed: number;
+    errors: Array<{
+      signalId: string;
+      status: string;
+      error: string;
+    }>;
+    stats: {
+      winrate: number;
+      wins: number;
+      losses: number;
+      totalClosed: number;
+      totalPnl: number;
+      openSignals: number;
+      avgProfitPnl: number;
+      avgLossPnl: number;
+      closedPerDayAvg: number;
+    };
+  }> {
+    const rows = await this.prisma.signal.findMany({
+      where: { deletedAt: null },
+      select: { id: true, status: true, createdAt: true },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const errors: Array<{ signalId: string; status: string; error: string }> = [];
+    let deleted = 0;
+
+    for (const row of rows) {
+      try {
+        await this.deleteTrade(row.id, { allowActiveCleanup: true });
+        deleted += 1;
+      } catch (e) {
+        errors.push({
+          signalId: row.id,
+          status: row.status,
+          error: e instanceof Error ? e.message : 'Ошибка удаления',
+        });
+      }
+    }
+
+    const stats = await this.getDashboardStats();
+    return {
+      ok: errors.length === 0,
+      total: rows.length,
+      deleted,
+      failed: errors.length,
+      errors,
+      stats,
+    };
   }
 
   async restoreTrade(id: string): Promise<void> {

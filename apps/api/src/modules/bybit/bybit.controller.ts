@@ -28,6 +28,11 @@ export class BybitController {
     return this.bybit.getSignalExecutionDebugSnapshot(signalId);
   }
 
+  @Get('trade-pnl-breakdown/:signalId')
+  async tradePnlBreakdown(@Param('signalId') signalId: string) {
+    return this.bybit.getTradePnlBreakdown(signalId);
+  }
+
   @Post('close/:signalId')
   async closeSignal(
     @Param('signalId') signalId: string,

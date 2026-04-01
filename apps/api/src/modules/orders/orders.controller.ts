@@ -60,6 +60,14 @@ export class OrdersController {
     return { ok: true };
   }
 
+  @Post('trades/delete-all')
+  async deleteAllTrades(@Body() body?: { confirm?: boolean }) {
+    if (body?.confirm !== true) {
+      throw new BadRequestException('Укажите { "confirm": true } для удаления всех сделок');
+    }
+    return this.orders.deleteAllTradesSequential();
+  }
+
   @Post('trades/:id/restore')
   async restoreTrade(@Param('id') id: string) {
     await this.orders.restoreTrade(id);
