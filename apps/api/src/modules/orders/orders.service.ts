@@ -671,6 +671,81 @@ export class OrdersService {
     return total === 0 ? 0 : (wins / total) * 100;
   }
 
+  private isLossOutcome(status: string, realizedPnl: number | null): boolean {
+    return status === 'CLOSED_LOSS' || (typeof realizedPnl === 'number' && realizedPnl < 0);
+  }
+
+  private async buildMartingaleStepBySignalId(
+    items: Array<{ id: string; source: string | null; createdAt: Date }>,
+  ): Promise<Map<string, number>> {
+    const stepBySignalId = new Map<string, number>();
+    if (items.length === 0) {
+      return stepBySignalId;
+    }
+
+    const perSource = new Map<string, { maxCreatedAt: Date; trades: typeof items }>();
+    for (const item of items) {
+      if (!item.source || item.source.trim().length === 0) {
+        stepBySignalId.set(item.id, 0);
+        continue;
+      }
+      const bucket = perSource.get(item.source);
+      if (!bucket) {
+        perSource.set(item.source, { maxCreatedAt: item.createdAt, trades: [item] });
+        continue;
+      }
+      if (item.createdAt > bucket.maxCreatedAt) {
+        bucket.maxCreatedAt = item.createdAt;
+      }
+      bucket.trades.push(item);
+    }
+
+    const sourceEntries = Array.from(perSource.entries());
+    await Promise.all(
+      sourceEntries.map(async ([source, state]) => {
+        const closedRows = await this.prisma.signal.findMany({
+          where: {
+            deletedAt: null,
+            source,
+            status: { in: ['CLOSED_WIN', 'CLOSED_LOSS', 'CLOSED_MIXED'] },
+            OR: [
+              { closedAt: { not: null, lte: state.maxCreatedAt } },
+              { closedAt: null, createdAt: { lte: state.maxCreatedAt } },
+            ],
+          },
+          select: {
+            status: true,
+            realizedPnl: true,
+            createdAt: true,
+            closedAt: true,
+          },
+          orderBy: [{ closedAt: 'asc' }, { createdAt: 'asc' }],
+        });
+
+        const history = closedRows.map((row) => ({
+          status: row.status,
+          realizedPnl: row.realizedPnl,
+          ts: row.closedAt ?? row.createdAt,
+        }));
+        const tradesAsc = [...state.trades].sort(
+          (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
+        );
+        let idx = 0;
+        let streak = 0;
+        for (const trade of tradesAsc) {
+          while (idx < history.length && history[idx]!.ts <= trade.createdAt) {
+            const ev = history[idx]!;
+            streak = this.isLossOutcome(ev.status, ev.realizedPnl) ? streak + 1 : 0;
+            idx += 1;
+          }
+          stepBySignalId.set(trade.id, streak);
+        }
+      }),
+    );
+
+    return stepBySignalId;
+  }
+
   private parseStringList(raw: string | undefined): string[] {
     const text = String(raw ?? '').trim();
     if (!text) return [];
@@ -916,7 +991,18 @@ export class OrdersService {
       }),
       this.prisma.signal.count({ where }),
     ]);
-    return { items, total, page, pageSize };
+    const martingaleStepById = await this.buildMartingaleStepBySignalId(
+      items.map((item) => ({
+        id: item.id,
+        source: item.source,
+        createdAt: item.createdAt,
+      })),
+    );
+    const itemsWithMartingale = items.map((item) => ({
+      ...item,
+      martingaleStep: martingaleStepById.get(item.id) ?? 0,
+    }));
+    return { items: itemsWithMartingale, total, page, pageSize };
   }
 
   async statsBySource() {

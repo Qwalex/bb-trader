@@ -23,6 +23,7 @@ type TradeListItem = {
   leverage: number;
   orderUsd: number;
   capitalPercent: number;
+  martingaleStep?: number | null;
   events?: Array<{
     id: string;
     type: string;

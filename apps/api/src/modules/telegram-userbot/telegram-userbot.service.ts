@@ -3308,29 +3308,90 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private formatMirrorSignalText(signal: SignalDto, sourceChatTitle?: string): string {
-    const entries = signal.entries.map((x) => String(x)).join(' / ');
-    const tps = signal.takeProfits.map((x) => String(x)).join(' / ');
-    const src = (sourceChatTitle ?? signal.source ?? '—').trim() || '—';
+  private toFixedPrice(value: number): string {
+    return Number.isFinite(value) ? value.toFixed(4) : '0.0000';
+  }
+
+  private normalizeDirection(direction: SignalDto['direction']): 'LONG' | 'SHORT' {
+    return direction === 'short' ? 'SHORT' : 'LONG';
+  }
+
+  private calculateMovePercent(params: {
+    from: number;
+    to: number;
+    direction: 'LONG' | 'SHORT';
+  }): string {
+    if (!Number.isFinite(params.from) || params.from === 0 || !Number.isFinite(params.to)) {
+      return '0.00%';
+    }
+    const raw =
+      params.direction === 'LONG'
+        ? ((params.to - params.from) / params.from) * 100
+        : ((params.from - params.to) / params.from) * 100;
+    return `${Math.abs(raw).toFixed(2)}%`;
+  }
+
+  private stripTelegramExportPrefix(text: string): string {
+    const lines = text.replace(/\r/g, '').split('\n');
+    if (lines.length === 0) {
+      return '';
+    }
+    const firstLine = lines[0];
+    if (firstLine === undefined) {
+      return lines.join('\n').trim();
+    }
+    lines[0] = firstLine
+      .replace(/^\[\d{2}\.\d{2}\.\d{4}\s+\d{1,2}:\d{2}\]\s*[^:]+:\s*/u, '')
+      .trimStart();
+    return lines.join('\n').trim();
+  }
+
+  private formatMirrorSignalText(signal: SignalDto, _sourceChatTitle?: string): string {
+    void _sourceChatTitle;
+    const direction = this.normalizeDirection(signal.direction);
+    const pair = signal.pair.toUpperCase();
+    const entries = [...signal.entries].filter(Number.isFinite).sort((a, b) => a - b);
+    const tps = [...signal.takeProfits].filter(Number.isFinite);
+    const entryLow = entries[0] ?? signal.entries[0] ?? 0;
+    const entryHigh = entries[entries.length - 1] ?? signal.entries[0] ?? 0;
+    const entryMid = (entryLow + entryHigh) / 2;
+    const slPercent = this.calculateMovePercent({
+      from: entryMid,
+      to: signal.stopLoss,
+      direction,
+    });
+    const targetLines = tps.map(
+      (tp, idx) =>
+        `${idx + 1}. ${this.toFixedPrice(tp)} (${this.calculateMovePercent({ from: entryMid, to: tp, direction })})`,
+    );
+
     return [
-      '📡 СИГНАЛ',
-      `Источник: ${src}`,
-      `Пара: ${signal.pair}`,
-      `Направление: ${signal.direction.toUpperCase()}`,
-      `Вход: ${entries || '—'}`,
-      `TP: ${tps || '—'}`,
-      `SL: ${signal.stopLoss}`,
+      `${direction === 'LONG' ? '🟢' : '🔴'} ${direction} ${pair}`,
       '',
-      '⚠️ Публикация исходного распознанного сигнала (без подстановки дефолтов).',
+      '📊 Market: futures',
+      `⚡ Leverage: ${signal.leverage}x`,
+      '',
+      '💰 Entry Range:',
+      `${this.toFixedPrice(entryLow)} - ${this.toFixedPrice(entryHigh)}`,
+      '',
+      '🛑 Stop Loss:',
+      `${this.toFixedPrice(signal.stopLoss)} (${slPercent})`,
+      '',
+      '🎯 Targets:',
+      ...(targetLines.length > 0 ? targetLines : ['1. —']),
+      '',
+      '🤖 Auto-generated signal',
     ].join('\n');
   }
 
   private formatMirrorResultText(text: string): string {
-    return `✅ РЕЗУЛЬТАТ\n\n${text}`.slice(0, 3500);
+    const cleaned = this.stripTelegramExportPrefix(text);
+    return cleaned.slice(0, 3500);
   }
 
   private formatMirrorCancelText(text: string): string {
-    return `🛑 ОТМЕНА\n\n${text}`.slice(0, 3500);
+    const cleaned = this.stripTelegramExportPrefix(text);
+    return cleaned.slice(0, 3500);
   }
 
   private async sendMirrorMessage(params: {

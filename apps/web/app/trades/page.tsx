@@ -42,6 +42,7 @@ type Signal = {
   /** Номинал в USDT */
   orderUsd: number;
   capitalPercent: number;
+  martingaleStep?: number;
   events?: SignalEvent[];
 };
 

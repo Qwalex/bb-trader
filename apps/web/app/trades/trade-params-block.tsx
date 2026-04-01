@@ -5,6 +5,7 @@ type TradeParamsSignal = {
   leverage: number;
   orderUsd: number;
   capitalPercent: number;
+  martingaleStep?: number | null;
 };
 
 function parseNumArray(raw: string | number[] | undefined): number[] {
@@ -46,6 +47,12 @@ function fmtSumLine(s: TradeParamsSignal): string {
   return '—';
 }
 
+function fmtMartingaleStep(step: number | null | undefined): string {
+  if (typeof step !== 'number' || !Number.isFinite(step)) return '—';
+  if (step <= 0) return 'база';
+  return `#${Math.trunc(step)}`;
+}
+
 export function TradeParamsBlock({ signal }: { signal: TradeParamsSignal }) {
   const entries = parseNumArray(signal.entries);
   const tps = parseNumArray(signal.takeProfits);
@@ -70,6 +77,10 @@ export function TradeParamsBlock({ signal }: { signal: TradeParamsSignal }) {
         <dt>Сумма входа</dt>
         <dd title={signal.orderUsd <= 0 && signal.capitalPercent > 0 ? 'Доля от баланса' : undefined}>
           {fmtSumLine(signal)}
+        </dd>
+        <dt>Мартингейл</dt>
+        <dd title="Номер шага для источника на момент создания сделки">
+          {fmtMartingaleStep(signal.martingaleStep)}
         </dd>
       </dl>
     </details>
