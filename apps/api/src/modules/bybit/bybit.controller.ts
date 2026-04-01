@@ -1,8 +1,10 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 
 import { BalanceSnapshotService } from './balance-snapshot.service';
 import { BybitService } from './bybit.service';
 
+@ApiTags('Bybit')
 @Controller('bybit')
 export class BybitController {
   constructor(

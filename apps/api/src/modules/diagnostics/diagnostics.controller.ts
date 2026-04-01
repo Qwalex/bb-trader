@@ -8,10 +8,12 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 
 import { DiagnosticsService } from './diagnostics.service';
 import { TradingAiAdvisorService } from './trading-ai-advisor.service';
 
+@ApiTags('Diagnostics')
 @Controller('diagnostics')
 export class DiagnosticsController {
   constructor(

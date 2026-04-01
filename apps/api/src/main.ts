@@ -1,5 +1,6 @@
 import { LogLevel } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 import { AppModule } from './app.module';
 
@@ -14,6 +15,19 @@ async function bootstrap() {
     logger: logLevels,
   });
   app.enableCors({ origin: true });
+
+  const swaggerConfig = new DocumentBuilder()
+    .setTitle('SignalsBot API')
+    .setDescription('REST API для SignalsBot (NestJS)')
+    .setVersion('1.0')
+    .build();
+  const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
+  SwaggerModule.setup('docs', app, swaggerDocument, {
+    swaggerOptions: {
+      persistAuthorization: true,
+    },
+  });
+
   const port = process.env.API_PORT ?? '3001';
   const host = process.env.API_HOST ?? '0.0.0.0';
   await app.listen(parseInt(port, 10), host);

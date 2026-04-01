@@ -38,8 +38,11 @@ docker compose up --build
 
 - API: `http://localhost:3001` (health: `/health`)
 - Web: `http://localhost:3000`
+- DB Viewer (SQLite): `http://localhost:8081`
 
 База SQLite в volume `sqlite-data` (`/app/data/dev.db` в контейнере API).
+
+Визуальный просмотр БД доступен через сервис `db-viewer` (sqlite-web).
 
 ## Логи приложения (UI)
 

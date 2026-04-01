@@ -1,7 +1,9 @@
 import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 
 import { TelegramUserbotService } from './telegram-userbot.service';
 
+@ApiTags('Telegram Userbot')
 @Controller('telegram-userbot')
 export class TelegramUserbotController {
   constructor(private readonly userbot: TelegramUserbotService) {}
