@@ -315,6 +315,21 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       .filter((n) => Number.isFinite(n));
   }
 
+  /** Подпись строки входов: зона vs DCA (для текста и HTML). */
+  private formatEntryLineText(params: {
+    entryPrices: number[];
+    entryIsRange?: boolean;
+  }): string {
+    const prices = params.entryPrices.join(', ');
+    if (params.entryIsRange === true && params.entryPrices.length === 2) {
+      return `Входы (зона): ${prices}`;
+    }
+    if (params.entryIsRange === false && params.entryPrices.length > 1) {
+      return `Входы (DCA): ${prices}`;
+    }
+    return `Входы: ${prices}`;
+  }
+
   private formatSignalTable(s: SignalDto, defaultOrderUsd: number): string {
     const src = s.source ? `\nИсточник: ${s.source}` : '';
     const sizing =
@@ -327,11 +342,15 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       s.takeProfits.length > 1
         ? `\n(несколько TP: объём позиции делится поровну между уровнями — при 4 TP по 25% каждый)`
         : '';
+    const entryLine = this.formatEntryLineText({
+      entryPrices: s.entries,
+      entryIsRange: s.entryIsRange,
+    });
     return (
       `Сигнал (проверьте данные):\n` +
       `Пара: ${s.pair}\n` +
       `Сторона: ${s.direction.toUpperCase()}\n` +
-      `Входы: ${s.entries.join(', ')}\n` +
+      `${entryLine}\n` +
       `SL: ${s.stopLoss}\n` +
       `TP: ${s.takeProfits.join(', ')}${tpExtra}\n` +
       `Плечо: ${s.leverage}x\n` +
@@ -345,7 +364,14 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const lines: string[] = ['Черновик (что уже есть):'];
     if (p.pair) lines.push(`Пара: ${p.pair}`);
     if (p.direction) lines.push(`Сторона: ${p.direction.toUpperCase()}`);
-    if (p.entries?.length) lines.push(`Входы: ${p.entries.join(', ')}`);
+    if (p.entries?.length) {
+      lines.push(
+        this.formatEntryLineText({
+          entryPrices: p.entries,
+          entryIsRange: p.entryIsRange,
+        }),
+      );
+    }
     if (p.stopLoss !== undefined) lines.push(`SL: ${p.stopLoss}`);
     if (p.takeProfits?.length) lines.push(`TP: ${p.takeProfits.join(', ')}`);
     if (p.leverage !== undefined) lines.push(`Плечо: ${p.leverage}x`);
@@ -419,11 +445,15 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         : s.capitalPercent > 0
           ? `Капитал: ${s.capitalPercent}% от депозита`
           : `Сумма: $${defaultOrderUsd} USDT (по умолчанию)`;
+    const entryLine = this.formatEntryLineText({
+      entryPrices: s.entries,
+      entryIsRange: s.entryIsRange,
+    });
     return (
       `Новый сигнал из Telegram Userbot\n` +
       `Пара: ${s.pair}\n` +
       `Сторона: ${s.direction.toUpperCase()}\n` +
-      `Входы: ${s.entries.join(', ')}\n` +
+      `${entryLine}\n` +
       `SL: ${s.stopLoss}\n` +
       `TP: ${s.takeProfits.join(', ')}\n` +
       `Плечо: ${s.leverage}x\n` +
@@ -602,6 +632,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     pair: string;
     direction: string;
     entries: number[];
+    /** true — зона [low,high]; false — DCA; не передавать — нейтральная подпись */
+    entryIsRange?: boolean;
     stopLoss: number;
     takeProfits: number[];
     leverage: number;
@@ -630,8 +662,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const pair = escHtml((params.pair ?? '').trim().toUpperCase());
     const signalId = escHtml((params.signalId ?? '').trim());
     const direction = escHtml((params.direction ?? '').trim().toUpperCase());
-    const entries = escHtml(
-      params.entries.length > 0 ? params.entries.map((v) => String(v)).join(', ') : '—',
+    const entryLine = escHtml(
+      params.entries.length > 0
+        ? this.formatEntryLineText({
+            entryPrices: params.entries,
+            entryIsRange: params.entryIsRange,
+          })
+        : '—',
     );
     const stopLoss = escHtml(String(params.stopLoss));
     const takeProfits = escHtml(
@@ -653,7 +690,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       `Пара: <code>${pair}</code>\n` +
       `ID сделки: <code>${signalId}</code>\n` +
       `Направление: <code>${direction}</code>\n` +
-      `Входы: <code>${entries}</code>\n` +
+      `<code>${entryLine}</code>\n` +
       `Stop Loss: <code>${stopLoss}</code>\n` +
       `Take Profit: <code>${takeProfits}</code>\n` +
       `Плечо: <code>${leverage}</code>\n` +
@@ -1069,14 +1106,26 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   private formatTradeDetailHtml(signal: Signal & { orders: Order[] }): string {
-    let entries: string;
-    let tps: string;
+    let entryNums: number[] = [];
     try {
       const e = JSON.parse(signal.entries) as unknown;
-      entries = Array.isArray(e) ? e.map((x) => String(x)).join(', ') : signal.entries;
+      if (Array.isArray(e)) {
+        entryNums = e
+          .map((x) => Number(x))
+          .filter((n) => Number.isFinite(n));
+      }
     } catch {
-      entries = signal.entries;
+      entryNums = [];
     }
+    const entryLine = this.tgEsc(
+      entryNums.length > 0
+        ? this.formatEntryLineText({
+            entryPrices: entryNums,
+            entryIsRange: signal.entryIsRange,
+          })
+        : String(signal.entries),
+    );
+    let tps: string;
     try {
       const t = JSON.parse(signal.takeProfits) as unknown;
       tps = Array.isArray(t) ? t.map((x) => String(x)).join(', ') : signal.takeProfits;
@@ -1097,7 +1146,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       `<b>Сторона</b> · <b>${dir}</b>\n` +
       `<b>Статус</b> · <code>${this.tgEsc(signal.status)}</code>\n\n` +
       `<b>Параметры</b>\n` +
-      `├ Входы: <code>${this.tgEsc(entries)}</code>\n` +
+      `├ <code>${entryLine}</code>\n` +
       `├ SL: <code>${signal.stopLoss}</code>\n` +
       `├ TP: <code>${this.tgEsc(tps)}</code>\n` +
       `├ Плечо: <code>${signal.leverage}x</code>\n` +

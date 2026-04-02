@@ -1740,6 +1740,7 @@ export class BybitService {
       pair: string;
       direction: string;
       entries: string;
+      entryIsRange?: boolean;
       stopLoss: number;
       takeProfits: string;
       leverage: number;
@@ -1755,6 +1756,7 @@ export class BybitService {
         pair: signal.pair,
         direction: signal.direction,
         entries: this.parseNumArray(signal.entries),
+        entryIsRange: signal.entryIsRange,
         stopLoss: signal.stopLoss,
         takeProfits: this.parseNumArray(signal.takeProfits),
         leverage: signal.leverage,
