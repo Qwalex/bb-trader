@@ -1130,18 +1130,21 @@ export default function TelegramUserbotPage() {
               <code>{chat.chatId}</code>
             </div>
             <div className="userbotChatCardParams">
-              <div>
-                <span className="userbotChatCardParamLabel">Приоритет</span>
-                <input
-                  className="userbotCellInput"
-                  type="number"
-                  min={0}
-                  step={1}
-                  key={`prio-${chat.chatId}-${chat.sourcePriority ?? 0}`}
-                  defaultValue={chat.sourcePriority ?? 0}
-                  placeholder="0"
-                  title="Чем больше число, тем выше приоритет источника"
-                  onBlur={(e) => {
+              <div className="userbotChatCardParamCompact">
+                <div className="userbotChatFieldCompact">
+                  <span className="userbotChatFieldCompactLabel" title="Приоритет источника">
+                    Пр.
+                  </span>
+                  <input
+                    className="userbotCellInput userbotCellInputCompact"
+                    type="number"
+                    min={0}
+                    step={1}
+                    key={`prio-${chat.chatId}-${chat.sourcePriority ?? 0}`}
+                    defaultValue={chat.sourcePriority ?? 0}
+                    placeholder="0"
+                    title="Чем больше число, тем выше приоритет источника"
+                    onBlur={(e) => {
                     const v = e.target.value.trim();
                     const num = v === '' ? 0 : Number.parseInt(v, 10);
                     if (!Number.isFinite(num) || num < 0) {
@@ -1174,19 +1177,21 @@ export default function TelegramUserbotPage() {
                     });
                   }}
                 />
-              </div>
-              <div>
-                <span className="userbotChatCardParamLabel">Плечо</span>
-                <input
-                  className="userbotCellInput"
-                  type="number"
-                  min={1}
-                  step={1}
-                  key={`lev-${chat.chatId}-${chat.defaultLeverage ?? 'x'}`}
-                  defaultValue={chat.defaultLeverage ?? ''}
-                  placeholder="авто"
-                  title="Пусто — общий DEFAULT_LEVERAGE"
-                  onBlur={(e) => {
+                </div>
+                <div className="userbotChatFieldCompact">
+                  <span className="userbotChatFieldCompactLabel" title="Кредитное плечо">
+                    Плечо
+                  </span>
+                  <input
+                    className="userbotCellInput userbotCellInputCompact"
+                    type="number"
+                    min={1}
+                    step={1}
+                    key={`lev-${chat.chatId}-${chat.defaultLeverage ?? 'x'}`}
+                    defaultValue={chat.defaultLeverage ?? ''}
+                    placeholder="авто"
+                    title="Пусто — общий DEFAULT_LEVERAGE"
+                    onBlur={(e) => {
                     const v = e.target.value.trim();
                     const num = v === '' ? null : Number.parseInt(v, 10);
                     if (
@@ -1224,19 +1229,21 @@ export default function TelegramUserbotPage() {
                     });
                   }}
                 />
-              </div>
-              <div>
-                <span className="userbotChatCardParamLabel">Мартингейл</span>
-                <input
-                  className="userbotCellInput"
-                  type="number"
-                  min={1}
-                  step={0.01}
-                  key={`mrt-${chat.chatId}-${chat.martingaleMultiplier ?? 'x'}`}
-                  defaultValue={chat.martingaleMultiplier ?? ''}
-                  placeholder="дефолт"
-                  title="Пусто — дефолтный множитель из настроек"
-                  onBlur={(e) => {
+                </div>
+                <div className="userbotChatFieldCompact">
+                  <span className="userbotChatFieldCompactLabel" title="Мартингейл после убытка">
+                    Март.
+                  </span>
+                  <input
+                    className="userbotCellInput userbotCellInputCompact"
+                    type="number"
+                    min={1}
+                    step={0.01}
+                    key={`mrt-${chat.chatId}-${chat.martingaleMultiplier ?? 'x'}`}
+                    defaultValue={chat.martingaleMultiplier ?? ''}
+                    placeholder="—"
+                    title="Пусто — дефолтный множитель из настроек"
+                    onBlur={(e) => {
                     const v = e.target.value.trim();
                     const num = v === '' ? null : Number.parseFloat(v);
                     if (v !== '' && (!Number.isFinite(num) || num === null || num <= 1)) {
@@ -1271,21 +1278,23 @@ export default function TelegramUserbotPage() {
                     });
                   }}
                 />
-              </div>
-              <div>
-                <span className="userbotChatCardParamLabel">Мин. лот биржи</span>
-                <select
-                  className="userbotCellInput"
-                  value={
-                    chat.minLotBump === null || chat.minLotBump === undefined
-                      ? ''
-                      : chat.minLotBump
-                        ? 'true'
-                        : 'false'
-                  }
-                  title="Переопределение глобальной настройки «увеличивать до минимального лота»"
-                  aria-label="Минимальный лот биржи для источника"
-                  onChange={(e) => {
+                </div>
+                <div className="userbotChatFieldCompact">
+                  <span className="userbotChatFieldCompactLabel" title="Увеличивать номинал до минимального лота биржи">
+                    Min лот
+                  </span>
+                  <select
+                    className="userbotCellInput userbotCellInputCompact userbotCellSelectCompact"
+                    value={
+                      chat.minLotBump === null || chat.minLotBump === undefined
+                        ? ''
+                        : chat.minLotBump
+                          ? 'true'
+                          : 'false'
+                    }
+                    title="Переопределение: увеличивать до минимального лота биржи"
+                    aria-label="Минимальный лот биржи для источника"
+                    onChange={(e) => {
                     const v = e.target.value;
                     const next: boolean | null = v === '' ? null : v === 'true';
                     const same =
@@ -1314,12 +1323,13 @@ export default function TelegramUserbotPage() {
                     });
                   }}
                 >
-                  <option value="">Как в общих настройках</option>
-                  <option value="false">Выключено (ошибка, если номинала мало)</option>
-                  <option value="true">Включено (поднять до min лота)</option>
+                  <option value="">Как общие</option>
+                  <option value="false">Ошибка</option>
+                  <option value="true">До min</option>
                 </select>
+                </div>
               </div>
-              <div>
+              <div className="userbotChatCardParamEntry">
                 <span className="userbotChatCardParamLabel">Сумма входа</span>
                 <EntrySizingControl
                   mode={
