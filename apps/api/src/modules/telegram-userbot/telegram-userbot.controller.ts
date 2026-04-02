@@ -297,6 +297,11 @@ export class TelegramUserbotController {
         defaultEntryUsd: { type: 'string', nullable: true },
         martingaleMultiplier: { type: 'number', nullable: true },
         sourcePriority: { type: 'number', nullable: true },
+        minLotBump: {
+          type: 'boolean',
+          nullable: true,
+          description: 'null — наследовать глобальный BUMP_TO_MIN_EXCHANGE_LOT',
+        },
       },
     },
   })
@@ -311,6 +316,7 @@ export class TelegramUserbotController {
       defaultEntryUsd?: string | null;
       martingaleMultiplier?: number | null;
       sourcePriority?: number | null;
+      minLotBump?: boolean | null;
     },
   ) {
     return this.userbot.updateChat(chatId, body);

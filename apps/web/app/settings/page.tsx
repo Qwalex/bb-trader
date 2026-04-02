@@ -41,6 +41,11 @@ const KEYS = [
     label: 'Дефолт суммы входа (если в сигнале не указан размер)',
   },
   {
+    key: 'BUMP_TO_MIN_EXCHANGE_LOT',
+    label:
+      'Увеличивать сумму входа до минимального лота биржи, если номинала не хватает (true/false; по умолчанию false)',
+  },
+  {
     key: 'DEFAULT_LEVERAGE_ENABLED',
     label: 'Включить кредитное плечо по умолчанию',
   },
@@ -106,6 +111,7 @@ const KEYS = [
 
 const BOOLEAN_KEYS = new Set<string>([
   'BYBIT_TESTNET',
+  'BUMP_TO_MIN_EXCHANGE_LOT',
   'DEFAULT_LEVERAGE_ENABLED',
   'TELEGRAM_USERBOT_ENABLED',
   'TELEGRAM_USERBOT_USE_AI_CLASSIFIER',
@@ -156,6 +162,7 @@ const SETTINGS_SECTIONS: { id: string; title: string; keys: string[] }[] = [
     keys: [
       'MIN_CAPITAL_AMOUNT',
       'DEFAULT_ORDER_USD',
+      'BUMP_TO_MIN_EXCHANGE_LOT',
       'DEFAULT_LEVERAGE_ENABLED',
       'DEFAULT_LEVERAGE',
       'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',

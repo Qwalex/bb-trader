@@ -585,6 +585,24 @@ h1.pageTitle {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
+.userbotDefaultsFieldFullWidth {
+  grid-column: 1 / -1;
+}
+
+.userbotDefaultsCheckbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  font-size: 0.88rem;
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+.userbotDefaultsCheckbox input {
+  margin-top: 0.15rem;
+  flex-shrink: 0;
+}
+
 .userbotDefaultsFieldLabel {
   font-size: 0.68rem;
   text-transform: uppercase;

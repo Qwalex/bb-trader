@@ -49,6 +49,8 @@ type UserbotChat = {
   defaultLeverage: number | null;
   defaultEntryUsd: string | null;
   martingaleMultiplier: number | null;
+  /** null — наследовать глобальный BUMP_TO_MIN_EXCHANGE_LOT */
+  minLotBump?: boolean | null;
 };
 
 type TodayMetrics = {
@@ -100,6 +102,7 @@ export default function TelegramUserbotPage() {
   const [globalEntryAmount, setGlobalEntryAmount] = useState('');
   const [globalLev, setGlobalLev] = useState('');
   const [globalMartingaleDefault, setGlobalMartingaleDefault] = useState('');
+  const [globalBumpToMinLot, setGlobalBumpToMinLot] = useState(false);
   const [globalDefaultsLoaded, setGlobalDefaultsLoaded] = useState(false);
   const [entryByChat, setEntryByChat] = useState<
     Record<string, { mode: EntrySizingMode; amount: string }>
@@ -243,6 +246,8 @@ export default function TelegramUserbotPage() {
     );
     setGlobalLev(byKey.get('DEFAULT_LEVERAGE') ?? '');
     setGlobalMartingaleDefault(byKey.get('SOURCE_MARTINGALE_DEFAULT_MULTIPLIER') ?? '');
+    const bumpRaw = (byKey.get('BUMP_TO_MIN_EXCHANGE_LOT') ?? '').trim().toLowerCase();
+    setGlobalBumpToMinLot(bumpRaw === 'true' || bumpRaw === '1');
     setGlobalDefaultsLoaded(true);
   }
 
@@ -507,6 +512,24 @@ export default function TelegramUserbotPage() {
                   aria-label="Дефолтный множитель мартингейла"
                 />
               </div>
+              <div className="userbotDefaultsField userbotDefaultsFieldFullWidth">
+                <span className="userbotDefaultsFieldLabel">Мин. лот биржи</span>
+                <span className="userbotDefaultsFieldName">Глобально</span>
+                <span className="userbotDefaultsFieldHint">
+                  Если номинала не хватает на минимальный лот (например 6 USDT на BTC), по умолчанию —
+                  ошибка. Включите, чтобы поднимать объём до минимума биржи (как раньше).
+                </span>
+                <label className="userbotDefaultsCheckbox">
+                  <input
+                    type="checkbox"
+                    checked={globalBumpToMinLot}
+                    disabled={busy !== null}
+                    onChange={(e) => setGlobalBumpToMinLot(e.target.checked)}
+                    aria-label="Увеличивать сумму входа до минимального лота биржи"
+                  />
+                  <span>Увеличивать сумму входа до минимального лота биржи</span>
+                </label>
+              </div>
             </div>
             <div className="userbotDefaultsActions">
               <button
@@ -534,6 +557,14 @@ export default function TelegramUserbotPage() {
                       body: JSON.stringify({
                         key: 'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',
                         value: globalMartingaleDefault.trim(),
+                      }),
+                    });
+                    await fetch(`${getApiBase()}/settings`, {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        key: 'BUMP_TO_MIN_EXCHANGE_LOT',
+                        value: globalBumpToMinLot ? 'true' : 'false',
                       }),
                     });
                     setMsg({ type: 'ok', text: 'Общие дефолты сохранены' });
@@ -1240,6 +1271,53 @@ export default function TelegramUserbotPage() {
                     });
                   }}
                 />
+              </div>
+              <div>
+                <span className="userbotChatCardParamLabel">Мин. лот биржи</span>
+                <select
+                  className="userbotCellInput"
+                  value={
+                    chat.minLotBump === null || chat.minLotBump === undefined
+                      ? ''
+                      : chat.minLotBump
+                        ? 'true'
+                        : 'false'
+                  }
+                  title="Переопределение глобальной настройки «увеличивать до минимального лота»"
+                  aria-label="Минимальный лот биржи для источника"
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    const next: boolean | null = v === '' ? null : v === 'true';
+                    const same =
+                      (next === null &&
+                        (chat.minLotBump === null || chat.minLotBump === undefined)) ||
+                      next === chat.minLotBump;
+                    if (same) return;
+                    void runAction(`bump-${chat.chatId}`, async () => {
+                      const res = await fetch(
+                        `${getApiBase()}/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
+                        {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ minLotBump: next }),
+                        },
+                      );
+                      if (!res.ok) {
+                        throw new Error(`Ошибка сохранения (${res.status})`);
+                      }
+                      setChats((prev) =>
+                        prev.map((row) =>
+                          row.id === chat.id ? { ...row, minLotBump: next } : row,
+                        ),
+                      );
+                      setMsg({ type: 'ok', text: 'Настройка мин. лота для источника сохранена' });
+                    });
+                  }}
+                >
+                  <option value="">Как в общих настройках</option>
+                  <option value="false">Выключено (ошибка, если номинала мало)</option>
+                  <option value="true">Включено (поднять до min лота)</option>
+                </select>
               </div>
               <div>
                 <span className="userbotChatCardParamLabel">Сумма входа</span>

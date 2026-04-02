@@ -977,6 +977,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       defaultEntryUsd?: string | null;
       martingaleMultiplier?: number | null;
       sourcePriority?: number | null;
+      /** null = наследовать глобальный BUMP_TO_MIN_EXCHANGE_LOT */
+      minLotBump?: boolean | null;
     },
   ) {
     const entryNorm =
@@ -1010,6 +1012,12 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           : Number.isFinite(body.sourcePriority)
             ? Math.max(0, Math.floor(body.sourcePriority))
             : 0;
+    const minLotBumpNorm =
+      body.minLotBump === undefined
+        ? undefined
+        : body.minLotBump === null
+          ? null
+          : Boolean(body.minLotBump);
 
     const prismaAny = this.prisma as any;
     const row = await prismaAny.tgUserbotChat.upsert({
@@ -1021,12 +1029,14 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         sourcePriority: sourcePriorityNorm ?? 0,
         defaultLeverage: levNorm ?? null,
         defaultEntryUsd: entryNorm ?? null,
+        minLotBump: minLotBumpNorm ?? null,
       },
       update: {
         ...(body.enabled !== undefined ? { enabled: body.enabled } : {}),
         ...(sourcePriorityNorm !== undefined ? { sourcePriority: sourcePriorityNorm } : {}),
         ...(levNorm !== undefined ? { defaultLeverage: levNorm } : {}),
         ...(entryNorm !== undefined ? { defaultEntryUsd: entryNorm } : {}),
+        ...(minLotBumpNorm !== undefined ? { minLotBump: minLotBumpNorm } : {}),
       },
     });
     if (martingaleNorm !== undefined) {

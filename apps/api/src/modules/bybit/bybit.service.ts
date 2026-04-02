@@ -4,6 +4,7 @@ import { RestClientV5 } from 'bybit-api';
 import { normalizeTradingPair, type SignalDto } from '@repo/shared';
 
 import { formatError } from '../../common/format-error';
+import { PrismaService } from '../../prisma/prisma.service';
 import { AppLogService } from '../app-log/app-log.service';
 import { OrdersService } from '../orders/orders.service';
 import { SettingsService } from '../settings/settings.service';
@@ -165,6 +166,7 @@ export class BybitService {
   private readonly recalcJobOrder: string[] = [];
 
   constructor(
+    private readonly prisma: PrismaService,
     private readonly settings: SettingsService,
     @Inject(forwardRef(() => OrdersService))
     private readonly orders: OrdersService,
@@ -172,6 +174,25 @@ export class BybitService {
     private readonly telegram: TelegramService,
     private readonly appLog: AppLogService,
   ) {}
+
+  /**
+   * Глобально: BUMP_TO_MIN_EXCHANGE_LOT (по умолчанию false).
+   * По чату userbot: minLotBump — если задан, перекрывает глобальное значение.
+   */
+  private async resolveBumpToMinExchangeLot(chatId?: string): Promise<boolean> {
+    const trimmed = chatId?.trim();
+    if (trimmed) {
+      const row = await this.prisma.tgUserbotChat.findUnique({
+        where: { chatId: trimmed },
+        select: { minLotBump: true },
+      });
+      if (row?.minLotBump != null) {
+        return row.minLotBump;
+      }
+    }
+    const raw = await this.settings.get('BUMP_TO_MIN_EXCHANGE_LOT');
+    return raw === 'true' || raw === '1';
+  }
 
   /**
    * Нормализует строковые настройки из .env/SQLite:
@@ -455,11 +476,74 @@ export class BybitService {
   private roundQty(qty: number, step: string, minQty: string): string {
     const stepNum = parseFloat(step);
     const min = parseFloat(minQty);
-    // Входы считаем с округлением вниз, чтобы не превышать доступный бюджет/маржу.
+    // Округление вниз по шагу; min подмешивается только если выше заранее проверили,
+    // что номинала хватает на minQty (validateLeveragedNotionalVsMinQty).
     const roundedDown = Math.floor(qty / stepNum) * stepNum;
     const q = Math.max(roundedDown, min);
     const decimals = (step.split('.')[1] ?? '').length;
     return q.toFixed(decimals);
+  }
+
+  /**
+   * Если расчётное qty < minQty биржи, roundQty() поднимет количество до minQty — фактический
+   * номинал ордера станет больше заданного (например ~68 USDT вместо 6 на BTC при min 0.001).
+   * Здесь отсекаем такие случаи: ордер не выставляем, пользователь видит понятную ошибку.
+   */
+  private validateLeveragedNotionalVsMinQty(params: {
+    leveragedNotional: number;
+    effectiveEntries: number[];
+    weights: number[];
+    lastPrice: number | undefined;
+    minQtyNum: number;
+    symbol: string;
+  }): string | undefined {
+    const {
+      leveragedNotional,
+      effectiveEntries,
+      weights,
+      lastPrice,
+      minQtyNum,
+      symbol,
+    } = params;
+    if (
+      !Number.isFinite(leveragedNotional) ||
+      leveragedNotional <= 0 ||
+      !Number.isFinite(minQtyNum) ||
+      minQtyNum <= 0
+    ) {
+      return undefined;
+    }
+
+    if (effectiveEntries.length === 0) {
+      if (
+        lastPrice == null ||
+        !Number.isFinite(lastPrice) ||
+        lastPrice <= 0
+      ) {
+        return undefined;
+      }
+      const qtyRaw = leveragedNotional / lastPrice;
+      if (qtyRaw + 1e-12 < minQtyNum) {
+        const minUsd = minQtyNum * lastPrice;
+        return `Номинал ${leveragedNotional.toFixed(2)} USDT меньше минимального лота для ${symbol}: при цене ~${lastPrice.toFixed(2)} нужно не меньше ~${minUsd.toFixed(2)} USDT (мин. количество ${minQtyNum}).`;
+      }
+      return undefined;
+    }
+
+    for (let i = 0; i < effectiveEntries.length; i++) {
+      const price = effectiveEntries[i]!;
+      const share = weights[i] ?? 1 / effectiveEntries.length;
+      const notionalSlice = leveragedNotional * share;
+      if (!Number.isFinite(price) || price <= 0) {
+        continue;
+      }
+      const qtyRaw = notionalSlice / price;
+      if (qtyRaw + 1e-12 < minQtyNum) {
+        const minUsd = minQtyNum * price;
+        return `Доля номинала на вход ${i + 1} (${notionalSlice.toFixed(2)} USDT) меньше минимального лота для ${symbol}: при цене ~${price.toFixed(2)} нужно не меньше ~${minUsd.toFixed(2)} USDT (мин. количество ${minQtyNum}).`;
+      }
+    }
+    return undefined;
   }
 
   /** Базовая валидация направления/уровней сигнала. */
@@ -1859,6 +1943,47 @@ export class BybitService {
               firstEntryPrice: effectiveEntries[0],
             },
           );
+        }
+      }
+
+      const bumpToMin = await this.resolveBumpToMinExchangeLot(origin?.chatId);
+      const minQtyErr = this.validateLeveragedNotionalVsMinQty({
+        leveragedNotional,
+        effectiveEntries,
+        weights,
+        lastPrice,
+        minQtyNum,
+        symbol,
+      });
+      if (minQtyErr) {
+        if (bumpToMin) {
+          void this.appLog.append(
+            'info',
+            'bybit',
+            'placeSignalOrders: номинал ниже minQty — увеличение qty до мин. лота (BUMP_TO_MIN_EXCHANGE_LOT / minLotBump)',
+            {
+              symbol,
+              leveragedNotional,
+              minQty: minQtyNum,
+              entries: effectiveEntries.length,
+              lastPrice,
+              chatId: origin?.chatId ?? null,
+            },
+          );
+        } else {
+          void this.appLog.append(
+            'warn',
+            'bybit',
+            'placeSignalOrders: номинал ниже minQty биржи (отказ до ордера)',
+            {
+              symbol,
+              leveragedNotional,
+              minQty: minQtyNum,
+              entries: effectiveEntries.length,
+              lastPrice,
+            },
+          );
+          return { ok: false, error: minQtyErr };
         }
       }
 

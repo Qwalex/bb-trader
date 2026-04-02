@@ -11,6 +11,8 @@ import {
 const ENV_FALLBACK: Record<string, string> = {
   /** Номинал по умолчанию, если в БД и .env ключ не задан */
   DEFAULT_ORDER_USD: '10',
+  /** Если true — при номинале ниже minQty биржи поднимать qty до минимума (старое поведение); иначе ошибка */
+  BUMP_TO_MIN_EXCHANGE_LOT: 'false',
 };
 
 @Injectable()

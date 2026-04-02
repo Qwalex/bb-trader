@@ -1730,7 +1730,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }> {
     const row = await this.prisma.tgUserbotIngest.findUnique({
       where: { id: ingestId },
-      select: { text: true, chatId: true },
+      select: { text: true, chatId: true, messageId: true },
     });
     const text = row?.text?.trim();
     if (!text) {
@@ -1770,7 +1770,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (chat?.title) {
       parsed.signal.source = chat.title;
     }
-    const place = await this.bybit.placeSignalOrders(parsed.signal, text);
+    const place = await this.bybit.placeSignalOrders(parsed.signal, text, {
+      chatId: row?.chatId ?? undefined,
+      messageId: row?.messageId ?? undefined,
+    });
     if (!place.ok) {
       return { ok: false, error: formatError(place.error) };
     }
