@@ -1,46 +1,55 @@
-name: Promote development -> master (manual)
+name: Sync branches (manual)
 
 on:
   workflow_dispatch:
-    inputs:
-      source_branch:
-        description: "Откуда мерджим (обычно development)"
-        required: true
-        default: "development"
-      target_branch:
-        description: "Куда мерджим (обычно master)"
-        required: true
-        default: "master"
+    inputs: {}
 
 permissions:
   contents: write
 
 concurrency:
-  group: promote-${{ github.repository }}-${{ inputs.target_branch }}
+  group: sync-${{ github.repository }}-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
-  promote:
+  sync:
     runs-on: ubuntu-latest
     steps:
+      - name: Decide direction (by workflow ref)
+        id: dir
+        run: |
+          set -euo pipefail
+          REF="${GITHUB_REF_NAME:-}"
+          if [[ "$REF" == "master" ]]; then
+            echo "source=development" >> "$GITHUB_OUTPUT"
+            echo "target=master" >> "$GITHUB_OUTPUT"
+          elif [[ "$REF" == "development" ]]; then
+            echo "source=master" >> "$GITHUB_OUTPUT"
+            echo "target=development" >> "$GITHUB_OUTPUT"
+          else
+            echo "This workflow must be run using workflow from master or development." >&2
+            echo "Got ref: '$REF'" >&2
+            exit 1
+          fi
+
       - name: Checkout target branch
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.target_branch }}
+          ref: ${{ steps.dir.outputs.target }}
           fetch-depth: 0
 
       - name: Fetch source branch
         run: |
           set -euo pipefail
-          git fetch origin "${{ inputs.source_branch }}":"refs/remotes/origin/${{ inputs.source_branch }}"
+          git fetch origin "${{ steps.dir.outputs.source }}":"refs/remotes/origin/${{ steps.dir.outputs.source }}"
 
       - name: Merge source into target (ff if possible)
         run: |
           set -euo pipefail
           git status --porcelain
 
-          TARGET="${{ inputs.target_branch }}"
-          SOURCE="origin/${{ inputs.source_branch }}"
+          TARGET="${{ steps.dir.outputs.target }}"
+          SOURCE="origin/${{ steps.dir.outputs.source }}"
 
           echo "Target: $TARGET"
           echo "Source: $SOURCE"
@@ -58,5 +67,5 @@ jobs:
       - name: Push target branch
         run: |
           set -euo pipefail
-          git push origin "HEAD:${{ inputs.target_branch }}"
+          git push origin "HEAD:${{ steps.dir.outputs.target }}"
 
