@@ -13,6 +13,8 @@ services:
       DATABASE_URL: file:/app/data/dev.db
       API_PORT: "3001"
       API_HOST: 0.0.0.0
+      STACK_SLUG: ${STACK_SLUG:-trade-dev}
+      API_SWAGGER_SERVER: "/${STACK_SLUG:-trade-dev}-api"
     volumes:
       - sqlite-data-dev:/app/data
     ports:
@@ -30,13 +32,13 @@ services:
       context: .
       dockerfile: Dockerfile.web
       args:
-        NEXT_BASE_PATH: ${WEB_NEXT_BASE_PATH:-/trade-dev}
-        NEXT_PUBLIC_API_URL: ${WEB_NEXT_PUBLIC_API_URL:-/trade-dev-api}
+        STACK_SLUG: ${STACK_SLUG:-trade-dev}
         API_INTERNAL_URL: ${WEB_API_INTERNAL_URL:-http://api:3001}
     restart: unless-stopped
     environment:
-      NEXT_BASE_PATH: ${WEB_NEXT_BASE_PATH:-/trade-dev}
-      NEXT_PUBLIC_API_URL: ${WEB_NEXT_PUBLIC_API_URL:-/trade-dev-api}
+      STACK_SLUG: ${STACK_SLUG:-trade-dev}
+      NEXT_BASE_PATH: "/${STACK_SLUG:-trade-dev}"
+      NEXT_PUBLIC_API_URL: "/${STACK_SLUG:-trade-dev}-api"
       API_INTERNAL_URL: ${WEB_API_INTERNAL_URL:-http://api:3001}
     ports:
       - "127.0.0.1:3013:3000"
@@ -44,7 +46,7 @@ services:
       api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/trade-dev || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/${STACK_SLUG:-trade-dev} || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 10
@@ -62,7 +64,7 @@ services:
         "--port",
         "8080",
         "--url-prefix",
-        "/trade-dev-db",
+        "/${STACK_SLUG:-trade-dev}-db",
       ]
     ports:
       - "127.0.0.1:8082:8080"

@@ -56,8 +56,7 @@ jobs:
           file: Dockerfile.web
           push: true
           build-args: |
-            NEXT_BASE_PATH=/trade
-            NEXT_PUBLIC_API_URL=/trade-api
+            STACK_SLUG=trade
             API_INTERNAL_URL=http://api:3001
           tags: |
             ${{ env.REGISTRY }}/${{ steps.meta.outputs.lower_repo }}/web:${{ github.sha }}
