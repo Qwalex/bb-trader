@@ -55,11 +55,15 @@ type ExternalConfirmationRequest = {
   onResult?: (result: ExternalConfirmationResult) => Promise<void> | void;
 };
 
+const DRAFT_TTL_MS = 45 * 60_000;
+const EXTERNAL_CONFIRM_TTL_MS = 20 * 60_000;
+
 @Injectable()
 export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TelegramService.name);
   private bot: Telegraf | null = null;
   private botLaunchRetryTimer: NodeJS.Timeout | null = null;
+  private cleanupTimer: NodeJS.Timeout | null = null;
   private shuttingDown = false;
   /** Один черновик сигнала на пользователя (до подтверждения или отмены). */
   private readonly drafts = new Map<number, DraftSession>();
@@ -114,6 +118,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     this.registerHandlers();
     this.shuttingDown = false;
+    this.startMemoryCleanupLoop();
     void this.launchBotWithRetry();
   }
 
@@ -189,11 +194,52 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleDestroy(): Promise<void> {
     this.shuttingDown = true;
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = null;
+    }
     if (this.botLaunchRetryTimer) {
       clearTimeout(this.botLaunchRetryTimer);
       this.botLaunchRetryTimer = null;
     }
     this.bot?.stop('SIGTERM');
+  }
+
+  private startMemoryCleanupLoop(): void {
+    if (this.cleanupTimer) return;
+    // Очищаем in-memory структуры, чтобы они не росли бесконечно при долгом аптайме.
+    this.cleanupTimer = setInterval(() => {
+      try {
+        const now = Date.now();
+        // Черновики: удаляем самые старые по эвристике "нет активности" — ориентируемся на последний userTurn.
+        // DraftSession не хранит явный timestamp, поэтому очищаем только по лимиту размера,
+        // а также "подтверждения" чистим по createdAt.
+        const maxDrafts = 500;
+        if (this.drafts.size > maxDrafts) {
+          const excess = this.drafts.size - maxDrafts;
+          const keys = Array.from(this.drafts.keys()).slice(0, excess);
+          for (const k of keys) this.drafts.delete(k);
+        }
+        const maxOverrides = 500;
+        if (this.sourceOverrideByUser.size > maxOverrides) {
+          const excess = this.sourceOverrideByUser.size - maxOverrides;
+          const keys = Array.from(this.sourceOverrideByUser.keys()).slice(0, excess);
+          for (const k of keys) this.sourceOverrideByUser.delete(k);
+        }
+        let removed = 0;
+        for (const [id, req] of this.externalConfirmations.entries()) {
+          if (now - (req.createdAt ?? 0) > EXTERNAL_CONFIRM_TTL_MS) {
+            this.externalConfirmations.delete(id);
+            removed += 1;
+          }
+        }
+        if (removed > 0) {
+          this.logger.log(`TelegramService: cleaned externalConfirmations=${removed}`);
+        }
+      } catch (e) {
+        this.logger.warn(`TelegramService cleanup loop failed: ${formatError(e)}`);
+      }
+    }, 60_000);
   }
 
   private async launchBotWithRetry(): Promise<void> {

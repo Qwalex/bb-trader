@@ -65,7 +65,12 @@ type IngestProcessJob = {
     signalHash: string | null;
     status: string;
   };
-  text: string;
+  /**
+   * Текст сообщения может быть большим. Чтобы очередь не раздувала память,
+   * храним текст inline только до лимита; иначе подтягиваем из БД по ingest.id.
+   */
+  text: string | null;
+  textLen: number;
   meta?: { replyToMessageId?: string };
   options?: ProcessIngestOptions;
 };
@@ -90,6 +95,8 @@ type SourceMartingaleMap = Record<string, number>;
 const USERBOT_POLL_INTERVAL_MS = 2000;
 const USERBOT_POLL_FETCH_LIMIT = 20;
 const USERBOT_PROCESSING_CONCURRENCY = 4;
+const USERBOT_MAX_QUEUE_DEFAULT = 300;
+const USERBOT_INLINE_TEXT_MAX_CHARS = 4_000;
 const USERBOT_MAX_MESSAGE_AGE_MINUTES_DEFAULT = 10;
 const USERBOT_MIN_BALANCE_USD_DEFAULT = 3;
 const USERBOT_BALANCE_CHECK_CACHE_MS = 30_000;
@@ -1162,7 +1169,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         signalHash: null,
         status: ingest.status,
       },
-      text,
+      text: text.length > USERBOT_INLINE_TEXT_MAX_CHARS ? null : text,
+      textLen: text.length,
       meta,
       options: {
         enforceBalanceGuard: true,
@@ -1176,15 +1184,52 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     if (this.processingQueuedIds.has(job.ingest.id)) {
       return;
     }
+    // Ставим "замок" сразу, чтобы не было гонки и дубликатов при async-проверке лимита.
     this.processingQueuedIds.add(job.ingest.id);
-    this.processingQueue.push({
-      ...job,
-      options: {
-        ...job.options,
-        enqueuedAtMs: Date.now(),
-      },
+
+    // Защита от неконтролируемого роста памяти: ограничиваем очередь.
+    // При переполнении помечаем ingest как ignored с причиной "overloaded".
+    void (async () => {
+      const maxQueue = await this.getNumberSetting(
+        'TELEGRAM_USERBOT_MAX_QUEUE',
+        USERBOT_MAX_QUEUE_DEFAULT,
+        10,
+        10_000,
+      );
+      if (this.processingQueue.length >= maxQueue) {
+        this.processingQueuedIds.delete(job.ingest.id);
+        void this.appLog.append(
+          'warn',
+          'telegram',
+          'Userbot: processing queue overflow, dropping ingest',
+          {
+            ingestId: job.ingest.id,
+            chatId: job.ingest.chatId,
+            queueDepth: this.processingQueue.length,
+            maxQueue,
+            textLen: job.textLen,
+          },
+        );
+        await this.updateIngest(job.ingest.id, {
+          status: 'ignored',
+          classification: 'other',
+          error: `Очередь обработки переполнена (>${maxQueue}). Сообщение пропущено.`,
+        }).catch(() => undefined);
+        return;
+      }
+      this.processingQueue.push({
+        ...job,
+        options: {
+          ...job.options,
+          enqueuedAtMs: Date.now(),
+        },
+      });
+      this.pumpIngestQueue();
+    })().catch((e) => {
+      // При ошибке не держим "замок" навсегда.
+      this.processingQueuedIds.delete(job.ingest.id);
+      this.logger.warn(`enqueueIngestJob failed: ${formatError(e)}`);
     });
-    this.pumpIngestQueue();
   }
 
   private pumpIngestQueue(): void {
@@ -1207,9 +1252,17 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
   private async runIngestJob(job: IngestProcessJob): Promise<void> {
     try {
+      let text = job.text;
+      if (text == null) {
+        const row = await this.prisma.tgUserbotIngest.findUnique({
+          where: { id: job.ingest.id },
+          select: { text: true },
+        });
+        text = row?.text ?? '';
+      }
       await this.processIngestRecord(
         job.ingest,
-        job.text,
+        text,
         job.meta,
         job.options,
       );
