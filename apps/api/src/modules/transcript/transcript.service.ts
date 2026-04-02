@@ -121,6 +121,7 @@ Return ONLY valid JSON (no markdown, no commentary) with this exact shape:
     "pair": "BTCUSDT" | null,
     "direction": "long" | "short" | null,
     "entries": [number, ...] | null,
+    "entryIsRange": boolean | null,
     "stopLoss": number | null,
     "takeProfits": [number, ...] | null,
     "leverage": number | null,
@@ -163,10 +164,11 @@ Field rules:
 - pair: always the USDT linear perpetual symbol as BASEUSDT (e.g. BTCUSDT, ETHUSDT, 1000PEPEUSDT). If the message names only the base asset without a quote (BTC, ETH, SOL, PEPE), append USDT. Forms like ETH/USDT, BTC-USDT, ethusdt are fine; casing and separators are normalized server-side.
 - direction must be long or short.
 - entries and leverage are optional.
-- entries: first price is main entry; following prices are DCA levels.
+- entries: first price is main entry; following prices are DCA levels — unless entryIsRange is true (see below).
 - If the user gives no entry price, treat it as market entry: set entries to null and do NOT ask for clarification only because entries are missing. The order will be placed at market at the execution stage.
 - If the message gives BOTH a market entry option and a limit entry (labels such as Entry market / Entry limit, маркет и лимит, market vs limit, two entry lines where one is market and the other has a price), ALWAYS prefer the limit: set entries to the limit price(s) only. Do NOT set entries to null because "market" is also mentioned alongside an explicit limit price.
-- If the message describes ONE entry zone as a range for the same purpose (e.g. "entry range 1 - 2", "buy zone 1-2", "диапазон входа 1 - 2"), use one entry equal to the midpoint, not two DCA levels.
+- If the message describes ONE entry zone as a range for the same purpose (e.g. "entry range 1 - 2", "buy zone 1-2", "диапазон входа 1 - 2"), set entries to exactly two numbers [lower, higher] in ascending order (smaller first), and set entryIsRange to true. Do NOT use midpoint. Do NOT treat as two separate DCA levels.
+- If the message clearly gives two independent DCA entry levels (not one zone), set entryIsRange to false or omit it.
 - If leverage is given as a range (e.g. "2 - 5"), use the midpoint and round up (2-5 => 4).
 - Extract prices only from explicit labels (Entry, Stop loss, SL, Targets/TP, etc.). Do not blend, infer, or average numbers from different fields.
 - Field labels without actual values (e.g. "Entry:", "SL:", "TP1:" with no number after them) do NOT count as known values.
@@ -1144,6 +1146,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       pair: normalizeTradingPair(dto.pair),
       direction: dto.direction,
       entries: dto.entries ?? [],
+      entryIsRange: dto.entryIsRange === true,
       stopLoss: dto.stopLoss,
       takeProfits: dto.takeProfits,
       leverage: dto.leverage,

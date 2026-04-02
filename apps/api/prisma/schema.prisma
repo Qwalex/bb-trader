@@ -12,6 +12,8 @@ model Signal {
   pair           String
   direction      String
   entries        String // JSON number[]
+  /// true — entries [low,high] — одна зона входа (не DCA)
+  entryIsRange   Boolean  @default(false)
   stopLoss       Float
   takeProfits    String // JSON number[]
   leverage       Int

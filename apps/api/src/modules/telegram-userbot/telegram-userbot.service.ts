@@ -2225,6 +2225,10 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           Array.isArray(updatePartial.entries) && updatePartial.entries.length > 0
             ? updatePartial.entries
             : base.entries,
+        entryIsRange:
+          typeof updatePartial.entryIsRange === 'boolean'
+            ? updatePartial.entryIsRange
+            : (base.entryIsRange ?? false),
         stopLoss:
           typeof updatePartial.stopLoss === 'number' ? updatePartial.stopLoss : base.stopLoss,
         takeProfits:
@@ -2346,6 +2350,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     pair: string;
     direction: string;
     entries: string;
+    entryIsRange?: boolean;
     stopLoss: number;
     takeProfits: string;
     leverage: number;
@@ -2358,6 +2363,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       pair: prev.pair,
       direction,
       entries: parseSignalPriceArrayJson(prev.entries),
+      entryIsRange: prev.entryIsRange === true,
       stopLoss: prev.stopLoss,
       takeProfits: parseSignalPriceArrayJson(prev.takeProfits),
       leverage: prev.leverage,

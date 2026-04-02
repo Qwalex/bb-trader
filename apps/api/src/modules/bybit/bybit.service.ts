@@ -586,6 +586,73 @@ export class BybitService {
    * Доля номинала на каждый вход: первый 50%, остальные поровну на вторую половину
    * (2 входа → 50/50, 3 → 50/25/25, 4 → 50/16.67/…).
    */
+  /**
+   * Режим entryIsRange: [low, high] — одна зона. Если last внутри или на границе — рынок;
+   * если снаружи — одна цена: ближайшая граница ± 10% ширины диапазона внутрь, по сетке тика.
+   */
+  private applyEntryRangeResolution(
+    signal: SignalDto,
+    lastPrice: number | undefined,
+    tickSize: string,
+  ):
+    | { ok: true; effectiveEntries: number[]; weights: number[] }
+    | { ok: false; error: string } {
+    if (!signal.entryIsRange) {
+      const effectiveEntries = signal.entries;
+      return {
+        ok: true,
+        effectiveEntries,
+        weights: this.entryNotionalWeights(effectiveEntries.length || 1),
+      };
+    }
+    if (signal.entries.length !== 2) {
+      return {
+        ok: false,
+        error:
+          'Режим входа по диапазону: нужны ровно две границы зоны (нижняя и верхняя).',
+      };
+    }
+    const a = signal.entries[0]!;
+    const b = signal.entries[1]!;
+    const low = Math.min(a, b);
+    const high = Math.max(a, b);
+    const W = high - low;
+    if (!Number.isFinite(W) || W <= 0) {
+      return {
+        ok: false,
+        error: 'Некорректный диапазон входа: границы совпадают или невалидны.',
+      };
+    }
+    const inset = 0.1 * W;
+    if (lastPrice === undefined || !Number.isFinite(lastPrice) || lastPrice <= 0) {
+      return {
+        ok: false,
+        error:
+          'Для входа по диапазону нужна текущая цена инструмента (не удалось получить с биржи).',
+      };
+    }
+    const EPS = 1e-9 * Math.max(1, Math.abs(low), Math.abs(high));
+    if (lastPrice >= low - EPS && lastPrice <= high + EPS) {
+      void this.appLog.append('info', 'bybit', 'placeSignalOrders: диапазон входа — цена в зоне или на границе, рыночный вход', {
+        pair: signal.pair,
+        low,
+        high,
+        lastPrice,
+      });
+      return { ok: true, effectiveEntries: [], weights: [] };
+    }
+    const target = lastPrice < low ? low + inset : high - inset;
+    const snapped = this.snapPriceToTickNum(target, tickSize);
+    void this.appLog.append('info', 'bybit', 'placeSignalOrders: диапазон входа — цена вне зоны, одна лимит/stop цена', {
+      pair: signal.pair,
+      low,
+      high,
+      lastPrice,
+      target: snapped,
+    });
+    return { ok: true, effectiveEntries: [snapped], weights: [1] };
+  }
+
   private entryNotionalWeights(entryCount: number): number[] {
     const n = entryCount;
     if (n <= 0) return [];
@@ -1913,8 +1980,16 @@ export class BybitService {
       );
       const minQtyNum = parseFloat(minQty);
       const requestedEntries = signal.entries;
-      let effectiveEntries = requestedEntries;
-      let weights = this.entryNotionalWeights(effectiveEntries.length || 1);
+      const rangePlan = this.applyEntryRangeResolution(signal, lastPrice, tickSize);
+      if (!rangePlan.ok) {
+        void this.appLog.append('warn', 'bybit', 'placeSignalOrders: диапазон входа отклонён', {
+          symbol,
+          error: rangePlan.error,
+        });
+        return { ok: false, error: rangePlan.error };
+      }
+      let effectiveEntries = rangePlan.effectiveEntries;
+      let weights = rangePlan.weights;
 
       /**
        * Если бюджет не позволяет проставить все заданные входы (qty по какому-то входу

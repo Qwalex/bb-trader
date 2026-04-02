@@ -59,6 +59,7 @@ export class UserbotSignalHashService {
         pair: true,
         direction: true,
         entries: true,
+        entryIsRange: true,
         stopLoss: true,
         takeProfits: true,
         leverage: true,

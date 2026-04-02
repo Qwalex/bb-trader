@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsIn,
   IsNumber,
   IsOptional,
@@ -20,6 +21,11 @@ export class SignalParseDto {
   @IsNumber({}, { each: true })
   @Type(() => Number)
   entries?: number[];
+
+  /** Одна зона входа [low, high], не DCA */
+  @IsOptional()
+  @IsBoolean()
+  entryIsRange?: boolean;
 
   @IsNumber()
   stopLoss!: number;

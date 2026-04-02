@@ -16,6 +16,10 @@ export interface SignalDto {
   direction: SignalDirection;
   /** Цены входов: первый — основной, остальные — DCA; номинал на Bybit: 50% / остальное поровну на DCA */
   entries: number[];
+  /**
+   * true — entries из двух чисел задают одну зону [low, high] (не DCA). Исполнение: см. BybitService.
+   */
+  entryIsRange?: boolean;
   stopLoss: number;
   /** TP levels; position split equally */
   takeProfits: number[];

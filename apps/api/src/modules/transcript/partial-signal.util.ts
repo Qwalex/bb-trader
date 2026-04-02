@@ -35,6 +35,9 @@ export function normalizePartialSignal(raw: unknown): Partial<SignalDto> {
       .filter((n) => !Number.isNaN(n));
     if (nums.length) out.entries = nums;
   }
+  if (o.entryIsRange === true || o.entryIsRange === false) {
+    out.entryIsRange = Boolean(o.entryIsRange);
+  }
   if (typeof o.stopLoss === 'number' && !Number.isNaN(o.stopLoss)) {
     out.stopLoss = o.stopLoss;
   } else if (o.stopLoss != null) {
@@ -137,6 +140,7 @@ export function fieldLabelRu(key: string): string {
     orderUsd:
       'сумма позиции в USDT (номинал); если не задана — значение из настроек DEFAULT_ORDER_USD',
     capitalPercent: 'доля депозита в % (только если не задаёте сумму в USDT)',
+    entryIsRange: 'одна зона входа (две границы), не DCA',
   };
   return map[key] ?? key;
 }

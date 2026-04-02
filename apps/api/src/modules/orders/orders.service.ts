@@ -83,6 +83,7 @@ export class OrdersService {
         pair: normalizeTradingPair(signal.pair),
         direction: signal.direction,
         entries: JSON.stringify(signal.entries),
+        entryIsRange: signal.entryIsRange === true,
         stopLoss: signal.stopLoss,
         takeProfits: JSON.stringify(signal.takeProfits),
         leverage: signal.leverage,

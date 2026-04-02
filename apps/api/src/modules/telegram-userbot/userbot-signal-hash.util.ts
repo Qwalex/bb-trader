@@ -21,6 +21,7 @@ export function signalDtoFromSignalRow(row: {
   pair: string;
   direction: string;
   entries: string;
+  entryIsRange?: boolean;
   stopLoss: number;
   takeProfits: string;
   leverage: number;
@@ -33,6 +34,7 @@ export function signalDtoFromSignalRow(row: {
     pair: row.pair,
     direction,
     entries: parseSignalPriceArrayJson(row.entries),
+    entryIsRange: row.entryIsRange === true,
     stopLoss: row.stopLoss,
     takeProfits: parseSignalPriceArrayJson(row.takeProfits),
     leverage: row.leverage,
@@ -52,6 +54,7 @@ export function computeUserbotSignalHash(signal: SignalDto): string {
     direction: signal.direction,
     leverage: Number(signal.leverage),
     entries: signal.entries.map((v) => Number(v).toFixed(8)),
+    entryIsRange: signal.entryIsRange === true,
     stopLoss: Number(signal.stopLoss).toFixed(8),
     takeProfits: signal.takeProfits.map((v) => Number(v).toFixed(8)),
   };
