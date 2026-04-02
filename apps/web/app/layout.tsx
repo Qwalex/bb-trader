@@ -81,7 +81,7 @@ export default function RootLayout({
       <body className={`${geistSans.variable} ${geistMono.variable}`}>
         <PwaRegister />
         <header className="nav">
-          <strong className="brand">SignalsBot</strong>
+          <strong className="brand">SignalsBot Dev</strong>
           <nav className="navLinks">
             <Link href="/">Дашборд</Link>
             <Link href="/trades">Сделки</Link>
