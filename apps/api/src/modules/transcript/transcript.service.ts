@@ -51,6 +51,11 @@ const TRANSCRIPT_RESPONSE_JSON_SCHEMA = {
         },
         direction: { type: ['string', 'null'], enum: ['long', 'short', null] },
         entries: { type: ['array', 'null'], items: { type: 'number' }, minItems: 1 },
+        entryIsRange: {
+          type: ['boolean', 'null'],
+          description:
+            'true: entries are ONE zone [low, high] (range/zone wording); false: entries are DCA list; null if single entry or market',
+        },
         stopLoss: { type: ['number', 'null'] },
         takeProfits: {
           type: ['array', 'null'],
@@ -66,6 +71,7 @@ const TRANSCRIPT_RESPONSE_JSON_SCHEMA = {
         'pair',
         'direction',
         'entries',
+        'entryIsRange',
         'stopLoss',
         'takeProfits',
         'leverage',
