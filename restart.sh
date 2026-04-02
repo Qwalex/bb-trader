@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 NOTIFY_URL="https://dev.qwalex.ru/notify/"
-PROJECT_NAME="bb-trade"
+PROJECT_NAME="${PROJECT_NAME:-bb-trade}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Состояние только на VPS (не коммитить): последний успешный деплой из registry и журнал.
