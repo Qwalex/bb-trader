@@ -1,0 +1,62 @@
+name: Promote development -> master (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_branch:
+        description: "Откуда мерджим (обычно development)"
+        required: true
+        default: "development"
+      target_branch:
+        description: "Куда мерджим (обычно master)"
+        required: true
+        default: "master"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: promote-${{ github.repository }}-${{ inputs.target_branch }}
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout target branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_branch }}
+          fetch-depth: 0
+
+      - name: Fetch source branch
+        run: |
+          set -euo pipefail
+          git fetch origin "${{ inputs.source_branch }}":"refs/remotes/origin/${{ inputs.source_branch }}"
+
+      - name: Merge source into target (ff if possible)
+        run: |
+          set -euo pipefail
+          git status --porcelain
+
+          TARGET="${{ inputs.target_branch }}"
+          SOURCE="origin/${{ inputs.source_branch }}"
+
+          echo "Target: $TARGET"
+          echo "Source: $SOURCE"
+
+          # 1) Пытаемся fast-forward (предпочтительно: без merge-коммита, без конфликтов).
+          if git merge --ff-only "$SOURCE"; then
+            echo "Fast-forward merge ok."
+          else
+            echo "Fast-forward невозможен — делаем merge-коммит."
+            # 2) Merge-коммит с локальными user.* (не трогаем global git config).
+            git -c user.name="github-actions[bot]" -c user.email="github-actions[bot]@users.noreply.github.com" \
+              merge --no-ff --no-edit "$SOURCE"
+          fi
+
+      - name: Push target branch
+        run: |
+          set -euo pipefail
+          git push origin "HEAD:${{ inputs.target_branch }}"
+
