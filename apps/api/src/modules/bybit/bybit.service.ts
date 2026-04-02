@@ -442,13 +442,24 @@ export class BybitService {
     }
   }
 
+  /**
+   * Целое число шагов qtyStep в qty (без этого 0.3/0.1 в JS даёт 2.999… → floor = 2).
+   */
+  private static floorQtyToStepUnits(qty: number, stepNum: number): number {
+    if (!Number.isFinite(qty) || !Number.isFinite(stepNum) || stepNum <= 0) {
+      return 0;
+    }
+    return Math.floor(qty / stepNum + 1e-9);
+  }
+
   /** Округление количества к шагу лота (без подмешивания min на каждый кусок — это ломало split). */
   private formatQtyToStep(qty: number, qtyStep: string): string {
     const stepNum = parseFloat(qtyStep);
     if (!Number.isFinite(stepNum) || stepNum <= 0) {
       return String(qty);
     }
-    const floored = Math.floor(qty / stepNum) * stepNum;
+    const units = BybitService.floorQtyToStepUnits(qty, stepNum);
+    const floored = units * stepNum;
     const decimals = (qtyStep.split('.')[1] ?? '').length;
     return floored.toFixed(decimals);
   }
@@ -478,7 +489,8 @@ export class BybitService {
     const min = parseFloat(minQty);
     // Округление вниз по шагу; min подмешивается только если выше заранее проверили,
     // что номинала хватает на minQty (validateLeveragedNotionalVsMinQty).
-    const roundedDown = Math.floor(qty / stepNum) * stepNum;
+    const roundedDown =
+      BybitService.floorQtyToStepUnits(qty, stepNum) * stepNum;
     const q = Math.max(roundedDown, min);
     const decimals = (step.split('.')[1] ?? '').length;
     return q.toFixed(decimals);
@@ -683,7 +695,7 @@ export class BybitService {
     ) {
       return [];
     }
-    const totalUnits = Math.floor(totalQtyBase / stepNum);
+    const totalUnits = BybitService.floorQtyToStepUnits(totalQtyBase, stepNum);
     const totalFloored = totalUnits * stepNum;
     if (!Number.isFinite(totalFloored) || totalFloored < min) {
       return [];
@@ -747,7 +759,7 @@ export class BybitService {
     const posSizeRounded = this.formatQtyToStep(params.posSize, params.qtyStep);
     const totalUnits =
       Number.isFinite(qtyStepNum) && qtyStepNum > 0
-        ? Math.floor(params.posSize / qtyStepNum)
+        ? BybitService.floorQtyToStepUnits(params.posSize, qtyStepNum)
         : 0;
     const reasons: string[] = [];
     if (!Number.isFinite(qtyStepNum) || qtyStepNum <= 0) {
@@ -2288,7 +2300,7 @@ export class BybitService {
     });
   }
 
-  /** Есть ли уже исполненный вход (ENTRY/DCA). */
+  /** Есть ли уже исполненный вход (ENTRY/DCA). PartiallyFilled считаем достаточным для TP/SL по текущему объёму. */
   private hasFilledEntryOrders(
     orders: {
       orderKind: string;
@@ -2299,7 +2311,8 @@ export class BybitService {
       if (o.orderKind !== 'ENTRY' && o.orderKind !== 'DCA') {
         return false;
       }
-      return BybitService.isFilledOrderStatus(o.status);
+      const s = (o.status ?? '').trim().toLowerCase();
+      return s === 'filled' || s === 'partiallyfilled';
     });
   }
 
@@ -2654,24 +2667,82 @@ export class BybitService {
         o.qty != null ? Number(o.qty) : undefined,
       );
       if (st && st !== o.status) {
+        const stLow = st.trim().toLowerCase();
         await this.orders.updateOrder(o.id, {
           status: st,
-          filledAt: BybitService.isFilledOrderStatus(st) ? new Date() : undefined,
+          filledAt:
+            stLow === 'filled' || stLow === 'partiallyfilled'
+              ? new Date()
+              : undefined,
         });
       }
     }
 
-    const s2 = await this.orders.getSignalWithOrders(fresh.id);
+    let s2 = await this.orders.getSignalWithOrders(fresh.id);
     if (!s2) {
       return;
     }
 
-    // Если ещё нет ни одного исполненного входа, TP/SL ставить рано.
+    // Если в БД вход ещё не Filled, но на бирже уже есть позиция по стороне сигнала — доверяем бирже
+    // (часто Market/лаг API: ордер остаётся New, позиция уже открыта; иначе TP никогда не выставится).
     if (!this.hasFilledEntryOrders(s2.orders)) {
-      this.logger.debug(
-        `placeTpSplitIfNeeded: skip ${normalizeTradingPair(s2.pair)} — no filled entries yet`,
+      const symbolProbe = normalizeTradingPair(s2.pair);
+      const posProbe = await client.getPositionInfo({
+        category: 'linear',
+        symbol: symbolProbe,
+      });
+      const dirProbe = s2.direction === 'short' ? 'short' : 'long';
+      const rowProbe = BybitService.pickPositionRowForSignalDirection(
+        posProbe.result?.list ?? [],
+        dirProbe,
       );
-      return;
+      const sideProbe = String(rowProbe?.side ?? '').toLowerCase();
+      const sizeProbe = rowProbe?.size
+        ? Math.abs(parseFloat(String(rowProbe.size)))
+        : 0;
+      const hasLive =
+        rowProbe &&
+        sizeProbe > 1e-12 &&
+        ((dirProbe === 'long' && sideProbe === 'buy') ||
+          (dirProbe === 'short' && sideProbe === 'sell'));
+      if (!hasLive) {
+        this.logger.debug(
+          `placeTpSplitIfNeeded: skip ${symbolProbe} — no filled entries yet`,
+        );
+        return;
+      }
+      void this.appLog.append(
+        'warn',
+        'bybit',
+        'placeTpSplit: ENTRY в БД не Filled/PartiallyFilled, позиция на бирже есть — помечаем входы исполненными',
+        { signalId: s2.id, pair: symbolProbe, positionSize: sizeProbe },
+      );
+      for (const o of s2.orders) {
+        const ost = (o.status ?? '').trim().toLowerCase();
+        if (
+          ost === 'cancelled' ||
+          ost === 'deactivated' ||
+          ost === 'rejected'
+        ) {
+          continue;
+        }
+        if (
+          (o.orderKind === 'ENTRY' || o.orderKind === 'DCA') &&
+          o.bybitOrderId &&
+          !BybitService.isFilledOrderStatus(o.status) &&
+          ost !== 'partiallyfilled'
+        ) {
+          await this.orders.updateOrder(o.id, {
+            status: 'Filled',
+            filledAt: new Date(),
+          });
+        }
+      }
+      const s2ref = await this.orders.getSignalWithOrders(fresh.id);
+      if (!s2ref) {
+        return;
+      }
+      s2 = s2ref;
     }
 
     const symbol = normalizeTradingPair(s2.pair);
@@ -2821,6 +2892,33 @@ export class BybitService {
       });
     }
 
+    // Иначе в БД остаётся NEW по TP, а на бирже ордер уже снят — считаем «достаточно живых» и не шлём TP снова (tpOrdersPlaced: 0).
+    const tpOrdersToSync = s2.orders.filter(
+      (o) => o.orderKind === 'TP' && o.bybitOrderId,
+    );
+    for (const o of tpOrdersToSync) {
+      const st = await this.fetchOrderStatusFromExchange(
+        client,
+        s2.pair,
+        o.bybitOrderId!,
+        o.qty != null ? Number(o.qty) : undefined,
+      );
+      if (st && st !== o.status) {
+        const stLow = st.trim().toLowerCase();
+        await this.orders.updateOrder(o.id, {
+          status: st,
+          filledAt:
+            stLow === 'filled' || stLow === 'partiallyfilled'
+              ? new Date()
+              : undefined,
+        });
+      }
+    }
+    const s2AfterTpSync = await this.orders.getSignalWithOrders(fresh.id);
+    if (s2AfterTpSync) {
+      s2 = s2AfterTpSync;
+    }
+
     const liveTpByPrice = new Map<string, number>();
     const filledTpByPrice = new Map<string, number>();
     for (const o of s2.orders) {
@@ -2842,7 +2940,14 @@ export class BybitService {
       const tpPrice = activeTpPrices[ti]!;
       const levelQtyStr = qtyParts[ti];
       if (!levelQtyStr || parseFloat(levelQtyStr) <= 0) {
-        return;
+        void this.appLog.append('warn', 'bybit', 'placeTpSplit: пропуск уровня TP — нулевой qty в разбиении', {
+          symbol,
+          signalId: s2.id,
+          tpIndex: ti,
+          tpPrice,
+          qtyPartsLen: qtyParts.length,
+        });
+        continue;
       }
 
       const levelQty = parseFloat(levelQtyStr);
@@ -2861,6 +2966,20 @@ export class BybitService {
       const targetAtPrice = Math.max(0, childQtyParts.length - alreadyFilledAtPrice);
       let missingAtPrice = Math.max(0, targetAtPrice - existingAtPrice);
       if (missingAtPrice <= 0) {
+        void this.appLog.append(
+          'warn',
+          'bybit',
+          'placeTpSplit: уровень TP пропущен — в БД уже учтены ордера на этой цене (проверьте, что статусы совпадают с биржей)',
+          {
+            symbol,
+            signalId: s2.id,
+            tpIndex: ti,
+            priceStr,
+            existingAtPrice,
+            alreadyFilledAtPrice,
+            targetAtPrice,
+          },
+        );
         continue;
       }
 
@@ -2918,6 +3037,19 @@ export class BybitService {
       tpOrdersPerLevel: tpChildrenPerLevel,
       tpOrdersPlaced: totalTpPlaced,
     });
+    if (totalTpPlaced === 0 && activeTpPrices.length > 0 && qtyParts.length > 0) {
+      void this.appLog.append(
+        'warn',
+        'bybit',
+        'placeTpSplit: tpOrdersPlaced=0 при ненулевом разбиении — см. отказы reduce-only или пропуски уровней выше',
+        {
+          symbol,
+          signalId: s2.id,
+          activeTpPrices,
+          qtyParts,
+        },
+      );
+    }
   }
 
   /** orderId в строке getClosedPnL — для привязки PnL к нашим ордерам, а не к list[0] для всех. */
