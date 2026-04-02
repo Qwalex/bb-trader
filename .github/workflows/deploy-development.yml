@@ -3,6 +3,10 @@ name: Deploy development to VPS
 on:
   push:
     branches: ["development"]
+  workflow_run:
+    workflows: ["Sync branches (manual)"]
+    types: ["completed"]
+    branches: ["development"]
 
 permissions:
   contents: read
@@ -13,10 +17,15 @@ env:
 
 jobs:
   build-and-push:
+    if: |
+      (github.event_name == 'push') ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
       - name: Docker cleanup (before build)
         run: |
