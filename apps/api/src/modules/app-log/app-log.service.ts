@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import { SettingsService } from '../settings/settings.service';
 
 import { pruneOldLogs, stringifyPayload } from './log-sanitize';
 
@@ -20,13 +21,88 @@ const NOISE_MESSAGES = [
   'Userbot: duplicate ingest skipped',
 ] as const;
 
+/** Не пишем в БД (страница /logs): высокочастотный отладочный шум. */
+const SKIP_DB_APPEND_MESSAGES = new Set<string>([
+  ...NOISE_MESSAGES,
+  'poll: stale reconcile skipped because pair is suspended',
+  'poll: stale reconcile postponed until clean state repeats',
+  'poll: no stale signals found to reconcile for clean exchange side',
+  'poll: no live position for signal direction before close candidate evaluation',
+  'immediate stale blocker cleanup skipped because exchange exposure exists',
+  'stale reconcile suspended',
+  'stale reconcile resumed',
+  'stale reconcile suspension decremented',
+  'Userbot: pair/direction transition started',
+  'Userbot: pair/direction transition finished',
+  'Userbot: pair/direction transition decremented',
+  'Userbot: close cooldown set',
+  'Reentry: resolved root source message',
+  'Close: resolved root source message',
+  'Userbot: released signal hash',
+  'Userbot: processing started',
+  'Userbot: parse started',
+]);
+
+function shouldSkipDbAppend(
+  level: LogLevel,
+  message: string,
+  opts: { logNoisyEvents: boolean },
+): boolean {
+  const skipAllDebug =
+    process.env.APPLOG_DB_SKIP_DEBUG === '1' ||
+    String(process.env.APPLOG_DB_SKIP_DEBUG ?? '')
+      .toLowerCase()
+      .trim() === 'true';
+  if (skipAllDebug && level === 'debug') {
+    return true;
+  }
+  if (opts.logNoisyEvents) {
+    return false;
+  }
+  return SKIP_DB_APPEND_MESSAGES.has(message);
+}
+
+function parseLogNoisySetting(raw: string | undefined): boolean {
+  const s = String(raw ?? '').trim().toLowerCase();
+  return s === 'true' || s === '1' || s === 'yes';
+}
+
 @Injectable()
 export class AppLogService {
+  private static readonly LOG_NOISY_POLICY_TTL_MS = 10_000;
+
   private readonly logger = new Logger(AppLogService.name);
   private dbFullMuteUntilTs = 0;
   private dbFullLastErrorTs = 0;
+  private logNoisyPolicyCache: { expiresAt: number; value: boolean } | null =
+    null;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly settings: SettingsService,
+  ) {}
+
+  private async resolveLogNoisyEventsEnabled(): Promise<boolean> {
+    const now = Date.now();
+    if (
+      this.logNoisyPolicyCache &&
+      now < this.logNoisyPolicyCache.expiresAt
+    ) {
+      return this.logNoisyPolicyCache.value;
+    }
+    let raw: string | undefined;
+    try {
+      raw = await this.settings.get('APPLOG_LOG_NOISY_EVENTS');
+    } catch {
+      raw = undefined;
+    }
+    const value = parseLogNoisySetting(raw);
+    this.logNoisyPolicyCache = {
+      value,
+      expiresAt: now + AppLogService.LOG_NOISY_POLICY_TTL_MS,
+    };
+    return value;
+  }
 
   private isDbFullError(e: unknown): boolean {
     const msg = String(e ?? '').toLowerCase();
@@ -59,6 +135,10 @@ export class AppLogService {
     message: string,
     payload?: unknown,
   ): Promise<void> {
+    const logNoisyEvents = await this.resolveLogNoisyEventsEnabled();
+    if (shouldSkipDbAppend(level, message, { logNoisyEvents })) {
+      return;
+    }
     if (this.shouldMuteDbWrites()) {
       return;
     }

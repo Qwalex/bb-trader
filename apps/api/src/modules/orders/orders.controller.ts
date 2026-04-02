@@ -57,6 +57,18 @@ export class OrdersController {
   @ApiQuery({ name: 'sortBy', required: false, enum: ['createdAt', 'closedAt'] })
   @ApiQuery({ name: 'page', required: false })
   @ApiQuery({ name: 'pageSize', required: false })
+  @ApiQuery({
+    name: 'refreshPnl',
+    required: false,
+    description:
+      '1/true — для закрытых сделок запросить PnL с Bybit (медленно); по умолчанию только БД',
+  })
+  @ApiQuery({
+    name: 'martingaleSteps',
+    required: false,
+    description:
+      '1/true — посчитать шаг мартингейла (тяжёлый запрос по истории источника)',
+  })
   @ApiOkResponse({ description: 'Список сделок успешно получен' })
   @Get('trades')
   async trades(
@@ -70,7 +82,11 @@ export class OrdersController {
     @Query('sortBy') sortBy?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
+    @Query('refreshPnl') refreshPnl?: string,
+    @Query('martingaleSteps') martingaleSteps?: string,
   ) {
+    const truthy = (v: string | undefined) =>
+      v === '1' || v?.toLowerCase() === 'true';
     return this.orders.listTrades({
       signalId,
       source,
@@ -82,6 +98,8 @@ export class OrdersController {
       sortBy: sortBy === 'closedAt' ? 'closedAt' : 'createdAt',
       page: page ? parseInt(page, 10) : 1,
       pageSize: pageSize ? parseInt(pageSize, 10) : 20,
+      refreshPnlFromExchange: truthy(refreshPnl),
+      includeMartingaleSteps: truthy(martingaleSteps),
     });
   }
 

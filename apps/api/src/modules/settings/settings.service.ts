@@ -13,6 +13,8 @@ const ENV_FALLBACK: Record<string, string> = {
   DEFAULT_ORDER_USD: '10',
   /** Если true — при номинале ниже minQty биржи поднимать qty до минимума (старое поведение); иначе ошибка */
   BUMP_TO_MIN_EXCHANGE_LOT: 'false',
+  /** Если true — в AppLog (БД) писать шумные события; по умолчанию false */
+  APPLOG_LOG_NOISY_EVENTS: 'false',
 };
 
 @Injectable()

@@ -88,12 +88,20 @@ export default async function TradesPage({
       : false;
   const sortBy = sp.sortBy === 'closedAt' ? 'closedAt' : 'createdAt';
   const page = typeof sp.page === 'string' ? sp.page : '1';
+  const refreshPnl =
+    typeof sp.refreshPnl === 'string' &&
+    (sp.refreshPnl === '1' || sp.refreshPnl.toLowerCase() === 'true');
+  const martingaleSteps =
+    typeof sp.martingaleSteps === 'string' &&
+    (sp.martingaleSteps === '1' || sp.martingaleSteps.toLowerCase() === 'true');
   if (signalId) q.set('signalId', signalId);
   if (source) q.set('source', source);
   if (pair) q.set('pair', pair);
   if (status) q.set('status', status);
   if (includeDeleted) q.set('includeDeleted', '1');
   if (sortBy !== 'createdAt') q.set('sortBy', sortBy);
+  if (refreshPnl) q.set('refreshPnl', '1');
+  if (martingaleSteps) q.set('martingaleSteps', '1');
   q.set('page', page);
 
   let data: TradesRes | null = null;

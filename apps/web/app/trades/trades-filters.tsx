@@ -29,7 +29,21 @@ export function TradesFilters({ sourceOptions }: Props) {
     const includeDeleted = sp.get('includeDeleted') === '1' || sp.get('includeDeleted') === 'true';
     const sortBy: 'createdAt' | 'closedAt' =
       sp.get('sortBy') === 'closedAt' ? 'closedAt' : 'createdAt';
-    return { signalId, source, pair, status, includeDeleted, sortBy };
+    const refreshPnl =
+      sp.get('refreshPnl') === '1' || sp.get('refreshPnl')?.toLowerCase() === 'true';
+    const martingaleSteps =
+      sp.get('martingaleSteps') === '1' ||
+      sp.get('martingaleSteps')?.toLowerCase() === 'true';
+    return {
+      signalId,
+      source,
+      pair,
+      status,
+      includeDeleted,
+      sortBy,
+      refreshPnl,
+      martingaleSteps,
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -39,6 +53,8 @@ export function TradesFilters({ sourceOptions }: Props) {
   const [status, setStatus] = useState(initial.status);
   const [includeDeleted, setIncludeDeleted] = useState(initial.includeDeleted);
   const [sortBy, setSortBy] = useState<'createdAt' | 'closedAt'>(initial.sortBy);
+  const [refreshPnl, setRefreshPnl] = useState(initial.refreshPnl);
+  const [martingaleSteps, setMartingaleSteps] = useState(initial.martingaleSteps);
 
   const signalIdTimer = useRef<number | null>(null);
   const pairTimer = useRef<number | null>(null);
@@ -50,6 +66,8 @@ export function TradesFilters({ sourceOptions }: Props) {
     status?: string;
     includeDeleted?: boolean;
     sortBy?: 'createdAt' | 'closedAt';
+    refreshPnl?: boolean;
+    martingaleSteps?: boolean;
   }) {
     const q = new URLSearchParams(sp.toString());
 
@@ -85,6 +103,16 @@ export function TradesFilters({ sourceOptions }: Props) {
     if (next.sortBy !== undefined) {
       if (next.sortBy === 'closedAt') q.set('sortBy', 'closedAt');
       else q.delete('sortBy');
+      q.delete('page');
+    }
+    if (next.refreshPnl !== undefined) {
+      if (next.refreshPnl) q.set('refreshPnl', '1');
+      else q.delete('refreshPnl');
+      q.delete('page');
+    }
+    if (next.martingaleSteps !== undefined) {
+      if (next.martingaleSteps) q.set('martingaleSteps', '1');
+      else q.delete('martingaleSteps');
       q.delete('page');
     }
 
@@ -207,6 +235,52 @@ export function TradesFilters({ sourceOptions }: Props) {
         </select>
       </label>
 
+      <label
+        className="toggle tradesFiltersToggle"
+        title="По умолчанию PnL берётся из БД без запросов к Bybit"
+        style={{ justifyContent: 'flex-end' }}
+      >
+        <input
+          type="checkbox"
+          checked={refreshPnl}
+          aria-label="Детализация PnL с Bybit"
+          onChange={(e) => {
+            const v = e.target.checked;
+            setRefreshPnl(v);
+            replaceQuery({ refreshPnl: v });
+          }}
+        />
+        <span className="toggleTrack" aria-hidden="true">
+          <span className="toggleThumb" />
+        </span>
+        <span style={{ fontSize: '0.82rem', maxWidth: '11rem' }}>
+          PnL с Bybit (медленно)
+        </span>
+      </label>
+
+      <label
+        className="toggle tradesFiltersToggle"
+        title="Тяжёлый расчёт по всей истории источника"
+        style={{ justifyContent: 'flex-end' }}
+      >
+        <input
+          type="checkbox"
+          checked={martingaleSteps}
+          aria-label="Шаг мартингейла"
+          onChange={(e) => {
+            const v = e.target.checked;
+            setMartingaleSteps(v);
+            replaceQuery({ martingaleSteps: v });
+          }}
+        />
+        <span className="toggleTrack" aria-hidden="true">
+          <span className="toggleThumb" />
+        </span>
+        <span style={{ fontSize: '0.82rem', maxWidth: '11rem' }}>
+          Шаг мартингейла
+        </span>
+      </label>
+
       <button
         type="button"
         className="btn btnSecondary"
@@ -217,6 +291,8 @@ export function TradesFilters({ sourceOptions }: Props) {
           setStatus('');
           setIncludeDeleted(false);
           setSortBy('createdAt');
+          setRefreshPnl(false);
+          setMartingaleSteps(false);
           router.replace(pathname);
         }}
       >

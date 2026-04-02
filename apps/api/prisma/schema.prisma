@@ -32,6 +32,8 @@ model Signal {
   events         SignalEvent[]
 
   @@index([sourceChatId, sourceMessageId])
+  @@index([deletedAt, createdAt])
+  @@index([deletedAt, closedAt])
 }
 
 model SignalEvent {

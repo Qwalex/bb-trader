@@ -25,6 +25,16 @@ export interface TradesFilter {
   sortBy?: 'createdAt' | 'closedAt';
   page?: number;
   pageSize?: number;
+  /**
+   * true — для каждой закрытой сделки запросить PnL с Bybit (медленно при большой странице).
+   * По умолчанию false: показывать `realizedPnl` из БД без обращения к бирже.
+   */
+  refreshPnlFromExchange?: boolean;
+  /**
+   * true — посчитать шаг мартингейла по истории источника (тяжёлый запрос при длинной истории).
+   * По умолчанию false: поле не заполняется (в UI «—»).
+   */
+  includeMartingaleSteps?: boolean;
 }
 
 @Injectable()
@@ -1044,6 +1054,9 @@ export class OrdersService {
         }
       }
     }
+    const refreshPnlFromExchange = f.refreshPnlFromExchange === true;
+    const includeMartingaleSteps = f.includeMartingaleSteps === true;
+
     const [items, total] = await Promise.all([
       this.prisma.signal.findMany({
         where,
@@ -1063,20 +1076,37 @@ export class OrdersService {
       }),
       this.prisma.signal.count({ where }),
     ]);
-    const martingaleStepById = await this.buildMartingaleStepBySignalId(
-      items.map((item) => ({
-        id: item.id,
-        source: item.source,
-        createdAt: item.createdAt,
-      })),
-    );
-    const itemsWithMartingale = items.map((item) => ({
-      ...item,
-      martingaleStep: martingaleStepById.get(item.id) ?? 0,
-    }));
+
+    let itemsBase = items.map((item) => ({ ...item }));
+    if (includeMartingaleSteps) {
+      const martingaleStepById = await this.buildMartingaleStepBySignalId(
+        items.map((item) => ({
+          id: item.id,
+          source: item.source,
+          createdAt: item.createdAt,
+        })),
+      );
+      itemsBase = items.map((item) => ({
+        ...item,
+        martingaleStep: martingaleStepById.get(item.id) ?? 0,
+      }));
+    }
+
+    if (!refreshPnlFromExchange) {
+      return {
+        items: itemsBase.map((item) => ({
+          ...item,
+          finalPnl: item.realizedPnl ?? null,
+          pnlBreakdown: null,
+        })),
+        total,
+        page,
+        pageSize,
+      };
+    }
 
     const itemsWithPnlBreakdown = await Promise.all(
-      itemsWithMartingale.map(async (item) => {
+      itemsBase.map(async (item) => {
         let finalPnl = item.realizedPnl;
         let pnlBreakdown: {
           source: 'closed_pnl' | 'execution_fallback' | 'unavailable';
