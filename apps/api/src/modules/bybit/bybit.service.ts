@@ -2963,7 +2963,20 @@ export class BybitService {
       const priceStr = this.formatPriceToTick(tpPrice, tickSize);
       const existingAtPrice = liveTpByPrice.get(priceStr) ?? 0;
       const alreadyFilledAtPrice = filledTpByPrice.get(priceStr) ?? 0;
-      const targetAtPrice = Math.max(0, childQtyParts.length - alreadyFilledAtPrice);
+      // Сколько уровней TP после округления к тику дают эту же цену (иначе два TP «схлопываются» в один priceStr,
+      // а target по childQtyParts.length=1 давал missing=0 после первого ордера — второй уровень не выставлялся).
+      const levelsSharingPrice = activeTpPrices.filter((p, idx) => {
+        const qs = qtyParts[idx];
+        if (!qs || parseFloat(qs) <= 0) {
+          return false;
+        }
+        return this.formatPriceToTick(p, tickSize) === priceStr;
+      }).length;
+      const slotsThisLevel = childQtyParts.length;
+      const targetAtPrice = Math.max(
+        0,
+        levelsSharingPrice - alreadyFilledAtPrice,
+      );
       let missingAtPrice = Math.max(0, targetAtPrice - existingAtPrice);
       if (missingAtPrice <= 0) {
         void this.appLog.append(
@@ -2978,6 +2991,8 @@ export class BybitService {
             existingAtPrice,
             alreadyFilledAtPrice,
             targetAtPrice,
+            levelsSharingPrice,
+            slotsThisLevel,
           },
         );
         continue;
