@@ -164,14 +164,13 @@ Field rules:
 - pair: always the USDT linear perpetual symbol as BASEUSDT (e.g. BTCUSDT, ETHUSDT, 1000PEPEUSDT). If the message names only the base asset without a quote (BTC, ETH, SOL, PEPE), append USDT. Forms like ETH/USDT, BTC-USDT, ethusdt are fine; casing and separators are normalized server-side.
 - direction must be long or short.
 - entries and leverage are optional.
-- entries: first price is main entry; following prices are DCA levels — unless entryIsRange is true (see below).
+- entries / entryIsRange — classify yourself from the text:
+  - Range (one entry band): one interval, two bounds for a single "where to enter" idea (e.g. zone/диапазон/зона/коридор/between A and B, or one "A – B" line as min/max of one band). Then entryIsRange=true, entries=[lower, higher] ascending. Server uses range-entry rules; no midpoint; not DCA.
+  - List / enumeration (DCA): several separate entry prices (numbered list, multiple bullets, "Entry 1/2", distinct steps) without one band framing min/max of one zone. Then entryIsRange=false or omit, entries in message order (first main, then DCA). Server uses DCA rules.
+  - If unclear: use range only when both numbers are clearly lower and upper bound of one zone; otherwise treat as DCA list.
 - If the user gives no entry price, treat it as market entry: set entries to null and do NOT ask for clarification only because entries are missing. The order will be placed at market at the execution stage.
 - If the message gives BOTH a market entry option and a limit entry (labels such as Entry market / Entry limit, маркет и лимит, market vs limit, two entry lines where one is market and the other has a price), ALWAYS prefer the limit: set entries to the limit price(s) only. Do NOT set entries to null because "market" is also mentioned alongside an explicit limit price.
-- ONE entry zone / range (same trade, one band of prices) MUST use entryIsRange=true and entries=[low, high] ascending. This includes Russian phrasing: "в зоне $X – $Y", "в зоне X–Y", "открываем long/short в зоне … – …", "диапазон входа", "зона входа", "коридор", and English: "in the zone", "entry zone", "range", "between X and Y" when both bounds are for ONE entry idea (not two separate labeled DCA steps).
-- Examples of entryIsRange=true: "Шорт в зоне 0.09183 – 0.09285"; "Entry range 1.2 - 1.4"; "buy zone 0.5 - 0.52". Set entries to [0.09183, 0.09285] (smaller first), entryIsRange=true. Never set two DCA entries for this pattern.
-- takeProfits are ONLY from targets/TP/цели/закрыть по — the lines BELOW the entry zone in the message. Do NOT put TP prices into entries.
-- entryIsRange=false (two DCA levels) only when the message explicitly describes TWO separate accumulation steps (e.g. "DCA1 / DCA2", "first entry … second entry …" as distinct planned fills), not a single zone with two bounds.
-- If the message clearly gives two independent DCA entry levels (not one zone), set entryIsRange to false or omit it.
+- takeProfits: use only target/TP/цели/закрыть по prices — never put TP prices into entries.
 - If leverage is given as a range (e.g. "2 - 5"), use the midpoint and round up (2-5 => 4).
 - Extract prices only from explicit labels (Entry, Stop loss, SL, Targets/TP, etc.). Do not blend, infer, or average numbers from different fields.
 - Field labels without actual values (e.g. "Entry:", "SL:", "TP1:" with no number after them) do NOT count as known values.
