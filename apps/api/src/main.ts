@@ -16,12 +16,16 @@ async function bootstrap() {
   });
   app.enableCors({ origin: true });
 
-  const swaggerServer = process.env.API_SWAGGER_SERVER?.trim() ?? '/';
+  const swaggerServer = process.env.API_SWAGGER_SERVER?.trim();
+  if (!swaggerServer) {
+    throw new Error('API_SWAGGER_SERVER is required (e.g. "/trade-api")');
+  }
   const swaggerConfig = new DocumentBuilder()
     .setTitle('SignalsBot API')
     .setDescription('REST API для SignalsBot (NestJS)')
     .setVersion('1.0')
-    .addServer(swaggerServer, 'Direct API (local)')
+    .addServer('/', 'Direct API (local)')
+    .addServer(swaggerServer, 'Proxy base path')
     .build();
   const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('docs', app, swaggerDocument, {
