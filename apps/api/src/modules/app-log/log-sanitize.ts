@@ -63,19 +63,65 @@ export function stringifyPayload(payload: unknown, maxTotal = 100_000): string {
 export async function pruneOldLogs(
   prisma: PrismaService,
   keepLast: number,
+  noiseMessages: readonly string[] = [],
 ): Promise<void> {
   const count = await prisma.appLog.count();
   if (count <= keepLast) {
     return;
   }
   const excess = count - keepLast;
-  const rows = await prisma.appLog.findMany({
-    orderBy: { createdAt: 'asc' },
-    take: excess,
-    select: { id: true },
-  });
-  const ids = rows.map((r) => r.id);
-  if (ids.length) {
-    await prisma.appLog.deleteMany({ where: { id: { in: ids } } });
+  let remaining = excess;
+
+  const deleteOldestWhere = async (
+    where: Record<string, unknown>,
+    limit: number,
+  ): Promise<number> => {
+    if (limit <= 0) return 0;
+    const rows = await prisma.appLog.findMany({
+      where: where as any,
+      orderBy: { createdAt: 'asc' },
+      take: limit,
+      select: { id: true },
+    });
+    const ids = rows.map((r) => r.id);
+    if (!ids.length) return 0;
+    const res = await prisma.appLog.deleteMany({ where: { id: { in: ids } } });
+    return res.count ?? ids.length;
+  };
+
+  // Приоритет удаления: шумные debug → все debug → info noise → остальные info/system → warn → error (последними).
+  // Это защищает важные warn/error от вытеснения большим потоком debug/info.
+  remaining -= await deleteOldestWhere(
+    noiseMessages.length
+      ? { level: 'debug', message: { in: [...noiseMessages] } }
+      : { level: 'debug' },
+    remaining,
+  );
+  remaining -= await deleteOldestWhere(
+    { level: 'debug' },
+    remaining,
+  );
+  if (noiseMessages.length) {
+    remaining -= await deleteOldestWhere(
+      { level: 'info', message: { in: [...noiseMessages] } },
+      remaining,
+    );
+  }
+  remaining -= await deleteOldestWhere(
+    { level: 'info' },
+    remaining,
+  );
+  remaining -= await deleteOldestWhere(
+    { level: 'warn' },
+    remaining,
+  );
+  remaining -= await deleteOldestWhere(
+    { level: 'error' },
+    remaining,
+  );
+
+  // На всякий случай: если что-то осталось (неизвестные level), удаляем самые старые вообще.
+  if (remaining > 0) {
+    await deleteOldestWhere({}, remaining);
   }
 }

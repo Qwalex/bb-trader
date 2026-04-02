@@ -73,7 +73,7 @@ export class AppLogService {
           payload: payloadStr,
         },
       });
-      void pruneOldLogs(this.prisma, MAX_ROWS).catch((e) =>
+      void pruneOldLogs(this.prisma, MAX_ROWS, NOISE_MESSAGES).catch((e) =>
         this.logger.warn(`pruneOldLogs: ${String(e)}`),
       );
     } catch (e) {
