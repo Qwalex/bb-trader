@@ -3,6 +3,8 @@ set -Eeuo pipefail
 
 NOTIFY_URL="https://dev.qwalex.ru/notify/"
 PROJECT_NAME="${PROJECT_NAME:-bb-trade}"
+DEPLOY_VARIANT="${DEPLOY_VARIANT:-production}"
+DEPLOY_WRAPPER="${DEPLOY_WRAPPER:-restart.sh}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Состояние только на VPS (не коммитить): последний успешный деплой из registry и журнал.
@@ -87,7 +89,7 @@ report_deploy_failure_no_rollback() {
   dump_compose_failure_logs "registry: финальная ошибка (откат невозможен или не помог)"
   local tail_log
   tail_log="$(tail -n 80 "$LOG_FILE" 2>/dev/null || true)"
-  notify $'❌ Деплой из registry не удался; откат недоступен (нет файла прошлого успеха) или откат тоже упал.\n\n'"$(deploy_saved_files_notice 1)"$'\n\nПоследние строки лога restart:\n'"$tail_log"
+  notify $'❌ '"$DEPLOY_VARIANT"$' деплой не удался (источник: '"$DEPLOY_WRAPPER"$'); откат недоступен (нет файла прошлого успеха) или откат тоже упал.\n\n'"$(deploy_saved_files_notice 1)"$'\n\nПоследние строки лога restart:\n'"$tail_log"
   exit 1
 }
 
@@ -97,7 +99,7 @@ on_error() {
   local tail_log
   tail_log="$(tail -n 80 "$LOG_FILE" 2>/dev/null || true)"
 
-  notify $'❌ Обновление проекта '"$PROJECT_NAME"$' завершилось ошибкой.\n\nКоманда:\n'"$cmd"$'\n\nКод выхода: '"$exit_code"$'\n\nПоследние строки лога:\n'"$tail_log"$'\n\n'"$(deploy_saved_files_notice 0)"
+  notify $'❌ '"$DEPLOY_VARIANT"$' обновление '"$PROJECT_NAME"$' завершилось ошибкой (источник: '"$DEPLOY_WRAPPER"$').\n\nКоманда:\n'"$cmd"$'\n\nКод выхода: '"$exit_code"$'\n\nПоследние строки лога:\n'"$tail_log"$'\n\n'"$(deploy_saved_files_notice 0)"
   exit "$exit_code"
 }
 
@@ -163,4 +165,4 @@ else
   fi
 fi
 
-notify "✅ Проект ${PROJECT_NAME} обновлён без ошибок."
+notify "✅ ${DEPLOY_VARIANT} стенд: проект ${PROJECT_NAME} обновлён без ошибок (источник: ${DEPLOY_WRAPPER})."
