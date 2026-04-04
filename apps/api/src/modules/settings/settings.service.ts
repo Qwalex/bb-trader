@@ -73,8 +73,10 @@ export class SettingsService {
     private readonly config: ConfigService,
   ) {}
 
-  async get(key: string): Promise<string | undefined> {
-    const row = await this.prisma.setting.findUnique({ where: { key } });
+  async get(key: string, workspaceId?: string | null): Promise<string | undefined> {
+    const row = workspaceId
+      ? await this.prisma.setting.findUnique({ where: { workspaceId_key: { workspaceId, key } } })
+      : null;
     if (row?.value !== undefined && row?.value !== '') {
       return row.value;
     }
@@ -126,12 +128,16 @@ export class SettingsService {
   }
 
   async set(key: string, value: string): Promise<void> {
+    const workspaceId = process.env.BOOTSTRAP_WORKSPACE_ID?.trim();
+    if (!workspaceId) {
+      throw new Error('BOOTSTRAP_WORKSPACE_ID is required until full tenant context wiring is complete');
+    }
     if (!SettingsService.canWriteKey(key)) {
       throw new Error(`Unsupported setting key: ${key}`);
     }
     await this.prisma.setting.upsert({
-      where: { key },
-      create: { key, value },
+      where: { workspaceId_key: { workspaceId, key } },
+      create: { workspaceId, key, value },
       update: { value },
     });
   }
@@ -145,7 +151,14 @@ export class SettingsService {
   }
 
   async list(): Promise<{ key: string; value: string }[]> {
-    return this.prisma.setting.findMany({ orderBy: { key: 'asc' } });
+    const workspaceId = process.env.BOOTSTRAP_WORKSPACE_ID?.trim();
+    if (!workspaceId) {
+      return [];
+    }
+    return this.prisma.setting.findMany({
+      where: { workspaceId },
+      orderBy: { key: 'asc' },
+    });
   }
 
   async getManyResolved(keys: string[]): Promise<{ key: string; value: string }[]> {

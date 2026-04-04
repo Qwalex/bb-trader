@@ -3,56 +3,122 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
-model Signal {
-  id             String   @id @default(cuid())
-  pair           String
-  direction      String
-  entries        String // JSON number[]
-  /// true — entries [low,high] — одна зона входа (не DCA)
-  entryIsRange   Boolean  @default(false)
-  stopLoss       Float
-  takeProfits    String // JSON number[]
-  leverage       Int
-  /// Номинал в USDT (fallback в БД 10; фактический дефолт — настройка DEFAULT_ORDER_USD)
-  orderUsd       Float    @default(10)
-  capitalPercent Float    @default(0)
-  source         String?
-  sourceChatId   String?
-  sourceMessageId String?
-  rawMessage     String?
-  status         String // OPEN, ORDERS_PLACED, CLOSED_WIN, CLOSED_LOSS, CLOSED_MIXED, FAILED
-  realizedPnl    Float?
-  closedAt       DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  deletedAt      DateTime?
-  orders         Order[]
-  events         SignalEvent[]
+model Workspace {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  ownerUserId String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
+  owner                  UserProfile                @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  members                WorkspaceMember[]
+  signals                Signal[]
+  signalEvents           SignalEvent[]
+  orders                 Order[]
+  settings               Setting[]
+  balanceSnapshots       BalanceSnapshot[]
+  appLogs                AppLog[]
+  tgUserbotChats         TgUserbotChat[]
+  tgUserbotIngests       TgUserbotIngest[]
+  tgUserbotSignalHashes  TgUserbotSignalHash[]
+  tgUserbotFilterExamples TgUserbotFilterExample[]
+  tgUserbotFilterPatterns TgUserbotFilterPattern[]
+  tgUserbotPublishGroups TgUserbotPublishGroup[]
+  tgUserbotMirrorMessages TgUserbotMirrorMessage[]
+  diagnosticRuns         DiagnosticRun[]
+  diagnosticCases        DiagnosticCase[]
+  diagnosticModelResults DiagnosticModelResult[]
+  diagnosticStepResults  DiagnosticStepResult[]
+  diagnosticLogs         DiagnosticLog[]
+
+  @@index([ownerUserId])
+}
+
+model UserProfile {
+  id          String   @id
+  email       String   @unique
+  displayName String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  ownedWorkspaces Workspace[]
+  memberships     WorkspaceMember[]
+}
+
+model WorkspaceMember {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        String   @default("owner") // owner | admin | member
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+model Signal {
+  id              String   @id @default(cuid())
+  workspaceId      String?
+  pair            String
+  direction       String
+  entries         String // JSON number[]
+  /// true — entries [low,high] — одна зона входа (не DCA)
+  entryIsRange    Boolean  @default(false)
+  stopLoss        Float
+  takeProfits     String // JSON number[]
+  leverage        Int
+  /// Номинал в USDT (fallback в БД 10; фактический дефолт — настройка DEFAULT_ORDER_USD)
+  orderUsd        Float    @default(10)
+  capitalPercent  Float    @default(0)
+  source          String?
+  sourceChatId    String?
+  sourceMessageId String?
+  rawMessage      String?
+  status          String // OPEN, ORDERS_PLACED, CLOSED_WIN, CLOSED_LOSS, CLOSED_MIXED, FAILED
+  realizedPnl     Float?
+  closedAt        DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  deletedAt       DateTime?
+  workspace       Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  orders          Order[]
+  events          SignalEvent[]
+
+  @@index([workspaceId, sourceChatId, sourceMessageId])
   @@index([sourceChatId, sourceMessageId])
-  @@index([deletedAt, createdAt])
-  @@index([deletedAt, closedAt])
+  @@index([workspaceId, deletedAt, createdAt])
+  @@index([workspaceId, deletedAt, closedAt])
 }
 
 model SignalEvent {
-  id        String   @id @default(cuid())
-  signalId  String
-  signal    Signal   @relation(fields: [signalId], references: [id], onDelete: Cascade)
-  type      String
-  payload   String?
-  createdAt DateTime @default(now())
+  id          String   @id @default(cuid())
+  workspaceId String?
+  signalId    String
+  signal      Signal   @relation(fields: [signalId], references: [id], onDelete: Cascade)
+  type        String
+  payload     String?
+  createdAt   DateTime @default(now())
 
-  @@index([signalId, createdAt])
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, signalId, createdAt])
 }
 
 model Order {
-  id           String    @id @default(cuid())
+  id           String   @id @default(cuid())
+  workspaceId  String?
   signalId     String
-  signal       Signal    @relation(fields: [signalId], references: [id], onDelete: Cascade)
+  signal       Signal   @relation(fields: [signalId], references: [id], onDelete: Cascade)
   bybitOrderId String?
   orderKind    String // ENTRY, DCA, TP, SL
   side         String
@@ -61,251 +127,306 @@ model Order {
   status       String
   pnl          Float?
   filledAt     DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  @@index([signalId])
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, signalId])
 }
 
 model Setting {
-  key       String   @id
-  value     String
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(cuid())
+  workspaceId String?
+  key         String
+  value       String
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, key])
+  @@index([workspaceId])
 }
 
 /// Один снимок суммарного USDT-баланса (equity) в сутки — для графика на дашборде.
 model BalanceSnapshot {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  totalUsd  Float
+  id          String   @id @default(cuid())
+  workspaceId String?
+  createdAt   DateTime @default(now())
+  totalUsd    Float
 
-  @@index([createdAt])
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
 }
 
 model AppLog {
-  id        String   @id @default(cuid())
-  level     String // info | warn | error | debug
-  category  String // openrouter | telegram | bybit | orders | system
-  message   String
-  payload   String? // JSON
-  createdAt DateTime @default(now())
+  id          String   @id @default(cuid())
+  workspaceId String?
+  level       String // info | warn | error | debug
+  category    String // openrouter | telegram | bybit | orders | system
+  message     String
+  payload     String? // JSON
+  createdAt   DateTime @default(now())
 
-  @@index([createdAt])
-  @@index([category, createdAt])
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, category, createdAt])
 }
 
 model TgUserbotChat {
-  id        String   @id @default(cuid())
-  chatId    String   @unique
-  title     String
-  username  String?
-  enabled   Boolean  @default(false)
+  id          String   @id @default(cuid())
+  workspaceId String?
+  chatId      String   @unique
+  title       String
+  username    String?
+  enabled     Boolean  @default(false)
   /// Приоритет источника для замены активного сигнала: больше = приоритетнее
-  sourcePriority Int @default(0)
+  sourcePriority Int    @default(0)
   /// Переопределение плеча для сигналов из этого чата; null = брать DEFAULT_LEVERAGE
   defaultLeverage Int?
   /// Дефолт суммы входа: USDT или процент от equity, как DEFAULT_ORDER_USD (например "10" или "10%"); null = только глобальная настройка
   defaultEntryUsd String?
   /// Увеличивать номинал до minQty биржи; null = брать глобальную настройку BUMP_TO_MIN_EXCHANGE_LOT
-  minLotBump Boolean?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  minLotBump      Boolean?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, chatId])
+  @@index([workspaceId, enabled])
 }
 
 model TgUserbotIngest {
-  id             String   @id @default(cuid())
-  chatId         String
-  messageId      String
+  id              String   @id @default(cuid())
+  workspaceId      String?
+  chatId          String
+  messageId       String
   dedupMessageKey String  @unique
-  text           String?
-  aiRequest      String?
-  aiResponse     String?
-  classification String // signal | result | other
-  signalHash     String?
-  status         String // ignored | duplicate_message | duplicate_signal | placed | parse_incomplete | parse_error | blocked_by_setting | place_error
-  error          String?
-  createdAt      DateTime @default(now())
+  text            String?
+  aiRequest       String?
+  aiResponse      String?
+  classification  String // signal | result | other
+  signalHash      String?
+  status          String // ignored | duplicate_message | duplicate_signal | placed | parse_incomplete | parse_error | blocked_by_setting | place_error
+  error           String?
+  createdAt       DateTime @default(now())
 
-  @@index([chatId, messageId])
-  @@index([signalHash])
-  @@index([createdAt])
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, dedupMessageKey])
+  @@index([workspaceId, chatId, messageId])
+  @@index([workspaceId, signalHash])
+  @@index([workspaceId, createdAt])
 }
 
 model TgUserbotSignalHash {
-  hash      String   @id
-  createdAt DateTime @default(now())
+  id          String   @id @default(cuid())
+  workspaceId String?
+  hash        String
+  createdAt   DateTime @default(now())
+
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, hash])
 }
 
 model TgUserbotFilterExample {
-  id         String   @id @default(cuid())
-  groupName  String
-  kind       String // signal | close | result | reentry
-  example    String
+  id            String   @id @default(cuid())
+  workspaceId    String?
+  groupName     String
+  kind          String // signal | close | result | reentry
+  example       String
   requiresQuote Boolean @default(false)
-  enabled    Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  enabled       Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  @@index([groupName, kind, enabled])
-  @@index([createdAt])
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, groupName, kind, enabled])
+  @@index([workspaceId, createdAt])
 }
 
 model TgUserbotFilterPattern {
-  id         String   @id @default(cuid())
-  groupName  String
-  kind       String // signal | close | result | reentry
-  pattern    String
+  id            String   @id @default(cuid())
+  workspaceId    String?
+  groupName     String
+  kind          String // signal | close | result | reentry
+  pattern       String
   requiresQuote Boolean @default(false)
-  enabled    Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  enabled       Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  @@index([groupName, kind, enabled])
-  @@index([createdAt])
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, groupName, kind, enabled])
+  @@index([workspaceId, createdAt])
 }
 
 model TgUserbotPublishGroup {
   id            String   @id @default(cuid())
+  workspaceId    String?
   title         String
-  chatId        String   @unique
+  chatId        String
   enabled       Boolean  @default(true)
   publishEveryN Int      @default(1)
   signalCounter Int      @default(0)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, chatId])
 }
 
 model TgUserbotMirrorMessage {
-  id                     String   @id @default(cuid())
-  publishGroupId         String
-  ingestId               String
-  sourceChatId           String
-  sourceMessageId        String
-  rootSourceChatId       String?
-  rootSourceMessageId    String?
-  kind                   String // signal | result | cancel
-  status                 String // posted | skipped_by_n | skipped_no_root | failed
-  targetChatId           String
-  targetMessageId        String?
+  id                      String   @id @default(cuid())
+  workspaceId              String?
+  publishGroupId          String
+  ingestId                String
+  sourceChatId            String
+  sourceMessageId         String
+  rootSourceChatId        String?
+  rootSourceMessageId     String?
+  kind                    String // signal | result | cancel
+  status                  String // posted | skipped_by_n | skipped_no_root | failed
+  targetChatId            String
+  targetMessageId         String?
   replyToTargetMessageId String?
-  error                  String?
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
+  error                   String?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
 
-  @@unique([publishGroupId, ingestId, kind])
-  @@index([publishGroupId, sourceChatId, sourceMessageId, kind])
-  @@index([publishGroupId, rootSourceChatId, rootSourceMessageId, kind])
-  @@index([createdAt])
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, publishGroupId, ingestId, kind])
+  @@index([workspaceId, publishGroupId, sourceChatId, sourceMessageId, kind])
+  @@index([workspaceId, publishGroupId, rootSourceChatId, rootSourceMessageId, kind])
+  @@index([workspaceId, createdAt])
 }
 
 model DiagnosticRun {
-  id          String   @id @default(cuid())
-  status      String // running | completed | failed
-  requestJson String?
-  modelsJson  String // JSON string[]
-  caseCount   Int      @default(0)
-  summary     String?
-  error       String?
-  startedAt   DateTime @default(now())
-  finishedAt  DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           String   @id @default(cuid())
+  workspaceId   String?
+  status       String // running | completed | failed
+  requestJson  String?
+  modelsJson   String // JSON string[]
+  caseCount    Int      @default(0)
+  summary      String?
+  error        String?
+  startedAt    DateTime @default(now())
+  finishedAt   DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
+  workspace    Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   cases        DiagnosticCase[]
   modelResults DiagnosticModelResult[]
   stepResults  DiagnosticStepResult[]
   logs         DiagnosticLog[]
 
-  @@index([createdAt])
-  @@index([status, createdAt])
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, status, createdAt])
 }
 
 model DiagnosticCase {
-  id        String   @id @default(cuid())
-  runId     String
-  run       DiagnosticRun @relation(fields: [runId], references: [id], onDelete: Cascade)
-  ingestId  String?
-  signalId  String?
-  chatId    String?
-  messageId String?
-  title     String?
-  status    String   @default("pending") // pending | completed | failed
-  traceJson String // normalized trace payload for auditing
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(cuid())
+  workspaceId  String?
+  runId       String
+  run         DiagnosticRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  ingestId    String?
+  signalId    String?
+  chatId      String?
+  messageId   String?
+  title       String?
+  status      String   @default("pending") // pending | completed | failed
+  traceJson   String // normalized trace payload for auditing
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
+  workspace     Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   modelResults DiagnosticModelResult[]
   stepResults  DiagnosticStepResult[]
   logs         DiagnosticLog[]
 
-  @@index([runId, createdAt])
-  @@index([ingestId])
-  @@index([signalId])
+  @@index([workspaceId, runId, createdAt])
+  @@index([workspaceId, ingestId])
+  @@index([workspaceId, signalId])
 }
 
 model DiagnosticModelResult {
-  id          String   @id @default(cuid())
-  runId       String
-  caseId      String
-  model       String
-  status      String // ok | warning | error | unknown
-  summary     String?
-  rawResponse String?
-  inputTokens Int?
-  outputTokens Int?
-  totalTokens Int?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  run         DiagnosticRun @relation(fields: [runId], references: [id], onDelete: Cascade)
-  diagnosticCase DiagnosticCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
-  stepResults DiagnosticStepResult[]
-  logs        DiagnosticLog[]
-
-  @@unique([runId, caseId, model])
-  @@index([runId, model])
-  @@index([caseId, createdAt])
-}
-
-model DiagnosticStepResult {
   id              String   @id @default(cuid())
+  workspaceId      String?
   runId           String
   caseId          String
-  modelResultId   String?
-  stepKey         String
+  model           String
   status          String // ok | warning | error | unknown
-  comment         String?
-  issuesJson      String?
-  evidenceJson    String?
-  missingContextJson String?
-  recommendedFixesJson String?
-  payloadJson     String?
+  summary         String?
+  rawResponse     String?
+  inputTokens     Int?
+  outputTokens    Int?
+  totalTokens     Int?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  run           DiagnosticRun @relation(fields: [runId], references: [id], onDelete: Cascade)
-  diagnosticCase DiagnosticCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
-  modelResult   DiagnosticModelResult? @relation(fields: [modelResultId], references: [id], onDelete: Cascade)
+  workspace       Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  run             DiagnosticRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  diagnosticCase  DiagnosticCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  stepResults     DiagnosticStepResult[]
+  logs            DiagnosticLog[]
 
-  @@index([runId, caseId, createdAt])
-  @@index([modelResultId, stepKey])
+  @@unique([workspaceId, runId, caseId, model])
+  @@index([workspaceId, runId, model])
+  @@index([workspaceId, caseId, createdAt])
+}
+
+model DiagnosticStepResult {
+  id                   String   @id @default(cuid())
+  workspaceId           String?
+  runId                String
+  caseId               String
+  modelResultId        String?
+  stepKey              String
+  status               String // ok | warning | error | unknown
+  comment              String?
+  issuesJson           String?
+  evidenceJson         String?
+  missingContextJson   String?
+  recommendedFixesJson String?
+  payloadJson          String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  workspace        Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  run              DiagnosticRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  diagnosticCase   DiagnosticCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  modelResult      DiagnosticModelResult? @relation(fields: [modelResultId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, runId, caseId, createdAt])
+  @@index([workspaceId, modelResultId, stepKey])
 }
 
 model DiagnosticLog {
-  id            String   @id @default(cuid())
-  runId         String
-  caseId        String?
-  modelResultId String?
-  level         String // info | warn | error | debug
-  category      String // diagnostics | openrouter | bybit | db | system
-  message       String
-  payload       String?
-  createdAt     DateTime @default(now())
+  id             String   @id @default(cuid())
+  workspaceId     String?
+  runId          String
+  caseId         String?
+  modelResultId  String?
+  level          String // info | warn | error | debug
+  category       String // diagnostics | openrouter | bybit | db | system
+  message        String
+  payload        String?
+  createdAt      DateTime @default(now())
 
-  run         DiagnosticRun @relation(fields: [runId], references: [id], onDelete: Cascade)
-  diagnosticCase DiagnosticCase? @relation(fields: [caseId], references: [id], onDelete: Cascade)
-  modelResult DiagnosticModelResult? @relation(fields: [modelResultId], references: [id], onDelete: Cascade)
+  workspace       Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  run             DiagnosticRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  diagnosticCase  DiagnosticCase? @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  modelResult     DiagnosticModelResult? @relation(fields: [modelResultId], references: [id], onDelete: Cascade)
 
-  @@index([runId, createdAt])
-  @@index([caseId, createdAt])
+  @@index([workspaceId, runId, createdAt])
+  @@index([workspaceId, caseId, createdAt])
 }

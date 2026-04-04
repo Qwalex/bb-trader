@@ -1,8 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { createServerClient } from '@supabase/ssr';
 
-import { DASHBOARD_SESSION_COOKIE } from '@repo/shared';
-
-import { readDashboardSessionFromToken } from './lib/auth';
+import { getSupabaseAnonKey, getSupabaseUrl } from './lib/supabase';
 
 function stripBasePath(pathname: string, basePath: string): string {
   if (!basePath) {
@@ -20,6 +19,9 @@ function stripBasePath(pathname: string, basePath: string): string {
 function isPublicPath(pathname: string): boolean {
   if (
     pathname === '/login' ||
+    pathname === '/signup' ||
+    pathname === '/forgot-password' ||
+    pathname === '/reset-password' ||
     pathname.startsWith('/auth/') ||
     pathname === '/favicon.ico' ||
     pathname === '/manifest.webmanifest' ||
@@ -37,11 +39,26 @@ export async function middleware(request: NextRequest) {
   const basePath = request.nextUrl.basePath ?? '';
   const pathname = stripBasePath(request.nextUrl.pathname, basePath);
   const isPublic = isPublicPath(pathname);
-  const session = await readDashboardSessionFromToken(
-    request.cookies.get(DASHBOARD_SESSION_COOKIE)?.value ?? null,
-  );
+  let response = NextResponse.next({
+    request: { headers: request.headers },
+  });
+  const supabase = createServerClient(getSupabaseUrl(), getSupabaseAnonKey(), {
+    cookies: {
+      getAll: () => request.cookies.getAll(),
+      setAll: (cookiesToSet) => {
+        cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
+        response = NextResponse.next({ request });
+        cookiesToSet.forEach(({ name, value, options }) => {
+          response.cookies.set(name, value, options);
+        });
+      },
+    },
+  });
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  if (!session && !isPublic) {
+  if (!user && !isPublic) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = `${basePath}/login`;
     loginUrl.searchParams.set(
@@ -51,14 +68,20 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  if (session && pathname === '/login') {
+  if (
+    user &&
+    (pathname === '/login' ||
+      pathname === '/signup' ||
+      pathname === '/forgot-password' ||
+      pathname === '/reset-password')
+  ) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = `${basePath}/`;
     redirectUrl.search = '';
     return NextResponse.redirect(redirectUrl);
   }
 
-  return NextResponse.next();
+  return response;
 }
 
 export const config = {

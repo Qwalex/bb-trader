@@ -3,8 +3,6 @@ import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import type { NextFunction, Request, Response } from 'express';
 
-import { INTERNAL_API_AUTH_HEADER } from '@repo/shared';
-
 import { AuthService } from './modules/auth/auth.service';
 import { AppModule } from './app.module';
 
@@ -39,8 +37,7 @@ async function bootstrap() {
     app.use(['/docs', '/docs-json'], (req: Request, res: Response, next: NextFunction) => {
       void auth
         .authenticateRequest({
-          cookieHeader: req.headers.cookie,
-          internalHeader: req.headers[INTERNAL_API_AUTH_HEADER],
+          authorizationHeader: req.headers.authorization,
         })
         .then((session) => {
           if (!session) {

@@ -6,10 +6,9 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 
-import { INTERNAL_API_AUTH_HEADER } from '@repo/shared';
-
 import { IS_PUBLIC_ROUTE } from './auth.decorators';
 import { AuthService } from './auth.service';
+import type { AuthenticatedRequestContext } from './auth.types';
 
 @Injectable()
 export class DashboardAuthGuard implements CanActivate {
@@ -30,15 +29,14 @@ export class DashboardAuthGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<{
       method?: string;
       headers: Record<string, string | string[] | undefined>;
-      user?: { sub: string; via: 'session' | 'internal' };
+      user?: AuthenticatedRequestContext;
     }>();
     if (String(request.method ?? '').toUpperCase() === 'OPTIONS') {
       return true;
     }
 
     const session = await this.auth.authenticateRequest({
-      cookieHeader: typeof request.headers.cookie === 'string' ? request.headers.cookie : undefined,
-      internalHeader: request.headers[INTERNAL_API_AUTH_HEADER],
+      authorizationHeader: request.headers.authorization,
     });
     if (!session) {
       throw new UnauthorizedException('Authentication required');

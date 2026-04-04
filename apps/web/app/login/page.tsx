@@ -12,11 +12,11 @@ function normalizeRedirectTarget(raw: string | undefined): string {
 }
 
 function errorText(code: string | undefined): string | null {
-  if (code === 'invalid_credentials') {
-    return 'Неверный логин или пароль.';
+  if (code === 'invalid_credentials' || code === 'auth_failed') {
+    return 'Неверный email или пароль.';
   }
   if (code === 'missing_auth_config') {
-    return 'Не настроены AUTH_SESSION_SECRET / DASHBOARD_USERNAME / DASHBOARD_PASSWORD.';
+    return 'Не настроены Supabase auth переменные.';
   }
   return null;
 }
@@ -44,7 +44,7 @@ export default async function LoginPage({
         Вход в SignalsBot
       </h1>
       <p style={{ color: 'var(--muted)', marginBottom: '1rem' }}>
-        Авторизуйтесь, чтобы открыть дашборд и административные действия API.
+        Авторизуйтесь через email, чтобы открыть ваш кабинет и связанные данные.
       </p>
       {errorText(error) && <p className="msg err">{errorText(error)}</p>}
       <form
@@ -54,8 +54,8 @@ export default async function LoginPage({
       >
         <input type="hidden" name="redirectTo" value={redirectTo} />
         <label style={{ display: 'grid', gap: '0.35rem' }}>
-          <span>Логин</span>
-          <input name="username" autoComplete="username" required />
+          <span>Email</span>
+          <input name="email" type="email" autoComplete="email" required />
         </label>
         <label style={{ display: 'grid', gap: '0.35rem' }}>
           <span>Пароль</span>
@@ -69,6 +69,10 @@ export default async function LoginPage({
         <button type="submit" className="btn">
           Войти
         </button>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <a href={withBasePath('/signup')}>Регистрация</a>
+          <a href={withBasePath('/forgot-password')}>Забыли пароль?</a>
+        </div>
       </form>
     </div>
   );

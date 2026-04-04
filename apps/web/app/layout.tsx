@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import localFont from 'next/font/local';
 import Link from 'next/link';
 
+import { ApiAuthBridge } from './components/ApiAuthBridge';
 import { PwaRegister } from './components/PwaRegister';
 import { readDashboardSession } from '../lib/server-auth';
 import { withBasePath } from '../lib/auth';
@@ -70,6 +71,7 @@ export default async function RootLayout({
   return (
     <html lang="ru">
       <body className={`${geistSans.variable} ${geistMono.variable}`}>
+        <ApiAuthBridge />
         <PwaRegister />
         <header className="nav">
           <strong className="brand">SignalsBot</strong>

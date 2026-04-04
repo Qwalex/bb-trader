@@ -1,71 +1,111 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { createClient } from '@supabase/supabase-js';
+import jwt from 'jsonwebtoken';
 
-import {
-  DASHBOARD_SESSION_COOKIE,
-  verifyDashboardSessionToken,
-} from '@repo/shared';
+import type { AuthenticatedRequestContext } from './auth.types';
+import { WorkspaceBootstrapService } from './workspace-bootstrap.service';
 
 @Injectable()
 export class AuthService {
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    private readonly workspaceBootstrap: WorkspaceBootstrapService,
+  ) {}
 
-  private getSessionSecret(): string | null {
-    const secret = this.config.get<string>('AUTH_SESSION_SECRET')?.trim();
+  private getSupabaseJwtSecret(): string | null {
+    const secret = this.config.get<string>('SUPABASE_JWT_SECRET')?.trim();
     return secret && secret.length > 0 ? secret : null;
   }
 
-  private getInternalToken(): string | null {
-    const token = this.config.get<string>('API_INTERNAL_AUTH_TOKEN')?.trim();
-    if (token && token.length > 0) {
-      return token;
-    }
-    return this.getSessionSecret();
+  private getSupabaseUrl(): string | null {
+    const url = this.config.get<string>('NEXT_PUBLIC_SUPABASE_URL')?.trim();
+    return url && url.length > 0 ? url : null;
   }
 
-  private parseCookieValue(cookieHeader: string | undefined, name: string): string | null {
-    const raw = String(cookieHeader ?? '');
-    if (!raw) {
+  private getServiceRoleKey(): string | null {
+    const key = this.config.get<string>('SUPABASE_SERVICE_ROLE_KEY_SERVER')?.trim();
+    return key && key.length > 0 ? key : null;
+  }
+
+  private parseBearerToken(headerValue?: string | string[]): string | null {
+    const raw = Array.isArray(headerValue) ? headerValue[0] : headerValue;
+    const value = String(raw ?? '').trim();
+    if (!value.toLowerCase().startsWith('bearer ')) {
       return null;
     }
-    for (const chunk of raw.split(';')) {
-      const [cookieName, ...rest] = chunk.trim().split('=');
-      if (cookieName === name) {
-        return rest.join('=');
-      }
+    const token = value.slice(7).trim();
+    return token || null;
+  }
+
+  private getSupabaseAdminClient() {
+    const url = this.getSupabaseUrl();
+    const serviceRoleKey = this.getServiceRoleKey();
+    if (!url || !serviceRoleKey) {
+      return null;
     }
-    return null;
+    return createClient(url, serviceRoleKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    });
+  }
+
+  private async resolveWorkspaceContext(userId: string): Promise<AuthenticatedRequestContext | null> {
+    const admin = this.getSupabaseAdminClient();
+    if (!admin) {
+      return {
+        userId,
+        email: null,
+        workspaceId: null,
+        role: null,
+      };
+    }
+    const userResult = await admin.auth.admin.getUserById(userId);
+    const user = userResult.data.user;
+    if (!user) {
+      return null;
+    }
+    const metadata = user.user_metadata ?? {};
+    const bootstrap = await this.workspaceBootstrap.ensureBootstrapWorkspace({
+      userId,
+      email: user.email ?? null,
+      workspaceName:
+        typeof metadata.workspace_name === 'string' ? metadata.workspace_name : null,
+      workspaceSlug:
+        typeof metadata.workspace_slug === 'string' ? metadata.workspace_slug : null,
+    });
+    return {
+      userId,
+      email: user.email ?? null,
+      workspaceId: bootstrap.workspaceId,
+      role: bootstrap.role,
+    };
   }
 
   async authenticateRequest(input: {
-    cookieHeader?: string;
-    internalHeader?: string | string[] | undefined;
-  }): Promise<{ sub: string; via: 'session' | 'internal' } | null> {
-    const internalHeader = Array.isArray(input.internalHeader)
-      ? input.internalHeader[0]
-      : input.internalHeader;
-    const expectedInternal = this.getInternalToken();
-    if (
-      expectedInternal &&
-      typeof internalHeader === 'string' &&
-      internalHeader.trim() === expectedInternal
-    ) {
-      return { sub: 'internal-web', via: 'internal' };
-    }
-
-    const sessionSecret = this.getSessionSecret();
-    if (!sessionSecret) {
+    authorizationHeader?: string | string[] | undefined;
+  }): Promise<AuthenticatedRequestContext | null> {
+    const token = this.parseBearerToken(input.authorizationHeader);
+    const jwtSecret = this.getSupabaseJwtSecret();
+    if (!token || !jwtSecret) {
       return null;
     }
-    const sessionToken = this.parseCookieValue(
-      input.cookieHeader,
-      DASHBOARD_SESSION_COOKIE,
-    );
-    const payload = await verifyDashboardSessionToken(sessionSecret, sessionToken);
-    if (!payload) {
+    let payload: string | jwt.JwtPayload;
+    try {
+      payload = jwt.verify(token, jwtSecret);
+    } catch {
       return null;
     }
-    return { sub: payload.sub, via: 'session' };
+    if (typeof payload === 'string') {
+      return null;
+    }
+    const userId = typeof payload.sub === 'string' ? payload.sub : null;
+    if (!userId) {
+      return null;
+    }
+    return this.resolveWorkspaceContext(userId);
   }
 
   getAllowedCorsOrigins(): string[] {

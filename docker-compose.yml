@@ -1,4 +1,99 @@
 services:
+  db:
+    image: supabase/postgres:15.8.1.060
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${SUPABASE_DB_PASSWORD}
+      POSTGRES_DB: postgres
+      JWT_SECRET: ${SUPABASE_JWT_SECRET}
+      JWT_EXP: 3600
+    volumes:
+      - supabase-db-data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  auth:
+    image: supabase/gotrue:v2.177.0
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      API_EXTERNAL_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgresql://postgres:${SUPABASE_DB_PASSWORD}@db:5432/postgres?search_path=auth
+      GOTRUE_SITE_URL: ${NEXT_PUBLIC_SITE_URL}
+      GOTRUE_URI_ALLOW_LIST: ${NEXT_PUBLIC_SITE_URL},${WEB_ORIGIN}
+      GOTRUE_JWT_SECRET: ${SUPABASE_JWT_SECRET}
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_DISABLE_SIGNUP: "false"
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_MAILER_AUTOCONFIRM: "false"
+      GOTRUE_SMTP_HOST: ${SUPABASE_SMTP_HOST}
+      GOTRUE_SMTP_PORT: ${SUPABASE_SMTP_PORT}
+      GOTRUE_SMTP_USER: ${SUPABASE_SMTP_USER}
+      GOTRUE_SMTP_PASS: ${SUPABASE_SMTP_PASS}
+      GOTRUE_SMTP_ADMIN_EMAIL: ${SUPABASE_SMTP_ADMIN_EMAIL}
+      GOTRUE_SMTP_SENDER_NAME: ${SUPABASE_SMTP_SENDER_NAME}
+    ports:
+      - "127.0.0.1:9999:9999"
+
+  rest:
+    image: postgrest/postgrest:v12.2.8
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      PGRST_DB_URI: postgresql://postgres:${SUPABASE_DB_PASSWORD}@db:5432/postgres
+      PGRST_DB_SCHEMAS: public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${SUPABASE_JWT_SECRET}
+
+  meta:
+    image: supabase/postgres-meta:v0.89.3
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      PG_META_PORT: 8080
+      PG_META_DB_HOST: db
+      PG_META_DB_PORT: 5432
+      PG_META_DB_NAME: postgres
+      PG_META_DB_USER: postgres
+      PG_META_DB_PASSWORD: ${SUPABASE_DB_PASSWORD}
+
+  studio:
+    image: supabase/studio:20250407-2f39f2c
+    restart: unless-stopped
+    depends_on:
+      - meta
+    environment:
+      STUDIO_PG_META_URL: http://meta:8080
+      SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+      SUPABASE_PUBLIC_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      AUTH_JWT_SECRET: ${SUPABASE_JWT_SECRET}
+    ports:
+      - "127.0.0.1:8081:3000"
+
+  kong:
+    image: kong:2.8.1
+    restart: unless-stopped
+    depends_on:
+      - auth
+      - rest
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /home/kong/kong.yml
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_PLUGINS: request-transformer,cors,key-auth,acl,basic-auth
+    volumes:
+      - ./supabase/kong.yml:/home/kong/kong.yml:ro
+    ports:
+      - "127.0.0.1:8000:8000"
+
   api:
     image: ${API_IMAGE:-bb-trade-api:local}
     build:
@@ -6,16 +101,19 @@ services:
       dockerfile: Dockerfile.api
     restart: unless-stopped
     environment:
-      DATABASE_URL: file:/app/data/dev.db
+      DATABASE_URL: ${DATABASE_URL}
+      DIRECT_URL: ${DIRECT_URL}
       API_PORT: "3001"
       API_HOST: 0.0.0.0
       STACK_SLUG: ${STACK_SLUG:-trade}
       API_SWAGGER_SERVER: "/${STACK_SLUG:-trade}-api"
-      AUTH_SESSION_SECRET: ${AUTH_SESSION_SECRET}
-      API_INTERNAL_AUTH_TOKEN: ${API_INTERNAL_AUTH_TOKEN:-${AUTH_SESSION_SECRET}}
       WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3003}
-    volumes:
-      - sqlite-data:/app/data
+      WEB_CORS_ORIGINS: ${WEB_CORS_ORIGINS:-}
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+      SUPABASE_JWT_SECRET: ${SUPABASE_JWT_SECRET}
+      SUPABASE_SERVICE_ROLE_KEY_SERVER: ${SUPABASE_SERVICE_ROLE_KEY_SERVER}
+      BOOTSTRAP_WORKSPACE_ID: ${BOOTSTRAP_WORKSPACE_ID}
     ports:
       - "127.0.0.1:3001:3001"
     healthcheck:
@@ -39,10 +137,10 @@ services:
       NEXT_BASE_PATH: "/${STACK_SLUG:-trade}"
       NEXT_PUBLIC_API_URL: "/${STACK_SLUG:-trade}-api"
       API_INTERNAL_URL: ${WEB_API_INTERNAL_URL:-http://api:3001}
-      AUTH_SESSION_SECRET: ${AUTH_SESSION_SECRET}
-      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME}
-      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}
-      API_INTERNAL_AUTH_TOKEN: ${API_INTERNAL_AUTH_TOKEN:-${AUTH_SESSION_SECRET}}
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY_SERVER: ${SUPABASE_SERVICE_ROLE_KEY_SERVER}
+      NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL}
     ports:
       - "127.0.0.1:3003:3000"
     depends_on:
@@ -55,19 +153,5 @@ services:
       retries: 10
       start_period: 20s
 
-  db-viewer:
-    image: coleifer/sqlite-web:latest
-    restart: unless-stopped
-    environment:
-      STACK_SLUG: ${STACK_SLUG:-trade}
-    command: ["sqlite_web", "/data/dev.db", "--host", "0.0.0.0", "--port", "8080", "--url-prefix", "/${STACK_SLUG:-trade}-db"]
-    ports:
-      - "127.0.0.1:8081:8080"
-    volumes:
-      - sqlite-data:/data:ro
-    depends_on:
-      api:
-        condition: service_healthy
-
 volumes:
-  sqlite-data:
+  supabase-db-data:

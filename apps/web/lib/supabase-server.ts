@@ -1,0 +1,29 @@
+import { cookies } from 'next/headers';
+
+import { createServerClient } from '@supabase/ssr';
+import { createClient } from '@supabase/supabase-js';
+
+import { getSupabaseAnonKey, getSupabaseServiceRoleKey, getSupabaseUrl } from './supabase';
+
+export async function createSupabaseServerClient() {
+  const cookieStore = await cookies();
+  return createServerClient(getSupabaseUrl(), getSupabaseAnonKey(), {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
+      },
+      setAll() {
+        // Cookie writes are handled in middleware and route handlers.
+      },
+    },
+  });
+}
+
+export function createSupabaseAdminClient() {
+  return createClient(getSupabaseUrl(), getSupabaseServiceRoleKey(), {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+}

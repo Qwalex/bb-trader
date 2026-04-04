@@ -1,11 +1,5 @@
-import { cookies } from 'next/headers';
-
-import {
-  DASHBOARD_SESSION_COOKIE,
-  INTERNAL_API_AUTH_HEADER,
-} from '@repo/shared';
-
-import { getInternalApiAuthToken, normalizeBasePath } from './auth';
+import { normalizeBasePath } from './auth';
+import { createSupabaseServerClient } from './supabase-server';
 
 export function getApiBase(): string {
   const isServer = typeof window === 'undefined';
@@ -30,11 +24,12 @@ export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T>
   const isServer = typeof window === 'undefined';
   const headers = new Headers(init?.headers);
   if (isServer) {
-    headers.set(INTERNAL_API_AUTH_HEADER, getInternalApiAuthToken());
-    const cookieStore = await cookies();
-    const sessionCookie = cookieStore.get(DASHBOARD_SESSION_COOKIE)?.value;
-    if (sessionCookie) {
-      headers.set('Cookie', `${DASHBOARD_SESSION_COOKIE}=${sessionCookie}`);
+    const supabase = await createSupabaseServerClient();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      headers.set('Authorization', `Bearer ${session.access_token}`);
     }
   }
   const res = await fetch(`${getApiBase()}${path}`, {

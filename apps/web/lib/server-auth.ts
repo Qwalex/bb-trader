@@ -1,12 +1,9 @@
-import { cookies } from 'next/headers';
-
-import { DASHBOARD_SESSION_COOKIE } from '@repo/shared';
-
-import { readDashboardSessionFromToken } from './auth';
+import { createSupabaseServerClient } from './supabase-server';
 
 export async function readDashboardSession() {
-  const store = await cookies();
-  return readDashboardSessionFromToken(
-    store.get(DASHBOARD_SESSION_COOKIE)?.value ?? null,
-  );
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  return user;
 }
