@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { withBasePath } from '../../../lib/auth';
-import { createSupabaseAdminClient } from '../../../lib/supabase-server';
+import { createSupabaseAdminClient } from '../../../lib/supabase-admin';
 import { createSupabaseRouteClient } from '../../../lib/supabase-route';
 
 function slugifyWorkspaceName(input: string): string {

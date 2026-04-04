@@ -1,9 +1,10 @@
+import 'server-only';
+
 import { cookies } from 'next/headers';
 
 import { createServerClient } from '@supabase/ssr';
-import { createClient } from '@supabase/supabase-js';
 
-import { getSupabaseAnonKey, getSupabaseServiceRoleKey, getSupabaseUrl } from './supabase';
+import { getSupabaseAnonKey, getSupabaseUrl } from './supabase';
 
 export async function createSupabaseServerClient() {
   const cookieStore = await cookies();
@@ -15,15 +16,6 @@ export async function createSupabaseServerClient() {
       setAll() {
         // Cookie writes are handled in middleware and route handlers.
       },
-    },
-  });
-}
-
-export function createSupabaseAdminClient() {
-  return createClient(getSupabaseUrl(), getSupabaseServiceRoleKey(), {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
     },
   });
 }

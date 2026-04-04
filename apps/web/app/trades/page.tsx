@@ -1,6 +1,6 @@
 import Link from 'next/link';
 
-import { fetchJson } from '../../lib/api';
+import { fetchJson } from '../../lib/api-server';
 import { DeleteAllTradesButton } from './delete-all-trades-button';
 import { RecalcClosedPnlButton } from './recalc-closed-pnl-button';
 import { TradesList } from './trades-list';

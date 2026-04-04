@@ -4,7 +4,7 @@ import { LiveExposurePanel } from './components/LiveExposurePanel';
 
 import Link from 'next/link';
 
-import { fetchJson } from '../lib/api';
+import { fetchJson } from '../lib/api-server';
 
 type Stats = {
   source?: string | null;
