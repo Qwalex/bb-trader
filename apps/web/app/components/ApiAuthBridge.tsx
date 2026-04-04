@@ -5,10 +5,16 @@ import { useEffect } from 'react';
 import { createSupabaseBrowserClient } from '../../lib/supabase';
 import { getApiBase } from '../../lib/api';
 
-export function ApiAuthBridge() {
+export function ApiAuthBridge(props: {
+  supabaseUrl: string;
+  supabaseAnonKey: string;
+}) {
   useEffect(() => {
     const originalFetch = window.fetch.bind(window);
-    const supabase = createSupabaseBrowserClient();
+    const supabase = createSupabaseBrowserClient(
+      props.supabaseUrl,
+      props.supabaseAnonKey,
+    );
     const apiBase = getApiBase();
 
     window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -41,7 +47,7 @@ export function ApiAuthBridge() {
     return () => {
       window.fetch = originalFetch;
     };
-  }, []);
+  }, [props.supabaseAnonKey, props.supabaseUrl]);
 
   return null;
 }

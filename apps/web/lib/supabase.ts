@@ -1,15 +1,15 @@
 import { createBrowserClient } from '@supabase/ssr';
 
-export function getSupabaseUrl(): string {
-  const value = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+export function getSupabaseUrl(explicit?: string): string {
+  const value = explicit?.trim() || process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
   if (!value) {
     throw new Error('NEXT_PUBLIC_SUPABASE_URL is required');
   }
   return value;
 }
 
-export function getSupabaseAnonKey(): string {
-  const value = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+export function getSupabaseAnonKey(explicit?: string): string {
+  const value = explicit?.trim() || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
   if (!value) {
     throw new Error('NEXT_PUBLIC_SUPABASE_ANON_KEY is required');
   }
@@ -24,6 +24,12 @@ export function getSupabaseServiceRoleKey(): string {
   return value;
 }
 
-export function createSupabaseBrowserClient() {
-  return createBrowserClient(getSupabaseUrl(), getSupabaseAnonKey());
+export function createSupabaseBrowserClient(
+  supabaseUrl?: string,
+  supabaseAnonKey?: string,
+) {
+  return createBrowserClient(
+    getSupabaseUrl(supabaseUrl),
+    getSupabaseAnonKey(supabaseAnonKey),
+  );
 }

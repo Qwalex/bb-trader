@@ -6,6 +6,7 @@ import { ApiAuthBridge } from './components/ApiAuthBridge';
 import { PwaRegister } from './components/PwaRegister';
 import { readDashboardSession } from '../lib/server-auth';
 import { withBasePath } from '../lib/auth';
+import { getSupabaseAnonKey, getSupabaseUrl } from '../lib/supabase';
 
 import './globals.css';
 
@@ -68,10 +69,15 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const session = await readDashboardSession();
+  const supabaseUrl = getSupabaseUrl();
+  const supabaseAnonKey = getSupabaseAnonKey();
   return (
     <html lang="ru">
       <body className={`${geistSans.variable} ${geistMono.variable}`}>
-        <ApiAuthBridge />
+        <ApiAuthBridge
+          supabaseUrl={supabaseUrl}
+          supabaseAnonKey={supabaseAnonKey}
+        />
         <PwaRegister />
         <header className="nav">
           <strong className="brand">SignalsBot</strong>
