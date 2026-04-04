@@ -143,19 +143,21 @@ if [[ -n "${API_IMAGE:-}" && -n "${WEB_IMAGE:-}" ]]; then
     append_deploy_history "ok" "$ATTEMPT_REF"
   else
     dump_compose_failure_logs "registry: первый деплой не удался (до отката)"
-    if [[ -f "$LAST_GOOD_ENV" && "${ROLLBACK_IN_PROGRESS:-}" != "1" ]]; then
-      # shellcheck disable=SC1090
-      if source "$LAST_GOOD_ENV" 2>/dev/null; then
-        export ROLLBACK_IN_PROGRESS=1
-        ROLLBACK_REF="${API_IMAGE##*:}"
-        notify $'⚠️ Деплой не удался. Откат к последнему успешному образу ('"$ROLLBACK_REF"').\n\n'"$(deploy_saved_files_notice 1)"
-        if deploy_from_registry; then
-          append_deploy_history "rollback_ok" "$ROLLBACK_REF"
-          notify "✅ Откат выполнен. Проект ${PROJECT_NAME} снова на образе ${ROLLBACK_REF}."
-          exit 0
-        fi
-      fi
-    fi
+    # Временнo отключено по запросу: при неудачном registry deploy не откатываемся
+    # к предыдущему образу автоматически, а сразу завершаем деплой ошибкой.
+    # if [[ -f "$LAST_GOOD_ENV" && "${ROLLBACK_IN_PROGRESS:-}" != "1" ]]; then
+    #   # shellcheck disable=SC1090
+    #   if source "$LAST_GOOD_ENV" 2>/dev/null; then
+    #     export ROLLBACK_IN_PROGRESS=1
+    #     ROLLBACK_REF="${API_IMAGE##*:}"
+    #     notify $'⚠️ Деплой не удался. Откат к последнему успешному образу ('"$ROLLBACK_REF"').\n\n'"$(deploy_saved_files_notice 1)"
+    #     if deploy_from_registry; then
+    #       append_deploy_history "rollback_ok" "$ROLLBACK_REF"
+    #       notify "✅ Откат выполнен. Проект ${PROJECT_NAME} снова на образе ${ROLLBACK_REF}."
+    #       exit 0
+    #     fi
+    #   fi
+    # fi
     report_deploy_failure_no_rollback
   fi
 else
