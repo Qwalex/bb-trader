@@ -65,11 +65,14 @@ export class BalanceSnapshotService {
     }
   }
 
-  async listRecent(days: number): Promise<{ at: string; totalUsd: number }[]> {
+  async listRecent(days: number, workspaceId?: string | null): Promise<{ at: string; totalUsd: number }[]> {
     const d = Math.min(Math.max(1, Math.floor(days)), 365);
     const since = new Date(Date.now() - d * 24 * 60 * 60 * 1000);
     const rows = await this.prisma.balanceSnapshot.findMany({
-      where: { createdAt: { gte: since } },
+      where: {
+        createdAt: { gte: since },
+        ...(workspaceId ? { workspaceId } : {}),
+      },
       orderBy: { createdAt: 'asc' },
       select: { createdAt: true, totalUsd: true },
     });

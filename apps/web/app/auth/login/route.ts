@@ -2,20 +2,13 @@ import { NextResponse } from 'next/server';
 
 import { createSupabaseRouteClient } from '../../../lib/supabase-route';
 import { withBasePath } from '../../../lib/auth';
-
-function normalizeRedirectTarget(raw: FormDataEntryValue | null): string {
-  const value = typeof raw === 'string' ? raw.trim() : '';
-  if (!value.startsWith('/')) {
-    return withBasePath('/');
-  }
-  return value;
-}
+import { normalizeRedirectTarget } from '../../../lib/redirect';
 
 export async function POST(request: Request) {
   const form = await request.formData();
   const email = typeof form.get('email') === 'string' ? String(form.get('email')).trim() : '';
   const password = typeof form.get('password') === 'string' ? String(form.get('password')) : '';
-  const redirectTo = normalizeRedirectTarget(form.get('redirectTo'));
+  const redirectTo = normalizeRedirectTarget(form.get('redirectTo'), withBasePath('/'));
 
   try {
     const routeClient = createSupabaseRouteClient(request);

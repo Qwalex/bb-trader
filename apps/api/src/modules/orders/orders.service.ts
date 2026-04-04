@@ -15,6 +15,7 @@ import { SettingsService } from '../settings/settings.service';
 import { UserbotSignalHashService } from '../telegram-userbot/userbot-signal-hash.service';
 
 export interface TradesFilter {
+  workspaceId?: string | null;
   signalId?: string;
   source?: string;
   pair?: string;
@@ -72,6 +73,19 @@ export class OrdersService {
     'CLOSED_MIXED',
   ]);
 
+  private buildWorkspaceWhere(workspaceId?: string | null): Prisma.SignalWhereInput {
+    return workspaceId ? { workspaceId } : {};
+  }
+
+  private assertWorkspaceAccess(
+    actualWorkspaceId: string | null | undefined,
+    workspaceId?: string | null,
+  ): void {
+    if (workspaceId && actualWorkspaceId !== workspaceId) {
+      throw new NotFoundException('Сделка не найдена');
+    }
+  }
+
   async createSignalRecord(
     signal: SignalDto,
     rawMessage: string | undefined,
@@ -126,11 +140,16 @@ export class OrdersService {
    * Обновляет source для сигнала и (если есть) для связанных сигналов.
    * "Связанные" определяем через общий набор `orders.bybitOrderId`.
    */
-  async updateSignalSourceWithPropagation(signalId: string, source: string | null) {
+  async updateSignalSourceWithPropagation(
+    signalId: string,
+    source: string | null,
+    workspaceId?: string | null,
+  ) {
     const signal = await this.prisma.signal.findUnique({
       where: { id: signalId },
       select: {
         id: true,
+        workspaceId: true,
         status: true,
         deletedAt: true,
         orders: { select: { bybitOrderId: true } },
@@ -144,6 +163,7 @@ export class OrdersService {
     if (signal.deletedAt) {
       throw new NotFoundException('Сделка удалена');
     }
+    this.assertWorkspaceAccess(signal.workspaceId, workspaceId);
 
     if (!OrdersService.SOURCE_EDIT_ALLOWED_STATUSES.has(signal.status)) {
       throw new BadRequestException(
@@ -170,6 +190,7 @@ export class OrdersService {
 
     const connected = await this.prisma.signal.findMany({
       where: {
+        ...this.buildWorkspaceWhere(workspaceId),
         deletedAt: null,
         status: { in: Array.from(OrdersService.SOURCE_EDIT_ALLOWED_STATUSES) },
         orders: {
@@ -184,7 +205,7 @@ export class OrdersService {
     const connectedIds = connected.map((r) => r.id);
 
     const res = await this.prisma.signal.updateMany({
-      where: { id: { in: connectedIds } },
+      where: { id: { in: connectedIds }, ...this.buildWorkspaceWhere(workspaceId) },
       data: { source },
     });
 
@@ -198,6 +219,7 @@ export class OrdersService {
   async updateTradeTelegramSource(
     signalId: string,
     body: { sourceChatId: string | null; sourceMessageId: string | null },
+    workspaceId?: string | null,
   ) {
     const chatRaw = body.sourceChatId;
     const msgRaw = body.sourceMessageId;
@@ -223,6 +245,7 @@ export class OrdersService {
       where: { id: signalId },
       select: {
         id: true,
+        workspaceId: true,
         status: true,
         deletedAt: true,
         sourceChatId: true,
@@ -236,6 +259,7 @@ export class OrdersService {
     if (signal.deletedAt) {
       throw new NotFoundException('Сделка удалена');
     }
+    this.assertWorkspaceAccess(signal.workspaceId, workspaceId);
     if (!OrdersService.SOURCE_EDIT_ALLOWED_STATUSES.has(signal.status)) {
       throw new BadRequestException(
         `Нельзя менять привязку к Telegram для статуса: ${signal.status}`,
@@ -246,6 +270,7 @@ export class OrdersService {
       const conflict = await this.prisma.signal.findFirst({
         where: {
           id: { not: signalId },
+          ...this.buildWorkspaceWhere(workspaceId),
           deletedAt: null,
           sourceChatId: normalizedChat,
           sourceMessageId: normalizedMsg,
@@ -287,10 +312,14 @@ export class OrdersService {
     };
   }
 
-  async updateTradePnlManual(signalId: string, realizedPnl: number | null) {
+  async updateTradePnlManual(
+    signalId: string,
+    realizedPnl: number | null,
+    workspaceId?: string | null,
+  ) {
     const signal = await this.prisma.signal.findUnique({
       where: { id: signalId },
-      select: { id: true, status: true, deletedAt: true, closedAt: true },
+      select: { id: true, workspaceId: true, status: true, deletedAt: true, closedAt: true },
     });
     if (!signal) {
       throw new NotFoundException('Сделка не найдена');
@@ -298,6 +327,7 @@ export class OrdersService {
     if (signal.deletedAt) {
       throw new NotFoundException('Сделка удалена');
     }
+    this.assertWorkspaceAccess(signal.workspaceId, workspaceId);
     if (!OrdersService.PNL_EDIT_ALLOWED_STATUSES.has(signal.status)) {
       throw new BadRequestException(
         `PnL можно корректировать только для закрытых сделок. Текущий статус: ${signal.status}`,
@@ -384,9 +414,9 @@ export class OrdersService {
     return this.prisma.order.findFirst({ where: { bybitOrderId } });
   }
 
-  async getSignalWithOrders(signalId: string) {
+  async getSignalWithOrders(signalId: string, workspaceId?: string | null) {
     return this.prisma.signal.findFirst({
-      where: { id: signalId, deletedAt: null },
+      where: { id: signalId, deletedAt: null, ...this.buildWorkspaceWhere(workspaceId) },
       include: { orders: true },
     });
   }
@@ -395,11 +425,12 @@ export class OrdersService {
     id: string,
     options?: {
       allowActiveCleanup?: boolean;
+      workspaceId?: string | null;
     },
   ): Promise<void> {
     const row = await this.prisma.signal.findUnique({
       where: { id },
-      select: { id: true, status: true, deletedAt: true },
+      select: { id: true, workspaceId: true, status: true, deletedAt: true },
     });
     if (!row) {
       throw new NotFoundException('Сделка не найдена');
@@ -407,6 +438,7 @@ export class OrdersService {
     if (row.deletedAt) {
       return;
     }
+    this.assertWorkspaceAccess(row.workspaceId, options?.workspaceId);
     const allowActiveCleanup = options?.allowActiveCleanup === true;
     if ((row.status === 'OPEN' || row.status === 'PARSED') && !allowActiveCleanup) {
       throw new BadRequestException(
@@ -414,7 +446,10 @@ export class OrdersService {
       );
     }
     if (row.status === 'ORDERS_PLACED' || row.status === 'OPEN') {
-      const cleanup = await this.bybit.cleanupExchangeBeforeDeletingPlacedSignal(id);
+      const cleanup = await this.bybit.cleanupExchangeBeforeDeletingPlacedSignal(
+        id,
+        options?.workspaceId,
+      );
       if (!cleanup.ok) {
         const tail = cleanup.details ? `: ${cleanup.details}` : '';
         throw new BadRequestException(
@@ -429,7 +464,7 @@ export class OrdersService {
     void this.userbotSignalHash.releaseForSignalId(id);
   }
 
-  async deleteAllTradesSequential(): Promise<{
+  async deleteAllTradesSequential(workspaceId?: string | null): Promise<{
     ok: boolean;
     total: number;
     deleted: number;
@@ -452,7 +487,7 @@ export class OrdersService {
     };
   }> {
     const rows = await this.prisma.signal.findMany({
-      where: { deletedAt: null },
+      where: { deletedAt: null, ...this.buildWorkspaceWhere(workspaceId) },
       select: { id: true, status: true, createdAt: true },
       orderBy: { createdAt: 'asc' },
     });
@@ -462,7 +497,10 @@ export class OrdersService {
 
     for (const row of rows) {
       try {
-        await this.deleteTrade(row.id, { allowActiveCleanup: true });
+        await this.deleteTrade(row.id, {
+          allowActiveCleanup: true,
+          workspaceId,
+        });
         deleted += 1;
       } catch (e) {
         errors.push({
@@ -473,7 +511,7 @@ export class OrdersService {
       }
     }
 
-    const stats = await this.getDashboardStats();
+    const stats = await this.getDashboardStats({ workspaceId });
     return {
       ok: errors.length === 0,
       total: rows.length,
@@ -484,10 +522,10 @@ export class OrdersService {
     };
   }
 
-  async restoreTrade(id: string): Promise<void> {
+  async restoreTrade(id: string, workspaceId?: string | null): Promise<void> {
     const row = await this.prisma.signal.findUnique({
       where: { id },
-      select: { id: true, deletedAt: true },
+      select: { id: true, workspaceId: true, deletedAt: true },
     });
     if (!row) {
       throw new NotFoundException('Сделка не найдена');
@@ -495,15 +533,17 @@ export class OrdersService {
     if (!row.deletedAt) {
       return;
     }
+    this.assertWorkspaceAccess(row.workspaceId, workspaceId);
     await this.prisma.signal.update({
       where: { id },
       data: { deletedAt: null },
     });
   }
 
-  async listOpenSignals() {
+  async listOpenSignals(workspaceId?: string | null) {
     return this.prisma.signal.findMany({
       where: {
+        ...this.buildWorkspaceWhere(workspaceId),
         deletedAt: null,
         status: { in: ['ORDERS_PLACED', 'OPEN'] },
       },
@@ -512,9 +552,13 @@ export class OrdersService {
     });
   }
 
-  async listClosedSignalsForPnlRecalc(params?: { limit?: number }) {
+  async listClosedSignalsForPnlRecalc(params?: {
+    limit?: number;
+    workspaceId?: string | null;
+  }) {
     const rawLimit = params?.limit;
     const where = {
+      ...this.buildWorkspaceWhere(params?.workspaceId),
       deletedAt: null,
       status: { in: ['CLOSED_WIN', 'CLOSED_LOSS', 'CLOSED_MIXED'] },
     };
@@ -573,10 +617,12 @@ export class OrdersService {
   async hasActiveSignalForPairAndDirection(
     pair: string,
     direction: 'long' | 'short',
+    workspaceId?: string | null,
   ): Promise<boolean> {
     const want = normalizeTradingPair(pair);
     const open = await this.prisma.signal.findMany({
       where: {
+        ...this.buildWorkspaceWhere(workspaceId),
         deletedAt: null,
         status: { in: ['ORDERS_PLACED', 'OPEN', 'PARSED'] },
         direction,
@@ -589,10 +635,16 @@ export class OrdersService {
   async hasOrdersPlacedSignalForPairAndDirection(
     pair: string,
     direction: 'long' | 'short',
+    workspaceId?: string | null,
   ): Promise<boolean> {
     const want = normalizeTradingPair(pair);
     const open = await this.prisma.signal.findMany({
-      where: { deletedAt: null, status: 'ORDERS_PLACED', direction },
+      where: {
+        ...this.buildWorkspaceWhere(workspaceId),
+        deletedAt: null,
+        status: 'ORDERS_PLACED',
+        direction,
+      },
       select: { pair: true },
     });
     return open.some((r) => normalizeTradingPair(r.pair) === want);
@@ -605,10 +657,16 @@ export class OrdersService {
   async reconcileStaleOpenSignalsForPairAndDirection(
     pair: string,
     direction: 'long' | 'short',
+    workspaceId?: string | null,
   ): Promise<string[]> {
     const want = normalizeTradingPair(pair);
     const open = await this.prisma.signal.findMany({
-      where: { deletedAt: null, status: 'ORDERS_PLACED', direction },
+      where: {
+        ...this.buildWorkspaceWhere(workspaceId),
+        deletedAt: null,
+        status: 'ORDERS_PLACED',
+        direction,
+      },
       select: { id: true, pair: true },
     });
     const ids = open
@@ -618,7 +676,7 @@ export class OrdersService {
       return [];
     }
     const res = await this.prisma.signal.updateMany({
-      where: { id: { in: ids }, deletedAt: null },
+      where: { id: { in: ids }, deletedAt: null, ...this.buildWorkspaceWhere(workspaceId) },
       data: {
         status: 'CLOSED_MIXED',
         closedAt: new Date(),
@@ -631,6 +689,7 @@ export class OrdersService {
     const updated = await this.prisma.signal.findMany({
       where: {
         id: { in: ids },
+        ...this.buildWorkspaceWhere(workspaceId),
         deletedAt: null,
         status: 'CLOSED_MIXED',
       },
@@ -639,10 +698,11 @@ export class OrdersService {
     return updated.map((r) => r.id);
   }
 
-  async getDashboardStats(params?: { source?: string }) {
+  async getDashboardStats(params?: { source?: string; workspaceId?: string | null }) {
     const source = params?.source;
-    const excluded = await this.getExcludedSourcesSet();
-    const statsResetAt = await this.getStatsResetAt();
+    const workspaceId = params?.workspaceId;
+    const excluded = await this.getExcludedSourcesSet(workspaceId);
+    const statsResetAt = await this.getStatsResetAt(workspaceId);
     if (source && excluded.has(source)) {
       return {
         winrate: 0,
@@ -658,6 +718,7 @@ export class OrdersService {
     }
     const closed = await this.prisma.signal.findMany({
       where: {
+        ...this.buildWorkspaceWhere(workspaceId),
         deletedAt: null,
         status: { in: ['CLOSED_WIN', 'CLOSED_LOSS', 'CLOSED_MIXED'] },
         ...(statsResetAt ? { closedAt: { gte: statsResetAt } } : {}),
@@ -705,6 +766,7 @@ export class OrdersService {
 
     const openRows = await this.prisma.signal.findMany({
       where: {
+        ...this.buildWorkspaceWhere(workspaceId),
         deletedAt: null,
         status: { in: ['ORDERS_PLACED', 'OPEN', 'PARSED'] },
         ...(statsResetAt ? { createdAt: { gte: statsResetAt } } : {}),
@@ -728,15 +790,17 @@ export class OrdersService {
     };
   }
 
-  async getPnlSeries(bucket: 'day' | 'week', params?: { source?: string }) {
+  async getPnlSeries(bucket: 'day' | 'week', params?: { source?: string; workspaceId?: string | null }) {
     const source = params?.source;
-    const excluded = await this.getExcludedSourcesSet();
-    const statsResetAt = await this.getStatsResetAt();
+    const workspaceId = params?.workspaceId;
+    const excluded = await this.getExcludedSourcesSet(workspaceId);
+    const statsResetAt = await this.getStatsResetAt(workspaceId);
     if (source && excluded.has(source)) {
       return [];
     }
     const closed = await this.prisma.signal.findMany({
       where: {
+        ...this.buildWorkspaceWhere(workspaceId),
         deletedAt: null,
         closedAt: { not: null },
         realizedPnl: { not: null },
@@ -772,6 +836,7 @@ export class OrdersService {
 
   private async buildMartingaleStepBySignalId(
     items: Array<{ id: string; source: string | null; createdAt: Date }>,
+    workspaceId?: string | null,
   ): Promise<Map<string, number>> {
     const stepBySignalId = new Map<string, number>();
     if (items.length === 0) {
@@ -800,6 +865,7 @@ export class OrdersService {
       sourceEntries.map(async ([source, state]) => {
         const closedRows = await this.prisma.signal.findMany({
           where: {
+            ...this.buildWorkspaceWhere(workspaceId),
             deletedAt: null,
             source,
             status: { in: ['CLOSED_WIN', 'CLOSED_LOSS', 'CLOSED_MIXED'] },
@@ -858,13 +924,13 @@ export class OrdersService {
     }
   }
 
-  private async getExcludedSourcesSet(): Promise<Set<string>> {
-    const raw = await this.settings.get('SOURCE_EXCLUDE_LIST');
+  private async getExcludedSourcesSet(workspaceId?: string | null): Promise<Set<string>> {
+    const raw = await this.settings.get('SOURCE_EXCLUDE_LIST', workspaceId);
     return new Set(this.parseStringList(raw));
   }
 
-  private async getStatsResetAt(): Promise<Date | undefined> {
-    const raw = await this.settings.get('STATS_RESET_AT');
+  private async getStatsResetAt(workspaceId?: string | null): Promise<Date | undefined> {
+    const raw = await this.settings.get('STATS_RESET_AT', workspaceId);
     if (!raw || raw.trim() === '') {
       return undefined;
     }
@@ -872,21 +938,23 @@ export class OrdersService {
     return Number.isNaN(d.getTime()) ? undefined : d;
   }
 
-  async resetAnalyticsStats() {
+  async resetAnalyticsStats(workspaceId?: string | null) {
     const resetAt = new Date();
-    await this.settings.set('STATS_RESET_AT', resetAt.toISOString());
+    await this.settings.set('STATS_RESET_AT', resetAt.toISOString(), workspaceId);
     return { ok: true, resetAt: resetAt.toISOString() };
   }
 
-  async getSourceStats(params?: { source?: string }) {
+  async getSourceStats(params?: { source?: string; workspaceId?: string | null }) {
     const source = params?.source;
-    const excluded = await this.getExcludedSourcesSet();
-    const statsResetAt = await this.getStatsResetAt();
+    const workspaceId = params?.workspaceId;
+    const excluded = await this.getExcludedSourcesSet(workspaceId);
+    const statsResetAt = await this.getStatsResetAt(workspaceId);
     if (source && excluded.has(source)) {
       return [];
     }
     const rows = await this.prisma.signal.findMany({
       where: {
+        ...this.buildWorkspaceWhere(workspaceId),
         deletedAt: null,
         ...(source ? { source } : {}),
       },
@@ -988,9 +1056,9 @@ export class OrdersService {
     return items;
   }
 
-  async getTopSources(params?: { limit?: number }) {
+  async getTopSources(params?: { limit?: number; workspaceId?: string | null }) {
     const limit = Math.min(Math.max(params?.limit ?? 5, 1), 50);
-    const all = await this.getSourceStats();
+    const all = await this.getSourceStats({ workspaceId: params?.workspaceId });
     const byPnl = [...all].sort((a, b) => b.totalPnl - a.totalPnl).slice(0, limit);
     const byWorstPnl = [...all].sort((a, b) => a.totalPnl - b.totalPnl).slice(0, limit);
     const byWinrate = [...all]
@@ -1035,7 +1103,9 @@ export class OrdersService {
       ? Math.min(Math.max(Math.trunc(f.pageSize ?? 20), 1), 100)
       : 20;
     const sortBy = f.sortBy === 'closedAt' ? 'closedAt' : 'createdAt';
-    const where: Prisma.SignalWhereInput = {};
+    const where: Prisma.SignalWhereInput = {
+      ...this.buildWorkspaceWhere(f.workspaceId),
+    };
     if (!f.includeDeleted) {
       where.deletedAt = null;
     }
@@ -1104,6 +1174,7 @@ export class OrdersService {
           source: item.source,
           createdAt: item.createdAt,
         })),
+        f.workspaceId,
       );
       itemsBase = items.map((item) => ({
         ...item,
@@ -1145,7 +1216,7 @@ export class OrdersService {
         } | null = null;
 
         if (OrdersService.CLOSED_STATUSES.has(item.status)) {
-          const breakdown = await this.bybit.getTradePnlBreakdown(item.id);
+          const breakdown = await this.bybit.getTradePnlBreakdown(item.id, f.workspaceId);
           finalPnl = breakdown.finalPnl ?? item.realizedPnl;
           pnlBreakdown = {
             source: breakdown.source,
@@ -1187,21 +1258,22 @@ export class OrdersService {
     return { items: itemsWithPnlBreakdown, total, page, pageSize };
   }
 
-  async statsBySource() {
+  async statsBySource(workspaceId?: string | null) {
     const rows = await this.prisma.signal.groupBy({
       by: ['source', 'status'],
       _count: { id: true },
-      where: { deletedAt: null },
+      where: { deletedAt: null, ...this.buildWorkspaceWhere(workspaceId) },
     });
     return rows;
   }
 
-  async listDistinctSources(): Promise<string[]> {
-    const excluded = await this.getExcludedSourcesSet();
+  async listDistinctSources(workspaceId?: string | null): Promise<string[]> {
+    const excluded = await this.getExcludedSourcesSet(workspaceId);
     const rows = await this.prisma.signal.groupBy({
       by: ['source'],
       _count: { id: true },
       where: {
+        ...this.buildWorkspaceWhere(workspaceId),
         deletedAt: null,
         source: { not: null },
       },
@@ -1214,13 +1286,14 @@ export class OrdersService {
       .sort((a, b) => a.localeCompare(b, 'ru'));
   }
 
-  async getLatestClosedSignalBySource(source: string) {
+  async getLatestClosedSignalBySource(source: string, workspaceId?: string | null) {
     const s = source.trim();
     if (!s) {
       return null;
     }
     return this.prisma.signal.findFirst({
       where: {
+        ...this.buildWorkspaceWhere(workspaceId),
         deletedAt: null,
         source: s,
         status: { in: ['CLOSED_WIN', 'CLOSED_LOSS', 'CLOSED_MIXED'] },
@@ -1235,11 +1308,11 @@ export class OrdersService {
     });
   }
 
-  async statsByPair() {
+  async statsByPair(workspaceId?: string | null) {
     const rows = await this.prisma.signal.groupBy({
       by: ['pair', 'status'],
       _count: { id: true },
-      where: { deletedAt: null },
+      where: { deletedAt: null, ...this.buildWorkspaceWhere(workspaceId) },
     });
     return rows;
   }

@@ -25,7 +25,8 @@ export async function POST(request: Request) {
   }
 
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() ?? `${new URL(request.url).origin}${withBasePath('')}`;
-  const signupRedirect = `${siteUrl}${withBasePath('/login')}`;
+  const signupRedirect = new URL(withBasePath('/auth/confirm'), siteUrl);
+  signupRedirect.searchParams.set('next', withBasePath('/login'));
 
   const routeClient = createSupabaseRouteClient(request);
   const { supabase } = routeClient;
@@ -33,7 +34,7 @@ export async function POST(request: Request) {
     email,
     password,
     options: {
-      emailRedirectTo: signupRedirect,
+      emailRedirectTo: signupRedirect.toString(),
       data: {
         workspace_name: workspaceName,
         workspace_slug: slugifyWorkspaceName(workspaceName),
@@ -45,12 +46,15 @@ export async function POST(request: Request) {
   }
 
   const admin = createSupabaseAdminClient();
-  await admin.auth.admin.updateUserById(data.user.id, {
+  const metadataUpdate = await admin.auth.admin.updateUserById(data.user.id, {
     user_metadata: {
       workspace_name: workspaceName,
       workspace_slug: slugifyWorkspaceName(workspaceName),
     },
   });
+  if (metadataUpdate.error) {
+    return NextResponse.redirect(new URL(`${withBasePath('/signup')}?error=signup_failed`, request.url));
+  }
 
   return NextResponse.redirect(
     new URL(`${withBasePath('/signup')}?error=confirmation_required`, request.url),

@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Param,
   Patch,
@@ -19,6 +20,8 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 
+import { CurrentUser } from '../auth/current-user.decorator';
+import type { AuthenticatedRequestContext } from '../auth/auth.types';
 import { OrdersService } from './orders.service';
 
 @ApiTags('Orders')
@@ -26,13 +29,28 @@ import { OrdersService } from './orders.service';
 export class OrdersController {
   constructor(private readonly orders: OrdersService) {}
 
+  private requireWorkspaceId(user: AuthenticatedRequestContext | null): string {
+    const workspaceId = user?.workspaceId?.trim();
+    if (!workspaceId) {
+      throw new ForbiddenException('Workspace context is required');
+    }
+    return workspaceId;
+  }
+
   @ApiOperation({ summary: 'Сводная статистика по сделкам' })
   @ApiQuery({ name: 'source', required: false, description: 'Фильтр по source' })
   @ApiOkResponse({ description: 'Статистика успешно получена' })
   @Get('stats')
-  async stats(@Query('source') source?: string) {
+  async stats(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
+    @Query('source') source?: string,
+  ) {
+    const workspaceId = this.requireWorkspaceId(user);
     const s = typeof source === 'string' ? source.trim() : '';
-    return this.orders.getDashboardStats({ source: s.length > 0 ? s : undefined });
+    return this.orders.getDashboardStats({
+      source: s.length > 0 ? s : undefined,
+      workspaceId,
+    });
   }
 
   @ApiOperation({ summary: 'Серия PnL по дням или неделям' })
@@ -40,10 +58,18 @@ export class OrdersController {
   @ApiQuery({ name: 'source', required: false })
   @ApiOkResponse({ description: 'Серия PnL успешно получена' })
   @Get('pnl-series')
-  async pnlSeries(@Query('bucket') bucket?: string, @Query('source') source?: string) {
+  async pnlSeries(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
+    @Query('bucket') bucket?: string,
+    @Query('source') source?: string,
+  ) {
+    const workspaceId = this.requireWorkspaceId(user);
     const b = bucket === 'week' ? 'week' : 'day';
     const s = typeof source === 'string' ? source.trim() : '';
-    return this.orders.getPnlSeries(b, { source: s.length > 0 ? s : undefined });
+    return this.orders.getPnlSeries(b, {
+      source: s.length > 0 ? s : undefined,
+      workspaceId,
+    });
   }
 
   @ApiOperation({ summary: 'Список сделок с фильтрами и пагинацией' })
@@ -72,6 +98,7 @@ export class OrdersController {
   @ApiOkResponse({ description: 'Список сделок успешно получен' })
   @Get('trades')
   async trades(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
     @Query('signalId') signalId?: string,
     @Query('source') source?: string,
     @Query('pair') pair?: string,
@@ -85,6 +112,7 @@ export class OrdersController {
     @Query('refreshPnl') refreshPnl?: string,
     @Query('martingaleSteps') martingaleSteps?: string,
   ) {
+    const workspaceId = this.requireWorkspaceId(user);
     const truthy = (v: string | undefined) =>
       v === '1' || v?.toLowerCase() === 'true';
     const parsePositiveInt = (raw: string | undefined, fallback: number, max: number) => {
@@ -108,6 +136,7 @@ export class OrdersController {
       );
     }
     return this.orders.listTrades({
+      workspaceId,
       signalId,
       source,
       pair,
@@ -127,8 +156,11 @@ export class OrdersController {
   @ApiParam({ name: 'id', description: 'ID сделки' })
   @ApiOkResponse({ description: 'Сделка удалена' })
   @Delete('trades/:id')
-  async deleteTrade(@Param('id') id: string) {
-    await this.orders.deleteTrade(id);
+  async deleteTrade(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
+    @Param('id') id: string,
+  ) {
+    await this.orders.deleteTrade(id, { workspaceId: this.requireWorkspaceId(user) });
     return { ok: true };
   }
 
@@ -142,19 +174,25 @@ export class OrdersController {
   @ApiBadRequestResponse({ description: 'Не передано confirm=true' })
   @ApiOkResponse({ description: 'Удаление всех сделок выполнено' })
   @Post('trades/delete-all')
-  async deleteAllTrades(@Body() body?: { confirm?: boolean }) {
+  async deleteAllTrades(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
+    @Body() body?: { confirm?: boolean },
+  ) {
     if (body?.confirm !== true) {
       throw new BadRequestException('Укажите { "confirm": true } для удаления всех сделок');
     }
-    return this.orders.deleteAllTradesSequential();
+    return this.orders.deleteAllTradesSequential(this.requireWorkspaceId(user));
   }
 
   @ApiOperation({ summary: 'Восстановить удалённую сделку' })
   @ApiParam({ name: 'id', description: 'ID сделки' })
   @ApiOkResponse({ description: 'Сделка восстановлена' })
   @Post('trades/:id/restore')
-  async restoreTrade(@Param('id') id: string) {
-    await this.orders.restoreTrade(id);
+  async restoreTrade(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
+    @Param('id') id: string,
+  ) {
+    await this.orders.restoreTrade(id, this.requireWorkspaceId(user));
     return { ok: true };
   }
 
@@ -169,12 +207,14 @@ export class OrdersController {
   @ApiOkResponse({ description: 'Source обновлён' })
   @Patch('trades/:id/source')
   async updateTradeSource(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
     @Param('id') id: string,
     @Body() body: { source?: string | null },
   ) {
     return this.orders.updateSignalSourceWithPropagation(
       id,
       body.source === undefined ? null : body.source,
+      this.requireWorkspaceId(user),
     );
   }
 
@@ -194,6 +234,7 @@ export class OrdersController {
   @ApiOkResponse({ description: 'Telegram-привязка обновлена' })
   @Patch('trades/:id/telegram-source')
   async updateTradeTelegramSource(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
     @Param('id') id: string,
     @Body()
     body: {
@@ -209,7 +250,7 @@ export class OrdersController {
     return this.orders.updateTradeTelegramSource(id, {
       sourceChatId: body.sourceChatId,
       sourceMessageId: body.sourceMessageId,
-    });
+    }, this.requireWorkspaceId(user));
   }
 
   @ApiOperation({ summary: 'Ручная корректировка realized PnL' })
@@ -224,6 +265,7 @@ export class OrdersController {
   @ApiOkResponse({ description: 'PnL обновлён' })
   @Patch('trades/:id/pnl')
   async updateTradePnl(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
     @Param('id') id: string,
     @Body() body: { realizedPnl?: number | null },
   ) {
@@ -232,31 +274,35 @@ export class OrdersController {
     if (pnl !== null && !Number.isFinite(pnl)) {
       throw new BadRequestException('realizedPnl должен быть числом или null');
     }
-    return this.orders.updateTradePnlManual(id, pnl);
+    return this.orders.updateTradePnlManual(id, pnl, this.requireWorkspaceId(user));
   }
 
   @ApiOperation({ summary: 'Группировка статистики по source' })
   @ApiOkResponse({ description: 'Статистика по source' })
   @Get('by-source')
-  async bySource() {
-    return this.orders.statsBySource();
+  async bySource(@CurrentUser() user: AuthenticatedRequestContext | null) {
+    return this.orders.statsBySource(this.requireWorkspaceId(user));
   }
 
   @ApiOperation({ summary: 'Топ источников по метрикам' })
   @ApiQuery({ name: 'limit', required: false })
   @ApiOkResponse({ description: 'Топ источников получен' })
   @Get('top-sources')
-  async topSources(@Query('limit') limit?: string) {
+  async topSources(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
+    @Query('limit') limit?: string,
+  ) {
+    const workspaceId = this.requireWorkspaceId(user);
     const raw = limit ? Number(limit) : 5;
     const take = Number.isFinite(raw) ? Math.min(Math.max(Math.trunc(raw), 1), 50) : 5;
-    return this.orders.getTopSources({ limit: take });
+    return this.orders.getTopSources({ limit: take, workspaceId });
   }
 
   @ApiOperation({ summary: 'Список уникальных source' })
   @ApiOkResponse({ description: 'Список source' })
   @Get('sources')
-  async sources() {
-    return this.orders.listDistinctSources();
+  async sources(@CurrentUser() user: AuthenticatedRequestContext | null) {
+    return this.orders.listDistinctSources(this.requireWorkspaceId(user));
   }
 
   @ApiOperation({ summary: 'Сброс статистики аналитики' })
@@ -269,17 +315,20 @@ export class OrdersController {
   @ApiBadRequestResponse({ description: 'Не передано confirm=true' })
   @ApiOkResponse({ description: 'Статистика сброшена' })
   @Post('reset-stats')
-  async resetStats(@Body() body?: { confirm?: boolean }) {
+  async resetStats(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
+    @Body() body?: { confirm?: boolean },
+  ) {
     if (body?.confirm !== true) {
       throw new BadRequestException('Укажите { "confirm": true } для сброса статистики');
     }
-    return this.orders.resetAnalyticsStats();
+    return this.orders.resetAnalyticsStats(this.requireWorkspaceId(user));
   }
 
   @ApiOperation({ summary: 'Группировка статистики по торговым парам' })
   @ApiOkResponse({ description: 'Статистика по парам' })
   @Get('by-pair')
-  async byPair() {
-    return this.orders.statsByPair();
+  async byPair(@CurrentUser() user: AuthenticatedRequestContext | null) {
+    return this.orders.statsByPair(this.requireWorkspaceId(user));
   }
 }

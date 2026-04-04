@@ -94,7 +94,9 @@ export class AuthService {
     }
     let payload: string | jwt.JwtPayload;
     try {
-      payload = jwt.verify(token, jwtSecret);
+      payload = jwt.verify(token, jwtSecret, {
+        audience: 'authenticated',
+      });
     } catch {
       return null;
     }
@@ -103,6 +105,14 @@ export class AuthService {
     }
     const userId = typeof payload.sub === 'string' ? payload.sub : null;
     if (!userId) {
+      return null;
+    }
+    const issuer = typeof payload.iss === 'string' ? payload.iss.trim().replace(/\/+$/, '') : '';
+    const supabaseUrl = this.getSupabaseUrl()?.replace(/\/+$/, '') ?? '';
+    const allowedIssuers = new Set(
+      ['supabase', supabaseUrl, supabaseUrl ? `${supabaseUrl}/auth/v1` : ''].filter(Boolean),
+    );
+    if (issuer && !allowedIssuers.has(issuer)) {
       return null;
     }
     return this.resolveWorkspaceContext(userId);

@@ -1,4 +1,4 @@
-# Стек development: отдельный project name, порты, volume SQLite — не пересекается с production.
+# Стек development: отдельный project name, порты и volumes — не пересекается с production.
 # На VPS: отдельный каталог (напр. /root/bb-trader-dev), ветка development, ./restart-dev.sh
 name: bb-trader-dev
 
@@ -31,7 +31,7 @@ services:
       GOTRUE_URI_ALLOW_LIST: ${NEXT_PUBLIC_SITE_URL},${WEB_ORIGIN}
       GOTRUE_JWT_SECRET: ${SUPABASE_JWT_SECRET}
       GOTRUE_JWT_AUD: authenticated
-      GOTRUE_DISABLE_SIGNUP: "false"
+      GOTRUE_DISABLE_SIGNUP: ${SUPABASE_DISABLE_SIGNUP:-false}
       GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
       GOTRUE_MAILER_AUTOCONFIRM: "false"
       GOTRUE_SMTP_HOST: ${SUPABASE_SMTP_HOST}

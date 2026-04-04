@@ -22,17 +22,25 @@ function isPublicPath(pathname: string): boolean {
     pathname === '/signup' ||
     pathname === '/forgot-password' ||
     pathname === '/reset-password' ||
+    pathname === '/offline' ||
     pathname.startsWith('/auth/') ||
     pathname === '/favicon.ico' ||
     pathname === '/manifest.webmanifest' ||
-    pathname === '/sw.js'
+    pathname === '/sw.js' ||
+    pathname === '/window.svg' ||
+    pathname === '/vercel.svg' ||
+    pathname === '/turborepo-light.svg' ||
+    pathname === '/turborepo-dark.svg' ||
+    pathname === '/next.svg' ||
+    pathname === '/globe.svg' ||
+    pathname === '/file-text.svg'
   ) {
     return true;
   }
   if (pathname.startsWith('/_next/') || pathname.startsWith('/icons/')) {
     return true;
   }
-  return pathname.includes('.');
+  return false;
 }
 
 export async function middleware(request: NextRequest) {
@@ -72,8 +80,7 @@ export async function middleware(request: NextRequest) {
     user &&
     (pathname === '/login' ||
       pathname === '/signup' ||
-      pathname === '/forgot-password' ||
-      pathname === '/reset-password')
+      pathname === '/forgot-password')
   ) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = `${basePath}/`;

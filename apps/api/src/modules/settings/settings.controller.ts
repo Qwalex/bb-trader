@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  ForbiddenException,
   Get,
   HttpCode,
   Post,
@@ -17,6 +18,8 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 
+import { CurrentUser } from '../auth/current-user.decorator';
+import type { AuthenticatedRequestContext } from '../auth/auth.types';
 import { SettingsService } from './settings.service';
 
 @ApiTags('Settings')
@@ -24,11 +27,19 @@ import { SettingsService } from './settings.service';
 export class SettingsController {
   constructor(private readonly settings: SettingsService) {}
 
+  private requireWorkspaceId(user: AuthenticatedRequestContext | null): string {
+    const workspaceId = user?.workspaceId?.trim();
+    if (!workspaceId) {
+      throw new ForbiddenException('Workspace context is required');
+    }
+    return workspaceId;
+  }
+
   @ApiOperation({ summary: 'Список настроек (секреты замаскированы)' })
   @ApiOkResponse({ description: 'Настройки получены' })
   @Get()
-  async list() {
-    const rows = await this.settings.list();
+  async list(@CurrentUser() user: AuthenticatedRequestContext | null) {
+    const rows = await this.settings.list(this.requireWorkspaceId(user));
     const redacted = rows.map((r) => ({
       key: r.key,
       value: SettingsService.redactValue(r.key, r.value),
@@ -44,7 +55,11 @@ export class SettingsController {
   })
   @ApiOkResponse({ description: 'Настройки получены' })
   @Get('selected')
-  async listSelected(@Query('keys') keysRaw?: string) {
+  async listSelected(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
+    @Query('keys') keysRaw?: string,
+  ) {
+    const workspaceId = this.requireWorkspaceId(user);
     const keys = String(keysRaw ?? '')
       .split(',')
       .map((key) => key.trim())
@@ -52,7 +67,7 @@ export class SettingsController {
     if (keys.length === 0) {
       throw new BadRequestException('Укажите query-параметр keys=KEY1,KEY2');
     }
-    const rows = await this.settings.getManyResolved(keys);
+    const rows = await this.settings.getManyResolved(keys, workspaceId);
     return {
       settings: rows.map((row) => ({
         key: row.key,
@@ -66,7 +81,8 @@ export class SettingsController {
   @ApiOperation({ summary: 'Получить публичные настройки для UI' })
   @ApiOkResponse({ description: 'UI-настройки получены' })
   @Get('ui')
-  async listUiSettings() {
+  async listUiSettings(@CurrentUser() user: AuthenticatedRequestContext | null) {
+    const workspaceId = this.requireWorkspaceId(user);
     return {
       settings: await this.settings.getManyResolved([
         'SOURCE_LIST',
@@ -75,15 +91,15 @@ export class SettingsController {
         'DEFAULT_LEVERAGE',
         'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',
         'BUMP_TO_MIN_EXCHANGE_LOT',
-      ]),
+      ], workspaceId),
     };
   }
 
   @ApiOperation({ summary: 'Статусы чувствительных настроек' })
   @ApiOkResponse({ description: 'Статусы секретов получены' })
   @Get('sensitive-status')
-  async listSensitiveStatus() {
-    const rows = await this.settings.list();
+  async listSensitiveStatus(@CurrentUser() user: AuthenticatedRequestContext | null) {
+    const rows = await this.settings.list(this.requireWorkspaceId(user));
     return {
       settings: rows
         .filter((row) => SettingsService.isSensitiveKey(row.key))
@@ -107,7 +123,11 @@ export class SettingsController {
   })
   @ApiOkResponse({ description: 'Настройка сохранена' })
   @Put()
-  async upsert(@Body() body: { key: string; value: string }) {
+  async upsert(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
+    @Body() body: { key: string; value: string },
+  ) {
+    const workspaceId = this.requireWorkspaceId(user);
     const key = String(body?.key ?? '').trim();
     if (!key) {
       throw new BadRequestException('key обязателен');
@@ -115,7 +135,7 @@ export class SettingsController {
     if (!SettingsService.canWriteKey(key)) {
       throw new BadRequestException(`Ключ ${key} не поддерживается для записи`);
     }
-    await this.settings.set(key, String(body?.value ?? ''));
+    await this.settings.set(key, String(body?.value ?? ''), workspaceId);
     return { ok: true };
   }
 
@@ -134,13 +154,20 @@ export class SettingsController {
   @ApiOkResponse({ description: 'База сброшена' })
   @Post('reset-database')
   @HttpCode(200)
-  async resetDatabase(@Body() body: { confirm?: boolean }) {
+  async resetDatabase(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
+    @Body() body: { confirm?: boolean },
+  ) {
+    const workspaceId = this.requireWorkspaceId(user);
     if (body?.confirm !== true) {
       throw new BadRequestException(
         'Укажите { "confirm": true } для подтверждения сброса базы',
       );
     }
-    await this.settings.resetAllData();
+    if (user?.role !== 'owner') {
+      throw new ForbiddenException('Only workspace owner can reset database');
+    }
+    await this.settings.resetAllData(workspaceId);
     return { ok: true };
   }
 }

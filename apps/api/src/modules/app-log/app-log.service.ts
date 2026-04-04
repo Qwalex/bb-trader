@@ -169,6 +169,7 @@ export class AppLogService {
   async list(options: {
     limit?: number;
     category?: string;
+    workspaceId?: string | null;
   }): Promise<
     {
       id: string;
@@ -180,12 +181,12 @@ export class AppLogService {
     }[]
   > {
     const limit = Math.min(Math.max(options.limit ?? 200, 1), 1000);
-    const where =
-      options.category && options.category !== 'all'
-        ? { category: options.category }
-        : undefined;
+    const where = {
+      ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
+      ...(options.category && options.category !== 'all' ? { category: options.category } : {}),
+    };
     return this.prisma.appLog.findMany({
-      where,
+      where: Object.keys(where).length > 0 ? where : undefined,
       orderBy: { createdAt: 'desc' },
       take: limit,
     });

@@ -23,6 +23,7 @@ export class WorkspaceBootstrapService {
   }): Promise<{ workspaceId: string; role: string }> {
     const existingMembership = await this.prisma.workspaceMember.findFirst({
       where: { userId: user.userId },
+      orderBy: { createdAt: 'asc' },
       select: { workspaceId: true, role: true },
     });
     if (existingMembership) {

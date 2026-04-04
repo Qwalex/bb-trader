@@ -1,15 +1,8 @@
 import { redirect } from 'next/navigation';
 
 import { withBasePath } from '../../lib/auth';
+import { normalizeRedirectTarget } from '../../lib/redirect';
 import { readDashboardSession } from '../../lib/server-auth';
-
-function normalizeRedirectTarget(raw: string | undefined): string {
-  const value = String(raw ?? '').trim();
-  if (!value.startsWith('/')) {
-    return withBasePath('/');
-  }
-  return value;
-}
 
 function errorText(code: string | undefined): string | null {
   if (code === 'invalid_credentials' || code === 'auth_failed') {
@@ -17,6 +10,9 @@ function errorText(code: string | undefined): string | null {
   }
   if (code === 'missing_auth_config') {
     return 'Не настроены Supabase auth переменные.';
+  }
+  if (code === 'auth_callback_failed') {
+    return 'Не удалось завершить вход по ссылке подтверждения.';
   }
   return null;
 }
@@ -33,7 +29,7 @@ export default async function LoginPage({
   const sp = await searchParams;
   const error = typeof sp.error === 'string' ? sp.error : undefined;
   const redirectToRaw = typeof sp.redirectTo === 'string' ? sp.redirectTo : undefined;
-  const redirectTo = normalizeRedirectTarget(redirectToRaw);
+  const redirectTo = normalizeRedirectTarget(redirectToRaw, withBasePath('/'));
 
   return (
     <div

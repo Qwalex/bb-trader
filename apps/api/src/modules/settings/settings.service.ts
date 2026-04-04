@@ -73,9 +73,21 @@ export class SettingsService {
     private readonly config: ConfigService,
   ) {}
 
+  private resolveWorkspaceId(workspaceId?: string | null): string | undefined {
+    const explicit = workspaceId?.trim();
+    if (explicit) {
+      return explicit;
+    }
+    const fallback = process.env.BOOTSTRAP_WORKSPACE_ID?.trim();
+    return fallback || undefined;
+  }
+
   async get(key: string, workspaceId?: string | null): Promise<string | undefined> {
-    const row = workspaceId
-      ? await this.prisma.setting.findUnique({ where: { workspaceId_key: { workspaceId, key } } })
+    const resolvedWorkspaceId = this.resolveWorkspaceId(workspaceId);
+    const row = resolvedWorkspaceId
+      ? await this.prisma.setting.findUnique({
+          where: { workspaceId_key: { workspaceId: resolvedWorkspaceId, key } },
+        })
       : null;
     if (row?.value !== undefined && row?.value !== '') {
       return row.value;
@@ -127,45 +139,51 @@ export class SettingsService {
     return resolveDefaultEntryToUsd(spec, balanceTotalUsd, fallbackUsd);
   }
 
-  async set(key: string, value: string): Promise<void> {
-    const workspaceId = process.env.BOOTSTRAP_WORKSPACE_ID?.trim();
-    if (!workspaceId) {
+  async set(key: string, value: string, workspaceId?: string | null): Promise<void> {
+    const resolvedWorkspaceId = this.resolveWorkspaceId(workspaceId);
+    if (!resolvedWorkspaceId) {
       throw new Error('BOOTSTRAP_WORKSPACE_ID is required until full tenant context wiring is complete');
     }
     if (!SettingsService.canWriteKey(key)) {
       throw new Error(`Unsupported setting key: ${key}`);
     }
     await this.prisma.setting.upsert({
-      where: { workspaceId_key: { workspaceId, key } },
-      create: { workspaceId, key, value },
+      where: { workspaceId_key: { workspaceId: resolvedWorkspaceId, key } },
+      create: { workspaceId: resolvedWorkspaceId, key, value },
       update: { value },
     });
   }
 
-  async getMany(keys: string[]): Promise<Record<string, string | undefined>> {
+  async getMany(
+    keys: string[],
+    workspaceId?: string | null,
+  ): Promise<Record<string, string | undefined>> {
     const out: Record<string, string | undefined> = {};
     for (const k of keys) {
-      out[k] = await this.get(k);
+      out[k] = await this.get(k, workspaceId);
     }
     return out;
   }
 
-  async list(): Promise<{ key: string; value: string }[]> {
-    const workspaceId = process.env.BOOTSTRAP_WORKSPACE_ID?.trim();
-    if (!workspaceId) {
+  async list(workspaceId?: string | null): Promise<{ key: string; value: string }[]> {
+    const resolvedWorkspaceId = this.resolveWorkspaceId(workspaceId);
+    if (!resolvedWorkspaceId) {
       return [];
     }
     return this.prisma.setting.findMany({
-      where: { workspaceId },
+      where: { workspaceId: resolvedWorkspaceId },
       orderBy: { key: 'asc' },
     });
   }
 
-  async getManyResolved(keys: string[]): Promise<{ key: string; value: string }[]> {
+  async getManyResolved(
+    keys: string[],
+    workspaceId?: string | null,
+  ): Promise<{ key: string; value: string }[]> {
     const uniqueKeys = Array.from(new Set(keys.map((key) => key.trim()).filter((key) => key.length > 0)));
     const rows = await Promise.all(
       uniqueKeys.map(async (key) => {
-        const value = await this.get(key);
+        const value = await this.get(key, workspaceId);
         return { key, value: value ?? '' };
       }),
     );
@@ -189,20 +207,24 @@ export class SettingsService {
   }
 
   /**
-   * Полная очистка SQLite: ордера, сигналы, логи, настройки в БД.
+   * Полная очистка данных текущего workspace в БД.
    * Переменные окружения не трогаются.
    */
-  async resetAllData(): Promise<void> {
+  async resetAllData(workspaceId?: string | null): Promise<void> {
+    const resolvedWorkspaceId = this.resolveWorkspaceId(workspaceId);
+    if (!resolvedWorkspaceId) {
+      throw new Error('Workspace id is required');
+    }
     await this.prisma.$transaction(async (tx) => {
-      await tx.diagnosticStepResult.deleteMany();
-      await tx.diagnosticLog.deleteMany();
-      await tx.diagnosticModelResult.deleteMany();
-      await tx.diagnosticCase.deleteMany();
-      await tx.diagnosticRun.deleteMany();
-      await tx.order.deleteMany();
-      await tx.signal.deleteMany();
-      await tx.appLog.deleteMany();
-      await tx.setting.deleteMany();
+      await tx.diagnosticStepResult.deleteMany({ where: { workspaceId: resolvedWorkspaceId } });
+      await tx.diagnosticLog.deleteMany({ where: { workspaceId: resolvedWorkspaceId } });
+      await tx.diagnosticModelResult.deleteMany({ where: { workspaceId: resolvedWorkspaceId } });
+      await tx.diagnosticCase.deleteMany({ where: { workspaceId: resolvedWorkspaceId } });
+      await tx.diagnosticRun.deleteMany({ where: { workspaceId: resolvedWorkspaceId } });
+      await tx.order.deleteMany({ where: { workspaceId: resolvedWorkspaceId } });
+      await tx.signal.deleteMany({ where: { workspaceId: resolvedWorkspaceId } });
+      await tx.appLog.deleteMany({ where: { workspaceId: resolvedWorkspaceId } });
+      await tx.setting.deleteMany({ where: { workspaceId: resolvedWorkspaceId } });
     });
   }
 }

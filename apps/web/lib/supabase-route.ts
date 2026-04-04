@@ -15,7 +15,12 @@ export function createSupabaseRouteClient(request: Request) {
           .filter(Boolean)
           .map((part) => {
             const [name, ...rest] = part.split('=');
-            return { name, value: rest.join('=') };
+            const value = rest.join('=');
+            try {
+              return { name, value: decodeURIComponent(value) };
+            } catch {
+              return { name, value };
+            }
           })
           .filter((cookie): cookie is { name: string; value: string } => Boolean(cookie.name));
       },

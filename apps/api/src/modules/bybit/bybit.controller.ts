@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Param, Post, Query } from '@nestjs/common';
 import {
   ApiBody,
   ApiOkResponse,
@@ -8,6 +8,8 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 
+import { CurrentUser } from '../auth/current-user.decorator';
+import type { AuthenticatedRequestContext } from '../auth/auth.types';
 import { BalanceSnapshotService } from './balance-snapshot.service';
 import { BybitService } from './bybit.service';
 
@@ -19,21 +21,36 @@ export class BybitController {
     private readonly balanceSnapshots: BalanceSnapshotService,
   ) {}
 
+  private requireWorkspaceId(user: AuthenticatedRequestContext | null): string {
+    const workspaceId = user?.workspaceId?.trim();
+    if (!workspaceId) {
+      throw new ForbiddenException('Workspace context is required');
+    }
+    return workspaceId;
+  }
+
   @ApiOperation({ summary: 'Live-снимок экспозиции и ордеров Bybit' })
   @ApiOkResponse({ description: 'Снимок получен' })
   @Get('live')
-  async live() {
-    return this.bybit.getLiveExposureSnapshot();
+  async live(@CurrentUser() user: AuthenticatedRequestContext | null) {
+    return this.bybit.getLiveExposureSnapshot(this.requireWorkspaceId(user));
   }
 
-  /** Дневные снимки суммарного USDT в SQLite (cron), без запросов к Bybit. Дашборд: график. */
+  /** Дневные снимки суммарного USDT в БД (cron), без запросов к Bybit. Дашборд: график. */
   @ApiOperation({ summary: 'История equity-снимков (локально из БД)' })
   @ApiQuery({ name: 'days', required: false, description: 'Количество дней' })
   @ApiOkResponse({ description: 'История баланса получена' })
   @Get('balance-history')
-  async balanceHistory(@Query('days') days?: string) {
+  async balanceHistory(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
+    @Query('days') days?: string,
+  ) {
+    const workspaceId = this.requireWorkspaceId(user);
     const d = days != null ? Number.parseInt(String(days), 10) : 30;
-    const points = await this.balanceSnapshots.listRecent(Number.isFinite(d) ? d : 30);
+    const points = await this.balanceSnapshots.listRecent(
+      Number.isFinite(d) ? d : 30,
+      workspaceId,
+    );
     return { points };
   }
 
@@ -41,16 +58,22 @@ export class BybitController {
   @ApiParam({ name: 'signalId', description: 'ID сделки' })
   @ApiOkResponse({ description: 'Отладочные данные по сделке' })
   @Get('signal/:signalId')
-  async signalSnapshot(@Param('signalId') signalId: string) {
-    return this.bybit.getSignalExecutionDebugSnapshot(signalId);
+  async signalSnapshot(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
+    @Param('signalId') signalId: string,
+  ) {
+    return this.bybit.getSignalExecutionDebugSnapshot(signalId, this.requireWorkspaceId(user));
   }
 
   @ApiOperation({ summary: 'Детализация PnL/комиссий сделки из Bybit' })
   @ApiParam({ name: 'signalId', description: 'ID сделки' })
   @ApiOkResponse({ description: 'Детализация PnL получена' })
   @Get('trade-pnl-breakdown/:signalId')
-  async tradePnlBreakdown(@Param('signalId') signalId: string) {
-    return this.bybit.getTradePnlBreakdown(signalId);
+  async tradePnlBreakdown(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
+    @Param('signalId') signalId: string,
+  ) {
+    return this.bybit.getTradePnlBreakdown(signalId, this.requireWorkspaceId(user));
   }
 
   @ApiOperation({ summary: 'Ручное закрытие сделки на Bybit' })
@@ -59,10 +82,11 @@ export class BybitController {
   @ApiOkResponse({ description: 'Команда закрытия отправлена' })
   @Post('close/:signalId')
   async closeSignal(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
     @Param('signalId') signalId: string,
     @Body() _body?: Record<string, unknown>,
   ) {
-    return this.bybit.closeSignalManually(signalId);
+    return this.bybit.closeSignalManually(signalId, this.requireWorkspaceId(user));
   }
 
   @ApiOperation({ summary: 'Пересчёт closed PnL (sync/async)' })
@@ -79,17 +103,21 @@ export class BybitController {
   @ApiOkResponse({ description: 'Пересчёт запущен или выполнен' })
   @Post('recalc-closed-pnl')
   async recalcClosedPnl(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
     @Body() body?: { limit?: number; dryRun?: boolean; async?: boolean },
   ) {
+    const workspaceId = this.requireWorkspaceId(user);
     if (body?.async !== false) {
       return this.bybit.startRecalcClosedSignalsPnlJob({
         limit: body?.limit,
         dryRun: body?.dryRun ?? true,
+        workspaceId,
       });
     }
     return this.bybit.recalcClosedSignalsPnl({
       limit: body?.limit,
       dryRun: body?.dryRun ?? true,
+      workspaceId,
     });
   }
 
@@ -97,8 +125,11 @@ export class BybitController {
   @ApiParam({ name: 'jobId', description: 'ID job' })
   @ApiOkResponse({ description: 'Статус job получен' })
   @Get('recalc-closed-pnl/:jobId')
-  async recalcClosedPnlJobStatus(@Param('jobId') jobId: string) {
-    const status = this.bybit.getRecalcClosedPnlJobStatus(jobId);
+  async recalcClosedPnlJobStatus(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
+    @Param('jobId') jobId: string,
+  ) {
+    const status = this.bybit.getRecalcClosedPnlJobStatus(jobId, this.requireWorkspaceId(user));
     if (!status) {
       return { ok: false, error: 'Job not found', jobId };
     }

@@ -82,6 +82,7 @@ export interface RecalcClosedPnlResult {
 
 export interface RecalcClosedPnlJobStatus {
   jobId: string;
+  workspaceId?: string | null;
   status: 'queued' | 'running' | 'completed' | 'failed';
   dryRun: boolean;
   limit: number;
@@ -221,30 +222,30 @@ export class BybitService {
    * — testnet: BYBIT_API_KEY_TESTNET / BYBIT_API_SECRET_TESTNET;
    * — mainnet: BYBIT_API_KEY_MAINNET / BYBIT_API_SECRET_MAINNET.
    */
-  private async getBybitCredentials(): Promise<{
+  private async getBybitCredentials(workspaceId?: string | null): Promise<{
     key: string;
     secret: string;
     testnet: boolean;
   } | null> {
     const testnet =
       BybitService.normalizeSettingValue(
-        await this.settings.get('BYBIT_TESTNET'),
+        await this.settings.get('BYBIT_TESTNET', workspaceId),
       )?.toLowerCase() === 'true';
     let key: string | undefined;
     let secret: string | undefined;
     if (testnet) {
       key = BybitService.normalizeSettingValue(
-        await this.settings.get('BYBIT_API_KEY_TESTNET'),
+        await this.settings.get('BYBIT_API_KEY_TESTNET', workspaceId),
       );
       secret = BybitService.normalizeSettingValue(
-        await this.settings.get('BYBIT_API_SECRET_TESTNET'),
+        await this.settings.get('BYBIT_API_SECRET_TESTNET', workspaceId),
       );
     } else {
       key = BybitService.normalizeSettingValue(
-        await this.settings.get('BYBIT_API_KEY_MAINNET'),
+        await this.settings.get('BYBIT_API_KEY_MAINNET', workspaceId),
       );
       secret = BybitService.normalizeSettingValue(
-        await this.settings.get('BYBIT_API_SECRET_MAINNET'),
+        await this.settings.get('BYBIT_API_SECRET_MAINNET', workspaceId),
       );
     }
     if (!key || !secret) {
@@ -253,8 +254,8 @@ export class BybitService {
     return { key, secret, testnet };
   }
 
-  private async getClient(): Promise<RestClientV5 | null> {
-    const creds = await this.getBybitCredentials();
+  private async getClient(workspaceId?: string | null): Promise<RestClientV5 | null> {
+    const creds = await this.getBybitCredentials(workspaceId);
     if (!creds) {
       return null;
     }
@@ -266,16 +267,16 @@ export class BybitService {
   }
 
   /** Текущий USDT-баланс (best-effort) для внешних guard-проверок — доступные средства. */
-  async getUnifiedUsdtBalance(): Promise<number | undefined> {
-    const d = await this.getUnifiedUsdtBalanceDetails();
+  async getUnifiedUsdtBalance(workspaceId?: string | null): Promise<number | undefined> {
+    const d = await this.getUnifiedUsdtBalanceDetails(workspaceId);
     return d?.availableUsd;
   }
 
   /** Доступный и суммарный (equity) USDT в unified-кошельке. */
-  async getUnifiedUsdtBalanceDetails(): Promise<
+  async getUnifiedUsdtBalanceDetails(workspaceId?: string | null): Promise<
     { availableUsd: number; totalUsd: number } | undefined
   > {
-    const client = await this.getClient();
+    const client = await this.getClient(workspaceId);
     if (!client) {
       return undefined;
     }
@@ -1150,12 +1151,12 @@ export class BybitService {
     return undefined;
   }
 
-  async getLiveExposureSnapshot(): Promise<{
+  async getLiveExposureSnapshot(workspaceId?: string | null): Promise<{
     bybitConnected: boolean;
     items: LiveExposureItem[];
   }> {
-    const openSignals = await this.orders.listOpenSignals();
-    const client = await this.getClient();
+    const openSignals = await this.orders.listOpenSignals(workspaceId);
+    const client = await this.getClient(workspaceId);
     const bybitConnected = Boolean(client);
     const items: LiveExposureItem[] = [];
 
@@ -1207,8 +1208,9 @@ export class BybitService {
 
   async getSignalExecutionDebugSnapshot(
     signalId: string,
+    workspaceId?: string | null,
   ): Promise<SignalExecutionDebugSnapshot> {
-    const signal = await this.orders.getSignalWithOrders(signalId);
+    const signal = await this.orders.getSignalWithOrders(signalId, workspaceId);
     if (!signal) {
       return {
         ok: false,
@@ -1219,7 +1221,7 @@ export class BybitService {
     }
 
     const symbol = normalizeTradingPair(signal.pair);
-    const client = await this.getClient();
+    const client = await this.getClient(workspaceId);
     const bybitConnected = Boolean(client);
     const dbOrders = signal.orders.map((o) => ({
       id: o.id,
@@ -1512,14 +1514,15 @@ export class BybitService {
    */
   async cleanupExchangeBeforeDeletingPlacedSignal(
     signalId: string,
+    workspaceId?: string | null,
   ): Promise<CloseSignalResult> {
-    const signal = await this.orders.getSignalWithOrders(signalId);
+    const signal = await this.orders.getSignalWithOrders(signalId, workspaceId);
     if (!signal) {
       return { ok: false, error: 'Сигнал не найден' };
     }
 
     const symbol = normalizeTradingPair(signal.pair);
-    const client = await this.getClient();
+    const client = await this.getClient(workspaceId);
     if (!client) {
       return {
         ok: false,
@@ -1614,14 +1617,17 @@ export class BybitService {
     };
   }
 
-  async closeSignalManually(signalId: string): Promise<CloseSignalResult> {
-    const signal = await this.orders.getSignalWithOrders(signalId);
+  async closeSignalManually(
+    signalId: string,
+    workspaceId?: string | null,
+  ): Promise<CloseSignalResult> {
+    const signal = await this.orders.getSignalWithOrders(signalId, workspaceId);
     if (!signal) {
       return { ok: false, error: 'Сигнал не найден' };
     }
 
     const symbol = normalizeTradingPair(signal.pair);
-    const client = await this.getClient();
+    const client = await this.getClient(workspaceId);
     if (!client) {
       return {
         ok: false,
@@ -3394,8 +3400,11 @@ export class BybitService {
     };
   }
 
-  async getTradePnlBreakdown(signalId: string): Promise<TradePnlBreakdownResult> {
-    const signal = await this.orders.getSignalWithOrders(signalId);
+  async getTradePnlBreakdown(
+    signalId: string,
+    workspaceId?: string | null,
+  ): Promise<TradePnlBreakdownResult> {
+    const signal = await this.orders.getSignalWithOrders(signalId, workspaceId);
     if (!signal) {
       return {
         ok: false,
@@ -3410,7 +3419,7 @@ export class BybitService {
     }
 
     const requestWindow = this.buildClosedPnlWindow(signal.createdAt, signal.closedAt);
-    const client = await this.getClient();
+    const client = await this.getClient(workspaceId);
     if (!client) {
       return {
         ok: false,
@@ -3606,6 +3615,7 @@ export class BybitService {
   startRecalcClosedSignalsPnlJob(params?: {
     limit?: number;
     dryRun?: boolean;
+    workspaceId?: string | null;
   }): RecalcClosedPnlJobStatus {
     const dryRun = params?.dryRun ?? true;
     const limit = params?.limit ?? 200;
@@ -3613,6 +3623,7 @@ export class BybitService {
     const createdAt = new Date().toISOString();
     const job: RecalcClosedPnlJobStatus = {
       jobId,
+      workspaceId: params?.workspaceId ?? null,
       status: 'queued',
       dryRun,
       limit,
@@ -3630,7 +3641,11 @@ export class BybitService {
         current.status = 'running';
         current.startedAt = new Date().toISOString();
         try {
-          const result = await this.recalcClosedSignalsPnl({ dryRun, limit });
+          const result = await this.recalcClosedSignalsPnl({
+            dryRun,
+            limit,
+            workspaceId: current.workspaceId,
+          });
           current.status = 'completed';
           current.result = result;
           current.finishedAt = new Date().toISOString();
@@ -3645,9 +3660,18 @@ export class BybitService {
     return { ...job };
   }
 
-  getRecalcClosedPnlJobStatus(jobId: string): RecalcClosedPnlJobStatus | null {
+  getRecalcClosedPnlJobStatus(
+    jobId: string,
+    workspaceId?: string | null,
+  ): RecalcClosedPnlJobStatus | null {
     const job = this.recalcJobs.get(jobId);
-    return job ? { ...job } : null;
+    if (!job) {
+      return null;
+    }
+    if (workspaceId && job.workspaceId !== workspaceId) {
+      return null;
+    }
+    return { ...job };
   }
 
   private pruneOldRecalcJobs(): void {
@@ -3663,10 +3687,12 @@ export class BybitService {
   async recalcClosedSignalsPnl(params?: {
     limit?: number;
     dryRun?: boolean;
+    workspaceId?: string | null;
   }): Promise<RecalcClosedPnlResult> {
     const dryRun = params?.dryRun ?? true;
     const limit = params?.limit ?? 200;
-    const client = await this.getClient();
+    const workspaceId = params?.workspaceId;
+    const client = await this.getClient(workspaceId);
     if (!client) {
       return {
         ok: false,
@@ -3686,7 +3712,7 @@ export class BybitService {
       };
     }
 
-    const closed = await this.orders.listClosedSignalsForPnlRecalc({ limit });
+    const closed = await this.orders.listClosedSignalsForPnlRecalc({ limit, workspaceId });
     let updated = 0;
     let unchanged = 0;
     let skippedNoBybitOrders = 0;

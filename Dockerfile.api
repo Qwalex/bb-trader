@@ -11,7 +11,6 @@ WORKDIR /app/packages/shared
 RUN npm run build
 
 WORKDIR /app/apps/api
-ENV DATABASE_URL=file:/app/data/dev.db
 RUN npx prisma generate && npm run build
 
 EXPOSE 3001

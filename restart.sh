@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-NOTIFY_URL="https://dev.qwalex.ru/notify/"
+NOTIFY_URL="${NOTIFY_URL:-https://dev.qwalex.ru/notify/}"
 PROJECT_NAME="${PROJECT_NAME:-bb-trade}"
 DEPLOY_VARIANT="${DEPLOY_VARIANT:-production}"
 DEPLOY_WRAPPER="${DEPLOY_WRAPPER:-restart.sh}"
@@ -71,30 +71,6 @@ write_last_good_registry_env() {
 deploy_from_registry() {
   docker compose pull
   docker compose up -d --remove-orphans
-}
-
-wait_for_service_healthy() {
-  local service_name="$1"
-  local attempts="${2:-30}"
-  local sleep_seconds="${3:-2}"
-  local container_id status
-
-  container_id="$(docker compose ps -q "$service_name")"
-  if [[ -z "$container_id" ]]; then
-    echo "Service ${service_name} container not found"
-    return 1
-  fi
-
-  for ((i=1; i<=attempts; i+=1)); do
-    status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container_id" 2>/dev/null || true)"
-    if [[ "$status" == "healthy" || "$status" == "running" ]]; then
-      return 0
-    fi
-    sleep "$sleep_seconds"
-  done
-
-  echo "Service ${service_name} did not become healthy in time"
-  return 1
 }
 
 # Дописывает в файл снимок `docker compose logs` (для анализа после сбоя).
