@@ -73,6 +73,23 @@ deploy_from_registry() {
   docker compose up -d --remove-orphans
 }
 
+run_prisma_db_push() {
+  local attempts="${1:-10}"
+  local sleep_seconds="${2:-3}"
+  local cmd="docker compose run --rm --no-deps api npm run db:push"
+
+  for ((i=1; i<=attempts; i+=1)); do
+    if eval "$cmd"; then
+      return 0
+    fi
+    echo "Prisma db push failed (attempt ${i}/${attempts}); retrying in ${sleep_seconds}s..."
+    sleep "$sleep_seconds"
+  done
+
+  echo "Prisma db push failed after ${attempts} attempts"
+  return 1
+}
+
 # Дописывает в файл снимок `docker compose logs` (для анализа после сбоя).
 dump_compose_failure_logs() {
   local label="${1:-deploy}"
@@ -139,6 +156,8 @@ fi
 if [[ -n "${API_IMAGE:-}" && -n "${WEB_IMAGE:-}" ]]; then
   ATTEMPT_REF="${API_IMAGE##*:}"
   if deploy_from_registry; then
+    run_prisma_db_push
+    docker compose up -d --remove-orphans
     write_last_good_registry_env
     append_deploy_history "ok" "$ATTEMPT_REF"
   else
@@ -162,6 +181,8 @@ if [[ -n "${API_IMAGE:-}" && -n "${WEB_IMAGE:-}" ]]; then
   fi
 else
   if docker compose up -d --build --remove-orphans; then
+    run_prisma_db_push
+    docker compose up -d --remove-orphans
     GIT_REF="$(git rev-parse --short HEAD 2>/dev/null || echo local-build)"
     append_deploy_history "ok" "$GIT_REF"
   else
