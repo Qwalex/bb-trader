@@ -64,7 +64,7 @@ services:
       PG_META_DB_PASSWORD: ${SUPABASE_DB_PASSWORD}
 
   studio:
-    image: supabase/studio:20250407-2f39f2c
+    image: ghcr.io/supabase/studio:2026.03.16-sha-5528817
     restart: unless-stopped
     depends_on:
       - meta
