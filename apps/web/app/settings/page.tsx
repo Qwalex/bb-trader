@@ -248,6 +248,13 @@ function mergeModelHistory(current: string[], value: string): string[] {
 }
 
 type Row = { key: string; value: string };
+type SelectedRow = {
+  key: string;
+  value: string;
+  sensitive?: boolean;
+  configured?: boolean;
+};
+type SensitiveMode = 'keep' | 'replace' | 'clear';
 
 function valueFor(rows: Row[], key: string): string {
   return rows.find((r) => r.key === key)?.value ?? '';
@@ -287,7 +294,7 @@ function isSensitiveKey(key: string): boolean {
     u.includes('SECRET') ||
     u.includes('TOKEN') ||
     u.includes('PASSWORD') ||
-    u === 'OPENROUTER_API_KEY' ||
+    u.includes('API_KEY') ||
     u.includes('API_HASH') ||
     u.includes('2FA')
   );
@@ -300,6 +307,20 @@ function formatPreviewValue(key: string, value: string): string {
   return t;
 }
 
+function beforeSensitivePreview(configured: boolean): string {
+  return configured ? '•••• (настроено)' : '(пусто)';
+}
+
+function afterSensitivePreview(mode: SensitiveMode, value: string, configured: boolean): string {
+  if (mode === 'clear') {
+    return '(будет очищено)';
+  }
+  if (mode === 'replace' && value.trim()) {
+    return '•••• (новое значение)';
+  }
+  return beforeSensitivePreview(configured);
+}
+
 type PendingChange = {
   key: string;
   label: string;
@@ -307,10 +328,28 @@ type PendingChange = {
   after: string;
 };
 
-function collectPendingChanges(saved: Row[], draft: Row[]): PendingChange[] {
+function collectPendingChanges(
+  saved: Row[],
+  draft: Row[],
+  sensitiveConfigured: Record<string, boolean>,
+  sensitiveDrafts: Record<string, string>,
+  sensitiveModes: Record<string, SensitiveMode>,
+): PendingChange[] {
   const out: PendingChange[] = [];
 
   for (const { key } of KEYS) {
+    if (isSensitiveKey(key)) {
+      const mode = sensitiveModes[key] ?? 'keep';
+      const nextValue = sensitiveDrafts[key] ?? '';
+      if (mode === 'keep' || (mode === 'replace' && !nextValue.trim())) continue;
+      out.push({
+        key,
+        label: labelForKey(key),
+        before: beforeSensitivePreview(Boolean(sensitiveConfigured[key])),
+        after: afterSensitivePreview(mode, nextValue, Boolean(sensitiveConfigured[key])),
+      });
+      continue;
+    }
     if (normCompare(valueFor(draft, key), valueFor(saved, key))) continue;
     out.push({
       key,
@@ -347,10 +386,25 @@ function collectPendingChanges(saved: Row[], draft: Row[]): PendingChange[] {
   return [...out].sort((a, b) => orderKey(a.key) - orderKey(b.key));
 }
 
-function buildPutOperations(saved: Row[], draft: Row[]): { key: string; value: string }[] {
+function buildPutOperations(
+  saved: Row[],
+  draft: Row[],
+  sensitiveDrafts: Record<string, string>,
+  sensitiveModes: Record<string, SensitiveMode>,
+): { key: string; value: string }[] {
   const ops: { key: string; value: string }[] = [];
 
   for (const { key } of KEYS) {
+    if (isSensitiveKey(key)) {
+      const mode = sensitiveModes[key] ?? 'keep';
+      const value = sensitiveDrafts[key] ?? '';
+      if (mode === 'replace' && value.trim()) {
+        ops.push({ key, value: value.trim() });
+      } else if (mode === 'clear') {
+        ops.push({ key, value: '' });
+      }
+      continue;
+    }
     if (normCompare(valueFor(draft, key), valueFor(saved, key))) continue;
     ops.push({ key, value: valueFor(draft, key).trim() });
   }
@@ -376,6 +430,9 @@ function buildPutOperations(saved: Row[], draft: Row[]): { key: string; value: s
 export default function SettingsPage() {
   const [savedRows, setSavedRows] = useState<Row[]>([]);
   const [draftRows, setDraftRows] = useState<Row[]>([]);
+  const [sensitiveConfigured, setSensitiveConfigured] = useState<Record<string, boolean>>({});
+  const [sensitiveDrafts, setSensitiveDrafts] = useState<Record<string, string>>({});
+  const [sensitiveModes, setSensitiveModes] = useState<Record<string, SensitiveMode>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'ok' | 'err'; text: string } | null>(
@@ -390,14 +447,29 @@ export default function SettingsPage() {
   useEffect(() => {
     void (async () => {
       try {
-        const res = await fetch(`${getApiBase()}/settings/raw`);
-        if (!res.ok) throw new Error(String(res.status));
-        const j = (await res.json()) as {
-          settings: Row[];
+        const selectedKeys = PUT_ORDER.join(',');
+        const [selectedRes, sensitiveRes] = await Promise.all([
+          fetch(`${getApiBase()}/settings/selected?keys=${encodeURIComponent(selectedKeys)}`),
+          fetch(`${getApiBase()}/settings/sensitive-status`),
+        ]);
+        if (!selectedRes.ok || !sensitiveRes.ok) throw new Error('settings load failed');
+        const selectedJson = (await selectedRes.json()) as { settings: SelectedRow[] };
+        const sensitiveJson = (await sensitiveRes.json()) as {
+          settings: Array<{ key: string; configured: boolean }>;
         };
-        const list = j.settings ?? [];
+        const list = (selectedJson.settings ?? []).map((row) => ({
+          key: row.key,
+          value: row.sensitive ? '' : row.value,
+        }));
         setSavedRows(list);
         setDraftRows(list);
+        setSensitiveConfigured(
+          Object.fromEntries(
+            (sensitiveJson.settings ?? []).map((row) => [row.key, row.configured]),
+          ) as Record<string, boolean>,
+        );
+        setSensitiveDrafts({});
+        setSensitiveModes({});
       } catch {
         setMessage({ type: 'err', text: 'Не удалось загрузить настройки' });
       } finally {
@@ -407,17 +479,22 @@ export default function SettingsPage() {
   }, []);
 
   const pendingChanges = useMemo(
-    () => collectPendingChanges(savedRows, draftRows),
-    [savedRows, draftRows],
+    () =>
+      collectPendingChanges(
+        savedRows,
+        draftRows,
+        sensitiveConfigured,
+        sensitiveDrafts,
+        sensitiveModes,
+      ),
+    [savedRows, draftRows, sensitiveConfigured, sensitiveDrafts, sensitiveModes],
   );
   const hasPendingChanges = pendingChanges.length > 0;
 
   const valueForDraft = (key: string) => valueFor(draftRows, key);
   const boolValueFor = (key: string) => valueForDraft(key).toLowerCase() === 'true';
-  const modelHistory = useMemo(
-    () => parseModelHistory(valueForDraft(MODEL_HISTORY_KEY)),
-    [draftRows],
-  );
+  const modelHistoryRaw = valueForDraft(MODEL_HISTORY_KEY);
+  const modelHistory = useMemo(() => parseModelHistory(modelHistoryRaw), [modelHistoryRaw]);
 
   function parseStringList(raw: string): string[] {
     const t = raw.trim();
@@ -455,13 +532,29 @@ export default function SettingsPage() {
     setDraftRows((prev) => upsertRow(prev, key, value));
   }
 
+  function setSensitiveDraftKey(key: string, value: string) {
+    setSensitiveDrafts((prev) => ({ ...prev, [key]: value }));
+    setSensitiveModes((prev) => ({
+      ...prev,
+      [key]: value.trim().length > 0 ? 'replace' : prev[key] ?? 'keep',
+    }));
+  }
+
+  function setSensitiveMode(key: string, mode: SensitiveMode) {
+    setSensitiveModes((prev) => ({ ...prev, [key]: mode }));
+    if (mode !== 'replace') {
+      setSensitiveDrafts((prev) => ({ ...prev, [key]: '' }));
+    }
+  }
+
   async function saveAll() {
-    const ops = buildPutOperations(savedRows, draftRows);
+    const ops = buildPutOperations(savedRows, draftRows, sensitiveDrafts, sensitiveModes);
     if (ops.length === 0) return;
     setSaving(true);
     setMessage(null);
     try {
       let next = [...savedRows];
+      const nextConfigured = { ...sensitiveConfigured };
       for (const { key, value } of ops) {
         const res = await fetch(`${getApiBase()}/settings`, {
           method: 'PUT',
@@ -469,10 +562,16 @@ export default function SettingsPage() {
           body: JSON.stringify({ key, value }),
         });
         if (!res.ok) throw new Error(String(res.status));
-        next = upsertRow(next, key, value);
+        next = upsertRow(next, key, isSensitiveKey(key) ? '' : value);
+        if (isSensitiveKey(key)) {
+          nextConfigured[key] = value.trim().length > 0;
+        }
       }
       setSavedRows(next);
       setDraftRows(next);
+      setSensitiveConfigured(nextConfigured);
+      setSensitiveDrafts({});
+      setSensitiveModes({});
       setMessage({ type: 'ok', text: 'Настройки сохранены' });
     } catch {
       setMessage({ type: 'err', text: 'Ошибка сохранения' });
@@ -483,6 +582,8 @@ export default function SettingsPage() {
 
   function revertDraft() {
     setDraftRows([...savedRows]);
+    setSensitiveDrafts({});
+    setSensitiveModes({});
     setMessage(null);
   }
 
@@ -509,6 +610,9 @@ export default function SettingsPage() {
       }
       setSavedRows([]);
       setDraftRows([]);
+      setSensitiveConfigured({});
+      setSensitiveDrafts({});
+      setSensitiveModes({});
       setMessage({
         type: 'ok',
         text: 'База данных очищена. Обновите страницу при необходимости.',
@@ -617,6 +721,9 @@ export default function SettingsPage() {
     const label = LABEL_BY_KEY[key] ?? key;
     const isBoolean = BOOLEAN_KEYS.has(key);
     const isModel = MODEL_KEYS.has(key);
+    const sensitive = isSensitiveKey(key);
+    const sensitiveMode = sensitiveModes[key] ?? 'keep';
+    const configured = Boolean(sensitiveConfigured[key]);
     return (
       <label key={key} className={isBoolean ? 'settingRowSwitch' : undefined}>
         <span>{label}</span>
@@ -635,6 +742,31 @@ export default function SettingsPage() {
           >
             <span className="switchThumb" />
           </button>
+        ) : sensitive ? (
+          <div style={{ display: 'grid', gap: '0.45rem' }}>
+            <div style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>
+              {configured ? 'Секрет настроен' : 'Секрет не задан'}
+            </div>
+            <select
+              value={sensitiveMode}
+              disabled={saving}
+              onChange={(e) => setSensitiveMode(key, e.target.value as SensitiveMode)}
+            >
+              <option value="keep">Оставить как есть</option>
+              <option value="replace">Заменить</option>
+              <option value="clear">Очистить</option>
+            </select>
+            {sensitiveMode === 'replace' ? (
+              <input
+                type="password"
+                value={sensitiveDrafts[key] ?? ''}
+                name={key}
+                autoComplete="new-password"
+                placeholder={configured ? 'Введите новое значение' : 'Введите значение'}
+                onChange={(e) => setSensitiveDraftKey(key, e.target.value)}
+              />
+            ) : null}
+          </div>
         ) : (
           <input
             value={valueForDraft(key)}
@@ -689,9 +821,10 @@ export default function SettingsPage() {
     <>
       <h1 className="pageTitle">Настройки</h1>
       <p style={{ color: 'var(--muted)', marginBottom: '1rem' }}>
-        Значения хранятся в SQLite на сервере API. Чувствительные поля не
-        отображаются в списке GET /settings (только в raw для этой страницы).
-        Изменения применяются на сервере только после нажатия «Сохранить».
+        Значения хранятся в SQLite на сервере API. Чувствительные поля не читаются
+        обратно в браузер: можно только увидеть, задан ли секрет, заменить его
+        или очистить. Изменения применяются на сервере только после нажатия
+        «Сохранить».
       </p>
       {message && (
         <p className={`msg ${message.type === 'ok' ? 'ok' : 'err'}`}>

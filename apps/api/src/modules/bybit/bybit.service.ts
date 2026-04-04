@@ -4120,7 +4120,10 @@ export class BybitService {
     if (this.staleReconcileSuspensions.has(reconcileKey)) {
       return 0;
     }
-    const hasDbBlocker = await this.orders.hasActiveSignalForPairAndDirection(symbol, direction);
+    const hasDbBlocker = await this.orders.hasOrdersPlacedSignalForPairAndDirection(
+      symbol,
+      direction,
+    );
     if (!hasDbBlocker) {
       return 0;
     }

@@ -576,6 +576,22 @@ export class OrdersService {
   ): Promise<boolean> {
     const want = normalizeTradingPair(pair);
     const open = await this.prisma.signal.findMany({
+      where: {
+        deletedAt: null,
+        status: { in: ['ORDERS_PLACED', 'OPEN', 'PARSED'] },
+        direction,
+      },
+      select: { pair: true },
+    });
+    return open.some((r) => normalizeTradingPair(r.pair) === want);
+  }
+
+  async hasOrdersPlacedSignalForPairAndDirection(
+    pair: string,
+    direction: 'long' | 'short',
+  ): Promise<boolean> {
+    const want = normalizeTradingPair(pair);
+    const open = await this.prisma.signal.findMany({
       where: { deletedAt: null, status: 'ORDERS_PLACED', direction },
       select: { pair: true },
     });
@@ -1014,8 +1030,10 @@ export class OrdersService {
   }
 
   async listTrades(f: TradesFilter) {
-    const page = f.page ?? 1;
-    const pageSize = Math.min(f.pageSize ?? 20, 100);
+    const page = Number.isFinite(f.page) ? Math.max(1, Math.trunc(f.page ?? 1)) : 1;
+    const pageSize = Number.isFinite(f.pageSize)
+      ? Math.min(Math.max(Math.trunc(f.pageSize ?? 20), 1), 100)
+      : 20;
     const sortBy = f.sortBy === 'closedAt' ? 'closedAt' : 'createdAt';
     const where: Prisma.SignalWhereInput = {};
     if (!f.includeDeleted) {

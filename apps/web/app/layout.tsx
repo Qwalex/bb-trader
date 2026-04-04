@@ -3,20 +3,10 @@ import localFont from 'next/font/local';
 import Link from 'next/link';
 
 import { PwaRegister } from './components/PwaRegister';
+import { readDashboardSession } from '../lib/server-auth';
+import { withBasePath } from '../lib/auth';
 
 import './globals.css';
-
-function normalizeBasePath(raw: string | undefined): string {
-  const t = (raw ?? '').trim();
-  if (!t || t === '/') return '';
-  return (t.startsWith('/') ? t : `/${t}`).replace(/\/+$/, '');
-}
-
-const basePath = normalizeBasePath(process.env.NEXT_PUBLIC_BASE_PATH);
-function withBasePath(url: string): string {
-  if (!url.startsWith('/')) return url;
-  return `${basePath}${url}`;
-}
 
 const geistSans = localFont({
   src: './fonts/GeistVF.woff',
@@ -71,28 +61,46 @@ export const viewport: Viewport = {
   themeColor: '#0f1419',
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const session = await readDashboardSession();
   return (
     <html lang="ru">
       <body className={`${geistSans.variable} ${geistMono.variable}`}>
         <PwaRegister />
         <header className="nav">
           <strong className="brand">SignalsBot</strong>
-          <nav className="navLinks">
-            <Link href="/">Дашборд</Link>
-            <Link href="/trades">Сделки</Link>
-            <Link href="/logs">Логи</Link>
-            <Link href="/ai">AI</Link>
-            <Link href="/diagnostics">Диагностика</Link>
-            <Link href="/telegram-userbot">Userbot</Link>
-            <Link href="/my-group">Моя группа</Link>
-            <Link href="/filters">Фильтры</Link>
-            <Link href="/settings">Настройки</Link>
-          </nav>
+          {session ? (
+            <nav className="navLinks">
+              <Link href="/">Дашборд</Link>
+              <Link href="/trades">Сделки</Link>
+              <Link href="/logs">Логи</Link>
+              <Link href="/ai">AI</Link>
+              <Link href="/diagnostics">Диагностика</Link>
+              <Link href="/telegram-userbot">Userbot</Link>
+              <Link href="/my-group">Моя группа</Link>
+              <Link href="/filters">Фильтры</Link>
+              <Link href="/settings">Настройки</Link>
+              <form action={withBasePath('/auth/logout')} method="post">
+                <button
+                  type="submit"
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid var(--border)',
+                    borderRadius: 6,
+                    color: 'var(--foreground)',
+                    cursor: 'pointer',
+                    padding: '0.3rem 0.65rem',
+                  }}
+                >
+                  Выйти
+                </button>
+              </form>
+            </nav>
+          ) : null}
         </header>
         <main className="main">{children}</main>
       </body>

@@ -17,6 +17,55 @@ const ENV_FALLBACK: Record<string, string> = {
   APPLOG_LOG_NOISY_EVENTS: 'false',
 };
 
+const SENSITIVE_SETTING_PATTERNS = ['SECRET', 'TOKEN', 'PASSWORD', 'API_KEY', 'API_HASH', '2FA'];
+const WRITE_ALLOWLIST = new Set([
+  'APPLOG_LOG_NOISY_EVENTS',
+  'BUMP_TO_MIN_EXCHANGE_LOT',
+  'BYBIT_API_KEY_MAINNET',
+  'BYBIT_API_KEY_TESTNET',
+  'BYBIT_API_SECRET_MAINNET',
+  'BYBIT_API_SECRET_TESTNET',
+  'BYBIT_TESTNET',
+  'DEFAULT_LEVERAGE',
+  'DEFAULT_LEVERAGE_ENABLED',
+  'DEFAULT_ORDER_USD',
+  'DIAGNOSTIC_BATCH_SIZE',
+  'DIAGNOSTIC_MAX_LOG_LINES',
+  'MIN_CAPITAL_AMOUNT',
+  'OPENROUTER_API_KEY',
+  'OPENROUTER_DIAGNOSTIC_MODELS',
+  'OPENROUTER_MODEL_AI_ADVISOR',
+  'OPENROUTER_MODEL_AUDIO',
+  'OPENROUTER_MODEL_AUDIO_FALLBACK_1',
+  'OPENROUTER_MODEL_DEFAULT',
+  'OPENROUTER_MODEL_HISTORY',
+  'OPENROUTER_MODEL_IMAGE',
+  'OPENROUTER_MODEL_IMAGE_FALLBACK_1',
+  'OPENROUTER_MODEL_TEXT',
+  'OPENROUTER_MODEL_TEXT_FALLBACK_1',
+  'POLLING_INTERVAL_MS',
+  'SIGNAL_SOURCE',
+  'SOURCE_EXCLUDE_LIST',
+  'SOURCE_LIST',
+  'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',
+  'STATS_RESET_AT',
+  'TELEGRAM_BOT_TOKEN',
+  'TELEGRAM_NOTIFY_API_TRADE_CANCELLED',
+  'TELEGRAM_USERBOT_2FA_PASSWORD',
+  'TELEGRAM_USERBOT_API_HASH',
+  'TELEGRAM_USERBOT_API_ID',
+  'TELEGRAM_USERBOT_CANCEL_STALE_ORDERS_ON_RESULT_WITHOUT_ENTRY',
+  'TELEGRAM_USERBOT_ENABLED',
+  'TELEGRAM_USERBOT_MIN_BALANCE_USD',
+  'TELEGRAM_USERBOT_NOTIFY_FAILURES',
+  'TELEGRAM_USERBOT_NOTIFY_RESULT_WITHOUT_ENTRY',
+  'TELEGRAM_USERBOT_POLL_INTERVAL_MS',
+  'TELEGRAM_USERBOT_REQUIRE_CONFIRMATION',
+  'TELEGRAM_USERBOT_SESSION',
+  'TELEGRAM_USERBOT_USE_AI_CLASSIFIER',
+  'TELEGRAM_WHITELIST',
+]);
+
 @Injectable()
 export class SettingsService {
   constructor(
@@ -77,6 +126,9 @@ export class SettingsService {
   }
 
   async set(key: string, value: string): Promise<void> {
+    if (!SettingsService.canWriteKey(key)) {
+      throw new Error(`Unsupported setting key: ${key}`);
+    }
     await this.prisma.setting.upsert({
       where: { key },
       create: { key, value },
@@ -94,6 +146,33 @@ export class SettingsService {
 
   async list(): Promise<{ key: string; value: string }[]> {
     return this.prisma.setting.findMany({ orderBy: { key: 'asc' } });
+  }
+
+  async getManyResolved(keys: string[]): Promise<{ key: string; value: string }[]> {
+    const uniqueKeys = Array.from(new Set(keys.map((key) => key.trim()).filter((key) => key.length > 0)));
+    const rows = await Promise.all(
+      uniqueKeys.map(async (key) => {
+        const value = await this.get(key);
+        return { key, value: value ?? '' };
+      }),
+    );
+    return rows.sort((a, b) => a.key.localeCompare(b.key, 'ru'));
+  }
+
+  static isSensitiveKey(key: string): boolean {
+    const upper = key.trim().toUpperCase();
+    return SENSITIVE_SETTING_PATTERNS.some((part) => upper.includes(part));
+  }
+
+  static redactValue(key: string, value: string): string {
+    if (!SettingsService.isSensitiveKey(key)) {
+      return value;
+    }
+    return value ? '***' : '';
+  }
+
+  static canWriteKey(key: string): boolean {
+    return WRITE_ALLOWLIST.has(key.trim());
   }
 
   /**

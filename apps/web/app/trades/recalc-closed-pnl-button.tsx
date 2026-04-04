@@ -29,6 +29,9 @@ type RecalcClosedPnlJobStatus = {
   error?: string;
 };
 
+const MAX_POLL_ATTEMPTS = 120;
+const POLL_INTERVAL_MS = 1500;
+
 export function RecalcClosedPnlButton({ limit }: { limit: number }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -53,7 +56,7 @@ export function RecalcClosedPnlButton({ limit }: { limit: number }) {
   }
 
   async function pollJob(jobId: string): Promise<RecalcClosedPnlJobStatus> {
-    for (;;) {
+    for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {
       const res = await fetch(`${getApiBase()}/bybit/recalc-closed-pnl/${encodeURIComponent(jobId)}`, {
         cache: 'no-store',
       });
@@ -68,8 +71,9 @@ export function RecalcClosedPnlButton({ limit }: { limit: number }) {
       if (status.status === 'completed' || status.status === 'failed') {
         return status;
       }
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
     }
+    throw new Error('Job не завершился вовремя. Проверьте статус позже или логи API.');
   }
 
   async function onClick() {

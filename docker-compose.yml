@@ -11,6 +11,9 @@ services:
       API_HOST: 0.0.0.0
       STACK_SLUG: ${STACK_SLUG:-trade}
       API_SWAGGER_SERVER: "/${STACK_SLUG:-trade}-api"
+      AUTH_SESSION_SECRET: ${AUTH_SESSION_SECRET}
+      API_INTERNAL_AUTH_TOKEN: ${API_INTERNAL_AUTH_TOKEN:-${AUTH_SESSION_SECRET}}
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3003}
     volumes:
       - sqlite-data:/app/data
     ports:
@@ -36,6 +39,10 @@ services:
       NEXT_BASE_PATH: "/${STACK_SLUG:-trade}"
       NEXT_PUBLIC_API_URL: "/${STACK_SLUG:-trade}-api"
       API_INTERNAL_URL: ${WEB_API_INTERNAL_URL:-http://api:3001}
+      AUTH_SESSION_SECRET: ${AUTH_SESSION_SECRET}
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}
+      API_INTERNAL_AUTH_TOKEN: ${API_INTERNAL_AUTH_TOKEN:-${AUTH_SESSION_SECRET}}
     ports:
       - "127.0.0.1:3003:3000"
     depends_on:

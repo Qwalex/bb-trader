@@ -120,12 +120,17 @@ if [[ -n "${GHCR_TOKEN:-}" && -n "${GHCR_USERNAME:-}" ]]; then
   echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
 fi
 
-# Один fetch + жёсткий сброс на origin (быстрее, чем fetch + reset HEAD + pull).
+# Один fetch; жёсткий сброс выполняется только при явном разрешении.
 # SKIP_GIT=1 — пропустить git (только образы из registry; compose/restart.sh на диске не обновятся).
+# ALLOW_GIT_HARD_RESET=1 — разрешить destructive sync до origin/<branch>.
 if [[ "${SKIP_GIT:-}" != "1" ]]; then
   branch="$(git rev-parse --abbrev-ref HEAD)"
   git fetch origin
-  git reset --hard "origin/${branch}"
+  if [[ "${ALLOW_GIT_HARD_RESET:-}" == "1" ]]; then
+    git reset --hard "origin/${branch}"
+  else
+    git merge --ff-only "origin/${branch}"
+  fi
 fi
 
 # Деплой из registry (CI задаёт API_IMAGE и WEB_IMAGE): pull слоёв + recreate.

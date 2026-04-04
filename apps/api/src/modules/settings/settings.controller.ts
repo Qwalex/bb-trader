@@ -3,8 +3,10 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   Post,
   Put,
+  Query,
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
@@ -26,22 +28,69 @@ export class SettingsController {
   @Get()
   async list() {
     const rows = await this.settings.list();
-    const redacted = rows.map((r) =>
-      r.key.toLowerCase().includes('secret') ||
-      r.key.toLowerCase().includes('key') ||
-      r.key.toLowerCase().includes('token')
-        ? { key: r.key, value: r.value ? '***' : '' }
-        : { key: r.key, value: r.value },
-    );
+    const redacted = rows.map((r) => ({
+      key: r.key,
+      value: SettingsService.redactValue(r.key, r.value),
+    }));
     return { settings: redacted };
   }
 
-  /** Full values for local dashboard (no auth in plan). */
-  @ApiOperation({ summary: 'Список настроек без маскировки (raw)' })
-  @ApiOkResponse({ description: 'Raw-настройки получены' })
-  @Get('raw')
-  async listRaw() {
-    return { settings: await this.settings.list() };
+  @ApiOperation({ summary: 'Получить выборку настроек по ключам' })
+  @ApiQuery({
+    name: 'keys',
+    required: true,
+    description: 'Список ключей через запятую',
+  })
+  @ApiOkResponse({ description: 'Настройки получены' })
+  @Get('selected')
+  async listSelected(@Query('keys') keysRaw?: string) {
+    const keys = String(keysRaw ?? '')
+      .split(',')
+      .map((key) => key.trim())
+      .filter((key) => key.length > 0);
+    if (keys.length === 0) {
+      throw new BadRequestException('Укажите query-параметр keys=KEY1,KEY2');
+    }
+    const rows = await this.settings.getManyResolved(keys);
+    return {
+      settings: rows.map((row) => ({
+        key: row.key,
+        value: SettingsService.isSensitiveKey(row.key) ? '' : row.value,
+        sensitive: SettingsService.isSensitiveKey(row.key),
+        configured: row.value.trim().length > 0,
+      })),
+    };
+  }
+
+  @ApiOperation({ summary: 'Получить публичные настройки для UI' })
+  @ApiOkResponse({ description: 'UI-настройки получены' })
+  @Get('ui')
+  async listUiSettings() {
+    return {
+      settings: await this.settings.getManyResolved([
+        'SOURCE_LIST',
+        'SOURCE_EXCLUDE_LIST',
+        'DEFAULT_ORDER_USD',
+        'DEFAULT_LEVERAGE',
+        'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',
+        'BUMP_TO_MIN_EXCHANGE_LOT',
+      ]),
+    };
+  }
+
+  @ApiOperation({ summary: 'Статусы чувствительных настроек' })
+  @ApiOkResponse({ description: 'Статусы секретов получены' })
+  @Get('sensitive-status')
+  async listSensitiveStatus() {
+    const rows = await this.settings.list();
+    return {
+      settings: rows
+        .filter((row) => SettingsService.isSensitiveKey(row.key))
+        .map((row) => ({
+          key: row.key,
+          configured: row.value.trim().length > 0,
+        })),
+    };
   }
 
   @ApiOperation({ summary: 'Создать/обновить одну настройку' })
@@ -58,7 +107,14 @@ export class SettingsController {
   @ApiOkResponse({ description: 'Настройка сохранена' })
   @Put()
   async upsert(@Body() body: { key: string; value: string }) {
-    await this.settings.set(body.key, body.value);
+    const key = String(body?.key ?? '').trim();
+    if (!key) {
+      throw new BadRequestException('key обязателен');
+    }
+    if (!SettingsService.canWriteKey(key)) {
+      throw new BadRequestException(`Ключ ${key} не поддерживается для записи`);
+    }
+    await this.settings.set(key, String(body?.value ?? ''));
     return { ok: true };
   }
 
@@ -76,6 +132,7 @@ export class SettingsController {
   @ApiBadRequestResponse({ description: 'Не передано confirm=true' })
   @ApiOkResponse({ description: 'База сброшена' })
   @Post('reset-database')
+  @HttpCode(200)
   async resetDatabase(@Body() body: { confirm?: boolean }) {
     if (body?.confirm !== true) {
       throw new BadRequestException(

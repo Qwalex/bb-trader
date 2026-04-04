@@ -87,19 +87,39 @@ export class OrdersController {
   ) {
     const truthy = (v: string | undefined) =>
       v === '1' || v?.toLowerCase() === 'true';
+    const parsePositiveInt = (raw: string | undefined, fallback: number, max: number) => {
+      if (!raw) return fallback;
+      const parsed = Number.parseInt(raw, 10);
+      if (!Number.isFinite(parsed)) return fallback;
+      return Math.min(Math.max(parsed, 1), max);
+    };
+    const parseDate = (raw: string | undefined) => {
+      if (!raw) return undefined;
+      const date = new Date(raw);
+      return Number.isNaN(date.getTime()) ? undefined : date;
+    };
+    const parsedPage = parsePositiveInt(page, 1, 10_000);
+    const parsedPageSize = parsePositiveInt(pageSize, 20, 100);
+    const refreshPnlFromExchange = truthy(refreshPnl);
+    const includeMartingaleSteps = truthy(martingaleSteps);
+    if ((refreshPnlFromExchange || includeMartingaleSteps) && parsedPageSize > 50) {
+      throw new BadRequestException(
+        'Для тяжёлых режимов refreshPnl/martingaleSteps pageSize не должен превышать 50',
+      );
+    }
     return this.orders.listTrades({
       signalId,
       source,
       pair,
       status,
-      from: from ? new Date(from) : undefined,
-      to: to ? new Date(to) : undefined,
+      from: parseDate(from),
+      to: parseDate(to),
       includeDeleted: includeDeleted === '1' || includeDeleted === 'true',
       sortBy: sortBy === 'closedAt' ? 'closedAt' : 'createdAt',
-      page: page ? parseInt(page, 10) : 1,
-      pageSize: pageSize ? parseInt(pageSize, 10) : 20,
-      refreshPnlFromExchange: truthy(refreshPnl),
-      includeMartingaleSteps: truthy(martingaleSteps),
+      page: parsedPage,
+      pageSize: parsedPageSize,
+      refreshPnlFromExchange,
+      includeMartingaleSteps,
     });
   }
 

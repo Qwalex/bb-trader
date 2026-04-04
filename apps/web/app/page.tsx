@@ -38,7 +38,7 @@ type TopSources = {
   worstWinrate: SourceStatsItem | null;
   bestWinrate: SourceStatsItem | null;
 };
-type SettingsRaw = {
+type SettingsUi = {
   settings: { key: string; value: string }[];
 };
 type UserbotStatus = {
@@ -76,7 +76,7 @@ export default async function Home({
         try {
           const [sourcesFromDb, settingsRaw] = await Promise.all([
             fetchJson<string[]>('/orders/sources'),
-            fetchJson<SettingsRaw>('/settings/raw'),
+            fetchJson<SettingsUi>('/settings/ui'),
           ]);
           const raw = settingsRaw.settings.find((r) => r.key === 'SOURCE_LIST')?.value;
           const rawExcluded = settingsRaw.settings.find((r) => r.key === 'SOURCE_EXCLUDE_LIST')
@@ -175,7 +175,7 @@ export default async function Home({
             `Автоматическая установка ордеров приостановлена: доступный баланс ниже порога ${guard.minBalanceUsd.toFixed(2)}$`}
         </p>
       )}
-      <form className="filters" method="get" action="/trade">
+      <form className="filters" method="get" action="">
         <label>
           Источник
           <select

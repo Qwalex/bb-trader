@@ -1,5 +1,14 @@
 export type SignalDirection = 'long' | 'short';
 
+export {
+  DASHBOARD_SESSION_COOKIE,
+  DEFAULT_DASHBOARD_SESSION_TTL_SECONDS,
+  INTERNAL_API_AUTH_HEADER,
+  createDashboardSessionToken,
+  verifyDashboardSessionToken,
+} from './auth';
+export type { DashboardSessionPayload } from './auth';
+
 /**
  * Единый вид пары для БД и сравнения с Bybit (пробелы, BTC-USDT / BTC/USDT → BTCUSDT).
  */

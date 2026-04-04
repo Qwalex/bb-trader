@@ -3,12 +3,15 @@ import { basename, join } from 'node:path';
 
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
 
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AppLogModule } from './modules/app-log/app-log.module';
+import { AuthModule } from './modules/auth/auth.module';
 import { BybitModule } from './modules/bybit/bybit.module';
+import { DashboardAuthGuard } from './modules/auth/auth.guard';
 import { OrdersModule } from './modules/orders/orders.module';
 import { DiagnosticsModule } from './modules/diagnostics/diagnostics.module';
 import { SettingsModule } from './modules/settings/settings.module';
@@ -51,6 +54,7 @@ function loadEnvFilePaths(): string[] {
       isGlobal: true,
       envFilePath: loadEnvFilePaths(),
     }),
+    AuthModule,
     ScheduleModule.forRoot(),
     PrismaModule,
     AppLogModule,
@@ -63,6 +67,12 @@ function loadEnvFilePaths(): string[] {
     TelegramUserbotModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    {
+      provide: APP_GUARD,
+      useClass: DashboardAuthGuard,
+    },
+  ],
 })
 export class AppModule {}

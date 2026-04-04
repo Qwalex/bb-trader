@@ -230,7 +230,7 @@ export default function TelegramUserbotPage() {
       fetch(`${getApiBase()}/telegram-userbot/status`).then((r) => r.json()),
       fetch(`${getApiBase()}/telegram-userbot/chats`).then((r) => r.json()),
       fetch(`${getApiBase()}/telegram-userbot/metrics/today`).then((r) => r.json()),
-      fetch(`${getApiBase()}/settings/raw`).then((r) => r.json()),
+      fetch(`${getApiBase()}/settings/ui`).then((r) => r.json()),
     ]);
     setStatus(s as BotStatus);
     const chatsList = c as UserbotChat[];
