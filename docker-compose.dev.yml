@@ -31,7 +31,8 @@ services:
     image: supabase/gotrue:v2.177.0
     restart: unless-stopped
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     environment:
       API_EXTERNAL_URL: ${NEXT_PUBLIC_SUPABASE_URL}
       GOTRUE_API_HOST: 0.0.0.0
@@ -58,7 +59,8 @@ services:
     image: postgrest/postgrest:v12.2.8
     restart: unless-stopped
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     environment:
       PGRST_DB_URI: postgresql://postgres:${SUPABASE_DB_PASSWORD}@db:5432/postgres
       PGRST_DB_SCHEMAS: public
@@ -69,7 +71,8 @@ services:
     image: supabase/postgres-meta:v0.89.3
     restart: unless-stopped
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     environment:
       PG_META_PORT: 8080
       PG_META_DB_HOST: db
