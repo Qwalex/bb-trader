@@ -9,6 +9,7 @@ import { AppLogService } from '../app-log/app-log.service';
 import { OrdersService } from '../orders/orders.service';
 import { SettingsService } from '../settings/settings.service';
 import { TelegramService } from '../telegram/telegram.service';
+import { VkNotifyMirrorService } from '../vk/vk-notify-mirror.service';
 
 export interface PlaceOrdersResult {
   ok: boolean;
@@ -172,6 +173,8 @@ export class BybitService {
     private readonly orders: OrdersService,
     @Inject(forwardRef(() => TelegramService))
     private readonly telegram: TelegramService,
+    @Inject(forwardRef(() => VkNotifyMirrorService))
+    private readonly vkNotifyMirror: VkNotifyMirrorService,
     private readonly appLog: AppLogService,
   ) {}
 
@@ -1770,6 +1773,20 @@ export class BybitService {
           `notifyApiTradeCancelled failed signalId=${signal.id}: ${res.error ?? 'unknown'}`,
         );
       }
+      void this.vkNotifyMirror.mirrorNotifyApiTradeCancelled({
+        signalId: signal.id,
+        pair: signal.pair,
+        direction: signal.direction,
+        entries: this.parseNumArray(signal.entries),
+        entryIsRange: signal.entryIsRange,
+        stopLoss: signal.stopLoss,
+        takeProfits: this.parseNumArray(signal.takeProfits),
+        leverage: signal.leverage,
+        orderUsd: signal.orderUsd,
+        capitalPercent: signal.capitalPercent,
+        source: signal.source,
+        reason,
+      });
     } catch (e) {
       this.logger.warn(
         `notifyApiTradeCancelled exception signalId=${signal.id}: ${formatError(e)}`,

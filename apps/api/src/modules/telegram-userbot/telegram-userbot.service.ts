@@ -1,4 +1,11 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import {
+  forwardRef,
+  Inject,
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { normalizeTradingPair, type SignalDto } from '@repo/shared';
 import { NewMessage } from 'telegram/events';
@@ -12,6 +19,7 @@ import { AppLogService } from '../app-log/app-log.service';
 import { BybitService } from '../bybit/bybit.service';
 import { SettingsService } from '../settings/settings.service';
 import { TelegramService } from '../telegram/telegram.service';
+import { VkNotifyMirrorService } from '../vk/vk-notify-mirror.service';
 import {
   TranscriptService,
   type TranscriptParseOverrides,
@@ -144,6 +152,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     private readonly bybit: BybitService,
     private readonly appLog: AppLogService,
     private readonly telegramBot: TelegramService,
+    @Inject(forwardRef(() => VkNotifyMirrorService))
+    private readonly vkNotifyMirror: VkNotifyMirrorService,
     private readonly userbotSignalHash: UserbotSignalHashService,
   ) {}
 
@@ -1811,41 +1821,55 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           aiRequest,
           aiResponse,
         });
+        const onExternalConfirmResult = async (result: {
+          decision: 'confirmed' | 'rejected';
+          ok: boolean;
+          error?: string;
+          signalId?: string;
+          bybitOrderIds?: string[];
+          actorUserId?: number;
+        }) => {
+          if (result.decision === 'rejected') {
+            this.appendIngestStageLog('info', 'Userbot: confirmation rejected by user', ingest, {
+              actorUserId: result.actorUserId ?? null,
+            });
+            await this.updateIngest(ingest.id, {
+              status: 'cancelled_by_confirmation',
+              error: `Отклонено пользователем ${result.actorUserId ?? ''}`.trim(),
+            });
+            return;
+          }
+          if (!result.ok) {
+            this.appendIngestStageLog('error', 'Userbot: confirmation accepted but placement failed', ingest, {
+              error: result.error ?? 'unknown',
+            });
+            await this.updateIngest(ingest.id, {
+              status: 'place_error',
+              error:
+                result.error ??
+                'Подтверждение получено, но ордер не удалось выставить',
+            });
+            return;
+          }
+          this.appendIngestStageLog('info', 'Userbot: confirmation accepted and placement succeeded', ingest, {
+            actorUserId: result.actorUserId ?? null,
+          });
+          await this.updateIngest(ingest.id, {
+            status: 'placed',
+            error: null,
+          });
+        };
         const req = await this.telegramBot.requestExternalSignalConfirmation({
           ingestId: ingest.id,
           signal,
           rawMessage: text,
-          onResult: async (result) => {
-            if (result.decision === 'rejected') {
-              this.appendIngestStageLog('info', 'Userbot: confirmation rejected by user', ingest, {
-                actorUserId: result.actorUserId ?? null,
-              });
-              await this.updateIngest(ingest.id, {
-                status: 'cancelled_by_confirmation',
-                error: `Отклонено пользователем ${result.actorUserId ?? ''}`.trim(),
-              });
-              return;
-            }
-            if (!result.ok) {
-              this.appendIngestStageLog('error', 'Userbot: confirmation accepted but placement failed', ingest, {
-                error: result.error ?? 'unknown',
-              });
-              await this.updateIngest(ingest.id, {
-                status: 'place_error',
-                error:
-                  result.error ??
-                  'Подтверждение получено, но ордер не удалось выставить',
-              });
-              return;
-            }
-            this.appendIngestStageLog('info', 'Userbot: confirmation accepted and placement succeeded', ingest, {
-              actorUserId: result.actorUserId ?? null,
-            });
-            await this.updateIngest(ingest.id, {
-              status: 'placed',
-              error: null,
-            });
-          },
+          onResult: onExternalConfirmResult,
+        });
+        void this.vkNotifyMirror.mirrorRequestExternalSignalConfirmation({
+          ingestId: ingest.id,
+          signal,
+          rawMessage: text,
+          onResult: onExternalConfirmResult,
         });
         if (!req.ok) {
           this.appendIngestStageLog('warn', 'Userbot: failed to send confirmation request', ingest, {
@@ -2582,6 +2606,15 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       resultMessageText: params.text,
       quotedSnippet: params.quotedText,
     });
+    void this.vkNotifyMirror.mirrorNotifyUserbotResultWithoutEntry({
+      ingestId: params.ingestId,
+      chatId: params.chatId,
+      groupTitle: chatMeta?.title?.trim() || undefined,
+      pair: signal.pair,
+      signalId: signal.id,
+      resultMessageText: params.text,
+      quotedSnippet: params.quotedText,
+    });
     if (!notify.ok) {
       return {
         ok: false,
@@ -3148,6 +3181,10 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     });
     const groupTitle = chatMeta?.title?.trim();
     const notify = await this.telegramBot.notifyUserbotSignalFailure({
+      ...params,
+      groupTitle: groupTitle && groupTitle.length > 0 ? groupTitle : undefined,
+    });
+    void this.vkNotifyMirror.mirrorNotifyUserbotSignalFailure({
       ...params,
       groupTitle: groupTitle && groupTitle.length > 0 ? groupTitle : undefined,
     });

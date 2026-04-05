@@ -5,6 +5,7 @@ import { OrdersModule } from '../orders/orders.module';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { SettingsModule } from '../settings/settings.module';
 import { TelegramModule } from '../telegram/telegram.module';
+import { VkModule } from '../vk/vk.module';
 import { BalanceSnapshotService } from './balance-snapshot.service';
 import { BybitController } from './bybit.controller';
 import { BybitPollService } from './bybit-poll.service';
@@ -16,6 +17,7 @@ import { BybitService } from './bybit.service';
     SettingsModule,
     forwardRef(() => OrdersModule),
     forwardRef(() => TelegramModule),
+    forwardRef(() => VkModule),
     AppLogModule,
   ],
   controllers: [BybitController],

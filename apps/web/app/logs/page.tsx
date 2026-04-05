@@ -23,6 +23,7 @@ const CATEGORIES = [
   { id: 'all', label: 'Все' },
   { id: 'openrouter', label: 'OpenRouter' },
   { id: 'telegram', label: 'Telegram' },
+  { id: 'vk', label: 'VK' },
   { id: 'bybit', label: 'Bybit' },
   { id: 'orders', label: 'Orders' },
   { id: 'system', label: 'System' },

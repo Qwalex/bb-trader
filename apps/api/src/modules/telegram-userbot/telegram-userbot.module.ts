@@ -4,6 +4,7 @@ import { AppLogModule } from '../app-log/app-log.module';
 import { BybitModule } from '../bybit/bybit.module';
 import { SettingsModule } from '../settings/settings.module';
 import { TelegramModule } from '../telegram/telegram.module';
+import { VkModule } from '../vk/vk.module';
 import { TranscriptModule } from '../transcript/transcript.module';
 import { TelegramUserbotController } from './telegram-userbot.controller';
 import { TelegramUserbotService } from './telegram-userbot.service';
@@ -16,6 +17,7 @@ import { UserbotSignalHashModule } from './userbot-signal-hash.module';
     BybitModule,
     AppLogModule,
     TelegramModule,
+    VkModule,
     UserbotSignalHashModule,
   ],
   controllers: [TelegramUserbotController],

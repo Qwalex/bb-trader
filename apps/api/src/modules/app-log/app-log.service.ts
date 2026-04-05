@@ -10,6 +10,7 @@ export type LogLevel = 'info' | 'warn' | 'error' | 'debug';
 export type LogCategory =
   | 'openrouter'
   | 'telegram'
+  | 'vk'
   | 'bybit'
   | 'orders'
   | 'system';
