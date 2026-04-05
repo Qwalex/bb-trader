@@ -170,7 +170,7 @@ export class AppLogService {
       const now = Date.now();
       if (now - this.lastPruneTs >= PRUNE_THROTTLE_MS) {
         this.lastPruneTs = now;
-        void pruneOldLogs(this.prisma, MAX_ROWS, NOISE_MESSAGES).catch((e) =>
+        void pruneOldLogs(this.prisma, MAX_ROWS, NOISE_MESSAGES, workspaceId).catch((e) =>
           this.logger.warn(`pruneOldLogs: ${String(e)}`),
         );
       }
@@ -217,14 +217,23 @@ export class AppLogService {
     }
     const olderThan = new Date(Date.now() - 30 * 60 * 1000);
     try {
-      const result = await this.prisma.appLog.deleteMany({
-        where: {
-          message: { in: [...NOISE_MESSAGES] },
-          createdAt: { lt: olderThan },
-        },
+      const buckets = await this.prisma.appLog.findMany({
+        select: { workspaceId: true },
+        distinct: ['workspaceId'],
       });
-      if (result.count > 0) {
-        this.logger.log(`deleted old noise logs: ${result.count}`);
+      let totalDeleted = 0;
+      for (const bucket of buckets) {
+        const result = await this.prisma.appLog.deleteMany({
+          where: {
+            workspaceId: bucket.workspaceId ?? null,
+            message: { in: [...NOISE_MESSAGES] },
+            createdAt: { lt: olderThan },
+          },
+        });
+        totalDeleted += result.count;
+      }
+      if (totalDeleted > 0) {
+        this.logger.log(`deleted old noise logs: ${totalDeleted}`);
       }
     } catch (e) {
       if (this.isDbFullError(e)) {
@@ -242,14 +251,23 @@ export class AppLogService {
     }
     const olderThan = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
     try {
-      const result = await this.prisma.appLog.deleteMany({
-        where: {
-          message: { notIn: [...NOISE_MESSAGES] },
-          createdAt: { lt: olderThan },
-        },
+      const buckets = await this.prisma.appLog.findMany({
+        select: { workspaceId: true },
+        distinct: ['workspaceId'],
       });
-      if (result.count > 0) {
-        this.logger.log(`deleted old regular logs: ${result.count}`);
+      let totalDeleted = 0;
+      for (const bucket of buckets) {
+        const result = await this.prisma.appLog.deleteMany({
+          where: {
+            workspaceId: bucket.workspaceId ?? null,
+            message: { notIn: [...NOISE_MESSAGES] },
+            createdAt: { lt: olderThan },
+          },
+        });
+        totalDeleted += result.count;
+      }
+      if (totalDeleted > 0) {
+        this.logger.log(`deleted old regular logs: ${totalDeleted}`);
       }
     } catch (e) {
       if (this.isDbFullError(e)) {
