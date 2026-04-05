@@ -183,7 +183,8 @@ model AppLog {
 model TgUserbotChat {
   id          String   @id @default(cuid())
   workspaceId String?
-  chatId      String   @unique
+  /// Один и тот же Telegram chatId может быть в разных кабинетах; уникальность — @@unique([workspaceId, chatId])
+  chatId      String
   title       String
   username    String?
   enabled     Boolean  @default(false)

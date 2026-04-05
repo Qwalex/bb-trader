@@ -1855,8 +1855,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         : this.bootstrapWorkspaceId();
     const [chat, details] = await Promise.all([
       row?.chatId
-        ? this.prisma.tgUserbotChat.findUnique({
-            where: { chatId: row.chatId },
+        ? this.prisma.tgUserbotChat.findFirst({
+            where: { workspaceId: ingestWs, chatId: row.chatId },
             select: { title: true, defaultLeverage: true, defaultEntryUsd: true },
           })
         : Promise.resolve(null),

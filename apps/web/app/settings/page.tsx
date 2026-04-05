@@ -1183,59 +1183,51 @@ export default function SettingsPage() {
         </details>
         ) : null}
 
-        <section className="card" aria-labelledby="nav-burger-layout-heading">
-          <h2
-            id="nav-burger-layout-heading"
-            style={{
-              margin: 0,
-              fontSize: '1rem',
-              fontWeight: 700,
-              color: 'var(--foreground)',
-            }}
-          >
-            Бургер в шапке
-          </h2>
-          <p style={{ color: 'var(--muted)', fontSize: '0.88rem', margin: '0.55rem 0 0.75rem' }}>
-            Только внешний вид: что уходит под ☰, а что остаётся в полоске. На права доступа к
-            разделам и полям это не влияет.
-          </p>
-          <div style={{ display: 'grid', gap: '0.35rem' }}>
-            {navItemsVisibleForUser(appIsAdmin).map((item) => (
-              <label
-                key={item.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  cursor: 'pointer',
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={navInBurgerDraft.has(item.id)}
-                  onChange={() => {
-                    setNavInBurgerDraft((prev) => {
-                      const n = new Set(prev);
-                      if (n.has(item.id)) n.delete(item.id);
-                      else n.add(item.id);
-                      return n;
-                    });
+        <details className="card">
+          <summary className="settingsSectionSummary">Бургер в шапке</summary>
+          <div style={{ marginTop: '0.9rem' }}>
+            <p style={{ color: 'var(--muted)', fontSize: '0.88rem', marginBottom: '0.75rem' }}>
+              Только внешний вид: что уходит под ☰, а что остаётся в полоске. На права доступа к
+              разделам и полям это не влияет.
+            </p>
+            <div style={{ display: 'grid', gap: '0.35rem' }}>
+              {navItemsVisibleForUser(appIsAdmin).map((item) => (
+                <label
+                  key={item.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    cursor: 'pointer',
                   }}
-                />
-                <span>{item.label}</span>
-              </label>
-            ))}
+                >
+                  <input
+                    type="checkbox"
+                    checked={navInBurgerDraft.has(item.id)}
+                    onChange={() => {
+                      setNavInBurgerDraft((prev) => {
+                        const n = new Set(prev);
+                        if (n.has(item.id)) n.delete(item.id);
+                        else n.add(item.id);
+                        return n;
+                      });
+                    }}
+                  />
+                  <span>{item.label}</span>
+                </label>
+              ))}
+            </div>
+            <button
+              type="button"
+              className="btn"
+              style={{ marginTop: '0.85rem' }}
+              disabled={navMenuSaving}
+              onClick={() => void saveNavMenuConfig()}
+            >
+              {navMenuSaving ? 'Сохранение…' : 'Сохранить раскладку'}
+            </button>
           </div>
-          <button
-            type="button"
-            className="btn"
-            style={{ marginTop: '0.85rem' }}
-            disabled={navMenuSaving}
-            onClick={() => void saveNavMenuConfig()}
-          >
-            {navMenuSaving ? 'Сохранение…' : 'Сохранить раскладку'}
-          </button>
-        </section>
+        </details>
 
         {appIsAdmin ? (
             <details className="card">

@@ -342,6 +342,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       limit: 1000,
     })) as unknown as Array<Record<string, unknown>>;
     let upserted = 0;
+    const syncedChatIds: string[] = [];
 
     for (const d of dialogs) {
       const entity = (d.entity ?? {}) as Record<string, unknown>;
@@ -373,7 +374,14 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         create: { workspaceId, chatId, title, username, enabled: false },
         update: { title, username },
       });
+      syncedChatIds.push(chatId);
       upserted += 1;
+    }
+
+    if (syncedChatIds.length > 0) {
+      await this.prisma.tgUserbotChat.deleteMany({
+        where: { chatId: { in: syncedChatIds }, workspaceId: null },
+      });
     }
 
     await this.refreshEnabledChatsCache(workspaceId);
@@ -985,9 +993,10 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     chatId: string,
     workspaceId?: string | null,
   ): Promise<TranscriptParseOverrides> {
+    const ws = workspaceId?.trim() ?? '';
     const [chat, details] = await Promise.all([
-      this.prisma.tgUserbotChat.findUnique({
-        where: { chatId },
+      this.prisma.tgUserbotChat.findFirst({
+        where: ws ? { workspaceId: ws, chatId } : { chatId },
         select: { defaultLeverage: true, defaultEntryUsd: true },
       }),
       this.bybit.getUnifiedUsdtBalanceDetails(workspaceId),
@@ -1226,16 +1235,16 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     meta?: { replyToMessageId?: string },
     options?: ProcessIngestOptions,
   ): Promise<void> {
-    try {
-      const ingestWsRow = await this.prisma.tgUserbotIngest.findUnique({
-        where: { id: ingest.id },
-        select: { workspaceId: true },
-      });
-      const ingestWorkspaceId =
-        ingestWsRow?.workspaceId != null && String(ingestWsRow.workspaceId).trim() !== ''
-          ? String(ingestWsRow.workspaceId).trim()
-          : null;
+    const ingestWsRow = await this.prisma.tgUserbotIngest.findUnique({
+      where: { id: ingest.id },
+      select: { workspaceId: true },
+    });
+    const ingestWorkspaceId =
+      ingestWsRow?.workspaceId != null && String(ingestWsRow.workspaceId).trim() !== ''
+        ? String(ingestWsRow.workspaceId).trim()
+        : null;
 
+    try {
       const processingStartedAt = new Date();
       const queueDelayMs = options?.enqueuedAtMs
         ? Math.max(0, Date.now() - options.enqueuedAtMs)
@@ -1276,8 +1285,11 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         }
       }
 
-      const chatMetaRaw = await (this.prisma as any).tgUserbotChat.findUnique({
-        where: { chatId: ingest.chatId },
+      const ingestWs = ingestWorkspaceId?.trim() ?? '';
+      const chatMetaRaw = await (this.prisma as any).tgUserbotChat.findFirst({
+        where: ingestWs
+          ? { workspaceId: ingestWs, chatId: ingest.chatId }
+          : { chatId: ingest.chatId },
         select: { title: true, sourcePriority: true },
       });
       const chatMeta = chatMetaRaw as
@@ -1533,6 +1545,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         await this.notifySignalFailureToBot({
           ingestId: ingest.id,
           chatId: ingest.chatId,
+          workspaceId: ingestWorkspaceId,
           token: this.extractTokenHint(text),
           stage: 'transcript',
           error: parseError,
@@ -1842,6 +1855,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         await this.notifySignalFailureToBot({
           ingestId: ingest.id,
           chatId: ingest.chatId,
+          workspaceId: ingestWorkspaceId,
           token: signal.pair,
           stage: 'bybit',
           error: placeError,
@@ -1883,6 +1897,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       await this.notifySignalFailureToBot({
         ingestId: ingest.id,
         chatId: ingest.chatId,
+        workspaceId: ingestWorkspaceId,
         token: this.extractTokenHint(text),
         stage: 'transcript',
         error: err,
@@ -2472,6 +2487,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       where: { id: lookup.signal.id },
       select: {
         id: true,
+        workspaceId: true,
         pair: true,
         orders: {
           select: {
@@ -2523,8 +2539,11 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       return { ok: true, mode: 'result_notify_disabled', signalId: signal.id };
     }
 
-    const chatMeta = await this.prisma.tgUserbotChat.findUnique({
-      where: { chatId: params.chatId },
+    const resultWs = signal.workspaceId?.trim() ?? '';
+    const chatMeta = await this.prisma.tgUserbotChat.findFirst({
+      where: resultWs
+        ? { workspaceId: resultWs, chatId: params.chatId }
+        : { chatId: params.chatId },
       select: { title: true },
     });
     const notify = await this.telegramBot.notifyUserbotResultWithoutEntry({
@@ -2638,6 +2657,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
+        workspaceId: true,
         pair: true,
         direction: true,
         entries: true,
@@ -2883,6 +2903,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       },
       select: {
         id: true,
+        workspaceId: true,
         pair: true,
         direction: true,
         entries: true,
@@ -2906,14 +2927,16 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   private async resolveSourcePriorityForSignal(signal: {
     source: string | null;
     sourceChatId: string | null;
+    workspaceId?: string | null;
   }): Promise<{ priority: number; sourceName: string | null }> {
     const sourceName = signal.source?.trim() || null;
     const chatId = signal.sourceChatId?.trim() || null;
     if (!chatId) {
       return { priority: 0, sourceName };
     }
-    const chatRaw = await (this.prisma as any).tgUserbotChat.findUnique({
-      where: { chatId },
+    const sigWs = signal.workspaceId?.trim() ?? '';
+    const chatRaw = await (this.prisma as any).tgUserbotChat.findFirst({
+      where: sigWs ? { workspaceId: sigWs, chatId } : { chatId },
       select: { title: true, sourcePriority: true },
     });
     const chat = chatRaw as
@@ -3087,6 +3110,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   private async notifySignalFailureToBot(params: {
     ingestId: string;
     chatId: string;
+    workspaceId?: string | null;
     token: string;
     stage: 'transcript' | 'bybit';
     error: string;
@@ -3099,12 +3123,20 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     if (!enabled) {
       return;
     }
-    const chatMeta = await this.prisma.tgUserbotChat.findUnique({
-      where: { chatId: params.chatId },
+    const failWs = params.workspaceId?.trim() ?? '';
+    const chatMeta = await this.prisma.tgUserbotChat.findFirst({
+      where: failWs
+        ? { workspaceId: failWs, chatId: params.chatId }
+        : { chatId: params.chatId },
     });
     const groupTitle = chatMeta?.title?.trim();
     const notify = await this.telegramBot.notifyUserbotSignalFailure({
-      ...params,
+      ingestId: params.ingestId,
+      chatId: params.chatId,
+      token: params.token,
+      stage: params.stage,
+      error: params.error,
+      missingData: params.missingData,
       groupTitle: groupTitle && groupTitle.length > 0 ? groupTitle : undefined,
     });
     if (!notify.ok) {

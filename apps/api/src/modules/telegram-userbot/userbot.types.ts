@@ -52,6 +52,7 @@ export type IngestProcessJob = {
 
 export type ActiveSignalLookup = {
   id: string;
+  workspaceId: string | null;
   pair: string;
   direction: string;
   entries: string;

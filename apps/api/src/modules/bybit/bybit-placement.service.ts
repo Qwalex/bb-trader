@@ -54,8 +54,9 @@ export class BybitPlacementService {
   ): Promise<boolean> {
     const trimmed = chatId?.trim();
     if (trimmed) {
-      const row = await this.prisma.tgUserbotChat.findUnique({
-        where: { chatId: trimmed },
+      const ws = workspaceId?.trim() ?? '';
+      const row = await this.prisma.tgUserbotChat.findFirst({
+        where: ws ? { workspaceId: ws, chatId: trimmed } : { chatId: trimmed },
         select: { minLotBump: true },
       });
       if (row?.minLotBump != null) {
