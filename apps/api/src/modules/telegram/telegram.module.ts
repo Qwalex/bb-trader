@@ -9,7 +9,7 @@ import { TelegramService } from './telegram.service';
 
 @Module({
   imports: [
-    SettingsModule,
+    forwardRef(() => SettingsModule),
     TranscriptModule,
     forwardRef(() => BybitModule),
     forwardRef(() => OrdersModule),

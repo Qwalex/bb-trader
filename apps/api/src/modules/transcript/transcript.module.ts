@@ -6,7 +6,11 @@ import { SettingsModule } from '../settings/settings.module';
 import { TranscriptService } from './transcript.service';
 
 @Module({
-  imports: [SettingsModule, AppLogModule, forwardRef(() => BybitModule)],
+  imports: [
+    forwardRef(() => SettingsModule),
+    AppLogModule,
+    forwardRef(() => BybitModule),
+  ],
   providers: [TranscriptService],
   exports: [TranscriptService],
 })
