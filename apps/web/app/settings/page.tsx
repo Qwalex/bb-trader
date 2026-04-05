@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 
 import { EntrySizingControl } from '../components/EntrySizingControl';
 import { getApiBase } from '../../lib/api';
@@ -46,6 +46,64 @@ function IconTrash(props: { className?: string }) {
       <line x1="10" y1="11" x2="10" y2="17" />
       <line x1="14" y1="11" x2="14" y2="17" />
     </svg>
+  );
+}
+
+const badgeBase: CSSProperties = {
+  fontSize: '0.72rem',
+  fontWeight: 600,
+  letterSpacing: '0.02em',
+  padding: '0.22rem 0.55rem',
+  borderRadius: 999,
+  lineHeight: 1.2,
+  whiteSpace: 'nowrap',
+};
+
+/** Статус секрета в кабинете (значение в БД не показывается в поле). */
+function SecretCabinetStatusBadge(props: {
+  configured: boolean;
+  markedForClear: boolean;
+}) {
+  const { configured, markedForClear } = props;
+  if (markedForClear) {
+    return (
+      <span
+        style={{
+          ...badgeBase,
+          background: 'color-mix(in srgb, var(--danger, #c44) 20%, transparent)',
+          color: 'var(--danger, #f88)',
+          border: '1px solid color-mix(in srgb, var(--danger, #c44) 50%, transparent)',
+        }}
+      >
+        Будет удалён
+      </span>
+    );
+  }
+  if (configured) {
+    return (
+      <span
+        style={{
+          ...badgeBase,
+          background: 'color-mix(in srgb, #3d8 22%, transparent)',
+          color: '#8e8',
+          border: '1px solid color-mix(in srgb, #3d8 45%, transparent)',
+        }}
+      >
+        Сохранён в кабинете
+      </span>
+    );
+  }
+  return (
+    <span
+      style={{
+        ...badgeBase,
+        background: 'color-mix(in srgb, var(--muted, #888) 15%, transparent)',
+        color: 'var(--muted, #aaa)',
+        border: '1px solid color-mix(in srgb, var(--muted, #888) 35%, transparent)',
+      }}
+    >
+      Не задан
+    </span>
   );
 }
 
@@ -668,7 +726,24 @@ export default function SettingsPage() {
     const configured = Boolean(sensitiveConfigured[key]);
     return (
       <label key={key} className={isBoolean ? 'settingRowSwitch' : undefined}>
-        <span>{label}</span>
+        {isSensitiveKey(key) ? (
+          <span
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              flexWrap: 'wrap',
+            }}
+          >
+            <span>{label}</span>
+            <SecretCabinetStatusBadge
+              configured={configured}
+              markedForClear={Boolean(sensitiveClear[key])}
+            />
+          </span>
+        ) : (
+          <span>{label}</span>
+        )}
         {isBoolean ? (
           <button
             type="button"
@@ -687,9 +762,8 @@ export default function SettingsPage() {
         ) : isSensitiveKey(key) ? (
           <div style={{ display: 'grid', gap: '0.45rem' }}>
             <p style={{ color: 'var(--muted)', fontSize: '0.82rem', lineHeight: 1.45, margin: 0 }}>
-              Хранится только в <strong>этом кабинете</strong> (текущий workspace). Секрет в форму не
-              подставляется — у каждого кабинета свои ключи.{' '}
-              {configured ? 'Сейчас значение задано.' : 'Сейчас не задано.'}
+              Хранится только в <strong>этом кабинете</strong> (workspace). Значение в поле не
+              показывается — статус справа от названия поля.
             </p>
             <div
               style={{
