@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 
+import { ACTIVE_WORKSPACE_STORAGE_KEY } from '../../lib/active-workspace';
 import { createSupabaseBrowserClient } from '../../lib/supabase';
 import { getApiBase } from '../../lib/api';
 
@@ -36,6 +37,16 @@ export function ApiAuthBridge(props: {
         } = await supabase.auth.getSession();
         if (session?.access_token) {
           headers.set('Authorization', `Bearer ${session.access_token}`);
+        }
+      }
+      if (!headers.has('X-Workspace-Id')) {
+        try {
+          const wid = localStorage.getItem(ACTIVE_WORKSPACE_STORAGE_KEY)?.trim();
+          if (wid) {
+            headers.set('X-Workspace-Id', wid);
+          }
+        } catch {
+          // ignore (private mode / SSR guard)
         }
       }
       return originalFetch(input, {

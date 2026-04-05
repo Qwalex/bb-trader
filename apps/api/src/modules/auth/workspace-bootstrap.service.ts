@@ -80,4 +80,58 @@ export class WorkspaceBootstrapService {
 
     return result;
   }
+
+  async findMembership(
+    userId: string,
+    workspaceId: string,
+  ): Promise<{ workspaceId: string; role: string } | null> {
+    const m = await this.prisma.workspaceMember.findFirst({
+      where: { userId, workspaceId },
+      select: { workspaceId: true, role: true },
+    });
+    return m;
+  }
+
+  async createWorkspaceForOwner(
+    userId: string,
+    login: string,
+  ): Promise<{ id: string; name: string; slug: string; role: string }> {
+    const baseName = login.trim();
+    if (!baseName) {
+      throw new Error('login required');
+    }
+    const baseSlug = this.slugify(baseName) || `ws-${userId.slice(0, 8)}`;
+
+    return this.prisma.$transaction(async (tx) => {
+      let slug = baseSlug;
+      let suffix = 1;
+      while (await tx.workspace.findUnique({ where: { slug }, select: { id: true } })) {
+        slug = `${baseSlug}-${suffix}`;
+        suffix += 1;
+      }
+
+      const workspace = await tx.workspace.create({
+        data: {
+          slug,
+          name: baseName,
+          ownerUserId: userId,
+        },
+      });
+
+      await tx.workspaceMember.create({
+        data: {
+          workspaceId: workspace.id,
+          userId,
+          role: 'owner',
+        },
+      });
+
+      return {
+        id: workspace.id,
+        name: workspace.name,
+        slug: workspace.slug,
+        role: 'owner',
+      };
+    });
+  }
 }

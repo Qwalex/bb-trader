@@ -35,13 +35,14 @@ export class DashboardAuthGuard implements CanActivate {
       return true;
     }
 
-    const session = await this.auth.authenticateRequest({
+    const authResult = await this.auth.authenticateRequest({
       authorizationHeader: request.headers.authorization,
+      workspaceIdHeader: request.headers['x-workspace-id'],
     });
-    if (!session) {
+    if (!authResult.ok) {
       throw new UnauthorizedException('Authentication required');
     }
-    request.user = session;
+    request.user = authResult.user;
     return true;
   }
 }

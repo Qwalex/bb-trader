@@ -35,7 +35,7 @@ export default async function LoginPage({
     <div className="authCard">
       <h1 className="authCardTitle">Вход в SignalsBot</h1>
       <p className="authCardIntro">
-        Авторизуйтесь через email, чтобы открыть ваш кабинет и связанные данные.
+        Войдите по email. Переключение между кабинетами — в шапке после входа.
       </p>
       {errorText(error) && <p className="msg err">{errorText(error)}</p>}
       <form className="authForm" action={withBasePath('/auth/login')} method="post">

@@ -20,6 +20,7 @@ import { SettingsModule } from './modules/settings/settings.module';
 import { TelegramModule } from './modules/telegram/telegram.module';
 import { TelegramUserbotModule } from './modules/telegram-userbot/telegram-userbot.module';
 import { TranscriptModule } from './modules/transcript/transcript.module';
+import { WorkspacesModule } from './modules/workspaces/workspaces.module';
 import { PrismaModule } from './prisma/prisma.module';
 
 /**
@@ -70,6 +71,7 @@ function loadEnvFilePaths(): string[] {
     BybitModule,
     TelegramModule,
     TelegramUserbotModule,
+    WorkspacesModule,
   ],
   controllers: [AppController],
   providers: [

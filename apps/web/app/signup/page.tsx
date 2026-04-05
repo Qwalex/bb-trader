@@ -50,7 +50,8 @@ export default async function SignupPage({
     <div className="authCard">
       <h1 className="authCardTitle">Регистрация</h1>
       <p className="authCardIntro">
-        Создайте аккаунт, чтобы получить собственный кабинет и изолированные данные.
+        Создайте аккаунт: первый кабинет с выбранным логином. Дополнительные кабинеты с тем же email
+        можно добавить после входа в меню «Кабинет».
       </p>
       {errorText(error) && (
         <p className={error === 'confirmation_required' ? 'msg ok' : 'msg err'}>{errorText(error)}</p>
@@ -84,12 +85,12 @@ export default async function SignupPage({
           />
         </label>
         <label className="authFormField">
-          <span className="authFormLabel">Имя кабинета</span>
+          <span className="authFormLabel">Логин</span>
           <input
             className="authInput"
             name="workspaceName"
-            autoComplete="organization"
-            placeholder="Например, мой трейдинг"
+            autoComplete="username"
+            placeholder="Например, основной-счёт"
             required
           />
         </label>

@@ -30,6 +30,7 @@ async function bootstrap() {
   const allowedOrigins = auth.getAllowedCorsOrigins();
   app.enableCors({
     credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Workspace-Id'],
     origin(
       origin: string | undefined,
       callback: (err: Error | null, allow?: boolean) => void,
@@ -51,9 +52,10 @@ async function bootstrap() {
       void auth
         .authenticateRequest({
           authorizationHeader: req.headers.authorization,
+          workspaceIdHeader: req.headers['x-workspace-id'],
         })
-        .then((session) => {
-          if (!session) {
+        .then((result) => {
+          if (!result.ok) {
             res.status(401).json({ message: 'Authentication required' });
             return;
           }

@@ -3,6 +3,7 @@ import localFont from 'next/font/local';
 import Link from 'next/link';
 
 import { ApiAuthBridge } from './components/ApiAuthBridge';
+import { WorkspaceSwitcher } from './components/WorkspaceSwitcher';
 import { PwaRegister } from './components/PwaRegister';
 import { readDashboardSession } from '../lib/server-auth';
 import { withBasePath } from '../lib/auth';
@@ -83,6 +84,7 @@ export default async function RootLayout({
           <strong className="brand">SignalsBot</strong>
           {session ? (
             <nav className="navLinks">
+              <WorkspaceSwitcher />
               <Link href="/">Дашборд</Link>
               <Link href="/trades">Сделки</Link>
               <Link href="/logs">Логи</Link>

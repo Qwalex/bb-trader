@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 
-import type { AuthenticatedRequestContext } from './auth.types';
+import type { AuthenticatedRequestContext, AuthenticateRequestResult } from './auth.types';
 import { WorkspaceBootstrapService } from './workspace-bootstrap.service';
 
 @Injectable()
@@ -26,6 +26,12 @@ export class AuthService {
   private getServiceRoleKey(): string | null {
     const key = this.config.get<string>('SUPABASE_SERVICE_ROLE_KEY_SERVER')?.trim();
     return key && key.length > 0 ? key : null;
+  }
+
+  private parseWorkspaceIdHeader(headerValue?: string | string[]): string | undefined {
+    const raw = Array.isArray(headerValue) ? headerValue[0] : headerValue;
+    const v = String(raw ?? '').trim();
+    return v.length > 0 ? v : undefined;
   }
 
   private parseBearerToken(headerValue?: string | string[]): string | null {
@@ -138,11 +144,12 @@ export class AuthService {
 
   async authenticateRequest(input: {
     authorizationHeader?: string | string[] | undefined;
-  }): Promise<AuthenticatedRequestContext | null> {
+    workspaceIdHeader?: string | string[] | undefined;
+  }): Promise<AuthenticateRequestResult> {
     const token = this.parseBearerToken(input.authorizationHeader);
     const jwtSecret = this.getSupabaseJwtSecret();
     if (!token || !jwtSecret) {
-      return null;
+      return { ok: false, reason: 'unauthorized' };
     }
     let payload: string | jwt.JwtPayload;
     try {
@@ -150,22 +157,39 @@ export class AuthService {
         audience: 'authenticated',
       });
     } catch {
-      return null;
+      return { ok: false, reason: 'unauthorized' };
     }
     if (typeof payload === 'string') {
-      return null;
+      return { ok: false, reason: 'unauthorized' };
     }
     const userId = typeof payload.sub === 'string' ? payload.sub : null;
     if (!userId) {
-      return null;
+      return { ok: false, reason: 'unauthorized' };
     }
     const issuer = typeof payload.iss === 'string' ? payload.iss.trim().replace(/\/+$/, '') : '';
     const supabaseUrl = this.getSupabaseUrl()?.replace(/\/+$/, '') ?? '';
     if (issuer && supabaseUrl && !this.issuerAllowed(issuer, supabaseUrl)) {
-      return null;
+      return { ok: false, reason: 'unauthorized' };
     }
     const jwtClaims = this.extractJwtUserClaims(payload);
-    return this.resolveWorkspaceContext(userId, jwtClaims);
+    const base = await this.resolveWorkspaceContext(userId, jwtClaims);
+    const requested = this.parseWorkspaceIdHeader(input.workspaceIdHeader);
+    if (requested) {
+      const member = await this.workspaceBootstrap.findMembership(userId, requested);
+      if (member) {
+        return {
+          ok: true,
+          user: {
+            userId,
+            email: base.email,
+            workspaceId: member.workspaceId,
+            role: member.role,
+          },
+        };
+      }
+      // устаревший или поддельный id в localStorage — не блокируем API, используем кабинет по умолчанию
+    }
+    return { ok: true, user: base };
   }
 
   getAllowedCorsOrigins(): string[] {

@@ -4,3 +4,7 @@ export type AuthenticatedRequestContext = {
   workspaceId: string | null;
   role: string | null;
 };
+
+export type AuthenticateRequestResult =
+  | { ok: true; user: AuthenticatedRequestContext }
+  | { ok: false; reason: 'unauthorized' };
