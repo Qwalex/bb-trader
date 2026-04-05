@@ -110,6 +110,8 @@ services:
       POSTGRES_BACKEND_SCHEMA: _analytics
       LOGFLARE_FEATURE_FLAG_OVERRIDE: multibackend=true
 
+  # Не ждём service_healthy у analytics: при отсутствии БД _supabase Logflare не поднимается, и Studio
+  # тогда никогда не стартует — ломается весь compose up / деплой. Логи в Studio без Logflare деградируют.
   studio:
     image: ghcr.io/supabase/studio:2026.03.16-sha-5528817
     restart: unless-stopped
@@ -117,7 +119,7 @@ services:
       meta:
         condition: service_started
       analytics:
-        condition: service_healthy
+        condition: service_started
     environment:
       STUDIO_PG_META_URL: http://meta:8080
       POSTGRES_HOST: db
