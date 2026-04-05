@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -21,18 +22,6 @@ export class WorkspaceBootstrapService {
     workspaceName?: string | null;
     workspaceSlug?: string | null;
   }): Promise<{ workspaceId: string; role: string }> {
-    const existingMembership = await this.prisma.workspaceMember.findFirst({
-      where: { userId: user.userId },
-      orderBy: { createdAt: 'asc' },
-      select: { workspaceId: true, role: true },
-    });
-    if (existingMembership) {
-      return {
-        workspaceId: existingMembership.workspaceId,
-        role: existingMembership.role,
-      };
-    }
-
     const baseName =
       user.workspaceName?.trim() ||
       (user.email?.split('@')[0]?.trim() ? `${user.email.split('@')[0]} workspace` : 'My workspace');
@@ -51,6 +40,24 @@ export class WorkspaceBootstrapService {
           displayName: baseName,
         },
       });
+
+      // Без блокировки параллельные первые запросы (несколько вкладок, ретраи) все видели
+      // «нет membership» и создавали development, development-1, development-2…
+      await tx.$executeRaw(
+        Prisma.sql`SELECT 1 FROM "UserProfile" WHERE id = ${user.userId} FOR UPDATE`,
+      );
+
+      const existingMembership = await tx.workspaceMember.findFirst({
+        where: { userId: user.userId },
+        orderBy: { createdAt: 'asc' },
+        select: { workspaceId: true, role: true },
+      });
+      if (existingMembership) {
+        return {
+          workspaceId: existingMembership.workspaceId,
+          role: existingMembership.role,
+        };
+      }
 
       let slug = baseSlug;
       let suffix = 1;
