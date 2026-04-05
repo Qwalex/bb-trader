@@ -19,7 +19,7 @@ import { BybitService } from './bybit.service';
 @Module({
   imports: [
     PrismaModule,
-    SettingsModule,
+    forwardRef(() => SettingsModule),
     forwardRef(() => OrdersModule),
     forwardRef(() => TelegramModule),
     AppLogModule,
@@ -36,6 +36,6 @@ import { BybitService } from './bybit.service';
     BybitPollService,
     BalanceSnapshotService,
   ],
-  exports: [BybitService, BalanceSnapshotService],
+  exports: [BybitService, BalanceSnapshotService, BybitClientService],
 })
 export class BybitModule {}

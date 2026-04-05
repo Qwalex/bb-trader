@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import { PrismaService } from '../../prisma/prisma.service';
@@ -311,6 +311,107 @@ export class SettingsService {
         throw new Error(`SETTINGS_KEYS_ADMIN_ONLY: ключ «${k}» нельзя включать в список`);
       }
     }
+  }
+
+  /** Проверки JSON для ключей меню / admin-only списка (как при PUT одной настройки). */
+  static validateSettingValueForUpsert(key: string, value: string): void {
+    if (key === NAV_MENU_IN_BURGER_KEY && value.trim() !== '') {
+      SettingsService.validateNavMenuInBurgerJson(value);
+    }
+    if (key === SETTINGS_KEYS_ADMIN_ONLY_KEY && value.trim() !== '') {
+      SettingsService.validateSettingsKeysAdminOnlyJson(value);
+    }
+  }
+
+  private static readonly BACKUP_MAX_KEYS = 400;
+  private static readonly BACKUP_MAX_VALUE_LEN = 2_000_000;
+
+  /**
+   * Резервная копия настроек текущего workspace (только строки из БД, разрешённые для записи).
+   * Секреты в ответе в открытом виде — файл нужно хранить в безопасности.
+   */
+  async buildBackupExportPayload(
+    workspaceId: string | null | undefined,
+    isAdmin: boolean,
+  ): Promise<{ version: number; exportedAt: string; settings: Record<string, string> }> {
+    const exportedAt = new Date().toISOString();
+    const wid = this.resolveWorkspaceId(workspaceId);
+    if (!wid) {
+      return { version: 1, exportedAt, settings: {} };
+    }
+    const adminSet = await this.buildAdminOnlySettingKeysSet(wid);
+    const rows = await this.list(wid);
+    const settings: Record<string, string> = {};
+    for (const row of rows) {
+      if (!SettingsService.canWriteKey(row.key)) continue;
+      if (!isAdmin && adminSet.has(row.key)) continue;
+      settings[row.key] = row.value;
+    }
+    return { version: 1, exportedAt, settings };
+  }
+
+  /**
+   * Импорт из JSON (формат как у export). Ключи вне allowlist и admin-only для не-админа пропускаются.
+   */
+  async importFromBackup(
+    workspaceId: string | null | undefined,
+    body: unknown,
+    isAdmin: boolean,
+  ): Promise<{ applied: number; skipped: { key: string; reason: string }[] }> {
+    const wid = this.resolveWorkspaceId(workspaceId);
+    if (!wid) {
+      throw new BadRequestException('Workspace id is required');
+    }
+    if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+      throw new BadRequestException('Ожидается JSON-объект');
+    }
+    const root = body as Record<string, unknown>;
+    const settingsRaw = root.settings;
+    if (settingsRaw === null || typeof settingsRaw !== 'object' || Array.isArray(settingsRaw)) {
+      throw new BadRequestException('Поле settings должно быть объектом «ключ → значение»');
+    }
+    const settingsObj = settingsRaw as Record<string, unknown>;
+    const entries = Object.entries(settingsObj);
+    if (entries.length > SettingsService.BACKUP_MAX_KEYS) {
+      throw new BadRequestException(
+        `Слишком много ключей (максимум ${SettingsService.BACKUP_MAX_KEYS})`,
+      );
+    }
+    const adminSet = await this.buildAdminOnlySettingKeysSet(wid);
+    const skipped: { key: string; reason: string }[] = [];
+    let applied = 0;
+    for (const [keyRaw, valueRaw] of entries) {
+      const key = String(keyRaw).trim();
+      if (!key) {
+        skipped.push({ key: String(keyRaw), reason: 'пустой ключ' });
+        continue;
+      }
+      if (!SettingsService.canWriteKey(key)) {
+        skipped.push({ key, reason: 'ключ не в списке разрешённых для записи' });
+        continue;
+      }
+      if (!isAdmin && adminSet.has(key)) {
+        skipped.push({ key, reason: 'только для администратора' });
+        continue;
+      }
+      const value = valueRaw === null || valueRaw === undefined ? '' : String(valueRaw);
+      if (value.length > SettingsService.BACKUP_MAX_VALUE_LEN) {
+        skipped.push({ key, reason: 'значение слишком длинное' });
+        continue;
+      }
+      try {
+        SettingsService.validateSettingValueForUpsert(key, value);
+      } catch (e) {
+        skipped.push({
+          key,
+          reason: e instanceof Error ? e.message : 'ошибка проверки значения',
+        });
+        continue;
+      }
+      await this.set(key, value, wid);
+      applied += 1;
+    }
+    return { applied, skipped };
   }
 
   private async getRawSettingRowFromDb(

@@ -3,8 +3,10 @@ import {
   Body,
   Controller,
   ForbiddenException,
+  forwardRef,
   Get,
   HttpCode,
+  Inject,
   Post,
   Put,
   Query,
@@ -21,16 +23,17 @@ import {
 import { requireWorkspaceId } from '../../common/require-workspace-id';
 import { CurrentUser } from '../auth/current-user.decorator';
 import type { AuthenticatedRequestContext } from '../auth/auth.types';
-import {
-  NAV_MENU_IN_BURGER_KEY,
-  SETTINGS_KEYS_ADMIN_ONLY_KEY,
-  SettingsService,
-} from './settings.service';
+import { BybitClientService } from '../bybit/bybit-client.service';
+import { SettingsService } from './settings.service';
 
 @ApiTags('Settings')
 @Controller('settings')
 export class SettingsController {
-  constructor(private readonly settings: SettingsService) {}
+  constructor(
+    private readonly settings: SettingsService,
+    @Inject(forwardRef(() => BybitClientService))
+    private readonly bybitClient: BybitClientService,
+  ) {}
 
   @ApiOperation({ summary: 'Список настроек (секреты замаскированы)' })
   @ApiOkResponse({ description: 'Настройки получены' })
@@ -152,21 +155,10 @@ export class SettingsController {
       throw new BadRequestException(`Ключ ${key} не поддерживается для записи`);
     }
     const valueStr = String(body?.value ?? '');
-    if (key === NAV_MENU_IN_BURGER_KEY && valueStr.trim() !== '') {
-      try {
-        SettingsService.validateNavMenuInBurgerJson(valueStr);
-      } catch (e) {
-        throw new BadRequestException(e instanceof Error ? e.message : 'Некорректное меню');
-      }
-    }
-    if (key === SETTINGS_KEYS_ADMIN_ONLY_KEY && valueStr.trim() !== '') {
-      try {
-        SettingsService.validateSettingsKeysAdminOnlyJson(valueStr);
-      } catch (e) {
-        throw new BadRequestException(
-          e instanceof Error ? e.message : 'Некорректный список ключей',
-        );
-      }
+    try {
+      SettingsService.validateSettingValueForUpsert(key, valueStr);
+    } catch (e) {
+      throw new BadRequestException(e instanceof Error ? e.message : 'Некорректное значение');
     }
     const adminOnlySet = await this.settings.buildAdminOnlySettingKeysSet(workspaceId);
     if (adminOnlySet.has(key) && user?.appRole !== 'admin') {
@@ -206,5 +198,50 @@ export class SettingsController {
     }
     await this.settings.resetAllData(workspaceId);
     return { ok: true };
+  }
+
+  @ApiOperation({
+    summary: 'Экспорт настроек кабинета в JSON',
+    description:
+      'Секреты передаются в открытом виде. Не передавайте файл третьим лицам. Учитываются только ключи из БД, разрешённые для записи; скрытые от пользователя admin-only ключи не попадут в выгрузку, если вы не app-admin.',
+  })
+  @ApiOkResponse({ description: 'JSON для сохранения в файл' })
+  @Get('export')
+  async exportBackup(@CurrentUser() user: AuthenticatedRequestContext | null) {
+    const workspaceId = requireWorkspaceId(user);
+    const isAdmin = user?.appRole === 'admin';
+    return this.settings.buildBackupExportPayload(workspaceId, isAdmin);
+  }
+
+  @ApiOperation({
+    summary: 'Импорт настроек из JSON',
+    description:
+      'Тело в формате выгрузки export: { version, settings: { KEY: "value", ... } }. Существующие ключи перезаписываются. Ключи только для админа при импорте не-app-admin пропускаются (в ответе skipped).',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['settings'],
+      properties: {
+        version: { type: 'number', example: 1 },
+        settings: {
+          type: 'object',
+          additionalProperties: { type: 'string' },
+        },
+      },
+    },
+  })
+  @ApiOkResponse({ description: 'Импорт выполнен' })
+  @Post('import')
+  @HttpCode(200)
+  async importBackup(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
+    @Body() body: unknown,
+  ) {
+    const workspaceId = requireWorkspaceId(user);
+    const isAdmin = user?.appRole === 'admin';
+    const result = await this.settings.importFromBackup(workspaceId, body, isAdmin);
+    this.bybitClient.invalidateClientCache();
+    return { ok: true, ...result };
   }
 }

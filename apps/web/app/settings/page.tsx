@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 
 import { EntrySizingControl } from '../components/EntrySizingControl';
 import { getApiBase } from '../../lib/api';
@@ -337,6 +337,9 @@ export default function SettingsPage() {
   const [adminOnlyKeysDraft, setAdminOnlyKeysDraft] = useState<Set<string>>(() => new Set());
   const [navMenuSaving, setNavMenuSaving] = useState(false);
   const [adminKeysSaving, setAdminKeysSaving] = useState(false);
+  const [backupExporting, setBackupExporting] = useState(false);
+  const [backupImporting, setBackupImporting] = useState(false);
+  const importBackupInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     void (async () => {
@@ -695,6 +698,101 @@ export default function SettingsPage() {
       setMessage({ type: 'err', text: 'Не удалось сбросить статистику' });
     } finally {
       setResettingStats(false);
+    }
+  }
+
+  async function exportSettingsBackup() {
+    setBackupExporting(true);
+    setMessage(null);
+    try {
+      const res = await fetch(`${getApiBase()}/settings/export`);
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error(t || String(res.status));
+      }
+      const obj = (await res.json()) as unknown;
+      const blob = new Blob([JSON.stringify(obj, null, 2)], {
+        type: 'application/json;charset=utf-8',
+      });
+      const name = `signalsbot-settings-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}Z.json`;
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      setMessage({
+        type: 'ok',
+        text: 'Файл скачан. В нём секреты в открытом виде — не передавайте посторонним.',
+      });
+    } catch {
+      setMessage({ type: 'err', text: 'Не удалось выгрузить настройки' });
+    } finally {
+      setBackupExporting(false);
+    }
+  }
+
+  async function importSettingsBackup(file: File) {
+    setBackupImporting(true);
+    setMessage(null);
+    try {
+      const text = await file.text();
+      let payload: unknown;
+      try {
+        payload = JSON.parse(text) as unknown;
+      } catch {
+        setMessage({ type: 'err', text: 'Файл не является корректным JSON' });
+        return;
+      }
+      const res = await fetch(`${getApiBase()}/settings/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const raw = await res.text();
+      let result: {
+        applied?: number;
+        skipped?: { key: string; reason: string }[];
+        message?: unknown;
+      };
+      try {
+        result = JSON.parse(raw) as typeof result;
+      } catch {
+        setMessage({
+          type: 'err',
+          text: !res.ok ? raw.slice(0, 280) || 'Ошибка импорта' : 'Некорректный ответ сервера',
+        });
+        return;
+      }
+      if (!res.ok) {
+        const m = result.message;
+        const text =
+          typeof m === 'string'
+            ? m
+            : Array.isArray(m)
+              ? m.map(String).join(' ')
+              : 'Не удалось импортировать';
+        setMessage({ type: 'err', text });
+        return;
+      }
+      const skipped = result.skipped ?? [];
+      const applied = result.applied ?? 0;
+      let msg = `Импорт: записано полей: ${applied}.`;
+      if (skipped.length > 0) {
+        const sample = skipped
+          .slice(0, 5)
+          .map((s) => s.key)
+          .join(', ');
+        msg += ` Пропущено: ${skipped.length}${sample ? ` (${sample}${skipped.length > 5 ? '…' : ''})` : ''}.`;
+      }
+      setMessage({ type: 'ok', text: `${msg} Обновляю страницу…` });
+      window.location.reload();
+    } catch {
+      setMessage({ type: 'err', text: 'Не удалось импортировать настройки' });
+    } finally {
+      setBackupImporting(false);
+      if (importBackupInputRef.current) {
+        importBackupInputRef.current.value = '';
+      }
     }
   }
 
@@ -1198,6 +1296,46 @@ export default function SettingsPage() {
             </details>
           </>
         ) : null}
+
+        <details className="card">
+          <summary className="settingsSectionSummary">Экспорт и импорт настроек</summary>
+          <div style={{ marginTop: '0.9rem' }}>
+            <p style={{ color: 'var(--muted)', fontSize: '0.88rem', marginBottom: '0.75rem' }}>
+              Резервная копия только для <strong>текущего кабинета</strong>. В JSON попадают все
+              сохранённые в БД ключи, которые вам разрешено менять; секреты — в открытом виде. Импорт
+              перезаписывает совпадающие ключи; ключи «только для администратора» при импорте под
+              обычным пользователем пропускаются.
+            </p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', alignItems: 'center' }}>
+              <button
+                type="button"
+                className="btn btnSecondary"
+                disabled={backupExporting || saving}
+                onClick={() => void exportSettingsBackup()}
+              >
+                {backupExporting ? 'Выгрузка…' : 'Скачать JSON'}
+              </button>
+              <input
+                ref={importBackupInputRef}
+                type="file"
+                accept="application/json,.json"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void importSettingsBackup(f);
+                }}
+              />
+              <button
+                type="button"
+                className="btn"
+                disabled={backupImporting || saving}
+                onClick={() => importBackupInputRef.current?.click()}
+              >
+                {backupImporting ? 'Импорт…' : 'Импорт из файла…'}
+              </button>
+            </div>
+          </div>
+        </details>
 
         {appIsAdmin ? (
         <details className="card">
