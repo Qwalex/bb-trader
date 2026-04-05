@@ -3,11 +3,13 @@ import { basename, join } from 'node:path';
 
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { GlobalExceptionFilter } from './common/http-exception.filter';
 import { AppLogModule } from './modules/app-log/app-log.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { BybitModule } from './modules/bybit/bybit.module';
@@ -56,6 +58,9 @@ function loadEnvFilePaths(): string[] {
     }),
     AuthModule,
     ScheduleModule.forRoot(),
+    ThrottlerModule.forRoot({
+      throttlers: [{ ttl: 60_000, limit: 60 }],
+    }),
     PrismaModule,
     AppLogModule,
     DiagnosticsModule,
@@ -70,8 +75,16 @@ function loadEnvFilePaths(): string[] {
   providers: [
     AppService,
     {
+      provide: APP_FILTER,
+      useClass: GlobalExceptionFilter,
+    },
+    {
       provide: APP_GUARD,
       useClass: DashboardAuthGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
     },
   ],
 })

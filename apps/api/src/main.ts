@@ -1,7 +1,8 @@
-import { LogLevel } from '@nestjs/common';
+import { LogLevel, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import type { NextFunction, Request, Response } from 'express';
+import helmet from 'helmet';
 
 import { AuthService } from './modules/auth/auth.service';
 import { AppModule } from './app.module';
@@ -16,6 +17,15 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     logger: logLevels,
   });
+  app.use(helmet());
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    }),
+  );
+
   const auth = app.get(AuthService);
   const allowedOrigins = auth.getAllowedCorsOrigins();
   app.enableCors({

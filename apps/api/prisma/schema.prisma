@@ -98,6 +98,7 @@ model Signal {
   @@index([sourceChatId, sourceMessageId])
   @@index([workspaceId, deletedAt, createdAt])
   @@index([workspaceId, deletedAt, closedAt])
+  @@index([workspaceId, pair, direction, status])
 }
 
 model SignalEvent {
@@ -133,6 +134,8 @@ model Order {
   workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId, signalId])
+  @@index([bybitOrderId])
+  @@index([workspaceId, status])
 }
 
 model Setting {

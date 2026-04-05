@@ -3,7 +3,6 @@ import {
   Body,
   Controller,
   Delete,
-  ForbiddenException,
   Get,
   Param,
   Patch,
@@ -20,6 +19,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 
+import { requireWorkspaceId } from '../../common/require-workspace-id';
 import { CurrentUser } from '../auth/current-user.decorator';
 import type { AuthenticatedRequestContext } from '../auth/auth.types';
 import { OrdersService } from './orders.service';
@@ -29,14 +29,6 @@ import { OrdersService } from './orders.service';
 export class OrdersController {
   constructor(private readonly orders: OrdersService) {}
 
-  private requireWorkspaceId(user: AuthenticatedRequestContext | null): string {
-    const workspaceId = user?.workspaceId?.trim();
-    if (!workspaceId) {
-      throw new ForbiddenException('Workspace context is required');
-    }
-    return workspaceId;
-  }
-
   @ApiOperation({ summary: 'Сводная статистика по сделкам' })
   @ApiQuery({ name: 'source', required: false, description: 'Фильтр по source' })
   @ApiOkResponse({ description: 'Статистика успешно получена' })
@@ -45,7 +37,7 @@ export class OrdersController {
     @CurrentUser() user: AuthenticatedRequestContext | null,
     @Query('source') source?: string,
   ) {
-    const workspaceId = this.requireWorkspaceId(user);
+    const workspaceId = requireWorkspaceId(user);
     const s = typeof source === 'string' ? source.trim() : '';
     return this.orders.getDashboardStats({
       source: s.length > 0 ? s : undefined,
@@ -63,7 +55,7 @@ export class OrdersController {
     @Query('bucket') bucket?: string,
     @Query('source') source?: string,
   ) {
-    const workspaceId = this.requireWorkspaceId(user);
+    const workspaceId = requireWorkspaceId(user);
     const b = bucket === 'week' ? 'week' : 'day';
     const s = typeof source === 'string' ? source.trim() : '';
     return this.orders.getPnlSeries(b, {
@@ -112,7 +104,7 @@ export class OrdersController {
     @Query('refreshPnl') refreshPnl?: string,
     @Query('martingaleSteps') martingaleSteps?: string,
   ) {
-    const workspaceId = this.requireWorkspaceId(user);
+    const workspaceId = requireWorkspaceId(user);
     const truthy = (v: string | undefined) =>
       v === '1' || v?.toLowerCase() === 'true';
     const parsePositiveInt = (raw: string | undefined, fallback: number, max: number) => {
@@ -160,7 +152,7 @@ export class OrdersController {
     @CurrentUser() user: AuthenticatedRequestContext | null,
     @Param('id') id: string,
   ) {
-    await this.orders.deleteTrade(id, { workspaceId: this.requireWorkspaceId(user) });
+    await this.orders.deleteTrade(id, { workspaceId: requireWorkspaceId(user) });
     return { ok: true };
   }
 
@@ -181,7 +173,7 @@ export class OrdersController {
     if (body?.confirm !== true) {
       throw new BadRequestException('Укажите { "confirm": true } для удаления всех сделок');
     }
-    return this.orders.deleteAllTradesSequential(this.requireWorkspaceId(user));
+    return this.orders.deleteAllTradesSequential(requireWorkspaceId(user));
   }
 
   @ApiOperation({ summary: 'Восстановить удалённую сделку' })
@@ -192,7 +184,7 @@ export class OrdersController {
     @CurrentUser() user: AuthenticatedRequestContext | null,
     @Param('id') id: string,
   ) {
-    await this.orders.restoreTrade(id, this.requireWorkspaceId(user));
+    await this.orders.restoreTrade(id, requireWorkspaceId(user));
     return { ok: true };
   }
 
@@ -214,7 +206,7 @@ export class OrdersController {
     return this.orders.updateSignalSourceWithPropagation(
       id,
       body.source === undefined ? null : body.source,
-      this.requireWorkspaceId(user),
+      requireWorkspaceId(user),
     );
   }
 
@@ -250,7 +242,7 @@ export class OrdersController {
     return this.orders.updateTradeTelegramSource(id, {
       sourceChatId: body.sourceChatId,
       sourceMessageId: body.sourceMessageId,
-    }, this.requireWorkspaceId(user));
+    }, requireWorkspaceId(user));
   }
 
   @ApiOperation({ summary: 'Ручная корректировка realized PnL' })
@@ -274,14 +266,14 @@ export class OrdersController {
     if (pnl !== null && !Number.isFinite(pnl)) {
       throw new BadRequestException('realizedPnl должен быть числом или null');
     }
-    return this.orders.updateTradePnlManual(id, pnl, this.requireWorkspaceId(user));
+    return this.orders.updateTradePnlManual(id, pnl, requireWorkspaceId(user));
   }
 
   @ApiOperation({ summary: 'Группировка статистики по source' })
   @ApiOkResponse({ description: 'Статистика по source' })
   @Get('by-source')
   async bySource(@CurrentUser() user: AuthenticatedRequestContext | null) {
-    return this.orders.statsBySource(this.requireWorkspaceId(user));
+    return this.orders.statsBySource(requireWorkspaceId(user));
   }
 
   @ApiOperation({ summary: 'Топ источников по метрикам' })
@@ -292,7 +284,7 @@ export class OrdersController {
     @CurrentUser() user: AuthenticatedRequestContext | null,
     @Query('limit') limit?: string,
   ) {
-    const workspaceId = this.requireWorkspaceId(user);
+    const workspaceId = requireWorkspaceId(user);
     const raw = limit ? Number(limit) : 5;
     const take = Number.isFinite(raw) ? Math.min(Math.max(Math.trunc(raw), 1), 50) : 5;
     return this.orders.getTopSources({ limit: take, workspaceId });
@@ -302,7 +294,7 @@ export class OrdersController {
   @ApiOkResponse({ description: 'Список source' })
   @Get('sources')
   async sources(@CurrentUser() user: AuthenticatedRequestContext | null) {
-    return this.orders.listDistinctSources(this.requireWorkspaceId(user));
+    return this.orders.listDistinctSources(requireWorkspaceId(user));
   }
 
   @ApiOperation({ summary: 'Сброс статистики аналитики' })
@@ -322,13 +314,13 @@ export class OrdersController {
     if (body?.confirm !== true) {
       throw new BadRequestException('Укажите { "confirm": true } для сброса статистики');
     }
-    return this.orders.resetAnalyticsStats(this.requireWorkspaceId(user));
+    return this.orders.resetAnalyticsStats(requireWorkspaceId(user));
   }
 
   @ApiOperation({ summary: 'Группировка статистики по торговым парам' })
   @ApiOkResponse({ description: 'Статистика по парам' })
   @Get('by-pair')
   async byPair(@CurrentUser() user: AuthenticatedRequestContext | null) {
-    return this.orders.statsByPair(this.requireWorkspaceId(user));
+    return this.orders.statsByPair(requireWorkspaceId(user));
   }
 }

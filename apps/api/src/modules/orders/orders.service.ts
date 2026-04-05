@@ -49,6 +49,7 @@ export class OrdersService {
   ) {}
 
   private static readonly ACTIVE_SIGNAL_STATUSES = new Set([
+    'PLACING',
     'ORDERS_PLACED',
     'OPEN',
     'PARSED',
@@ -274,7 +275,7 @@ export class OrdersService {
           deletedAt: null,
           sourceChatId: normalizedChat,
           sourceMessageId: normalizedMsg,
-          status: { in: ['ORDERS_PLACED', 'OPEN', 'PARSED'] },
+          status: { in: ['PLACING', 'ORDERS_PLACED', 'OPEN', 'PARSED'] },
         },
         select: { id: true },
       });
@@ -445,7 +446,7 @@ export class OrdersService {
         'Нельзя удалить активную сделку: сначала закройте позицию/ордера на бирже',
       );
     }
-    if (row.status === 'ORDERS_PLACED' || row.status === 'OPEN') {
+    if (row.status === 'PLACING' || row.status === 'ORDERS_PLACED' || row.status === 'OPEN') {
       const cleanup = await this.bybit.cleanupExchangeBeforeDeletingPlacedSignal(
         id,
         options?.workspaceId,
@@ -545,7 +546,7 @@ export class OrdersService {
       where: {
         ...this.buildWorkspaceWhere(workspaceId),
         deletedAt: null,
-        status: { in: ['ORDERS_PLACED', 'OPEN'] },
+        status: { in: ['PLACING', 'ORDERS_PLACED', 'OPEN'] },
       },
       include: { orders: true },
       orderBy: { createdAt: 'asc' },
@@ -624,7 +625,7 @@ export class OrdersService {
       where: {
         ...this.buildWorkspaceWhere(workspaceId),
         deletedAt: null,
-        status: { in: ['ORDERS_PLACED', 'OPEN', 'PARSED'] },
+        status: { in: ['PLACING', 'ORDERS_PLACED', 'OPEN', 'PARSED'] },
         direction,
       },
       select: { pair: true },
@@ -642,7 +643,7 @@ export class OrdersService {
       where: {
         ...this.buildWorkspaceWhere(workspaceId),
         deletedAt: null,
-        status: 'ORDERS_PLACED',
+        status: { in: ['PLACING', 'ORDERS_PLACED'] },
         direction,
       },
       select: { pair: true },
@@ -664,7 +665,7 @@ export class OrdersService {
       where: {
         ...this.buildWorkspaceWhere(workspaceId),
         deletedAt: null,
-        status: 'ORDERS_PLACED',
+        status: { in: ['PLACING', 'ORDERS_PLACED'] },
         direction,
       },
       select: { id: true, pair: true },
@@ -768,7 +769,7 @@ export class OrdersService {
       where: {
         ...this.buildWorkspaceWhere(workspaceId),
         deletedAt: null,
-        status: { in: ['ORDERS_PLACED', 'OPEN', 'PARSED'] },
+        status: { in: ['PLACING', 'ORDERS_PLACED', 'OPEN', 'PARSED'] },
         ...(statsResetAt ? { createdAt: { gte: statsResetAt } } : {}),
         ...(source ? { source } : {}),
       },
@@ -976,7 +977,7 @@ export class OrdersService {
       if (row.status === 'CLOSED_WIN' || row.status === 'CLOSED_LOSS' || row.status === 'CLOSED_MIXED') {
         return row.closedAt != null && row.closedAt >= statsResetAt;
       }
-      if (row.status === 'ORDERS_PLACED' || row.status === 'OPEN' || row.status === 'PARSED') {
+      if (row.status === 'PLACING' || row.status === 'ORDERS_PLACED' || row.status === 'OPEN' || row.status === 'PARSED') {
         return row.createdAt >= statsResetAt;
       }
       return false;
@@ -1018,6 +1019,7 @@ export class OrdersService {
         acc.closedMixed += 1;
         acc.closedTotal += 1;
       } else if (
+        r.status === 'PLACING' ||
         r.status === 'ORDERS_PLACED' ||
         r.status === 'OPEN' ||
         r.status === 'PARSED'

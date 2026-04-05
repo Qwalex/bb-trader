@@ -16,14 +16,6 @@ export function getSupabaseAnonKey(explicit?: string): string {
   return value;
 }
 
-export function getSupabaseServiceRoleKey(): string {
-  const value = process.env.SUPABASE_SERVICE_ROLE_KEY_SERVER?.trim();
-  if (!value) {
-    throw new Error('SUPABASE_SERVICE_ROLE_KEY_SERVER is required');
-  }
-  return value;
-}
-
 export function createSupabaseBrowserClient(
   supabaseUrl?: string,
   supabaseAnonKey?: string,

@@ -1,10 +1,13 @@
 import { NextResponse } from 'next/server';
 
+import { csrfCheck } from '../../../lib/csrf-check';
 import { withBasePath } from '../../../lib/auth';
 import { getPublicOrigin } from '../../../lib/public-origin';
 import { createSupabaseRouteClient } from '../../../lib/supabase-route';
 
 export async function POST(request: Request) {
+  const blocked = csrfCheck(request);
+  if (blocked) return blocked;
   const form = await request.formData();
   const password = typeof form.get('password') === 'string' ? String(form.get('password')) : '';
   const origin = getPublicOrigin(request);

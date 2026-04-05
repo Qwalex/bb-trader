@@ -35,7 +35,7 @@ const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_SITE_URL = 'https://signals-bot.local';
 const OPENROUTER_APP_TITLE = 'SignalsBot';
 const OPENROUTER_MAX_RETRIES = 5;
-const OPENROUTER_RETRY_DELAY_MS = 1_000;
+const OPENROUTER_BASE_RETRY_DELAY_MS = 1_000;
 
 const TRANSCRIPT_RESPONSE_JSON_SCHEMA = {
   type: 'object',
@@ -969,9 +969,8 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
             `OpenRouter ${ctx.operation} attempt ${attempt}/${OPENROUTER_MAX_RETRIES} failed: ${errText}`,
           );
           if (attempt < OPENROUTER_MAX_RETRIES) {
-            await new Promise((resolve) =>
-              setTimeout(resolve, OPENROUTER_RETRY_DELAY_MS),
-            );
+            const delay = OPENROUTER_BASE_RETRY_DELAY_MS * Math.pow(2, attempt - 1);
+            await new Promise((resolve) => setTimeout(resolve, delay));
           }
         }
       }

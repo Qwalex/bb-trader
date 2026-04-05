@@ -305,6 +305,11 @@ function isSensitiveKey(key: string): boolean {
   );
 }
 
+/** Секреты с выбором «не менять / записать / очистить»; OpenRouter key — обычное поле без этого шага. */
+function usesSensitiveSaveUi(key: string): boolean {
+  return isSensitiveKey(key) && key !== 'OPENROUTER_API_KEY';
+}
+
 function formatPreviewValue(key: string, value: string): string {
   if (!value) return '(пусто)';
   if (key === MODEL_HISTORY_KEY && canonicalModelHistoryJson(value) === '[]') {
@@ -346,7 +351,7 @@ function collectPendingChanges(
   const out: PendingChange[] = [];
 
   for (const { key } of KEYS) {
-    if (isSensitiveKey(key)) {
+    if (usesSensitiveSaveUi(key)) {
       const mode = sensitiveModes[key] ?? 'keep';
       const nextValue = sensitiveDrafts[key] ?? '';
       if (mode === 'keep' || (mode === 'replace' && !nextValue.trim())) continue;
@@ -404,7 +409,7 @@ function buildPutOperations(
   const ops: { key: string; value: string }[] = [];
 
   for (const { key } of KEYS) {
-    if (isSensitiveKey(key)) {
+    if (usesSensitiveSaveUi(key)) {
       const mode = sensitiveModes[key] ?? 'keep';
       const value = sensitiveDrafts[key] ?? '';
       if (mode === 'replace' && value.trim()) {
@@ -731,7 +736,7 @@ export default function SettingsPage() {
     const label = LABEL_BY_KEY[key] ?? key;
     const isBoolean = BOOLEAN_KEYS.has(key);
     const isModel = MODEL_KEYS.has(key);
-    const sensitive = isSensitiveKey(key);
+    const sensitiveSaveUi = usesSensitiveSaveUi(key);
     const sensitiveMode = sensitiveModes[key] ?? 'keep';
     const configured = Boolean(sensitiveConfigured[key]);
     return (
@@ -752,7 +757,25 @@ export default function SettingsPage() {
           >
             <span className="switchThumb" />
           </button>
-        ) : sensitive ? (
+        ) : key === 'OPENROUTER_API_KEY' ? (
+          <div style={{ display: 'grid', gap: '0.45rem' }}>
+            <p style={{ color: 'var(--muted)', fontSize: '0.82rem', lineHeight: 1.45, margin: 0 }}>
+              {configured
+                ? 'В базе уже есть значение; оно не показывается в форме.'
+                : 'В базе пока нет значения для этого поля.'}{' '}
+              Введите ключ только если нужно записать или заменить его.
+            </p>
+            <input
+              type="password"
+              value={valueForDraft(key)}
+              name={key}
+              autoComplete="new-password"
+              placeholder={configured ? 'Новый ключ (пусто = не менять при сохранении)' : 'OpenRouter API key'}
+              disabled={saving}
+              onChange={(e) => setDraftKey(key, e.target.value)}
+            />
+          </div>
+        ) : sensitiveSaveUi ? (
           <div style={{ display: 'grid', gap: '0.45rem' }}>
             <div style={{ color: 'var(--muted)', fontSize: '0.82rem', lineHeight: 1.45 }}>
               {configured

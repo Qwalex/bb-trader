@@ -8,6 +8,9 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 
+import { requireWorkspaceId } from '../../common/require-workspace-id';
+import { CurrentUser } from '../auth/current-user.decorator';
+import type { AuthenticatedRequestContext } from '../auth/auth.types';
 import { TelegramUserbotService } from './telegram-userbot.service';
 
 @ApiTags('Telegram Userbot')
@@ -32,14 +35,16 @@ export class TelegramUserbotController {
   @ApiOperation({ summary: 'Подключить userbot из сохраненной сессии' })
   @ApiOkResponse({ description: 'Подключение выполнено' })
   @Post('connect')
-  async connect() {
+  async connect(@CurrentUser() user: AuthenticatedRequestContext | null) {
+    requireWorkspaceId(user);
     return this.userbot.connectFromStoredSession();
   }
 
   @ApiOperation({ summary: 'Отключить userbot' })
   @ApiOkResponse({ description: 'Отключение выполнено' })
   @Post('disconnect')
-  async disconnect() {
+  async disconnect(@CurrentUser() user: AuthenticatedRequestContext | null) {
+    requireWorkspaceId(user);
     return this.userbot.disconnect();
   }
 
@@ -107,7 +112,11 @@ export class TelegramUserbotController {
   })
   @ApiOkResponse({ description: 'Сканирование завершено' })
   @Post('scan-today')
-  async scanToday(@Body() body?: { limitPerChat?: number }) {
+  async scanToday(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
+    @Body() body?: { limitPerChat?: number },
+  ) {
+    requireWorkspaceId(user);
     return this.userbot.scanTodayMessages(body?.limitPerChat);
   }
 

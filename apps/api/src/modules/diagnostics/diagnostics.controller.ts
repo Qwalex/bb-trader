@@ -16,6 +16,9 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 
+import { requireWorkspaceId } from '../../common/require-workspace-id';
+import { CurrentUser } from '../auth/current-user.decorator';
+import type { AuthenticatedRequestContext } from '../auth/auth.types';
 import { DiagnosticsService } from './diagnostics.service';
 import { TradingAiAdvisorService } from './trading-ai-advisor.service';
 
@@ -37,7 +40,11 @@ export class DiagnosticsController {
   @ApiForbiddenResponse({ description: 'Запрос не того origin' })
   @ApiOkResponse({ description: 'Диагностика запущена' })
   @Post('run-latest')
-  async runLatest(@Body() body?: { limit?: number }) {
+  async runLatest(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
+    @Body() body?: { limit?: number },
+  ) {
+    requireWorkspaceId(user);
     return this.diagnostics.runLatestBatch({ limit: body?.limit });
   }
 
@@ -46,7 +53,11 @@ export class DiagnosticsController {
   @ApiForbiddenResponse({ description: 'Запрос не того origin' })
   @ApiOkResponse({ description: 'Список запусков получен' })
   @Get('runs')
-  async runs(@Query('limit') limit?: string) {
+  async runs(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
+    @Query('limit') limit?: string,
+  ) {
+    requireWorkspaceId(user);
     const parsed = limit ? Number(limit) : undefined;
     return this.diagnostics.listRuns(Number.isFinite(parsed) ? parsed : undefined);
   }
@@ -56,7 +67,11 @@ export class DiagnosticsController {
   @ApiForbiddenResponse({ description: 'Запрос не того origin' })
   @ApiOkResponse({ description: 'Детали запуска получены' })
   @Get('runs/:id')
-  async runDetails(@Param('id') id: string) {
+  async runDetails(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
+    @Param('id') id: string,
+  ) {
+    requireWorkspaceId(user);
     return this.diagnostics.getRunDetails(id);
   }
 
@@ -70,7 +85,11 @@ export class DiagnosticsController {
   @ApiForbiddenResponse({ description: 'Запрос не того origin' })
   @ApiOkResponse({ description: 'Рекомендации сгенерированы' })
   @Post('trading-advice')
-  async tradingAdvice(@Body() body?: { closedLimit?: number }) {
+  async tradingAdvice(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
+    @Body() body?: { closedLimit?: number },
+  ) {
+    requireWorkspaceId(user);
     return this.tradingAdvisor.generateAdvice({
       closedLimit: body?.closedLimit,
     });

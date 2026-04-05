@@ -18,6 +18,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 
+import { requireWorkspaceId } from '../../common/require-workspace-id';
 import { CurrentUser } from '../auth/current-user.decorator';
 import type { AuthenticatedRequestContext } from '../auth/auth.types';
 import { SettingsService } from './settings.service';
@@ -27,19 +28,11 @@ import { SettingsService } from './settings.service';
 export class SettingsController {
   constructor(private readonly settings: SettingsService) {}
 
-  private requireWorkspaceId(user: AuthenticatedRequestContext | null): string {
-    const workspaceId = user?.workspaceId?.trim();
-    if (!workspaceId) {
-      throw new ForbiddenException('Workspace context is required');
-    }
-    return workspaceId;
-  }
-
   @ApiOperation({ summary: 'Список настроек (секреты замаскированы)' })
   @ApiOkResponse({ description: 'Настройки получены' })
   @Get()
   async list(@CurrentUser() user: AuthenticatedRequestContext | null) {
-    const rows = await this.settings.list(this.requireWorkspaceId(user));
+    const rows = await this.settings.list(requireWorkspaceId(user));
     const redacted = rows.map((r) => ({
       key: r.key,
       value: SettingsService.redactValue(r.key, r.value),
@@ -59,7 +52,7 @@ export class SettingsController {
     @CurrentUser() user: AuthenticatedRequestContext | null,
     @Query('keys') keysRaw?: string,
   ) {
-    const workspaceId = this.requireWorkspaceId(user);
+    const workspaceId = requireWorkspaceId(user);
     const keys = String(keysRaw ?? '')
       .split(',')
       .map((key) => key.trim())
@@ -82,7 +75,7 @@ export class SettingsController {
   @ApiOkResponse({ description: 'UI-настройки получены' })
   @Get('ui')
   async listUiSettings(@CurrentUser() user: AuthenticatedRequestContext | null) {
-    const workspaceId = this.requireWorkspaceId(user);
+    const workspaceId = requireWorkspaceId(user);
     return {
       settings: await this.settings.getManyResolved([
         'SOURCE_LIST',
@@ -99,7 +92,7 @@ export class SettingsController {
   @ApiOkResponse({ description: 'Статусы секретов получены' })
   @Get('sensitive-status')
   async listSensitiveStatus(@CurrentUser() user: AuthenticatedRequestContext | null) {
-    const rows = await this.settings.list(this.requireWorkspaceId(user));
+    const rows = await this.settings.list(requireWorkspaceId(user));
     return {
       settings: rows
         .filter((row) => SettingsService.isSensitiveKey(row.key))
@@ -127,7 +120,7 @@ export class SettingsController {
     @CurrentUser() user: AuthenticatedRequestContext | null,
     @Body() body: { key: string; value: string },
   ) {
-    const workspaceId = this.requireWorkspaceId(user);
+    const workspaceId = requireWorkspaceId(user);
     const key = String(body?.key ?? '').trim();
     if (!key) {
       throw new BadRequestException('key обязателен');
@@ -158,7 +151,7 @@ export class SettingsController {
     @CurrentUser() user: AuthenticatedRequestContext | null,
     @Body() body: { confirm?: boolean },
   ) {
-    const workspaceId = this.requireWorkspaceId(user);
+    const workspaceId = requireWorkspaceId(user);
     if (body?.confirm !== true) {
       throw new BadRequestException(
         'Укажите { "confirm": true } для подтверждения сброса базы',

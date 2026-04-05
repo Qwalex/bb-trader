@@ -1,8 +1,17 @@
-import { BalanceChart, type BalancePoint } from './components/BalanceChart';
-import { PnlChart } from './components/PnlChart';
+import dynamic from 'next/dynamic';
+import Link from 'next/link';
+
+import type { BalancePoint } from './components/BalanceChart';
 import { LiveExposurePanel } from './components/LiveExposurePanel';
 
-import Link from 'next/link';
+const BalanceChart = dynamic(
+  () => import('./components/BalanceChart').then((m) => m.BalanceChart),
+  { ssr: false },
+);
+const PnlChart = dynamic(
+  () => import('./components/PnlChart').then((m) => m.PnlChart),
+  { ssr: false },
+);
 
 import { fetchJson } from '../lib/api-server';
 

@@ -1,11 +1,16 @@
-FROM node:22-alpine
+FROM node:22-alpine AS builder
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-COPY packages ./packages
-COPY apps ./apps
+COPY packages/shared/package.json packages/shared/
+COPY packages/ui/package.json packages/ui/
+COPY packages/api/package.json packages/api/
+COPY apps/web/package.json apps/web/
 
 RUN npm ci
+
+COPY packages ./packages
+COPY apps ./apps
 
 WORKDIR /app/apps/web
 ARG STACK_SLUG=trade
@@ -16,5 +21,20 @@ ENV NEXT_PUBLIC_API_URL=/${STACK_SLUG}-api
 ENV API_INTERNAL_URL=${API_INTERNAL_URL}
 RUN npm run build
 
+FROM node:22-alpine
+RUN addgroup -S app && adduser -S app -G app
+WORKDIR /app
+
+COPY --from=builder /app/apps/web/.next ./apps/web/.next
+COPY --from=builder /app/apps/web/public ./apps/web/public
+COPY --from=builder /app/apps/web/package.json ./apps/web/package.json
+COPY --from=builder /app/apps/web/next.config.js ./apps/web/next.config.js
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/packages ./packages
+
+ENV NEXT_TELEMETRY_DISABLED=1
+
+USER app
 EXPOSE 3000
-CMD ["npm", "run", "start"]
+WORKDIR /app/apps/web
+CMD ["node", "node_modules/.bin/next", "start"]

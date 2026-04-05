@@ -1388,6 +1388,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         return;
       }
       const req = this.externalConfirmations.get(ingestId);
+      if (!this.externalConfirmations.delete(ingestId)) {
+        await ctx.answerCbQuery('Уже обрабатывается');
+        return;
+      }
       await ctx.answerCbQuery('Подтверждаю сигнал...');
 
       const fallback = await this.confirmFromIngestId(ingestId);
@@ -1401,7 +1405,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         await ctx.reply(`Подтверждение не выполнено: ${fallback.error}`);
         return;
       }
-      this.externalConfirmations.delete(ingestId);
       await req?.onResult?.({
         decision: 'confirmed',
         ok: true,

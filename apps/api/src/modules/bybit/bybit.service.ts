@@ -4,6 +4,7 @@ import { RestClientV5 } from 'bybit-api';
 import { normalizeTradingPair, type SignalDto } from '@repo/shared';
 
 import { formatError } from '../../common/format-error';
+import { KeyedMutex } from '../../common/keyed-mutex';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppLogService } from '../app-log/app-log.service';
 import { OrdersService } from '../orders/orders.service';
@@ -159,6 +160,7 @@ export interface SignalExecutionDebugSnapshot {
 @Injectable()
 export class BybitService {
   private readonly logger = new Logger(BybitService.name);
+  private readonly placementLock = new KeyedMutex();
   private readonly staleFlatPollCounts = new Map<string, number>();
   private readonly staleReconcileSuspensions = new Map<string, { count: number; reason?: string }>();
   private static readonly STALE_RECONCILE_REQUIRED_CLEAN_POLLS = 3;
@@ -1856,6 +1858,22 @@ export class BybitService {
       };
     }
 
+    const lockKey = `${symbol}:${signal.direction}`;
+    return this.placementLock.runExclusive(lockKey, () =>
+      this.placeSignalOrdersLocked(signal, rawMessage, origin, symbol, client, testnetMode),
+    );
+  }
+
+  private async placeSignalOrdersLocked(
+    signal: SignalDto,
+    rawMessage: string | undefined,
+    origin: { chatId?: string; messageId?: string } | undefined,
+    symbol: string,
+    client: RestClientV5,
+    _testnetMode: boolean,
+  ): Promise<PlaceOrdersResult> {
+    const side: 'Buy' | 'Sell' = signal.direction === 'long' ? 'Buy' : 'Sell';
+
     try {
       if (
         await this.hasExchangeExposureForDirection(
@@ -1914,8 +1932,6 @@ export class BybitService {
         error: `По паре ${symbol} уже есть активный сигнал ${signal.direction.toUpperCase()} (ордера в работе). Дождитесь закрытия сделки.`,
       };
     }
-
-    const side: 'Buy' | 'Sell' = signal.direction === 'long' ? 'Buy' : 'Sell';
 
     try {
       const lastPrice = await this.getLastPrice(client, symbol);
@@ -1987,12 +2003,29 @@ export class BybitService {
       } else {
         leveragedNotional = defaultOrderUsd;
       }
-      await client.setLeverage({
+      const maxLeverageRaw = await this.settings.get('MAX_LEVERAGE');
+      const maxLeverage =
+        maxLeverageRaw != null && Number.isFinite(Number(maxLeverageRaw)) && Number(maxLeverageRaw) > 0
+          ? Math.round(Number(maxLeverageRaw))
+          : 50;
+      const leverageInt = Math.min(Math.round(signal.leverage), maxLeverage);
+      const levRes = await client.setLeverage({
         category: 'linear',
         symbol,
-        buyLeverage: String(signal.leverage),
-        sellLeverage: String(signal.leverage),
+        buyLeverage: String(leverageInt),
+        sellLeverage: String(leverageInt),
       });
+      const levRc = (levRes as { retCode?: number }).retCode ?? levRes.retCode;
+      if (levRc !== 0 && levRc !== 110043) {
+        const levErr = formatError((levRes as { retMsg?: string }).retMsg ?? 'setLeverage failed');
+        void this.appLog.append('error', 'bybit', 'placeSignalOrders: setLeverage отклонён', {
+          symbol,
+          leverage: leverageInt,
+          retCode: levRc,
+          retMsg: levErr,
+        });
+        return { ok: false, error: `Не удалось установить плечо ${leverageInt}x: ${levErr}` };
+      }
 
       const { qtyStep, minQty, tickSize } = await this.getLinearInstrumentFilters(
         client,
@@ -2088,7 +2121,7 @@ export class BybitService {
           entries: effectiveEntries,
         },
         rawMessage,
-        'ORDERS_PLACED',
+        'PLACING',
         origin,
       );
 
@@ -2245,6 +2278,10 @@ export class BybitService {
           }
         }
       }
+
+      await this.orders.updateSignalStatus(signalRow.id, {
+        status: 'ORDERS_PLACED',
+      });
 
       void this.appLog.append('info', 'bybit', 'placeSignalOrders: успех', {
         symbol,
@@ -2487,31 +2524,33 @@ export class BybitService {
       settleCoin: 'USDT' as const,
       orderFilter: 'Order' as const,
     };
-    try {
-      const active = await client.getActiveOrders({
-        ...base,
-        orderId,
-        // Ищем ордер среди реально активных, иначе New/Untriggered пропадают из snapshot/poll.
-        openOnly: 0,
-        limit: 1,
-      });
-      if (active.retCode === 0 && (active.result?.list?.length ?? 0) > 0) {
-        return active.result!.list![0]!.orderStatus;
+    for (const orderFilter of ['Order', 'StopOrder'] as const) {
+      const filterBase = { ...base, orderFilter };
+      try {
+        const active = await client.getActiveOrders({
+          ...filterBase,
+          orderId,
+          openOnly: 0,
+          limit: 1,
+        });
+        if (active.retCode === 0 && (active.result?.list?.length ?? 0) > 0) {
+          return active.result!.list![0]!.orderStatus;
+        }
+      } catch (e) {
+        this.logger.debug(`getActiveOrders ${orderFilter} ${orderId}: ${formatError(e)}`);
       }
-    } catch (e) {
-      this.logger.debug(`getActiveOrders ${orderId}: ${formatError(e)}`);
-    }
-    try {
-      const hist = await client.getHistoricOrders({
-        ...base,
-        orderId,
-        limit: 1,
-      });
-      if (hist.retCode === 0 && (hist.result?.list?.length ?? 0) > 0) {
-        return hist.result!.list![0]!.orderStatus;
+      try {
+        const hist = await client.getHistoricOrders({
+          ...filterBase,
+          orderId,
+          limit: 1,
+        });
+        if (hist.retCode === 0 && (hist.result?.list?.length ?? 0) > 0) {
+          return hist.result!.list![0]!.orderStatus;
+        }
+      } catch (e) {
+        this.logger.debug(`getHistoricOrders ${orderFilter} ${orderId}: ${formatError(e)}`);
       }
-    } catch (e) {
-      this.logger.debug(`getHistoricOrders ${orderId}: ${formatError(e)}`);
     }
     try {
       const histScan = await client.getHistoricOrders({
@@ -2662,6 +2701,12 @@ export class BybitService {
     );
     if (entryOrders.length === 0) {
       return;
+    }
+
+    const avgEntry =
+      entryOrders.reduce((sum, o) => sum + (o.price ?? 0), 0) / entryOrders.length;
+    if (Number.isFinite(avgEntry) && avgEntry > 0) {
+      takeProfits.sort((a, b) => Math.abs(a - avgEntry) - Math.abs(b - avgEntry));
     }
 
     for (const o of entryOrders) {

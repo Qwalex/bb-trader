@@ -17,7 +17,13 @@ export function getPublicOrigin(request: Request): string {
   const xfHost = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim();
   const xfProto = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim();
   if (xfHost) {
-    return `${xfProto || 'https'}://${xfHost}`;
+    const trustedHosts = (process.env.TRUSTED_HOSTS ?? '')
+      .split(',')
+      .map((h) => h.trim())
+      .filter(Boolean);
+    if (trustedHosts.length === 0 || trustedHosts.includes(xfHost)) {
+      return `${xfProto || 'https'}://${xfHost}`;
+    }
   }
 
   const host = request.headers.get('host')?.split(',')[0]?.trim();

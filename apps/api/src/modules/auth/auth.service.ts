@@ -79,7 +79,7 @@ export class AuthService {
       return true;
     }
     if (!iss) {
-      return true;
+      return false;
     }
     try {
       const iu = new URL(iss);
@@ -178,13 +178,17 @@ export class AuthService {
       return Array.from(new Set(values));
     }
     const webOrigin = this.config.get<string>('WEB_ORIGIN')?.trim();
-    const defaults = [
-      webOrigin,
-      'http://localhost:3000',
-      'http://127.0.0.1:3000',
-      'http://localhost:3003',
-      'http://127.0.0.1:3003',
-    ].filter((v): v is string => typeof v === 'string' && v.length > 0);
+    const defaults: string[] = [webOrigin].filter(
+      (v): v is string => typeof v === 'string' && v.length > 0,
+    );
+    if (process.env.NODE_ENV !== 'production') {
+      defaults.push(
+        'http://localhost:3000',
+        'http://127.0.0.1:3000',
+        'http://localhost:3003',
+        'http://127.0.0.1:3003',
+      );
+    }
     return Array.from(new Set(defaults));
   }
 }
