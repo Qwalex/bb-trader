@@ -281,6 +281,7 @@ Be conservative: if unsure, return "other".`;
   async generateFilterPatterns(params: {
     kind: 'signal' | 'close' | 'result' | 'reentry';
     example: string;
+    workspaceId?: string | null;
   }): Promise<{
     ok: boolean;
     patterns?: string[];
@@ -296,14 +297,15 @@ Be conservative: if unsure, return "other".`;
       return { ok: false, error: 'Пример слишком короткий для генерации паттернов' };
     }
 
-    const apiKey = await this.settings.get('OPENROUTER_API_KEY');
+    const ws = params.workspaceId;
+    const apiKey = await this.settings.get('OPENROUTER_API_KEY', ws);
     if (!apiKey) {
       return { ok: false, error: 'OPENROUTER_API_KEY is not configured' };
     }
 
     const model =
-      (await this.resolveModelKeyWithDefault('OPENROUTER_MODEL_TEXT')) ??
-      (await this.settings.get('OPENROUTER_MODEL_DEFAULT'));
+      (await this.resolveModelKeyWithDefault('OPENROUTER_MODEL_TEXT', ws)) ??
+      (await this.settings.get('OPENROUTER_MODEL_DEFAULT', ws));
     if (!model) {
       return { ok: false, error: 'OPENROUTER model is not configured' };
     }

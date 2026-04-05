@@ -2,7 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { ACTIVE_WORKSPACE_STORAGE_KEY } from '../../lib/active-workspace';
+import {
+  ACTIVE_WORKSPACE_COOKIE_KEY,
+  ACTIVE_WORKSPACE_STORAGE_KEY,
+} from '../../lib/active-workspace';
 import { getApiBase } from '../../lib/api';
 
 type Ws = { id: string; name: string; slug: string; role: string };
@@ -20,6 +23,19 @@ export function WorkspaceSwitcher() {
   const [selectedId, setSelectedId] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+
+  const persistActiveWorkspace = useCallback((id: string) => {
+    try {
+      localStorage.setItem(ACTIVE_WORKSPACE_STORAGE_KEY, id);
+    } catch {
+      /* noop */
+    }
+    try {
+      document.cookie = `${ACTIVE_WORKSPACE_COOKIE_KEY}=${encodeURIComponent(id)}; path=/; max-age=31536000; samesite=lax`;
+    } catch {
+      /* noop */
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -51,11 +67,10 @@ export function WorkspaceSwitcher() {
         const valid = Boolean(stored && list.some((w) => w.id === stored));
         const nextId = valid ? stored : first.id;
         if (!valid) {
-          try {
-            localStorage.setItem(ACTIVE_WORKSPACE_STORAGE_KEY, nextId);
-          } catch {
-            /* noop */
-          }
+          persistActiveWorkspace(nextId);
+        } else {
+          // Продлеваем cookie для SSR даже если localStorage уже валиден.
+          persistActiveWorkspace(nextId);
         }
         setSelectedId(nextId);
       } catch {
@@ -67,17 +82,13 @@ export function WorkspaceSwitcher() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [persistActiveWorkspace]);
 
   const onSelect = useCallback((id: string) => {
     setSelectedId(id);
-    try {
-      localStorage.setItem(ACTIVE_WORKSPACE_STORAGE_KEY, id);
-    } catch {
-      /* noop */
-    }
+    persistActiveWorkspace(id);
     window.location.reload();
-  }, []);
+  }, [persistActiveWorkspace]);
 
   const nameCounts = useMemo(() => {
     const m = new Map<string, number>();

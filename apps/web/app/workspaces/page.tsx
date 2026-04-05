@@ -3,7 +3,10 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 
-import { ACTIVE_WORKSPACE_STORAGE_KEY } from '../../lib/active-workspace';
+import {
+  ACTIVE_WORKSPACE_COOKIE_KEY,
+  ACTIVE_WORKSPACE_STORAGE_KEY,
+} from '../../lib/active-workspace';
 import { getApiBase } from '../../lib/api';
 
 type Ws = { id: string; name: string; slug: string; role: string };
@@ -17,6 +20,19 @@ function dedupeById(list: Ws[]): Ws[] {
 }
 
 export default function WorkspacesPage() {
+  const persistActiveWorkspace = useCallback((id: string) => {
+    try {
+      localStorage.setItem(ACTIVE_WORKSPACE_STORAGE_KEY, id);
+    } catch {
+      /* noop */
+    }
+    try {
+      document.cookie = `${ACTIVE_WORKSPACE_COOKIE_KEY}=${encodeURIComponent(id)}; path=/; max-age=31536000; samesite=lax`;
+    } catch {
+      /* noop */
+    }
+  }, []);
+
   const [list, setList] = useState<Ws[]>([]);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
@@ -110,7 +126,7 @@ export default function WorkspacesPage() {
         if (cur === id) {
           const rest = list.filter((w) => w.id !== id);
           const next = rest[0]?.id;
-          if (next) localStorage.setItem(ACTIVE_WORKSPACE_STORAGE_KEY, next);
+          if (next) persistActiveWorkspace(next);
         }
       } catch {
         /* noop */
@@ -145,11 +161,7 @@ export default function WorkspacesPage() {
       setNewLogin('');
       setMsg({ type: 'ok', text: 'Кабинет создан' });
       if (w?.id) {
-        try {
-          localStorage.setItem(ACTIVE_WORKSPACE_STORAGE_KEY, w.id);
-        } catch {
-          /* noop */
-        }
+        persistActiveWorkspace(w.id);
       }
       await load();
     } catch {

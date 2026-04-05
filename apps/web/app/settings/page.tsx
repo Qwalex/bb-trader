@@ -21,7 +21,7 @@ import {
   labelForKey,
 } from './settings-fields';
 
-import { NAV_ITEMS } from '../../lib/nav-items';
+import { navItemsVisibleForUser } from '../../lib/nav-items';
 
 const NAV_MENU_IN_BURGER_KEY = 'NAV_MENU_IN_BURGER';
 const SETTINGS_KEYS_ADMIN_ONLY_KEY = 'SETTINGS_KEYS_ADMIN_ONLY';
@@ -554,10 +554,10 @@ export default function SettingsPage() {
       if (!res.ok) throw new Error(String(res.status));
       setMessage({
         type: 'ok',
-        text: 'Меню сохранено. При необходимости обновите страницу, чтобы обновить шапку.',
+        text: 'Раскладка шапки сохранена. При необходимости обновите страницу.',
       });
     } catch {
-      setMessage({ type: 'err', text: 'Не удалось сохранить меню' });
+      setMessage({ type: 'err', text: 'Не удалось сохранить раскладку шапки' });
     } finally {
       setNavMenuSaving(false);
     }
@@ -574,13 +574,7 @@ export default function SettingsPage() {
         body: JSON.stringify({ key: SETTINGS_KEYS_ADMIN_ONLY_KEY, value: payload }),
       });
       if (!res.ok) throw new Error(String(res.status));
-      setHiddenSettingKeys(
-        new Set([
-          NAV_MENU_IN_BURGER_KEY,
-          SETTINGS_KEYS_ADMIN_ONLY_KEY,
-          ...adminOnlyKeysDraft,
-        ]),
-      );
+      setHiddenSettingKeys(new Set([SETTINGS_KEYS_ADMIN_ONLY_KEY, ...adminOnlyKeysDraft]));
       setMessage({
         type: 'ok',
         text: 'Список ключей сохранён. Перезагрузите страницу, чтобы обновить список полей.',
@@ -1189,64 +1183,70 @@ export default function SettingsPage() {
         </details>
         ) : null}
 
-        {appIsAdmin ? (
-          <>
-            <details className="card">
-              <summary className="settingsSectionSummary">Меню (администратор)</summary>
-              <div style={{ marginTop: '0.9rem' }}>
-                <p style={{ color: 'var(--muted)', fontSize: '0.88rem', marginBottom: '0.75rem' }}>
-                  Отмеченные пункты открываются из бургера в шапке; снятая отметка — пункт в основной
-                  полоске рядом с кабинетом и «Выйти».
-                </p>
-                <div style={{ display: 'grid', gap: '0.35rem' }}>
-                  {NAV_ITEMS.map((item) => (
-                    <label
-                      key={item.id}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.5rem',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={navInBurgerDraft.has(item.id)}
-                        onChange={() => {
-                          setNavInBurgerDraft((prev) => {
-                            const n = new Set(prev);
-                            if (n.has(item.id)) n.delete(item.id);
-                            else n.add(item.id);
-                            return n;
-                          });
-                        }}
-                      />
-                      <span>{item.label}</span>
-                    </label>
-                  ))}
-                </div>
-                <button
-                  type="button"
-                  className="btn"
-                  style={{ marginTop: '0.85rem' }}
-                  disabled={navMenuSaving}
-                  onClick={() => void saveNavMenuConfig()}
-                >
-                  {navMenuSaving ? 'Сохранение…' : 'Сохранить меню'}
-                </button>
-              </div>
-            </details>
+        <section className="card" aria-labelledby="nav-burger-layout-heading">
+          <h2
+            id="nav-burger-layout-heading"
+            style={{
+              margin: 0,
+              fontSize: '1rem',
+              fontWeight: 700,
+              color: 'var(--foreground)',
+            }}
+          >
+            Бургер в шапке
+          </h2>
+          <p style={{ color: 'var(--muted)', fontSize: '0.88rem', margin: '0.55rem 0 0.75rem' }}>
+            Только внешний вид: что уходит под ☰, а что остаётся в полоске. На права доступа к
+            разделам и полям это не влияет.
+          </p>
+          <div style={{ display: 'grid', gap: '0.35rem' }}>
+            {navItemsVisibleForUser(appIsAdmin).map((item) => (
+              <label
+                key={item.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  cursor: 'pointer',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={navInBurgerDraft.has(item.id)}
+                  onChange={() => {
+                    setNavInBurgerDraft((prev) => {
+                      const n = new Set(prev);
+                      if (n.has(item.id)) n.delete(item.id);
+                      else n.add(item.id);
+                      return n;
+                    });
+                  }}
+                />
+                <span>{item.label}</span>
+              </label>
+            ))}
+          </div>
+          <button
+            type="button"
+            className="btn"
+            style={{ marginTop: '0.85rem' }}
+            disabled={navMenuSaving}
+            onClick={() => void saveNavMenuConfig()}
+          >
+            {navMenuSaving ? 'Сохранение…' : 'Сохранить раскладку'}
+          </button>
+        </section>
 
+        {appIsAdmin ? (
             <details className="card">
               <summary className="settingsSectionSummary">
-                Ключи настроек только для администратора
+                Доступ к полям настроек (только администратор приложения)
               </summary>
               <div style={{ marginTop: '0.9rem' }}>
                 <p style={{ color: 'var(--muted)', fontSize: '0.88rem', marginBottom: '0.75rem' }}>
-                  Выбранные ключи скрыты от обычных пользователей и недоступны им в API. Ключи{' '}
-                  <code style={{ fontSize: '0.8rem' }}>{NAV_MENU_IN_BURGER_KEY}</code> и{' '}
-                  <code style={{ fontSize: '0.8rem' }}>{SETTINGS_KEYS_ADMIN_ONLY_KEY}</code> всегда
-                  только у администратора.
+                  Выбранные ключи скрыты от обычных пользователей кабинета и недоступны им в API. Ключ{' '}
+                  <code style={{ fontSize: '0.8rem' }}>{SETTINGS_KEYS_ADMIN_ONLY_KEY}</code> (этот
+                  список) всегда только у администратора.
                 </p>
                 <div
                   style={{
@@ -1294,7 +1294,6 @@ export default function SettingsPage() {
                 </button>
               </div>
             </details>
-          </>
         ) : null}
 
         <details className="card">

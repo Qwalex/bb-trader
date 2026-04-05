@@ -6,9 +6,10 @@ import { PrismaService } from '../../prisma/prisma.service';
 export class UserbotPublishService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async listPublishGroups() {
+  async listPublishGroups(workspaceId: string) {
     const prismaAny = this.prisma as any;
     const rows = await prismaAny.tgUserbotPublishGroup.findMany({
+      where: { workspaceId },
       orderBy: [{ enabled: 'desc' }, { title: 'asc' }],
     });
     return { items: rows };
@@ -20,7 +21,7 @@ export class UserbotPublishService {
     chatId?: string;
     enabled?: boolean;
     publishEveryN?: number;
-  }) {
+  }, workspaceId: string) {
     const title = body.title?.trim() ?? '';
     const chatId = body.chatId?.trim() ?? '';
     const enabled = body.enabled !== false;
@@ -31,25 +32,31 @@ export class UserbotPublishService {
     if (body.id?.trim()) {
       const id = body.id.trim();
       const prismaAny = this.prisma as any;
-      const updated = await prismaAny.tgUserbotPublishGroup.update({
-        where: { id },
+      const updated = await prismaAny.tgUserbotPublishGroup.updateMany({
+        where: { id, workspaceId },
         data: { title, chatId, enabled, publishEveryN },
       });
-      return { ok: true, item: updated };
+      if (!updated || Number(updated.count ?? 0) === 0) {
+        return { ok: false, error: 'publish-группа не найдена' };
+      }
+      const item = await prismaAny.tgUserbotPublishGroup.findFirst({
+        where: { id, workspaceId },
+      });
+      return { ok: true, item };
     }
 
     const prismaAny = this.prisma as any;
     const created = await prismaAny.tgUserbotPublishGroup.create({
-      data: { title, chatId, enabled, publishEveryN },
+      data: { workspaceId, title, chatId, enabled, publishEveryN },
     });
     return { ok: true, item: created };
   }
 
-  async deletePublishGroup(id: string) {
+  async deletePublishGroup(id: string, workspaceId: string) {
     const v = id.trim();
     if (!v) return { ok: false, error: 'id обязателен' };
     const prismaAny = this.prisma as any;
-    await prismaAny.tgUserbotPublishGroup.delete({ where: { id: v } });
+    await prismaAny.tgUserbotPublishGroup.deleteMany({ where: { id: v, workspaceId } });
     return { ok: true };
   }
 }

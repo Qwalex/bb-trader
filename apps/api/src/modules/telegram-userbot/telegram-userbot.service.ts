@@ -120,9 +120,11 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         this.settings.get('TELEGRAM_USERBOT_API_HASH', workspaceId),
         this.settings.get('TELEGRAM_USERBOT_SESSION', workspaceId),
       ]);
-    const chatsTotal = await this.prisma.tgUserbotChat.count();
+    const chatsTotal = await this.prisma.tgUserbotChat.count({
+      where: { workspaceId },
+    });
     const chatsEnabled = await this.prisma.tgUserbotChat.count({
-      where: { enabled: true },
+      where: { workspaceId, enabled: true },
     });
     return {
       connected: await this.isClientAuthorized(this.client),
@@ -145,27 +147,28 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async getTodayMetrics() {
+  async getTodayMetrics(workspaceId?: string | null) {
     const start = this.startOfToday();
     const [readMessages, signalsFound, signalsPlaced, parseIncomplete, parseError] =
       await Promise.all([
         this.prisma.tgUserbotIngest.count({
-          where: { createdAt: { gte: start } },
+          where: { workspaceId: workspaceId ?? null, createdAt: { gte: start } },
         }),
         this.prisma.tgUserbotIngest.count({
-          where: { createdAt: { gte: start }, classification: 'signal' },
+          where: { workspaceId: workspaceId ?? null, createdAt: { gte: start }, classification: 'signal' },
         }),
         this.prisma.tgUserbotIngest.count({
-          where: { createdAt: { gte: start }, status: 'placed' },
+          where: { workspaceId: workspaceId ?? null, createdAt: { gte: start }, status: 'placed' },
         }),
         this.prisma.tgUserbotIngest.count({
-          where: { createdAt: { gte: start }, status: 'parse_incomplete' },
+          where: { workspaceId: workspaceId ?? null, createdAt: { gte: start }, status: 'parse_incomplete' },
         }),
         this.prisma.tgUserbotIngest.count({
-          where: { createdAt: { gte: start }, status: 'parse_error' },
+          where: { workspaceId: workspaceId ?? null, createdAt: { gte: start }, status: 'parse_error' },
         }),
       ]);
     const recent = await this.prisma.tgUserbotIngest.findMany({
+      where: { workspaceId: workspaceId ?? null },
       orderBy: { createdAt: 'desc' },
       take: 120,
       select: {
@@ -331,7 +334,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     return { ok: true, qr: this.qrState };
   }
 
-  async syncChats() {
+  async syncChats(workspaceId: string) {
     if (!this.client || !(await this.isClientAuthorized(this.client))) {
       return { ok: false, error: 'Userbot не подключен.' };
     }
@@ -366,23 +369,24 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         (d.entity as Record<string, unknown> | undefined)?.username,
       );
       await this.prisma.tgUserbotChat.upsert({
-        where: { chatId },
-        create: { chatId, title, username, enabled: false },
+        where: { workspaceId_chatId: { workspaceId, chatId } },
+        create: { workspaceId, chatId, title, username, enabled: false },
         update: { title, username },
       });
       upserted += 1;
     }
 
-    await this.refreshEnabledChatsCache();
+    await this.refreshEnabledChatsCache(workspaceId);
     return { ok: true, upserted };
   }
 
-  async listChats() {
+  async listChats(workspaceId: string) {
     const [rows, bySource] = await Promise.all([
       this.prisma.tgUserbotChat.findMany({
+        where: { workspaceId },
         orderBy: [{ enabled: 'desc' }, { title: 'asc' }],
       }),
-      this.getSourceMartingaleMap(),
+      this.getSourceMartingaleMap(workspaceId),
     ]);
     return rows.map((row) => ({
       ...row,
@@ -417,30 +421,31 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     return out;
   }
 
-  private async getSourceMartingaleMap(): Promise<SourceMartingaleMap> {
-    const raw = await this.settings.get('SOURCE_MARTINGALE_MULTIPLIERS');
+  private async getSourceMartingaleMap(workspaceId?: string | null): Promise<SourceMartingaleMap> {
+    const raw = await this.settings.get('SOURCE_MARTINGALE_MULTIPLIERS', workspaceId);
     return this.parseSourceMartingaleMap(raw);
   }
 
   private async setSourceMartingaleMultiplier(
     sourceName: string,
     multiplier: number | null,
+    workspaceId?: string | null,
   ): Promise<void> {
     const source = sourceName.trim().toLowerCase();
     if (!source) {
       return;
     }
-    const map = await this.getSourceMartingaleMap();
+    const map = await this.getSourceMartingaleMap(workspaceId);
     if (multiplier == null || !Number.isFinite(multiplier) || multiplier <= 1) {
       delete map[source];
     } else {
       map[source] = Math.round(multiplier * 1_000_000) / 1_000_000;
     }
-    await this.settings.set('SOURCE_MARTINGALE_MULTIPLIERS', JSON.stringify(map));
+    await this.settings.set('SOURCE_MARTINGALE_MULTIPLIERS', JSON.stringify(map), workspaceId);
   }
 
-  listPublishGroups() {
-    return this.userbotPublish.listPublishGroups();
+  listPublishGroups(workspaceId: string) {
+    return this.userbotPublish.listPublishGroups(workspaceId);
   }
 
   createOrUpdatePublishGroup(body: {
@@ -449,12 +454,12 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     chatId?: string;
     enabled?: boolean;
     publishEveryN?: number;
-  }) {
-    return this.userbotPublish.createOrUpdatePublishGroup(body);
+  }, workspaceId: string) {
+    return this.userbotPublish.createOrUpdatePublishGroup(body, workspaceId);
   }
 
-  deletePublishGroup(id: string) {
-    return this.userbotPublish.deletePublishGroup(id);
+  deletePublishGroup(id: string, workspaceId: string) {
+    return this.userbotPublish.deletePublishGroup(id, workspaceId);
   }
 
   /**
@@ -464,6 +469,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   async listIngestLinkCandidates(options: {
     limit?: number;
     chatId?: string;
+    workspaceId: string;
   }): Promise<{
     items: Array<{
       ingestId: string;
@@ -480,7 +486,10 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     const chatIdFilter = options.chatId?.trim();
 
     const rows = await this.prisma.tgUserbotIngest.findMany({
-      where: chatIdFilter ? { chatId: chatIdFilter } : {},
+      where: {
+        workspaceId: options.workspaceId,
+        ...(chatIdFilter ? { chatId: chatIdFilter } : {}),
+      },
       orderBy: { createdAt: 'desc' },
       take: limit,
       select: {
@@ -496,7 +505,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
     const chatIds = Array.from(new Set(rows.map((r) => r.chatId)));
     const chats = await this.prisma.tgUserbotChat.findMany({
-      where: { chatId: { in: chatIds } },
+      where: { workspaceId: options.workspaceId, chatId: { in: chatIds } },
       select: { chatId: true, title: true },
     });
     const titleByChat = new Map(chats.map((c) => [c.chatId, c.title]));
@@ -521,9 +530,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async listFilterGroups() {
+  async listFilterGroups(workspaceId: string) {
     const chatRows = await this.prisma.tgUserbotChat.findMany({
-      where: { enabled: true },
+      where: { workspaceId, enabled: true },
       orderBy: { title: 'asc' },
       select: { title: true },
     });
@@ -537,9 +546,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async listFilterExamples() {
+  async listFilterExamples(workspaceId: string) {
     const rows = await this.prisma.tgUserbotFilterExample.findMany({
-      where: { enabled: true },
+      where: { workspaceId, enabled: true },
       orderBy: [{ groupName: 'asc' }, { kind: 'asc' }, { createdAt: 'asc' }],
       select: {
         id: true,
@@ -553,9 +562,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     return { items: rows };
   }
 
-  async listFilterPatterns() {
+  async listFilterPatterns(workspaceId: string) {
     const rows = await this.prisma.tgUserbotFilterPattern.findMany({
-      where: { enabled: true },
+      where: { workspaceId, enabled: true },
       orderBy: [{ groupName: 'asc' }, { kind: 'asc' }, { createdAt: 'asc' }],
       select: {
         id: true,
@@ -574,7 +583,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     kind?: 'signal' | 'close' | 'result' | 'reentry';
     example?: string;
     requiresQuote?: boolean;
-  }) {
+  }, workspaceId: string) {
     const groupName = body.groupName?.trim() ?? '';
     const kind = body.kind;
     const example = body.example?.trim() ?? '';
@@ -589,7 +598,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       return { ok: false, error: 'example слишком короткий (минимум 6 символов)' };
     }
     const created = await this.prisma.tgUserbotFilterExample.create({
-      data: { groupName, kind, example, requiresQuote, enabled: true },
+      data: { workspaceId, groupName, kind, example, requiresQuote, enabled: true },
       select: {
         id: true,
         groupName: true,
@@ -602,9 +611,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     return { ok: true, item: created };
   }
 
-  async deleteFilterExample(id: string) {
-    await this.prisma.tgUserbotFilterExample.update({
-      where: { id },
+  async deleteFilterExample(id: string, workspaceId: string) {
+    await this.prisma.tgUserbotFilterExample.updateMany({
+      where: { id, workspaceId },
       data: { enabled: false },
     });
     return { ok: true };
@@ -615,7 +624,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     kind?: 'signal' | 'close' | 'result' | 'reentry';
     pattern?: string;
     requiresQuote?: boolean;
-  }) {
+  }, workspaceId: string) {
     const groupName = body.groupName?.trim() ?? '';
     const kind = body.kind;
     const pattern = body.pattern?.trim() ?? '';
@@ -630,7 +639,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       return { ok: false, error: 'pattern слишком короткий (минимум 2 символа)' };
     }
     const created = await this.prisma.tgUserbotFilterPattern.create({
-      data: { groupName, kind, pattern, requiresQuote, enabled: true },
+      data: { workspaceId, groupName, kind, pattern, requiresQuote, enabled: true },
       select: {
         id: true,
         groupName: true,
@@ -643,9 +652,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     return { ok: true, item: created };
   }
 
-  async deleteFilterPattern(id: string) {
-    await this.prisma.tgUserbotFilterPattern.update({
-      where: { id },
+  async deleteFilterPattern(id: string, workspaceId: string) {
+    await this.prisma.tgUserbotFilterPattern.updateMany({
+      where: { id, workspaceId },
       data: { enabled: false },
     });
     return { ok: true };
@@ -654,7 +663,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   async generateFilterPatterns(body: {
     kind?: 'signal' | 'close' | 'result' | 'reentry';
     example?: string;
-  }) {
+  }, workspaceId: string) {
     const kind = body.kind;
     const example = body.example?.trim() ?? '';
     if (kind !== 'signal' && kind !== 'close' && kind !== 'result' && kind !== 'reentry') {
@@ -663,16 +672,16 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     if (example.length < 6) {
       return { ok: false, error: 'example слишком короткий (минимум 6 символов)' };
     }
-    return this.transcript.generateFilterPatterns({ kind, example });
+    return this.transcript.generateFilterPatterns({ kind, example, workspaceId });
   }
 
-  async scanTodayMessages(limitPerChatRaw?: number) {
-    return this.scanTodayMessagesCore(limitPerChatRaw, true);
+  async scanTodayMessages(limitPerChatRaw?: number, workspaceId?: string | null) {
+    return this.scanTodayMessagesCore(limitPerChatRaw, true, workspaceId);
   }
 
-  async rereadIngestMessage(ingestId: string) {
-    const ingest = await this.prisma.tgUserbotIngest.findUnique({
-      where: { id: ingestId },
+  async rereadIngestMessage(ingestId: string, workspaceId: string) {
+    const ingest = await this.prisma.tgUserbotIngest.findFirst({
+      where: { id: ingestId, workspaceId },
       select: {
         id: true,
         chatId: true,
@@ -695,12 +704,13 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     return { ok: true };
   }
 
-  async rereadAllIngestMessages(limitRaw?: number) {
+  async rereadAllIngestMessages(limitRaw?: number, workspaceId?: string | null) {
     const limit =
       typeof limitRaw === 'number' && Number.isFinite(limitRaw)
         ? Math.max(1, Math.min(500, Math.floor(limitRaw)))
         : 80;
     const rows = await this.prisma.tgUserbotIngest.findMany({
+      where: { workspaceId: workspaceId ?? null },
       orderBy: { createdAt: 'desc' },
       take: limit,
       select: {
@@ -749,12 +759,13 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   private async scanTodayMessagesCore(
     limitPerChatRaw?: number,
     includeTodayMetrics = false,
+    workspaceId?: string | null,
   ) {
     if (!this.client || !(await this.isClientAuthorized(this.client))) {
       return { ok: false, error: 'Userbot не подключен.' };
     }
     const enabledChats = await this.prisma.tgUserbotChat.findMany({
-      where: { enabled: true },
+      where: { workspaceId: workspaceId ?? null, enabled: true },
       select: { chatId: true, title: true },
     });
     const limitPerChat =
@@ -826,7 +837,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    const today = includeTodayMetrics ? await this.getTodayMetrics() : undefined;
+    const today = includeTodayMetrics ? await this.getTodayMetrics(workspaceId) : undefined;
     return {
       ok: true,
       chatsProcessed,
@@ -901,6 +912,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       /** null = наследовать глобальный BUMP_TO_MIN_EXCHANGE_LOT */
       minLotBump?: boolean | null;
     },
+    workspaceId: string,
   ) {
     const entryNorm =
       body.defaultEntryUsd !== undefined
@@ -942,8 +954,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
     const prismaAny = this.prisma as any;
     const row = await prismaAny.tgUserbotChat.upsert({
-      where: { chatId },
+      where: { workspaceId_chatId: { workspaceId, chatId } },
       create: {
+        workspaceId,
         chatId,
         title: chatId,
         enabled: body.enabled === true,
@@ -962,9 +975,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     });
     if (martingaleNorm !== undefined) {
       const rowTitle = String(row?.title ?? chatId);
-      await this.setSourceMartingaleMultiplier(rowTitle, martingaleNorm);
+      await this.setSourceMartingaleMultiplier(rowTitle, martingaleNorm, workspaceId);
     }
-    await this.refreshEnabledChatsCache();
+    await this.refreshEnabledChatsCache(workspaceId);
     return { ok: true };
   }
 
@@ -3303,9 +3316,13 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     return code === 'P2002';
   }
 
-  private async refreshEnabledChatsCache() {
+  private async refreshEnabledChatsCache(workspaceId?: string | null) {
+    const ws =
+      workspaceId?.trim() ||
+      process.env.BOOTSTRAP_WORKSPACE_ID?.trim() ||
+      null;
     const rows = await this.prisma.tgUserbotChat.findMany({
-      where: { enabled: true },
+      where: { workspaceId: ws, enabled: true },
       select: { chatId: true },
     });
     this.enabledChatIds = new Set(rows.map((r) => r.chatId));

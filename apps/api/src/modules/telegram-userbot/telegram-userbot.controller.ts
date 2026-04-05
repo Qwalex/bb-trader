@@ -29,8 +29,9 @@ export class TelegramUserbotController {
   @ApiOperation({ summary: 'Метрики userbot за сегодня' })
   @ApiOkResponse({ description: 'Метрики получены' })
   @Get('metrics/today')
-  async metricsToday() {
-    return this.userbot.getTodayMetrics();
+  async metricsToday(@CurrentUser() user: AuthenticatedRequestContext | null) {
+    const workspaceId = requireWorkspaceId(user);
+    return this.userbot.getTodayMetrics(workspaceId);
   }
 
   @ApiOperation({ summary: 'Подключить userbot из сохраненной сессии' })
@@ -74,15 +75,17 @@ export class TelegramUserbotController {
   @ApiOperation({ summary: 'Синхронизировать чаты userbot' })
   @ApiOkResponse({ description: 'Синхронизация чатов выполнена' })
   @Post('chats/sync')
-  async syncChats() {
-    return this.userbot.syncChats();
+  async syncChats(@CurrentUser() user: AuthenticatedRequestContext | null) {
+    const workspaceId = requireWorkspaceId(user);
+    return this.userbot.syncChats(workspaceId);
   }
 
   @ApiOperation({ summary: 'Список чатов userbot' })
   @ApiOkResponse({ description: 'Список чатов получен' })
   @Get('chats')
-  async listChats() {
-    return this.userbot.listChats();
+  async listChats(@CurrentUser() user: AuthenticatedRequestContext | null) {
+    const workspaceId = requireWorkspaceId(user);
+    return this.userbot.listChats(workspaceId);
   }
 
   /**
@@ -94,14 +97,17 @@ export class TelegramUserbotController {
   @ApiOkResponse({ description: 'Кандидаты получены' })
   @Get('ingest-link-candidates')
   async ingestLinkCandidates(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
     @Query('limit') limit?: string,
     @Query('chatId') chatId?: string,
   ) {
+    const workspaceId = requireWorkspaceId(user);
     const raw = limit ? parseInt(limit, 10) : undefined;
     const n = Number.isFinite(raw) ? raw : undefined;
     return this.userbot.listIngestLinkCandidates({
       limit: n,
       chatId: typeof chatId === 'string' ? chatId : undefined,
+      workspaceId,
     });
   }
 
@@ -118,16 +124,20 @@ export class TelegramUserbotController {
     @CurrentUser() user: AuthenticatedRequestContext | null,
     @Body() body?: { limitPerChat?: number },
   ) {
-    requireWorkspaceId(user);
-    return this.userbot.scanTodayMessages(body?.limitPerChat);
+    const workspaceId = requireWorkspaceId(user);
+    return this.userbot.scanTodayMessages(body?.limitPerChat, workspaceId);
   }
 
   @ApiOperation({ summary: 'Перечитать ingest-сообщение по ID' })
   @ApiParam({ name: 'ingestId', description: 'ID ingest-записи' })
   @ApiOkResponse({ description: 'Перечитывание выполнено' })
   @Post('reread/:ingestId')
-  async reread(@Param('ingestId') ingestId: string) {
-    return this.userbot.rereadIngestMessage(ingestId);
+  async reread(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
+    @Param('ingestId') ingestId: string,
+  ) {
+    const workspaceId = requireWorkspaceId(user);
+    return this.userbot.rereadIngestMessage(ingestId, workspaceId);
   }
 
   @ApiOperation({ summary: 'Перечитать batch ingest-сообщений' })
@@ -139,36 +149,44 @@ export class TelegramUserbotController {
   })
   @ApiOkResponse({ description: 'Batch-перечитывание выполнено' })
   @Post('reread-all')
-  async rereadAll(@Body() body?: { limit?: number }) {
-    return this.userbot.rereadAllIngestMessages(body?.limit);
+  async rereadAll(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
+    @Body() body?: { limit?: number },
+  ) {
+    const workspaceId = requireWorkspaceId(user);
+    return this.userbot.rereadAllIngestMessages(body?.limit, workspaceId);
   }
 
   @ApiOperation({ summary: 'Список групп фильтров' })
   @ApiOkResponse({ description: 'Группы фильтров получены' })
   @Get('filters/groups')
-  async listFilterGroups() {
-    return this.userbot.listFilterGroups();
+  async listFilterGroups(@CurrentUser() user: AuthenticatedRequestContext | null) {
+    const workspaceId = requireWorkspaceId(user);
+    return this.userbot.listFilterGroups(workspaceId);
   }
 
   @ApiOperation({ summary: 'Список фильтр-примеров' })
   @ApiOkResponse({ description: 'Примеры фильтров получены' })
   @Get('filters/examples')
-  async listFilterExamples() {
-    return this.userbot.listFilterExamples();
+  async listFilterExamples(@CurrentUser() user: AuthenticatedRequestContext | null) {
+    const workspaceId = requireWorkspaceId(user);
+    return this.userbot.listFilterExamples(workspaceId);
   }
 
   @ApiOperation({ summary: 'Список regex-паттернов фильтров' })
   @ApiOkResponse({ description: 'Паттерны фильтров получены' })
   @Get('filters/patterns')
-  async listFilterPatterns() {
-    return this.userbot.listFilterPatterns();
+  async listFilterPatterns(@CurrentUser() user: AuthenticatedRequestContext | null) {
+    const workspaceId = requireWorkspaceId(user);
+    return this.userbot.listFilterPatterns(workspaceId);
   }
 
   @ApiOperation({ summary: 'Список publish-групп' })
   @ApiOkResponse({ description: 'Publish-группы получены' })
   @Get('publish-groups')
-  async listPublishGroups() {
-    return this.userbot.listPublishGroups();
+  async listPublishGroups(@CurrentUser() user: AuthenticatedRequestContext | null) {
+    const workspaceId = requireWorkspaceId(user);
+    return this.userbot.listPublishGroups(workspaceId);
   }
 
   @ApiOperation({ summary: 'Создать или обновить publish-группу' })
@@ -187,6 +205,7 @@ export class TelegramUserbotController {
   @ApiOkResponse({ description: 'Publish-группа сохранена' })
   @Post('publish-groups')
   async createOrUpdatePublishGroup(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
     @Body()
     body: {
       id?: string;
@@ -196,15 +215,20 @@ export class TelegramUserbotController {
       publishEveryN?: number;
     },
   ) {
-    return this.userbot.createOrUpdatePublishGroup(body);
+    const workspaceId = requireWorkspaceId(user);
+    return this.userbot.createOrUpdatePublishGroup(body, workspaceId);
   }
 
   @ApiOperation({ summary: 'Удалить publish-группу' })
   @ApiParam({ name: 'id', description: 'ID publish-группы' })
   @ApiOkResponse({ description: 'Publish-группа удалена' })
   @Post('publish-groups/:id/delete')
-  async deletePublishGroup(@Param('id') id: string) {
-    return this.userbot.deletePublishGroup(id);
+  async deletePublishGroup(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
+    @Param('id') id: string,
+  ) {
+    const workspaceId = requireWorkspaceId(user);
+    return this.userbot.deletePublishGroup(id, workspaceId);
   }
 
   @ApiOperation({ summary: 'Создать фильтр-пример' })
@@ -222,6 +246,7 @@ export class TelegramUserbotController {
   @ApiOkResponse({ description: 'Фильтр-пример создан' })
   @Post('filters/examples')
   async createFilterExample(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
     @Body()
     body: {
       groupName?: string;
@@ -230,15 +255,20 @@ export class TelegramUserbotController {
       requiresQuote?: boolean;
     },
   ) {
-    return this.userbot.createFilterExample(body);
+    const workspaceId = requireWorkspaceId(user);
+    return this.userbot.createFilterExample(body, workspaceId);
   }
 
   @ApiOperation({ summary: 'Удалить фильтр-пример' })
   @ApiParam({ name: 'id', description: 'ID фильтр-примера' })
   @ApiOkResponse({ description: 'Фильтр-пример удалён' })
   @Post('filters/examples/:id/delete')
-  async deleteFilterExample(@Param('id') id: string) {
-    return this.userbot.deleteFilterExample(id);
+  async deleteFilterExample(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
+    @Param('id') id: string,
+  ) {
+    const workspaceId = requireWorkspaceId(user);
+    return this.userbot.deleteFilterExample(id, workspaceId);
   }
 
   @ApiOperation({ summary: 'Создать regex-паттерн фильтра' })
@@ -256,6 +286,7 @@ export class TelegramUserbotController {
   @ApiOkResponse({ description: 'Паттерн фильтра создан' })
   @Post('filters/patterns')
   async createFilterPattern(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
     @Body()
     body: {
       groupName?: string;
@@ -264,15 +295,20 @@ export class TelegramUserbotController {
       requiresQuote?: boolean;
     },
   ) {
-    return this.userbot.createFilterPattern(body);
+    const workspaceId = requireWorkspaceId(user);
+    return this.userbot.createFilterPattern(body, workspaceId);
   }
 
   @ApiOperation({ summary: 'Удалить regex-паттерн фильтра' })
   @ApiParam({ name: 'id', description: 'ID паттерна' })
   @ApiOkResponse({ description: 'Паттерн удалён' })
   @Post('filters/patterns/:id/delete')
-  async deleteFilterPattern(@Param('id') id: string) {
-    return this.userbot.deleteFilterPattern(id);
+  async deleteFilterPattern(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
+    @Param('id') id: string,
+  ) {
+    const workspaceId = requireWorkspaceId(user);
+    return this.userbot.deleteFilterPattern(id, workspaceId);
   }
 
   @ApiOperation({ summary: 'Сгенерировать regex-паттерны по примеру' })
@@ -288,13 +324,15 @@ export class TelegramUserbotController {
   @ApiOkResponse({ description: 'Паттерны сгенерированы' })
   @Post('filters/patterns/generate')
   async generateFilterPatterns(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
     @Body()
     body: {
       kind?: 'signal' | 'close' | 'result' | 'reentry';
       example?: string;
     },
   ) {
-    return this.userbot.generateFilterPatterns(body);
+    const workspaceId = requireWorkspaceId(user);
+    return this.userbot.generateFilterPatterns(body, workspaceId);
   }
 
   @ApiOperation({ summary: 'Обновить настройки конкретного чата' })
@@ -319,6 +357,7 @@ export class TelegramUserbotController {
   @ApiOkResponse({ description: 'Настройки чата обновлены' })
   @Put('chats/:chatId')
   async updateChat(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
     @Param('chatId') chatId: string,
     @Body()
     body: {
@@ -330,6 +369,7 @@ export class TelegramUserbotController {
       minLotBump?: boolean | null;
     },
   ) {
-    return this.userbot.updateChat(chatId, body);
+    const workspaceId = requireWorkspaceId(user);
+    return this.userbot.updateChat(chatId, body, workspaceId);
   }
 }
