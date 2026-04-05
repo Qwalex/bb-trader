@@ -52,33 +52,85 @@ export class AuthService {
     });
   }
 
-  private async resolveWorkspaceContext(userId: string): Promise<AuthenticatedRequestContext | null> {
+  private extractJwtUserClaims(payload: jwt.JwtPayload): {
+    email: string | null;
+    workspaceName: string | null;
+    workspaceSlug: string | null;
+  } {
+    const email = typeof payload.email === 'string' ? payload.email : null;
+    const rawMeta = payload.user_metadata;
+    const meta =
+      rawMeta && typeof rawMeta === 'object' && !Array.isArray(rawMeta)
+        ? (rawMeta as Record<string, unknown>)
+        : {};
+    return {
+      email,
+      workspaceName: typeof meta.workspace_name === 'string' ? meta.workspace_name : null,
+      workspaceSlug: typeof meta.workspace_slug === 'string' ? meta.workspace_slug : null,
+    };
+  }
+
+  /** iss из GoTrue и NEXT_PUBLIC_SUPABASE_URL в API могут отличаться (http/127.0.0.1 vs публичный хост). */
+  private issuerAllowed(issRaw: string, supabaseUrlRaw: string): boolean {
+    const iss = issRaw.trim().replace(/\/+$/, '');
+    const base = supabaseUrlRaw.trim().replace(/\/+$/, '');
+    const allowed = new Set(['supabase', base, `${base}/auth/v1`].filter(Boolean));
+    if (allowed.has(iss)) {
+      return true;
+    }
+    if (!iss) {
+      return true;
+    }
+    try {
+      const iu = new URL(iss);
+      const bu = new URL(base.startsWith('http') ? base : `https://${base}`);
+      const pathOk = iu.pathname.replace(/\/$/, '') === '/auth/v1';
+      return pathOk && iu.hostname === bu.hostname;
+    } catch {
+      return false;
+    }
+  }
+
+  private async resolveWorkspaceContext(
+    userId: string,
+    jwtClaims: { email: string | null; workspaceName: string | null; workspaceSlug: string | null },
+  ): Promise<AuthenticatedRequestContext> {
     const admin = this.getSupabaseAdminClient();
-    if (!admin) {
-      return {
-        userId,
-        email: null,
-        workspaceId: null,
-        role: null,
-      };
+    if (admin) {
+      try {
+        const userResult = await admin.auth.admin.getUserById(userId);
+        const user = userResult.data.user;
+        if (user) {
+          const metadata = user.user_metadata ?? {};
+          const bootstrap = await this.workspaceBootstrap.ensureBootstrapWorkspace({
+            userId,
+            email: user.email ?? null,
+            workspaceName:
+              typeof metadata.workspace_name === 'string' ? metadata.workspace_name : null,
+            workspaceSlug:
+              typeof metadata.workspace_slug === 'string' ? metadata.workspace_slug : null,
+          });
+          return {
+            userId,
+            email: user.email ?? null,
+            workspaceId: bootstrap.workspaceId,
+            role: bootstrap.role,
+          };
+        }
+      } catch {
+        // сеть / неверный service role URL — не рвём сессию, берём claims из JWT
+      }
     }
-    const userResult = await admin.auth.admin.getUserById(userId);
-    const user = userResult.data.user;
-    if (!user) {
-      return null;
-    }
-    const metadata = user.user_metadata ?? {};
+
     const bootstrap = await this.workspaceBootstrap.ensureBootstrapWorkspace({
       userId,
-      email: user.email ?? null,
-      workspaceName:
-        typeof metadata.workspace_name === 'string' ? metadata.workspace_name : null,
-      workspaceSlug:
-        typeof metadata.workspace_slug === 'string' ? metadata.workspace_slug : null,
+      email: jwtClaims.email,
+      workspaceName: jwtClaims.workspaceName,
+      workspaceSlug: jwtClaims.workspaceSlug,
     });
     return {
       userId,
-      email: user.email ?? null,
+      email: jwtClaims.email,
       workspaceId: bootstrap.workspaceId,
       role: bootstrap.role,
     };
@@ -109,13 +161,11 @@ export class AuthService {
     }
     const issuer = typeof payload.iss === 'string' ? payload.iss.trim().replace(/\/+$/, '') : '';
     const supabaseUrl = this.getSupabaseUrl()?.replace(/\/+$/, '') ?? '';
-    const allowedIssuers = new Set(
-      ['supabase', supabaseUrl, supabaseUrl ? `${supabaseUrl}/auth/v1` : ''].filter(Boolean),
-    );
-    if (issuer && !allowedIssuers.has(issuer)) {
+    if (issuer && supabaseUrl && !this.issuerAllowed(issuer, supabaseUrl)) {
       return null;
     }
-    return this.resolveWorkspaceContext(userId);
+    const jwtClaims = this.extractJwtUserClaims(payload);
+    return this.resolveWorkspaceContext(userId, jwtClaims);
   }
 
   getAllowedCorsOrigins(): string[] {
