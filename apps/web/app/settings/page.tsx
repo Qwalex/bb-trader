@@ -26,6 +26,29 @@ import { NAV_ITEMS } from '../../lib/nav-items';
 const NAV_MENU_IN_BURGER_KEY = 'NAV_MENU_IN_BURGER';
 const SETTINGS_KEYS_ADMIN_ONLY_KEY = 'SETTINGS_KEYS_ADMIN_ONLY';
 
+function IconTrash(props: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={20}
+      height={20}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      {...props}
+    >
+      <path d="M3 6h18" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+      <line x1="10" y1="11" x2="10" y2="17" />
+      <line x1="14" y1="11" x2="14" y2="17" />
+    </svg>
+  );
+}
+
 function parseJsonKeyArray(raw: string | undefined): string[] {
   if (!raw?.trim()) return [];
   try {
@@ -668,36 +691,63 @@ export default function SettingsPage() {
               подставляется — у каждого кабинета свои ключи.{' '}
               {configured ? 'Сейчас значение задано.' : 'Сейчас не задано.'}
             </p>
-            <input
-              type="password"
-              value={sensitiveDrafts[key] ?? ''}
-              name={key}
-              autoComplete="new-password"
-              placeholder={
-                configured
-                  ? 'Новый ключ — только если заменяете; пусто = без изменений'
-                  : 'Введите ключ или токен'
-              }
-              disabled={saving || Boolean(sensitiveClear[key])}
-              onChange={(e) => setSensitiveDraftKey(key, e.target.value)}
-            />
-            <label
+            <div
               style={{
                 display: 'flex',
-                alignItems: 'center',
                 gap: '0.5rem',
-                fontSize: '0.88rem',
-                cursor: saving ? 'default' : 'pointer',
+                alignItems: 'stretch',
+                flexWrap: 'wrap',
               }}
             >
               <input
-                type="checkbox"
-                checked={Boolean(sensitiveClear[key])}
-                disabled={saving}
-                onChange={(e) => setSensitiveClearKey(key, e.target.checked)}
+                type="password"
+                value={sensitiveDrafts[key] ?? ''}
+                name={key}
+                autoComplete="new-password"
+                placeholder={
+                  configured
+                    ? 'Новый ключ — только если заменяете; пусто = без изменений'
+                    : 'Введите ключ или токен'
+                }
+                disabled={saving || Boolean(sensitiveClear[key])}
+                onChange={(e) => setSensitiveDraftKey(key, e.target.value)}
+                style={{ flex: '1 1 200px', minWidth: 0 }}
               />
-              Удалить сохранённое значение в этом кабинете
-            </label>
+              <button
+                type="button"
+                disabled={saving}
+                title={
+                  sensitiveClear[key]
+                    ? 'Отменить удаление сохранённого значения'
+                    : 'Удалить сохранённое значение в этом кабинете'
+                }
+                aria-label={
+                  sensitiveClear[key]
+                    ? 'Отменить удаление сохранённого значения'
+                    : 'Удалить сохранённое значение в этом кабинете'
+                }
+                aria-pressed={Boolean(sensitiveClear[key])}
+                onClick={() => setSensitiveClearKey(key, !Boolean(sensitiveClear[key]))}
+                className="btn btnSecondary"
+                style={{
+                  flex: '0 0 auto',
+                  padding: '0.45rem 0.6rem',
+                  minWidth: '2.5rem',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  ...(sensitiveClear[key]
+                    ? {
+                        borderColor: 'var(--danger, #c44)',
+                        color: 'var(--danger, #c44)',
+                        background: 'color-mix(in srgb, var(--danger, #c44) 12%, transparent)',
+                      }
+                    : {}),
+                }}
+              >
+                <IconTrash />
+              </button>
+            </div>
           </div>
         ) : (
           <input
