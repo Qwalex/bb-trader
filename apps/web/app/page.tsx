@@ -124,18 +124,26 @@ export default async function Home({
     const me = await fetchJson<{ workspaceId?: string | null }>('/auth/me');
     const wid = typeof me.workspaceId === 'string' ? me.workspaceId.trim() : '';
     if (wid) {
-      userbotStatus = await fetchJson<UserbotStatus>('/telegram-userbot/status', {
-        headers: { 'X-Workspace-Id': wid },
-      });
+      const wsHeaders = { 'X-Workspace-Id': wid };
+      try {
+        userbotStatus = await fetchJson<UserbotStatus>('/telegram-userbot/status', {
+          headers: wsHeaders,
+        });
+      } catch {
+        // Userbot status is optional for dashboard render.
+      }
+      try {
+        const bh = await fetchJson<{ points: BalancePoint[] }>(
+          '/bybit/balance-history?days=30',
+          { headers: wsHeaders },
+        );
+        balanceHistory = bh.points ?? [];
+      } catch {
+        // История баланса опциональна.
+      }
     }
   } catch {
-    // Userbot status is optional for dashboard render.
-  }
-  try {
-    const bh = await fetchJson<{ points: BalancePoint[] }>('/bybit/balance-history?days=30');
-    balanceHistory = bh.points ?? [];
-  } catch {
-    // История баланса опциональна.
+    // /auth/me или кабинет недоступны — без live-баланса и графика.
   }
   const guard = userbotStatus?.balanceGuard;
   const equity = guard?.totalBalanceUsd ?? null;

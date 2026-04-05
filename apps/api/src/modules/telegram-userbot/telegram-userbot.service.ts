@@ -68,6 +68,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         balanceUsd: number | undefined;
         totalBalanceUsd: number | undefined;
         minBalanceUsd: number;
+        workspaceKey: string;
       }
     | undefined;
   private messageRecencyCache:
@@ -3166,18 +3167,20 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       undefined,
       workspaceId,
     );
+    const workspaceKey = workspaceId?.trim() ?? '';
     const now = Date.now();
     let balanceUsd: number | undefined;
     let totalBalanceUsd: number | undefined;
     if (
       this.balanceCheckCache &&
       now - this.balanceCheckCache.checkedAtMs < USERBOT_BALANCE_CHECK_CACHE_MS &&
-      this.balanceCheckCache.minBalanceUsd === minBalanceUsd
+      this.balanceCheckCache.minBalanceUsd === minBalanceUsd &&
+      this.balanceCheckCache.workspaceKey === workspaceKey
     ) {
       balanceUsd = this.balanceCheckCache.balanceUsd;
       totalBalanceUsd = this.balanceCheckCache.totalBalanceUsd;
     } else {
-      const details = await this.bybit.getUnifiedUsdtBalanceDetails();
+      const details = await this.bybit.getUnifiedUsdtBalanceDetails(workspaceId);
       balanceUsd = details?.availableUsd;
       totalBalanceUsd = details?.totalUsd;
       this.balanceCheckCache = {
@@ -3185,6 +3188,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         balanceUsd,
         totalBalanceUsd,
         minBalanceUsd,
+        workspaceKey,
       };
     }
 
