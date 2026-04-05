@@ -42,6 +42,8 @@ model Workspace {
 model UserProfile {
   id          String   @id
   email       String   @unique
+  /// Роль в приложении: user | admin (не путать с WorkspaceMember.role)
+  appRole     String   @default("user")
   displayName String?
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())

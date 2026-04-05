@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Param,
   Patch,
@@ -313,6 +314,9 @@ export class OrdersController {
   ) {
     if (body?.confirm !== true) {
       throw new BadRequestException('Укажите { "confirm": true } для сброса статистики');
+    }
+    if (user?.appRole !== 'admin') {
+      throw new ForbiddenException('Только администратор приложения может сбросить статистику');
     }
     return this.orders.resetAnalyticsStats(requireWorkspaceId(user));
   }

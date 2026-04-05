@@ -21,6 +21,23 @@ import {
   labelForKey,
 } from './settings-fields';
 
+import { NAV_ITEMS } from '../../lib/nav-items';
+
+const NAV_MENU_IN_BURGER_KEY = 'NAV_MENU_IN_BURGER';
+const SETTINGS_KEYS_ADMIN_ONLY_KEY = 'SETTINGS_KEYS_ADMIN_ONLY';
+
+function parseJsonKeyArray(raw: string | undefined): string[] {
+  if (!raw?.trim()) return [];
+  try {
+    const p = JSON.parse(raw) as unknown;
+    if (!Array.isArray(p)) return [];
+    return p
+      .map((x) => (typeof x === 'string' ? x.trim() : ''))
+      .filter((x) => x.length > 0);
+  } catch {
+    return [];
+  }
+}
 
 type Row = { key: string; value: string };
 type SelectedRow = {
@@ -122,10 +139,12 @@ function collectPendingChanges(
   sensitiveConfigured: Record<string, boolean>,
   sensitiveDrafts: Record<string, string>,
   sensitiveModes: Record<string, SensitiveMode>,
+  hiddenFromUser: Set<string>,
 ): PendingChange[] {
   const out: PendingChange[] = [];
 
   for (const { key } of KEYS) {
+    if (hiddenFromUser.has(key)) continue;
     if (usesSensitiveSaveUi(key)) {
       const mode = sensitiveModes[key] ?? 'keep';
       const nextValue = sensitiveDrafts[key] ?? '';
@@ -148,6 +167,7 @@ function collectPendingChanges(
   }
 
   for (const ek of ['SOURCE_LIST', 'SOURCE_EXCLUDE_LIST', DIAGNOSTIC_MODELS_KEY] as const) {
+    if (hiddenFromUser.has(ek)) continue;
     if (normCompare(valueFor(draft, ek), valueFor(saved, ek))) continue;
     out.push({
       key: ek,
@@ -157,15 +177,17 @@ function collectPendingChanges(
     });
   }
 
-  const nextHist = computeNextModelHistoryString(saved, draft);
-  const savedHistCanonical = canonicalModelHistoryJson(valueFor(saved, MODEL_HISTORY_KEY));
-  if (!normCompare(nextHist, savedHistCanonical)) {
-    out.push({
-      key: MODEL_HISTORY_KEY,
-      label: labelForKey(MODEL_HISTORY_KEY),
-      before: formatPreviewValue(MODEL_HISTORY_KEY, savedHistCanonical),
-      after: formatPreviewValue(MODEL_HISTORY_KEY, nextHist),
-    });
+  if (!hiddenFromUser.has(MODEL_HISTORY_KEY)) {
+    const nextHist = computeNextModelHistoryString(saved, draft);
+    const savedHistCanonical = canonicalModelHistoryJson(valueFor(saved, MODEL_HISTORY_KEY));
+    if (!normCompare(nextHist, savedHistCanonical)) {
+      out.push({
+        key: MODEL_HISTORY_KEY,
+        label: labelForKey(MODEL_HISTORY_KEY),
+        before: formatPreviewValue(MODEL_HISTORY_KEY, savedHistCanonical),
+        after: formatPreviewValue(MODEL_HISTORY_KEY, nextHist),
+      });
+    }
   }
 
   const orderKey = (k: string) => {
@@ -180,10 +202,12 @@ function buildPutOperations(
   draft: Row[],
   sensitiveDrafts: Record<string, string>,
   sensitiveModes: Record<string, SensitiveMode>,
+  hiddenFromUser: Set<string>,
 ): { key: string; value: string }[] {
   const ops: { key: string; value: string }[] = [];
 
   for (const { key } of KEYS) {
+    if (hiddenFromUser.has(key)) continue;
     if (usesSensitiveSaveUi(key)) {
       const mode = sensitiveModes[key] ?? 'keep';
       const value = sensitiveDrafts[key] ?? '';
@@ -199,14 +223,17 @@ function buildPutOperations(
   }
 
   for (const ek of ['SOURCE_LIST', 'SOURCE_EXCLUDE_LIST', DIAGNOSTIC_MODELS_KEY] as const) {
+    if (hiddenFromUser.has(ek)) continue;
     if (normCompare(valueFor(draft, ek), valueFor(saved, ek))) continue;
     ops.push({ key: ek, value: valueFor(draft, ek) });
   }
 
-  const nextHist = computeNextModelHistoryString(saved, draft);
-  const savedHistCanonical = canonicalModelHistoryJson(valueFor(saved, MODEL_HISTORY_KEY));
-  if (!normCompare(nextHist, savedHistCanonical)) {
-    ops.push({ key: MODEL_HISTORY_KEY, value: nextHist });
+  if (!hiddenFromUser.has(MODEL_HISTORY_KEY)) {
+    const nextHist = computeNextModelHistoryString(saved, draft);
+    const savedHistCanonical = canonicalModelHistoryJson(valueFor(saved, MODEL_HISTORY_KEY));
+    if (!normCompare(nextHist, savedHistCanonical)) {
+      ops.push({ key: MODEL_HISTORY_KEY, value: nextHist });
+    }
   }
 
   const orderIndex = (k: string) => {
@@ -233,13 +260,47 @@ export default function SettingsPage() {
   const [newSource, setNewSource] = useState('');
   const [newExcludedSource, setNewExcludedSource] = useState('');
   const [newDiagnosticModel, setNewDiagnosticModel] = useState('');
+  const [appIsAdmin, setAppIsAdmin] = useState(false);
+  const [hiddenSettingKeys, setHiddenSettingKeys] = useState<Set<string>>(() => new Set());
+  const [navInBurgerDraft, setNavInBurgerDraft] = useState<Set<string>>(() => new Set());
+  const [adminOnlyKeysDraft, setAdminOnlyKeysDraft] = useState<Set<string>>(() => new Set());
+  const [navMenuSaving, setNavMenuSaving] = useState(false);
+  const [adminKeysSaving, setAdminKeysSaving] = useState(false);
 
   useEffect(() => {
     void (async () => {
       try {
-        const selectedKeys = PUT_ORDER.join(',');
+        const uiRes = await fetch(`${getApiBase()}/settings/ui`);
+        if (!uiRes.ok) throw new Error('settings ui failed');
+        const uiJson = (await uiRes.json()) as {
+          appRole?: string;
+          navMenuInBurger?: string[];
+          settingsKeysAdminOnly?: string[];
+        };
+        const hidden = new Set(
+          (uiJson.settingsKeysAdminOnly ?? []).map((k) => String(k).trim()).filter(Boolean),
+        );
+        const isAdmin = uiJson.appRole === 'admin';
+        setAppIsAdmin(isAdmin);
+        setHiddenSettingKeys(hidden);
+        setNavInBurgerDraft(
+          new Set(
+            (uiJson.navMenuInBurger ?? []).map((x) => String(x).trim()).filter(Boolean),
+          ),
+        );
+
+        const mainKeys = PUT_ORDER.filter((k) => !hidden.has(k));
+        const selectedKeyList = [
+          ...new Set([
+            ...mainKeys,
+            ...(isAdmin ? [SETTINGS_KEYS_ADMIN_ONLY_KEY] : []),
+          ]),
+        ];
+        const selectedKeys = selectedKeyList.join(',');
         const [selectedRes, sensitiveRes] = await Promise.all([
-          fetch(`${getApiBase()}/settings/selected?keys=${encodeURIComponent(selectedKeys)}`),
+          selectedKeyList.length > 0
+            ? fetch(`${getApiBase()}/settings/selected?keys=${encodeURIComponent(selectedKeys)}`)
+            : Promise.resolve(new Response(JSON.stringify({ settings: [] }), { status: 200 })),
           fetch(`${getApiBase()}/settings/sensitive-status`),
         ]);
         if (!selectedRes.ok || !sensitiveRes.ok) throw new Error('settings load failed');
@@ -247,10 +308,17 @@ export default function SettingsPage() {
         const sensitiveJson = (await sensitiveRes.json()) as {
           settings: Array<{ key: string; configured: boolean }>;
         };
-        const list = (selectedJson.settings ?? []).map((row) => ({
+        const rows = (selectedJson.settings ?? []).map((row) => ({
           key: row.key,
           value: row.sensitive ? '' : row.value,
         }));
+        const adminOnlyRow = rows.find((r) => r.key === SETTINGS_KEYS_ADMIN_ONLY_KEY);
+        const list = rows.filter((r) => r.key !== SETTINGS_KEYS_ADMIN_ONLY_KEY);
+        if (isAdmin && adminOnlyRow) {
+          setAdminOnlyKeysDraft(new Set(parseJsonKeyArray(adminOnlyRow.value)));
+        } else {
+          setAdminOnlyKeysDraft(new Set());
+        }
         setSavedRows(list);
         setDraftRows(list);
         setSensitiveConfigured(
@@ -276,8 +344,25 @@ export default function SettingsPage() {
         sensitiveConfigured,
         sensitiveDrafts,
         sensitiveModes,
+        hiddenSettingKeys,
       ),
-    [savedRows, draftRows, sensitiveConfigured, sensitiveDrafts, sensitiveModes],
+    [
+      savedRows,
+      draftRows,
+      sensitiveConfigured,
+      sensitiveDrafts,
+      sensitiveModes,
+      hiddenSettingKeys,
+    ],
+  );
+
+  const settingsSectionsVisible = useMemo(
+    () =>
+      SETTINGS_SECTIONS.map((section) => ({
+        ...section,
+        keys: section.keys.filter((k) => !hiddenSettingKeys.has(k)),
+      })).filter((section) => section.keys.length > 0),
+    [hiddenSettingKeys],
   );
   const hasPendingChanges = pendingChanges.length > 0;
 
@@ -338,7 +423,13 @@ export default function SettingsPage() {
   }
 
   async function saveAll() {
-    const ops = buildPutOperations(savedRows, draftRows, sensitiveDrafts, sensitiveModes);
+    const ops = buildPutOperations(
+      savedRows,
+      draftRows,
+      sensitiveDrafts,
+      sensitiveModes,
+      hiddenSettingKeys,
+    );
     if (ops.length === 0) return;
     setSaving(true);
     setMessage(null);
@@ -375,6 +466,57 @@ export default function SettingsPage() {
     setSensitiveDrafts({});
     setSensitiveModes({});
     setMessage(null);
+  }
+
+  async function saveNavMenuConfig() {
+    setNavMenuSaving(true);
+    setMessage(null);
+    try {
+      const payload = JSON.stringify([...navInBurgerDraft].sort());
+      const res = await fetch(`${getApiBase()}/settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: NAV_MENU_IN_BURGER_KEY, value: payload }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      setMessage({
+        type: 'ok',
+        text: 'Меню сохранено. При необходимости обновите страницу, чтобы обновить шапку.',
+      });
+    } catch {
+      setMessage({ type: 'err', text: 'Не удалось сохранить меню' });
+    } finally {
+      setNavMenuSaving(false);
+    }
+  }
+
+  async function saveAdminOnlyKeysConfig() {
+    setAdminKeysSaving(true);
+    setMessage(null);
+    try {
+      const payload = JSON.stringify([...adminOnlyKeysDraft].sort());
+      const res = await fetch(`${getApiBase()}/settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: SETTINGS_KEYS_ADMIN_ONLY_KEY, value: payload }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      setHiddenSettingKeys(
+        new Set([
+          NAV_MENU_IN_BURGER_KEY,
+          SETTINGS_KEYS_ADMIN_ONLY_KEY,
+          ...adminOnlyKeysDraft,
+        ]),
+      );
+      setMessage({
+        type: 'ok',
+        text: 'Список ключей сохранён. Перезагрузите страницу, чтобы обновить список полей.',
+      });
+    } catch {
+      setMessage({ type: 'err', text: 'Не удалось сохранить список ключей' });
+    } finally {
+      setAdminKeysSaving(false);
+    }
   }
 
   async function resetDatabase() {
@@ -644,7 +786,7 @@ export default function SettingsPage() {
         </p>
       )}
       <div className="settingsAccordion" style={{ marginTop: '0.75rem' }}>
-        {SETTINGS_SECTIONS.map((section) => (
+        {settingsSectionsVisible.map((section) => (
           <details key={section.id} className="card">
             <summary className="settingsSectionSummary">{section.title}</summary>
             <div className="settingsForm" style={{ marginTop: '0.9rem' }}>
@@ -653,6 +795,7 @@ export default function SettingsPage() {
           </details>
         ))}
 
+        {!hiddenSettingKeys.has('SOURCE_LIST') || !hiddenSettingKeys.has('SOURCE_EXCLUDE_LIST') ? (
         <details className="card">
           <summary className="settingsSectionSummary">Источники и исключения</summary>
           <div style={{ marginTop: '0.9rem' }}>
@@ -660,55 +803,64 @@ export default function SettingsPage() {
               Управляет списком `source`, который доступен для редактирования в сделках (`/trades`)
               и отдельным списком исключений для аналитики.
             </p>
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-              <input
-                value={newSource}
-                placeholder="добавить source, например Binance Killers"
-                onChange={(e) => setNewSource(e.target.value)}
-                style={{
-                  flex: '1 1 260px',
-                  padding: '0.5rem',
-                  borderRadius: 4,
-                  border: '1px solid var(--border)',
-                  background: 'var(--card)',
-                  color: 'var(--foreground)',
-                }}
-              />
-              <button
-                type="button"
-                onClick={() => addSource()}
-                disabled={saving || !newSource.trim()}
-                className="btn"
-              >
-                Добавить
-              </button>
-            </div>
-            {sourceListSorted.length > 0 && (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.85rem' }}>
-                {sourceListSorted.map((v) => (
-                  <button
-                    key={v}
-                    type="button"
-                    onClick={() => removeSource(v)}
+            {!hiddenSettingKeys.has('SOURCE_LIST') ? (
+              <>
+                <div
+                  style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}
+                >
+                  <input
+                    value={newSource}
+                    placeholder="добавить source, например Binance Killers"
+                    onChange={(e) => setNewSource(e.target.value)}
                     style={{
-                      padding: '0.2rem 0.45rem',
-                      borderRadius: 999,
-                      border: '1px solid var(--border, #444)',
-                      background: 'transparent',
-                      color: 'var(--muted)',
-                      cursor: saving ? 'not-allowed' : 'pointer',
-                      opacity: saving ? 0.7 : 1,
-                      fontSize: '0.85rem',
+                      flex: '1 1 260px',
+                      padding: '0.5rem',
+                      borderRadius: 4,
+                      border: '1px solid var(--border)',
+                      background: 'var(--card)',
+                      color: 'var(--foreground)',
                     }}
-                    disabled={saving}
-                    title="Удалить из списка"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => addSource()}
+                    disabled={saving || !newSource.trim()}
+                    className="btn"
                   >
-                    {v} ×
+                    Добавить
                   </button>
-                ))}
-              </div>
-            )}
+                </div>
+                {sourceListSorted.length > 0 && (
+                  <div
+                    style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.85rem' }}
+                  >
+                    {sourceListSorted.map((v) => (
+                      <button
+                        key={v}
+                        type="button"
+                        onClick={() => removeSource(v)}
+                        style={{
+                          padding: '0.2rem 0.45rem',
+                          borderRadius: 999,
+                          border: '1px solid var(--border, #444)',
+                          background: 'transparent',
+                          color: 'var(--muted)',
+                          cursor: saving ? 'not-allowed' : 'pointer',
+                          opacity: saving ? 0.7 : 1,
+                          fontSize: '0.85rem',
+                        }}
+                        disabled={saving}
+                        title="Удалить из списка"
+                      >
+                        {v} ×
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : null}
 
+            {!hiddenSettingKeys.has('SOURCE_EXCLUDE_LIST') ? (
             <div
               style={{
                 marginTop: '1.5rem',
@@ -772,9 +924,12 @@ export default function SettingsPage() {
                 </div>
               )}
             </div>
+            ) : null}
           </div>
         </details>
+        ) : null}
 
+        {!hiddenSettingKeys.has(DIAGNOSTIC_MODELS_KEY) ? (
         <details className="card">
           <summary className="settingsSectionSummary">Модели для диагностики</summary>
           <div style={{ marginTop: '0.9rem' }}>
@@ -832,7 +987,117 @@ export default function SettingsPage() {
             )}
           </div>
         </details>
+        ) : null}
 
+        {appIsAdmin ? (
+          <>
+            <details className="card">
+              <summary className="settingsSectionSummary">Меню (администратор)</summary>
+              <div style={{ marginTop: '0.9rem' }}>
+                <p style={{ color: 'var(--muted)', fontSize: '0.88rem', marginBottom: '0.75rem' }}>
+                  Отмеченные пункты открываются из бургера в шапке; снятая отметка — пункт в основной
+                  полоске рядом с кабинетом и «Выйти».
+                </p>
+                <div style={{ display: 'grid', gap: '0.35rem' }}>
+                  {NAV_ITEMS.map((item) => (
+                    <label
+                      key={item.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={navInBurgerDraft.has(item.id)}
+                        onChange={() => {
+                          setNavInBurgerDraft((prev) => {
+                            const n = new Set(prev);
+                            if (n.has(item.id)) n.delete(item.id);
+                            else n.add(item.id);
+                            return n;
+                          });
+                        }}
+                      />
+                      <span>{item.label}</span>
+                    </label>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ marginTop: '0.85rem' }}
+                  disabled={navMenuSaving}
+                  onClick={() => void saveNavMenuConfig()}
+                >
+                  {navMenuSaving ? 'Сохранение…' : 'Сохранить меню'}
+                </button>
+              </div>
+            </details>
+
+            <details className="card">
+              <summary className="settingsSectionSummary">
+                Ключи настроек только для администратора
+              </summary>
+              <div style={{ marginTop: '0.9rem' }}>
+                <p style={{ color: 'var(--muted)', fontSize: '0.88rem', marginBottom: '0.75rem' }}>
+                  Выбранные ключи скрыты от обычных пользователей и недоступны им в API. Ключи{' '}
+                  <code style={{ fontSize: '0.8rem' }}>{NAV_MENU_IN_BURGER_KEY}</code> и{' '}
+                  <code style={{ fontSize: '0.8rem' }}>{SETTINGS_KEYS_ADMIN_ONLY_KEY}</code> всегда
+                  только у администратора.
+                </p>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+                    gap: '0.35rem 0.75rem',
+                    maxHeight: 'min(50vh, 420px)',
+                    overflowY: 'auto',
+                  }}
+                >
+                  {PUT_ORDER.map((key) => (
+                    <label
+                      key={key}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.45rem',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={adminOnlyKeysDraft.has(key)}
+                        onChange={() => {
+                          setAdminOnlyKeysDraft((prev) => {
+                            const n = new Set(prev);
+                            if (n.has(key)) n.delete(key);
+                            else n.add(key);
+                            return n;
+                          });
+                        }}
+                      />
+                      <span style={{ fontSize: '0.82rem' }}>{labelForKey(key)}</span>
+                    </label>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ marginTop: '0.85rem' }}
+                  disabled={adminKeysSaving}
+                  onClick={() => void saveAdminOnlyKeysConfig()}
+                >
+                  {adminKeysSaving ? 'Сохранение…' : 'Сохранить список ключей'}
+                </button>
+              </div>
+            </details>
+          </>
+        ) : null}
+
+        {appIsAdmin ? (
         <details className="card">
           <summary className="settingsSectionSummary">Опасная зона</summary>
           <div style={{ marginTop: '0.9rem' }}>
@@ -860,6 +1125,7 @@ export default function SettingsPage() {
             </div>
           </div>
         </details>
+        ) : null}
       </div>
 
       <div

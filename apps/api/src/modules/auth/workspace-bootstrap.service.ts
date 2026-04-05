@@ -1,11 +1,27 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 
 import { PrismaService } from '../../prisma/prisma.service';
 
+import type { AppRole } from './auth.types';
+
 @Injectable()
 export class WorkspaceBootstrapService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
+  ) {}
+
+  private parseAppAdminEmails(): Set<string> {
+    const raw = this.config.get<string>('APP_ADMIN_EMAILS') ?? '';
+    return new Set(
+      raw
+        .split(/[,;\s]+/g)
+        .map((e) => e.trim().toLowerCase())
+        .filter((e) => e.length > 0),
+    );
+  }
 
   private slugify(input: string): string {
     return input
@@ -21,11 +37,15 @@ export class WorkspaceBootstrapService {
     email: string | null;
     workspaceName?: string | null;
     workspaceSlug?: string | null;
-  }): Promise<{ workspaceId: string; role: string }> {
+  }): Promise<{ workspaceId: string; role: string; appRole: AppRole }> {
     const baseName =
       user.workspaceName?.trim() ||
       (user.email?.split('@')[0]?.trim() ? `${user.email.split('@')[0]} workspace` : 'My workspace');
     const baseSlug = this.slugify(user.workspaceSlug?.trim() || baseName) || `workspace-${user.userId.slice(0, 8)}`;
+
+    const adminEmails = this.parseAppAdminEmails();
+    const emailLower = user.email?.trim().toLowerCase() ?? null;
+    const promoteToAdmin = Boolean(emailLower && adminEmails.has(emailLower));
 
     const result = await this.prisma.$transaction(async (tx) => {
       await tx.userProfile.upsert({
@@ -34,10 +54,12 @@ export class WorkspaceBootstrapService {
           id: user.userId,
           email: user.email ?? `${user.userId}@unknown.local`,
           displayName: baseName,
+          appRole: promoteToAdmin ? 'admin' : 'user',
         },
         update: {
           email: user.email ?? undefined,
           displayName: baseName,
+          ...(promoteToAdmin ? { appRole: 'admin' } : {}),
         },
       });
 
@@ -52,10 +74,17 @@ export class WorkspaceBootstrapService {
         orderBy: { createdAt: 'asc' },
         select: { workspaceId: true, role: true },
       });
+      const profile = await tx.userProfile.findUnique({
+        where: { id: user.userId },
+        select: { appRole: true },
+      });
+      const appRole: AppRole = profile?.appRole === 'admin' ? 'admin' : 'user';
+
       if (existingMembership) {
         return {
           workspaceId: existingMembership.workspaceId,
           role: existingMembership.role,
+          appRole,
         };
       }
 
@@ -82,7 +111,7 @@ export class WorkspaceBootstrapService {
         },
       });
 
-      return { workspaceId: workspace.id, role: 'owner' };
+      return { workspaceId: workspace.id, role: 'owner', appRole };
     });
 
     return result;

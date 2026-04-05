@@ -18,6 +18,42 @@ const ENV_FALLBACK: Record<string, string> = {
 };
 
 const SENSITIVE_SETTING_PATTERNS = ['SECRET', 'TOKEN', 'PASSWORD', 'API_KEY', 'API_HASH', '2FA'];
+
+/** JSON-массив id пунктов меню, которые показываются в бургере (остальные — в полоске). */
+export const NAV_MENU_IN_BURGER_KEY = 'NAV_MENU_IN_BURGER';
+/** JSON-массив ключей настроек, видимых и редактируемых только app-admin. */
+export const SETTINGS_KEYS_ADMIN_ONLY_KEY = 'SETTINGS_KEYS_ADMIN_ONLY';
+
+const META_ADMIN_ONLY_SETTING_KEYS = new Set<string>([
+  NAV_MENU_IN_BURGER_KEY,
+  SETTINGS_KEYS_ADMIN_ONLY_KEY,
+]);
+
+/** Должен совпадать с id в `apps/web/lib/nav-items.ts` (NAV_ITEMS). */
+const VALID_NAV_MENU_ITEM_IDS = new Set<string>([
+  'dashboard',
+  'trades',
+  'logs',
+  'ai',
+  'diagnostics',
+  'telegram-userbot',
+  'my-group',
+  'filters',
+  'workspaces',
+  'settings',
+]);
+
+/** Если в БД нет NAV_MENU_IN_BURGER — компактное меню по умолчанию. */
+export const DEFAULT_NAV_MENU_IN_BURGER_IDS: readonly string[] = [
+  'logs',
+  'ai',
+  'diagnostics',
+  'telegram-userbot',
+  'my-group',
+  'filters',
+  'workspaces',
+];
+
 const WRITE_ALLOWLIST = new Set([
   'APPLOG_LOG_NOISY_EVENTS',
   'BUMP_TO_MIN_EXCHANGE_LOT',
@@ -64,6 +100,8 @@ const WRITE_ALLOWLIST = new Set([
   'TELEGRAM_USERBOT_SESSION',
   'TELEGRAM_USERBOT_USE_AI_CLASSIFIER',
   'TELEGRAM_WHITELIST',
+  NAV_MENU_IN_BURGER_KEY,
+  SETTINGS_KEYS_ADMIN_ONLY_KEY,
 ]);
 
 @Injectable()
@@ -204,6 +242,117 @@ export class SettingsService {
 
   static canWriteKey(key: string): boolean {
     return WRITE_ALLOWLIST.has(key.trim());
+  }
+
+  static isMetaAdminOnlySettingKey(key: string): boolean {
+    return META_ADMIN_ONLY_SETTING_KEYS.has(key.trim());
+  }
+
+  static validateNavMenuInBurgerJson(raw: string): void {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new Error('NAV_MENU_IN_BURGER: ожидается JSON-массив строк');
+    }
+    if (!Array.isArray(parsed)) {
+      throw new Error('NAV_MENU_IN_BURGER: значение должно быть JSON-массивом');
+    }
+    for (const item of parsed) {
+      if (typeof item !== 'string' || !item.trim()) {
+        throw new Error('NAV_MENU_IN_BURGER: каждый элемент — непустая строка (id пункта)');
+      }
+      const id = item.trim();
+      if (!VALID_NAV_MENU_ITEM_IDS.has(id)) {
+        throw new Error(`NAV_MENU_IN_BURGER: неизвестный id «${id}»`);
+      }
+    }
+  }
+
+  static validateSettingsKeysAdminOnlyJson(raw: string): void {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new Error('SETTINGS_KEYS_ADMIN_ONLY: ожидается JSON-массив строк');
+    }
+    if (!Array.isArray(parsed)) {
+      throw new Error('SETTINGS_KEYS_ADMIN_ONLY: значение должно быть JSON-массивом');
+    }
+    for (const item of parsed) {
+      if (typeof item !== 'string' || !item.trim()) {
+        throw new Error('SETTINGS_KEYS_ADMIN_ONLY: каждый элемент — непустая строка (ключ настройки)');
+      }
+      const k = item.trim();
+      if (!SettingsService.canWriteKey(k)) {
+        throw new Error(`SETTINGS_KEYS_ADMIN_ONLY: ключ «${k}» не в списке разрешённых для записи`);
+      }
+      if (META_ADMIN_ONLY_SETTING_KEYS.has(k)) {
+        throw new Error(`SETTINGS_KEYS_ADMIN_ONLY: ключ «${k}» нельзя включать в список`);
+      }
+    }
+  }
+
+  private async getRawSettingRowFromDb(
+    workspaceId: string,
+    key: string,
+  ): Promise<{ value: string } | null> {
+    return this.prisma.setting.findUnique({
+      where: { workspaceId_key: { workspaceId, key } },
+      select: { value: true },
+    });
+  }
+
+  /**
+   * Id пунктов в бургере. Если строки в БД нет — дефолтный компактный набор.
+   * Пустой JSON-массив [] означает «все пункты в полоске».
+   */
+  async getNavMenuInBurgerIds(workspaceId: string): Promise<string[]> {
+    const row = await this.getRawSettingRowFromDb(workspaceId, NAV_MENU_IN_BURGER_KEY);
+    if (!row || !row.value.trim()) {
+      return [...DEFAULT_NAV_MENU_IN_BURGER_IDS];
+    }
+    try {
+      const parsed = JSON.parse(row.value) as unknown;
+      if (!Array.isArray(parsed)) {
+        return [...DEFAULT_NAV_MENU_IN_BURGER_IDS];
+      }
+      return parsed
+        .map((x) => (typeof x === 'string' ? x.trim() : ''))
+        .filter((id) => VALID_NAV_MENU_ITEM_IDS.has(id));
+    } catch {
+      return [...DEFAULT_NAV_MENU_IN_BURGER_IDS];
+    }
+  }
+
+  private async getExtraAdminOnlyKeysFromDb(workspaceId: string): Promise<string[]> {
+    const row = await this.getRawSettingRowFromDb(workspaceId, SETTINGS_KEYS_ADMIN_ONLY_KEY);
+    if (!row?.value?.trim()) {
+      return [];
+    }
+    try {
+      const parsed = JSON.parse(row.value) as unknown;
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
+      return parsed
+        .map((x) => (typeof x === 'string' ? x.trim() : ''))
+        .filter((k) => k.length > 0 && SettingsService.canWriteKey(k));
+    } catch {
+      return [];
+    }
+  }
+
+  /** Ключи настроек, скрытые от не-админов (мета + список из БД). */
+  async buildAdminOnlySettingKeysSet(workspaceId: string): Promise<Set<string>> {
+    const out = new Set<string>(META_ADMIN_ONLY_SETTING_KEYS);
+    const extra = await this.getExtraAdminOnlyKeysFromDb(workspaceId);
+    for (const k of extra) {
+      if (!META_ADMIN_ONLY_SETTING_KEYS.has(k)) {
+        out.add(k);
+      }
+    }
+    return out;
   }
 
   /**

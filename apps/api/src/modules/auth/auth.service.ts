@@ -121,6 +121,7 @@ export class AuthService {
             email: user.email ?? null,
             workspaceId: bootstrap.workspaceId,
             role: bootstrap.role,
+            appRole: bootstrap.appRole,
           };
         }
       } catch {
@@ -139,6 +140,7 @@ export class AuthService {
       email: jwtClaims.email,
       workspaceId: bootstrap.workspaceId,
       role: bootstrap.role,
+      appRole: bootstrap.appRole,
     };
   }
 
@@ -184,6 +186,7 @@ export class AuthService {
             email: base.email,
             workspaceId: member.workspaceId,
             role: member.role,
+            appRole: base.appRole,
           },
         };
       }
