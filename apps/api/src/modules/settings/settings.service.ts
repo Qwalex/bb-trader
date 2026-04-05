@@ -27,6 +27,17 @@ export const SETTINGS_KEYS_ADMIN_ONLY_KEY = 'SETTINGS_KEYS_ADMIN_ONLY';
 /** Мета-ключи, которые нельзя отдать не-админу и нельзя включать в SETTINGS_KEYS_ADMIN_ONLY. */
 const META_ADMIN_ONLY_SETTING_KEYS = new Set<string>([SETTINGS_KEYS_ADMIN_ONLY_KEY]);
 
+/**
+ * При запросе с явным workspaceId (кабинет из X-Workspace-Id) не подмешивать глобальный .env —
+ * иначе чужой кабинет «унаследует» TELEGRAM_USERBOT_SESSION/API_ID с процесса.
+ */
+const WORKSPACE_SCOPED_NO_ENV_FALLBACK_KEYS = new Set<string>([
+  'TELEGRAM_USERBOT_API_ID',
+  'TELEGRAM_USERBOT_API_HASH',
+  'TELEGRAM_USERBOT_SESSION',
+  'TELEGRAM_USERBOT_2FA_PASSWORD',
+]);
+
 /** Должен совпадать с id в `apps/web/lib/nav-items.ts` (NAV_ITEMS). */
 const VALID_NAV_MENU_ITEM_IDS = new Set<string>([
   'dashboard',
@@ -119,6 +130,8 @@ export class SettingsService {
   }
 
   async get(key: string, workspaceId?: string | null): Promise<string | undefined> {
+    const requestedExplicitWorkspace =
+      typeof workspaceId === 'string' && workspaceId.trim() !== '';
     const resolvedWorkspaceId = this.resolveWorkspaceId(workspaceId);
     const row = resolvedWorkspaceId
       ? await this.prisma.setting.findUnique({
@@ -127,6 +140,12 @@ export class SettingsService {
       : null;
     if (row?.value !== undefined && row?.value !== '') {
       return row.value;
+    }
+    if (
+      requestedExplicitWorkspace &&
+      WORKSPACE_SCOPED_NO_ENV_FALLBACK_KEYS.has(key)
+    ) {
+      return undefined;
     }
     const fromEnv = this.config.get<string>(key);
     if (fromEnv !== undefined && fromEnv !== '') {

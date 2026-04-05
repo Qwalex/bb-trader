@@ -46,8 +46,8 @@ export class TelegramUserbotController {
   @ApiOkResponse({ description: 'Отключение выполнено' })
   @Post('disconnect')
   async disconnect(@CurrentUser() user: AuthenticatedRequestContext | null) {
-    requireWorkspaceId(user);
-    return this.userbot.disconnect();
+    const workspaceId = requireWorkspaceId(user);
+    return this.userbot.disconnect(workspaceId);
   }
 
   @ApiOperation({ summary: 'Начать QR-логин userbot' })

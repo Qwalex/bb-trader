@@ -54,6 +54,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   private processingWorkersActive = 0;
 
   private client: TelegramClient | null = null;
+  /** Кабинет, для которого в этом процессе поднят MTProto-клиент (один на весь API). */
+  private clientOwnerWorkspaceId: string | null = null;
   private messageHandlerRegistered = false;
   private enabledChatIds = new Set<string>();
 
@@ -126,8 +128,11 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     const chatsEnabled = await this.prisma.tgUserbotChat.count({
       where: { workspaceId, enabled: true },
     });
+    const ws = workspaceId.trim();
+    const authorized = await this.isClientAuthorized(this.client);
+    const ownedHere = this.clientOwnerWorkspaceId?.trim() === ws;
     return {
-      connected: await this.isClientAuthorized(this.client),
+      connected: authorized && ownedHere,
       enabled,
       useAiClassifier,
       requireConfirmation,
@@ -200,6 +205,27 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   }
 
   async connectFromStoredSession(workspaceId?: string | null) {
+    const ownerWs =
+      typeof workspaceId === 'string' && workspaceId.trim() !== ''
+        ? workspaceId.trim()
+        : this.resolveBootstrapWorkspaceId();
+    if (!ownerWs) {
+      return {
+        ok: false,
+        error:
+          'Не задан кабинет для userbot: укажите workspace в запросе или BOOTSTRAP_WORKSPACE_ID на сервере.',
+      };
+    }
+    if (this.client && (await this.isClientAuthorized(this.client))) {
+      const cur = this.clientOwnerWorkspaceId?.trim();
+      if (cur && cur !== ownerWs) {
+        return {
+          ok: false,
+          error:
+            'Уже подключён userbot другого кабинета. Отключите его в том кабинете, затем подключайте здесь.',
+        };
+      }
+    }
     const creds = await this.getApiCreds(workspaceId);
     const session = (await this.settings.get('TELEGRAM_USERBOT_SESSION', workspaceId))?.trim();
     if (!session) {
@@ -224,31 +250,63 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         error: 'Сессия недействительна. Выполните повторный вход по QR.',
       };
     }
-    await this.attachClient(client);
+    await this.attachClient(client, ownerWs);
     await this.settings.set('TELEGRAM_USERBOT_ENABLED', 'true', workspaceId);
     return { ok: true, connected: true };
   }
 
-  async disconnect() {
+  /**
+   * @param workspaceId — из API: отключить только владелец. Без аргумента — принудительно (onModuleDestroy).
+   */
+  async disconnect(workspaceId?: string) {
     if (!this.client) {
+      this.clientOwnerWorkspaceId = null;
+      this.enabledChatIds.clear();
       return { ok: true, connected: false };
+    }
+    if (workspaceId !== undefined) {
+      const ws = workspaceId.trim();
+      const owner = this.clientOwnerWorkspaceId?.trim();
+      if (owner && owner !== ws) {
+        return {
+          ok: false,
+          connected: true,
+          error:
+            'Отключить можно только из кабинета, к которому привязан userbot.',
+        };
+      }
     }
     try {
       await this.client.disconnect();
     } finally {
       this.client = null;
+      this.clientOwnerWorkspaceId = null;
       this.messageHandlerRegistered = false;
+      this.enabledChatIds.clear();
     }
     return { ok: true, connected: false };
   }
 
   async startQrLogin(workspaceId: string) {
+    const ws = workspaceId.trim();
     if (await this.isClientAuthorized(this.client)) {
-      return {
-        ok: true,
-        message: 'Userbot уже авторизован.',
-        qr: this.qrState,
-      };
+      const owner = this.clientOwnerWorkspaceId?.trim();
+      if (owner === ws) {
+        return {
+          ok: true,
+          message: 'Userbot уже авторизован.',
+          qr: this.qrState,
+        };
+      }
+      if (owner) {
+        return {
+          ok: false,
+          message:
+            'Сейчас авторизован userbot другого кабинета. Сначала отключите его там.',
+          qr: this.qrState,
+        };
+      }
+      await this.disconnect();
     }
     if (this.qrTask) {
       return { ok: true, message: 'QR-вход уже запущен.', qr: this.qrState };
@@ -303,7 +361,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         ).save();
         await this.settings.set('TELEGRAM_USERBOT_SESSION', savedSession, workspaceId);
         await this.settings.set('TELEGRAM_USERBOT_ENABLED', 'true', workspaceId);
-        await this.attachClient(qrClient);
+        await this.attachClient(qrClient, workspaceId.trim());
         this.qrClient = null;
         this.setQrState({ phase: 'authorized' });
       } catch (e) {
@@ -335,10 +393,15 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   }
 
   async syncChats(workspaceId: string) {
-    if (!this.client || !(await this.isClientAuthorized(this.client))) {
+    const gate = await this.assertUserbotOwnedByWorkspace(workspaceId);
+    if (!gate.ok) {
+      return { ok: false, error: gate.error };
+    }
+    const client = this.client;
+    if (!client) {
       return { ok: false, error: 'Userbot не подключен.' };
     }
-    const dialogs = (await this.client.getDialogs({
+    const dialogs = (await client.getDialogs({
       limit: 1000,
     })) as unknown as Array<Record<string, unknown>>;
     let upserted = 0;
@@ -769,11 +832,23 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     includeTodayMetrics = false,
     workspaceId?: string | null,
   ) {
-    if (!this.client || !(await this.isClientAuthorized(this.client))) {
+    const ws =
+      (typeof workspaceId === 'string' && workspaceId.trim() !== ''
+        ? workspaceId.trim()
+        : null) ?? this.clientOwnerWorkspaceId?.trim() ?? null;
+    if (!ws) {
+      return { ok: false, error: 'Userbot не подключен.' };
+    }
+    const gate = await this.assertUserbotOwnedByWorkspace(ws);
+    if (!gate.ok) {
+      return { ok: false, error: gate.error };
+    }
+    const client = this.client;
+    if (!client) {
       return { ok: false, error: 'Userbot не подключен.' };
     }
     const enabledChats = await this.prisma.tgUserbotChat.findMany({
-      where: { workspaceId: workspaceId ?? null, enabled: true },
+      where: { workspaceId: ws, enabled: true },
       select: { chatId: true, title: true },
     });
     const limitPerChat =
@@ -788,7 +863,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
     for (const chat of enabledChats) {
       try {
-        const list = (await this.client.getMessages(chat.chatId, {
+        const list = (await client.getMessages(chat.chatId, {
           limit: limitPerChat,
         })) as unknown as Array<Record<string, unknown>>;
         chatsProcessed += 1;
@@ -845,7 +920,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    const today = includeTodayMetrics ? await this.getTodayMetrics(workspaceId) : undefined;
+    const today = includeTodayMetrics ? await this.getTodayMetrics(ws) : undefined;
     return {
       ok: true,
       chatsProcessed,
@@ -985,7 +1060,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       const rowTitle = String(row?.title ?? chatId);
       await this.setSourceMartingaleMultiplier(rowTitle, martingaleNorm, workspaceId);
     }
-    await this.refreshEnabledChatsCache(workspaceId);
+    if (this.clientOwnerWorkspaceId?.trim() === workspaceId.trim()) {
+      await this.refreshEnabledChatsCache(workspaceId);
+    }
     return { ok: true };
   }
 
@@ -1017,12 +1094,45 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  private async attachClient(client: TelegramClient): Promise<void> {
+  private resolveBootstrapWorkspaceId(): string | null {
+    const id = process.env.BOOTSTRAP_WORKSPACE_ID?.trim();
+    return id || null;
+  }
+
+  private async assertUserbotOwnedByWorkspace(
+    workspaceId: string,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    const ws = workspaceId.trim();
+    if (!ws) {
+      return { ok: false, error: 'Не указан кабинет.' };
+    }
+    if (!this.client || !(await this.isClientAuthorized(this.client))) {
+      return { ok: false, error: 'Userbot не подключен.' };
+    }
+    if (this.clientOwnerWorkspaceId?.trim() !== ws) {
+      return {
+        ok: false,
+        error:
+          'Подключён userbot другого кабинета. Операции с Telegram доступны только владельцу сессии.',
+      };
+    }
+    return { ok: true };
+  }
+
+  private async attachClient(
+    client: TelegramClient,
+    ownerWorkspaceId: string,
+  ): Promise<void> {
+    const owner = ownerWorkspaceId.trim();
+    if (!owner) {
+      throw new Error('ownerWorkspaceId required for attachClient');
+    }
     if (this.client && this.client !== client) {
       await this.client.disconnect();
       this.messageHandlerRegistered = false;
     }
     this.client = client;
+    this.clientOwnerWorkspaceId = owner;
     if (!this.messageHandlerRegistered) {
       this.client.addEventHandler(
         this.handleIncomingMessage,
@@ -1030,7 +1140,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       );
       this.messageHandlerRegistered = true;
     }
-    await this.refreshEnabledChatsCache();
+    await this.refreshEnabledChatsCache(owner);
   }
 
   private readonly handleIncomingMessage = async (event: unknown) => {
@@ -3328,11 +3438,14 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     status: string;
   }) {
     try {
-      const bootstrapWs = process.env.BOOTSTRAP_WORKSPACE_ID?.trim();
+      const ingestWs =
+        this.clientOwnerWorkspaceId?.trim() ||
+        this.resolveBootstrapWorkspaceId() ||
+        null;
       return await this.prisma.tgUserbotIngest.create({
         data: {
           ...data,
-          ...(bootstrapWs ? { workspaceId: bootstrapWs } : {}),
+          ...(ingestWs ? { workspaceId: ingestWs } : {}),
         },
       });
     } catch (e) {
