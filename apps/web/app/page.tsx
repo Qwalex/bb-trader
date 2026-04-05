@@ -166,7 +166,22 @@ export default async function Home({
       <h1 className="pageTitle">Дашборд Test</h1>
       {err && (
         <p className="msg err" style={{ marginBottom: '1rem' }}>
-          {err} — проверьте, что API запущен и NEXT_PUBLIC_API_URL верный.
+          {err.startsWith('401') ? (
+            <>
+              Нет доступа к API (401). Выполните вход заново или обновите страницу после логина.
+            </>
+          ) : err.toLowerCase().includes('fetch failed') ? (
+            <>
+              Сеть до API недоступна ({err}). Для сервера проверьте{' '}
+              <code style={{ fontSize: '0.85em' }}>WEB_API_INTERNAL_URL</code> (в Docker это порт{' '}
+              <strong>3001</strong> у сервиса api, не host-порт вроде 3011).
+            </>
+          ) : (
+            <>
+              {err} — проверьте, что API запущен и{' '}
+              <code style={{ fontSize: '0.85em' }}>NEXT_PUBLIC_API_URL</code> верный.
+            </>
+          )}
         </p>
       )}
       {guard?.paused && (

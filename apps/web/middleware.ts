@@ -1,7 +1,11 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 
+import { normalizeBasePath } from './lib/auth';
 import { getSupabaseAnonKey, getSupabaseUrl } from './lib/supabase';
+
+/** Совпадает с basePath из next.config (NEXT_BASE_PATH на этапе сборки). */
+const appBasePath = normalizeBasePath(process.env.NEXT_PUBLIC_BASE_PATH);
 
 function stripBasePath(pathname: string, basePath: string): string {
   if (!basePath) {
@@ -44,7 +48,7 @@ function isPublicPath(pathname: string): boolean {
 }
 
 export async function middleware(request: NextRequest) {
-  const basePath = request.nextUrl.basePath ?? '';
+  const basePath = appBasePath;
   const pathname = stripBasePath(request.nextUrl.pathname, basePath);
   const isPublic = isPublicPath(pathname);
   let response = NextResponse.next({
@@ -91,6 +95,8 @@ export async function middleware(request: NextRequest) {
   return response;
 }
 
+// Next.js 16: matcher должен быть статическим (без шаблонов из env). При basePath сопоставление
+// идёт с pathname без префикса basePath — см. https://nextjs.org/docs/app/building-your-application/routing/middleware#matcher
 export const config = {
-  matcher: ['/((?!_next/static|_next/image).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)', '/'],
 };
