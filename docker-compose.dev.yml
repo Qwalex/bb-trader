@@ -1,5 +1,12 @@
 # Стек development: отдельный project name, порты и volumes — не пересекается с production.
 # На VPS: отдельный каталог (напр. /root/bb-trader-dev), ветка development, ./restart-dev.sh
+#
+# Порты на хосте (сравнение с docker-compose.yml / production):
+#   Nest API:  127.0.0.1:${DEV_API_HOST_PORT:-3011} → контейнер 3001  (prod: …:3001→3001)
+#   Next web:  127.0.0.1:3013 → 3000  (prod: 3003→3000)
+#   Kong:      8010→8000  (prod: 8000), Postgres: 5433→5432  (prod: 5432), Studio: 8082  (prod: 8081)
+# Внутри сети compose web всегда ходит на http://api:3001 — это не DEV_API_HOST_PORT.
+# Если порт на хосте занят: задайте в .env рядом с compose, например DEV_API_HOST_PORT=3021
 name: bb-trader-dev
 
 services:
@@ -186,7 +193,7 @@ services:
       SUPABASE_SERVICE_ROLE_KEY_SERVER: ${SUPABASE_SERVICE_ROLE_KEY_SERVER}
       BOOTSTRAP_WORKSPACE_ID: ${BOOTSTRAP_WORKSPACE_ID}
     ports:
-      - "127.0.0.1:3011:3001"
+      - "127.0.0.1:${DEV_API_HOST_PORT:-3011}:3001"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3001/health || exit 1"]
       interval: 10s
