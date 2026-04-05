@@ -11,9 +11,6 @@ concurrency:
   group: sync-${{ github.repository }}-${{ github.ref_name }}
   cancel-in-progress: false
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-
 jobs:
   sync:
     runs-on: ubuntu-latest
@@ -36,7 +33,7 @@ jobs:
           fi
 
       - name: Checkout target branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ steps.dir.outputs.target }}
           fetch-depth: 0
