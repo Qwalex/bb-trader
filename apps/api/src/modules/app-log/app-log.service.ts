@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import type { Prisma } from '@prisma/client';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
@@ -67,6 +68,14 @@ function shouldSkipDbAppend(
 function parseLogNoisySetting(raw: string | undefined): boolean {
   const s = String(raw ?? '').trim().toLowerCase();
   return s === 'true' || s === '1' || s === 'yes';
+}
+
+/** Только точное совпадение workspaceId; без этого в выборку входят строки с workspaceId=null (наследие до привязки логов к кабинету). */
+function isStrictWorkspaceLogList(): boolean {
+  const s = String(process.env.APPLOG_STRICT_WORKSPACE_LOGS ?? '')
+    .trim()
+    .toLowerCase();
+  return s === '1' || s === 'true' || s === 'yes';
 }
 
 @Injectable()
@@ -199,12 +208,27 @@ export class AppLogService {
     }[]
   > {
     const limit = Math.min(Math.max(options.limit ?? 200, 1), 1000);
-    const where = {
-      ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
-      ...(options.category && options.category !== 'all' ? { category: options.category } : {}),
-    };
+    const ws = options.workspaceId?.trim();
+    const strict = isStrictWorkspaceLogList();
+    const clauses: Prisma.AppLogWhereInput[] = [];
+    if (ws) {
+      clauses.push(
+        strict
+          ? { workspaceId: ws }
+          : { OR: [{ workspaceId: ws }, { workspaceId: null }] },
+      );
+    }
+    if (options.category && options.category !== 'all') {
+      clauses.push({ category: options.category });
+    }
+    const where: Prisma.AppLogWhereInput | undefined =
+      clauses.length === 0
+        ? undefined
+        : clauses.length === 1
+          ? clauses[0]
+          : { AND: clauses };
     return this.prisma.appLog.findMany({
-      where: Object.keys(where).length > 0 ? where : undefined,
+      where,
       orderBy: { createdAt: 'desc' },
       take: limit,
     });
