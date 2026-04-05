@@ -76,7 +76,8 @@ deploy_from_registry() {
 run_prisma_db_push() {
   local attempts="${1:-10}"
   local sleep_seconds="${2:-3}"
-  local cmd="docker compose run --rm --no-deps api npm run db:push"
+  # В production-образе API нет корневого monorepo package.json — только apps/api/package.json
+  local cmd="docker compose run --rm --no-deps -w /app/apps/api api npm run db:push"
 
   for ((i=1; i<=attempts; i+=1)); do
     if eval "$cmd"; then
