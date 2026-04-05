@@ -13,7 +13,7 @@ import { TelegramService } from './telegram.service';
     TranscriptModule,
     forwardRef(() => BybitModule),
     forwardRef(() => OrdersModule),
-    AppLogModule,
+    forwardRef(() => AppLogModule),
   ],
   providers: [TelegramService],
   exports: [TelegramService],
