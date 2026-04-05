@@ -7,7 +7,11 @@ import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
 
 @Module({
-  imports: [SettingsModule, forwardRef(() => BybitModule), UserbotSignalHashModule],
+  imports: [
+    forwardRef(() => SettingsModule),
+    forwardRef(() => BybitModule),
+    UserbotSignalHashModule,
+  ],
   controllers: [OrdersController],
   providers: [OrdersService],
   exports: [OrdersService],
