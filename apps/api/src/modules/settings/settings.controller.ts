@@ -177,7 +177,7 @@ export class SettingsController {
   }
 
   /**
-   * Сброс локальной БД (SQLite). Только для панели настроек; без отдельной auth.
+   * Сброс данных текущего workspace в БД. Только для панели настроек.
    * Тело: `{ "confirm": true }`.
    */
   @ApiOperation({ summary: 'Сброс локальной базы данных' })

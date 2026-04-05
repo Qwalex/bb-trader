@@ -46,8 +46,6 @@ type SelectedRow = {
   sensitive?: boolean;
   configured?: boolean;
 };
-type SensitiveMode = 'keep' | 'replace' | 'clear';
-
 function valueFor(rows: Row[], key: string): string {
   return rows.find((r) => r.key === key)?.value ?? '';
 }
@@ -97,11 +95,6 @@ function isSensitiveKey(key: string): boolean {
   );
 }
 
-/** Секреты с выбором «не менять / записать / очистить»; OpenRouter key — обычное поле без этого шага. */
-function usesSensitiveSaveUi(key: string): boolean {
-  return isSensitiveKey(key) && key !== 'OPENROUTER_API_KEY';
-}
-
 function formatPreviewValue(key: string, value: string): string {
   if (!value) return '(пусто)';
   if (key === MODEL_HISTORY_KEY && canonicalModelHistoryJson(value) === '[]') {
@@ -116,13 +109,9 @@ function beforeSensitivePreview(configured: boolean): string {
   return configured ? '•••• (настроено)' : '(пусто)';
 }
 
-function afterSensitivePreview(mode: SensitiveMode, value: string, configured: boolean): string {
-  if (mode === 'clear') {
-    return '(будет очищено)';
-  }
-  if (mode === 'replace' && value.trim()) {
-    return '•••• (новое значение)';
-  }
+function afterSensitivePreview(clear: boolean, newValue: string, configured: boolean): string {
+  if (clear) return '(удалить из этого кабинета)';
+  if (newValue.trim()) return '•••• (новое значение)';
   return beforeSensitivePreview(configured);
 }
 
@@ -138,22 +127,22 @@ function collectPendingChanges(
   draft: Row[],
   sensitiveConfigured: Record<string, boolean>,
   sensitiveDrafts: Record<string, string>,
-  sensitiveModes: Record<string, SensitiveMode>,
+  sensitiveClear: Record<string, boolean>,
   hiddenFromUser: Set<string>,
 ): PendingChange[] {
   const out: PendingChange[] = [];
 
   for (const { key } of KEYS) {
     if (hiddenFromUser.has(key)) continue;
-    if (usesSensitiveSaveUi(key)) {
-      const mode = sensitiveModes[key] ?? 'keep';
+    if (isSensitiveKey(key)) {
+      const clear = Boolean(sensitiveClear[key]);
       const nextValue = sensitiveDrafts[key] ?? '';
-      if (mode === 'keep' || (mode === 'replace' && !nextValue.trim())) continue;
+      if (!clear && !nextValue.trim()) continue;
       out.push({
         key,
         label: labelForKey(key),
         before: beforeSensitivePreview(Boolean(sensitiveConfigured[key])),
-        after: afterSensitivePreview(mode, nextValue, Boolean(sensitiveConfigured[key])),
+        after: afterSensitivePreview(clear, nextValue, Boolean(sensitiveConfigured[key])),
       });
       continue;
     }
@@ -201,20 +190,21 @@ function buildPutOperations(
   saved: Row[],
   draft: Row[],
   sensitiveDrafts: Record<string, string>,
-  sensitiveModes: Record<string, SensitiveMode>,
+  sensitiveClear: Record<string, boolean>,
   hiddenFromUser: Set<string>,
 ): { key: string; value: string }[] {
   const ops: { key: string; value: string }[] = [];
 
   for (const { key } of KEYS) {
     if (hiddenFromUser.has(key)) continue;
-    if (usesSensitiveSaveUi(key)) {
-      const mode = sensitiveModes[key] ?? 'keep';
-      const value = sensitiveDrafts[key] ?? '';
-      if (mode === 'replace' && value.trim()) {
-        ops.push({ key, value: value.trim() });
-      } else if (mode === 'clear') {
+    if (isSensitiveKey(key)) {
+      if (sensitiveClear[key]) {
         ops.push({ key, value: '' });
+      } else {
+        const value = sensitiveDrafts[key] ?? '';
+        if (value.trim()) {
+          ops.push({ key, value: value.trim() });
+        }
       }
       continue;
     }
@@ -249,7 +239,7 @@ export default function SettingsPage() {
   const [draftRows, setDraftRows] = useState<Row[]>([]);
   const [sensitiveConfigured, setSensitiveConfigured] = useState<Record<string, boolean>>({});
   const [sensitiveDrafts, setSensitiveDrafts] = useState<Record<string, string>>({});
-  const [sensitiveModes, setSensitiveModes] = useState<Record<string, SensitiveMode>>({});
+  const [sensitiveClear, setSensitiveClear] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'ok' | 'err'; text: string } | null>(
@@ -327,7 +317,7 @@ export default function SettingsPage() {
           ) as Record<string, boolean>,
         );
         setSensitiveDrafts({});
-        setSensitiveModes({});
+        setSensitiveClear({});
       } catch {
         setMessage({ type: 'err', text: 'Не удалось загрузить настройки' });
       } finally {
@@ -343,7 +333,7 @@ export default function SettingsPage() {
         draftRows,
         sensitiveConfigured,
         sensitiveDrafts,
-        sensitiveModes,
+        sensitiveClear,
         hiddenSettingKeys,
       ),
     [
@@ -351,7 +341,7 @@ export default function SettingsPage() {
       draftRows,
       sensitiveConfigured,
       sensitiveDrafts,
-      sensitiveModes,
+      sensitiveClear,
       hiddenSettingKeys,
     ],
   );
@@ -409,15 +399,14 @@ export default function SettingsPage() {
 
   function setSensitiveDraftKey(key: string, value: string) {
     setSensitiveDrafts((prev) => ({ ...prev, [key]: value }));
-    setSensitiveModes((prev) => ({
-      ...prev,
-      [key]: value.trim().length > 0 ? 'replace' : prev[key] ?? 'keep',
-    }));
+    if (value.trim().length > 0) {
+      setSensitiveClear((prev) => ({ ...prev, [key]: false }));
+    }
   }
 
-  function setSensitiveMode(key: string, mode: SensitiveMode) {
-    setSensitiveModes((prev) => ({ ...prev, [key]: mode }));
-    if (mode !== 'replace') {
+  function setSensitiveClearKey(key: string, checked: boolean) {
+    setSensitiveClear((prev) => ({ ...prev, [key]: checked }));
+    if (checked) {
       setSensitiveDrafts((prev) => ({ ...prev, [key]: '' }));
     }
   }
@@ -427,7 +416,7 @@ export default function SettingsPage() {
       savedRows,
       draftRows,
       sensitiveDrafts,
-      sensitiveModes,
+      sensitiveClear,
       hiddenSettingKeys,
     );
     if (ops.length === 0) return;
@@ -452,7 +441,7 @@ export default function SettingsPage() {
       setDraftRows(next);
       setSensitiveConfigured(nextConfigured);
       setSensitiveDrafts({});
-      setSensitiveModes({});
+      setSensitiveClear({});
       setMessage({ type: 'ok', text: 'Настройки сохранены' });
     } catch {
       setMessage({ type: 'err', text: 'Ошибка сохранения' });
@@ -464,7 +453,7 @@ export default function SettingsPage() {
   function revertDraft() {
     setDraftRows([...savedRows]);
     setSensitiveDrafts({});
-    setSensitiveModes({});
+    setSensitiveClear({});
     setMessage(null);
   }
 
@@ -521,8 +510,8 @@ export default function SettingsPage() {
 
   async function resetDatabase() {
     const ok = window.confirm(
-      'Удалить все данные в SQLite на сервере API?\n\n' +
-        'Будут удалены: сигналы, ордера, логи и сохранённые в БД настройки (ключи, токены и т.д.).\n' +
+      'Удалить все данные текущего кабинета в БД API?\n\n' +
+        'Будут удалены: сигналы, ордера, логи и настройки этого workspace (ключи, токены и т.д.).\n' +
         'Переменные из .env не затрагиваются.',
     );
     if (!ok) {
@@ -544,7 +533,7 @@ export default function SettingsPage() {
       setDraftRows([]);
       setSensitiveConfigured({});
       setSensitiveDrafts({});
-      setSensitiveModes({});
+      setSensitiveClear({});
       setMessage({
         type: 'ok',
         text: 'База данных очищена. Обновите страницу при необходимости.',
@@ -653,8 +642,6 @@ export default function SettingsPage() {
     const label = LABEL_BY_KEY[key] ?? key;
     const isBoolean = BOOLEAN_KEYS.has(key);
     const isModel = MODEL_KEYS.has(key);
-    const sensitiveSaveUi = usesSensitiveSaveUi(key);
-    const sensitiveMode = sensitiveModes[key] ?? 'keep';
     const configured = Boolean(sensitiveConfigured[key]);
     return (
       <label key={key} className={isBoolean ? 'settingRowSwitch' : undefined}>
@@ -674,52 +661,43 @@ export default function SettingsPage() {
           >
             <span className="switchThumb" />
           </button>
-        ) : key === 'OPENROUTER_API_KEY' ? (
+        ) : isSensitiveKey(key) ? (
           <div style={{ display: 'grid', gap: '0.45rem' }}>
             <p style={{ color: 'var(--muted)', fontSize: '0.82rem', lineHeight: 1.45, margin: 0 }}>
-              {configured
-                ? 'В базе уже есть значение; оно не показывается в форме.'
-                : 'В базе пока нет значения для этого поля.'}{' '}
-              Введите ключ только если нужно записать или заменить его.
+              Хранится только в <strong>этом кабинете</strong> (текущий workspace). Секрет в форму не
+              подставляется — у каждого кабинета свои ключи.{' '}
+              {configured ? 'Сейчас значение задано.' : 'Сейчас не задано.'}
             </p>
             <input
               type="password"
-              value={valueForDraft(key)}
+              value={sensitiveDrafts[key] ?? ''}
               name={key}
               autoComplete="new-password"
-              placeholder={configured ? 'Новый ключ (пусто = не менять при сохранении)' : 'OpenRouter API key'}
-              disabled={saving}
-              onChange={(e) => setDraftKey(key, e.target.value)}
+              placeholder={
+                configured
+                  ? 'Новый ключ — только если заменяете; пусто = без изменений'
+                  : 'Введите ключ или токен'
+              }
+              disabled={saving || Boolean(sensitiveClear[key])}
+              onChange={(e) => setSensitiveDraftKey(key, e.target.value)}
             />
-          </div>
-        ) : sensitiveSaveUi ? (
-          <div style={{ display: 'grid', gap: '0.45rem' }}>
-            <div style={{ color: 'var(--muted)', fontSize: '0.82rem', lineHeight: 1.45 }}>
-              {configured
-                ? 'В базе уже есть значение; оно не показывается в форме.'
-                : 'В базе пока нет значения для этого поля.'}{' '}
-              Выберите, что сделать при нажатии «Сохранить».
-            </div>
-            <select
-              value={sensitiveMode}
-              disabled={saving}
-              aria-label={`${label}: действие при сохранении`}
-              onChange={(e) => setSensitiveMode(key, e.target.value as SensitiveMode)}
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                fontSize: '0.88rem',
+                cursor: saving ? 'default' : 'pointer',
+              }}
             >
-              <option value="keep">Не менять (оставить в базе как сейчас)</option>
-              <option value="replace">Записать новый ключ / токен</option>
-              <option value="clear">Удалить из базы (очистить)</option>
-            </select>
-            {sensitiveMode === 'replace' ? (
               <input
-                type="password"
-                value={sensitiveDrafts[key] ?? ''}
-                name={key}
-                autoComplete="new-password"
-                placeholder={configured ? 'Новое значение' : 'Значение для записи в базу'}
-                onChange={(e) => setSensitiveDraftKey(key, e.target.value)}
+                type="checkbox"
+                checked={Boolean(sensitiveClear[key])}
+                disabled={saving}
+                onChange={(e) => setSensitiveClearKey(key, e.target.checked)}
               />
-            ) : null}
+              Удалить сохранённое значение в этом кабинете
+            </label>
           </div>
         ) : (
           <input
@@ -775,10 +753,10 @@ export default function SettingsPage() {
     <>
       <h1 className="pageTitle">Настройки</h1>
       <p style={{ color: 'var(--muted)', marginBottom: '1rem' }}>
-        Значения хранятся в SQLite на сервере API. Чувствительные поля не читаются
-        обратно в браузер: можно только увидеть, задан ли секрет, заменить его
-        или очистить. Изменения применяются на сервере только после нажатия
-        «Сохранить».
+        Настройки привязаны к <strong>текущему кабинету</strong> (workspace): у каждого кабинета свои
+        значения в БД API. Секреты (Bybit, Telegram, OpenRouter и т.д.) в браузер не отдаются — видно
+        только, задано ли поле; новое значение вводите вручную или отмечаете удаление в кабинете.
+        Сохранение — по кнопке «Сохранить».
       </p>
       {message && (
         <p className={`msg ${message.type === 'ok' ? 'ok' : 'err'}`}>
@@ -1102,8 +1080,8 @@ export default function SettingsPage() {
           <summary className="settingsSectionSummary">Опасная зона</summary>
           <div style={{ marginTop: '0.9rem' }}>
             <p style={{ color: 'var(--muted)', marginBottom: '0.75rem', fontSize: '0.9rem' }}>
-              Сброс статистики не удаляет сделки, а только начинает расчет метрик заново. Полный сброс
-              БД удаляет сигналы, ордера, логи и настройки в SQLite.
+              Сброс статистики не удаляет сделки, а только начинает расчёт метрик заново. Полный сброс
+              БД удаляет данные <strong>текущего кабинета</strong>: сигналы, ордера, логи и настройки.
             </p>
             <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
               <button
@@ -1143,7 +1121,7 @@ export default function SettingsPage() {
         {hasPendingChanges ? (
           <>
             <p style={{ color: 'var(--muted)', fontSize: '0.88rem', marginBottom: '0.6rem' }}>
-              Будут записаны в SQLite следующие отличия от последнего сохранённого состояния:
+              В БД API для этого кабинета будут применены такие изменения:
             </p>
             <ul
               style={{
