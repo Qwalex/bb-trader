@@ -21,8 +21,9 @@ export class TelegramUserbotController {
   @ApiOperation({ summary: 'Статус userbot' })
   @ApiOkResponse({ description: 'Статус получен' })
   @Get('status')
-  async status() {
-    return this.userbot.getStatus();
+  async status(@CurrentUser() user: AuthenticatedRequestContext | null) {
+    const workspaceId = requireWorkspaceId(user);
+    return this.userbot.getStatus(workspaceId);
   }
 
   @ApiOperation({ summary: 'Метрики userbot за сегодня' })
@@ -36,8 +37,8 @@ export class TelegramUserbotController {
   @ApiOkResponse({ description: 'Подключение выполнено' })
   @Post('connect')
   async connect(@CurrentUser() user: AuthenticatedRequestContext | null) {
-    requireWorkspaceId(user);
-    return this.userbot.connectFromStoredSession();
+    const workspaceId = requireWorkspaceId(user);
+    return this.userbot.connectFromStoredSession(workspaceId);
   }
 
   @ApiOperation({ summary: 'Отключить userbot' })
@@ -51,8 +52,9 @@ export class TelegramUserbotController {
   @ApiOperation({ summary: 'Начать QR-логин userbot' })
   @ApiOkResponse({ description: 'QR-логин запущен' })
   @Post('qr/start')
-  async startQr() {
-    return this.userbot.startQrLogin();
+  async startQr(@CurrentUser() user: AuthenticatedRequestContext | null) {
+    const workspaceId = requireWorkspaceId(user);
+    return this.userbot.startQrLogin(workspaceId);
   }
 
   @ApiOperation({ summary: 'Статус QR-логина userbot' })

@@ -109,15 +109,15 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     await this.stopQrClient();
   }
 
-  async getStatus() {
+  async getStatus(workspaceId: string) {
     const [enabled, useAiClassifier, requireConfirmation, apiId, apiHash, session] =
       await Promise.all([
-        this.getBoolSetting('TELEGRAM_USERBOT_ENABLED', false),
-        this.getBoolSetting('TELEGRAM_USERBOT_USE_AI_CLASSIFIER', true),
-        this.getBoolSetting('TELEGRAM_USERBOT_REQUIRE_CONFIRMATION', false),
-        this.settings.get('TELEGRAM_USERBOT_API_ID'),
-        this.settings.get('TELEGRAM_USERBOT_API_HASH'),
-        this.settings.get('TELEGRAM_USERBOT_SESSION'),
+        this.getBoolSetting('TELEGRAM_USERBOT_ENABLED', false, workspaceId),
+        this.getBoolSetting('TELEGRAM_USERBOT_USE_AI_CLASSIFIER', true, workspaceId),
+        this.getBoolSetting('TELEGRAM_USERBOT_REQUIRE_CONFIRMATION', false, workspaceId),
+        this.settings.get('TELEGRAM_USERBOT_API_ID', workspaceId),
+        this.settings.get('TELEGRAM_USERBOT_API_HASH', workspaceId),
+        this.settings.get('TELEGRAM_USERBOT_SESSION', workspaceId),
       ]);
     const chatsTotal = await this.prisma.tgUserbotChat.count();
     const chatsEnabled = await this.prisma.tgUserbotChat.count({
@@ -135,12 +135,12 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       },
       chatsTotal,
       chatsEnabled,
-      pollMs: await this.getUserbotPollIntervalMs(),
+      pollMs: await this.getUserbotPollIntervalMs(workspaceId),
       pollingInFlight: this.pollInFlight,
       processingQueueDepth: this.processingQueue.length,
       processingWorkersActive: this.processingWorkersActive,
       qr: this.qrState,
-      balanceGuard: await this.getBalanceGuardSnapshot(),
+      balanceGuard: await this.getBalanceGuardSnapshot(workspaceId),
     };
   }
 
@@ -195,9 +195,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async connectFromStoredSession() {
-    const creds = await this.getApiCreds();
-    const session = (await this.settings.get('TELEGRAM_USERBOT_SESSION'))?.trim();
+  async connectFromStoredSession(workspaceId?: string | null) {
+    const creds = await this.getApiCreds(workspaceId);
+    const session = (await this.settings.get('TELEGRAM_USERBOT_SESSION', workspaceId))?.trim();
     if (!session) {
       return {
         ok: false,
@@ -221,7 +221,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       };
     }
     await this.attachClient(client);
-    await this.settings.set('TELEGRAM_USERBOT_ENABLED', 'true');
+    await this.settings.set('TELEGRAM_USERBOT_ENABLED', 'true', workspaceId);
     return { ok: true, connected: true };
   }
 
@@ -238,7 +238,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     return { ok: true, connected: false };
   }
 
-  async startQrLogin() {
+  async startQrLogin(workspaceId: string) {
     if (await this.isClientAuthorized(this.client)) {
       return {
         ok: true,
@@ -250,7 +250,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       return { ok: true, message: 'QR-вход уже запущен.', qr: this.qrState };
     }
 
-    const creds = await this.getApiCreds();
+    const creds = await this.getApiCreds(workspaceId);
     await this.stopQrClient();
     const qrClient = new TelegramClient(
       new StringSession(''),
@@ -283,7 +283,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
               });
             },
             password: async () =>
-              (await this.settings.get('TELEGRAM_USERBOT_2FA_PASSWORD')) ?? '',
+              (await this.settings.get('TELEGRAM_USERBOT_2FA_PASSWORD', workspaceId)) ?? '',
           },
         );
         const authorized = await this.isClientAuthorized(qrClient);
@@ -297,8 +297,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         const savedSession = (
           qrClient.session as unknown as { save: () => string }
         ).save();
-        await this.settings.set('TELEGRAM_USERBOT_SESSION', savedSession);
-        await this.settings.set('TELEGRAM_USERBOT_ENABLED', 'true');
+        await this.settings.set('TELEGRAM_USERBOT_SESSION', savedSession, workspaceId);
+        await this.settings.set('TELEGRAM_USERBOT_ENABLED', 'true', workspaceId);
         await this.attachClient(qrClient);
         this.qrClient = null;
         this.setQrState({ phase: 'authorized' });
@@ -859,12 +859,13 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     this.pollTimer = null;
   }
 
-  private async getUserbotPollIntervalMs(): Promise<number> {
+  private async getUserbotPollIntervalMs(workspaceId?: string | null): Promise<number> {
     return this.getNumberSetting(
       'TELEGRAM_USERBOT_POLL_INTERVAL_MS',
       USERBOT_POLL_INTERVAL_MS,
       500,
       60_000,
+      workspaceId,
     );
   }
 
@@ -3151,7 +3152,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     return { ignore: false };
   }
 
-  private async getBalanceGuardSnapshot(): Promise<{
+  private async getBalanceGuardSnapshot(workspaceId?: string | null): Promise<{
     minBalanceUsd: number;
     balanceUsd: number | null;
     totalBalanceUsd: number | null;
@@ -3162,6 +3163,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       'TELEGRAM_USERBOT_MIN_BALANCE_USD',
       USERBOT_MIN_BALANCE_USD_DEFAULT,
       0,
+      undefined,
+      workspaceId,
     );
     const now = Date.now();
     let balanceUsd: number | undefined;
@@ -3265,9 +3268,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     this.enabledChatIds = new Set(rows.map((r) => r.chatId));
   }
 
-  private async getApiCreds(): Promise<{ apiId: number; apiHash: string }> {
-    const apiIdRaw = (await this.settings.get('TELEGRAM_USERBOT_API_ID'))?.trim();
-    const apiHash = (await this.settings.get('TELEGRAM_USERBOT_API_HASH'))?.trim();
+  private async getApiCreds(workspaceId?: string | null): Promise<{ apiId: number; apiHash: string }> {
+    const apiIdRaw = (await this.settings.get('TELEGRAM_USERBOT_API_ID', workspaceId))?.trim();
+    const apiHash = (await this.settings.get('TELEGRAM_USERBOT_API_HASH', workspaceId))?.trim();
     const apiId = apiIdRaw ? parseInt(apiIdRaw, 10) : Number.NaN;
     if (!Number.isFinite(apiId) || !apiHash) {
       throw new Error(
@@ -3579,8 +3582,12 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  private async getBoolSetting(key: string, fallback: boolean): Promise<boolean> {
-    const raw = await this.settings.get(key);
+  private async getBoolSetting(
+    key: string,
+    fallback: boolean,
+    workspaceId?: string | null,
+  ): Promise<boolean> {
+    const raw = await this.settings.get(key, workspaceId);
     if (raw == null || raw.trim() === '') {
       return fallback;
     }
@@ -3592,8 +3599,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     fallback: number,
     min?: number,
     max?: number,
+    workspaceId?: string | null,
   ): Promise<number> {
-    const raw = await this.settings.get(key);
+    const raw = await this.settings.get(key, workspaceId);
     if (raw == null || raw.trim() === '') {
       return fallback;
     }

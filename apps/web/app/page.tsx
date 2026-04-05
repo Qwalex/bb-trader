@@ -121,7 +121,13 @@ export default async function Home({
   }
   let balanceHistory: BalancePoint[] = [];
   try {
-    userbotStatus = await fetchJson<UserbotStatus>('/telegram-userbot/status');
+    const me = await fetchJson<{ workspaceId?: string | null }>('/auth/me');
+    const wid = typeof me.workspaceId === 'string' ? me.workspaceId.trim() : '';
+    if (wid) {
+      userbotStatus = await fetchJson<UserbotStatus>('/telegram-userbot/status', {
+        headers: { 'X-Workspace-Id': wid },
+      });
+    }
   } catch {
     // Userbot status is optional for dashboard render.
   }
