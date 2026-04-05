@@ -15,6 +15,7 @@ import {
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 
 import { requireWorkspaceId } from '../../common/require-workspace-id';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -39,6 +40,7 @@ export class DiagnosticsController {
   })
   @ApiForbiddenResponse({ description: 'Запрос не того origin' })
   @ApiOkResponse({ description: 'Диагностика запущена' })
+  @Throttle({ heavy: { limit: 10, ttl: 60_000 } })
   @Post('run-latest')
   async runLatest(
     @CurrentUser() user: AuthenticatedRequestContext | null,
@@ -84,6 +86,7 @@ export class DiagnosticsController {
   })
   @ApiForbiddenResponse({ description: 'Запрос не того origin' })
   @ApiOkResponse({ description: 'Рекомендации сгенерированы' })
+  @Throttle({ heavy: { limit: 10, ttl: 60_000 } })
   @Post('trading-advice')
   async tradingAdvice(
     @CurrentUser() user: AuthenticatedRequestContext | null,

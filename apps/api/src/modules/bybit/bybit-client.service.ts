@@ -5,6 +5,8 @@ import { SettingsService } from '../settings/settings.service';
 
 @Injectable()
 export class BybitClientService {
+  private readonly clientCache = new Map<string, RestClientV5>();
+
   constructor(private readonly settings: SettingsService) {}
 
   /**
@@ -69,10 +71,20 @@ export class BybitClientService {
     if (!creds) {
       return null;
     }
-    return new RestClientV5({
+    const cacheKey = `${String(creds.testnet)}:${creds.key}`;
+    const cached = this.clientCache.get(cacheKey);
+    if (cached) return cached;
+    const client = new RestClientV5({
       key: creds.key,
       secret: creds.secret,
       testnet: creds.testnet,
     });
+    this.clientCache.set(cacheKey, client);
+    return client;
+  }
+
+  /** Сбросить кешированные клиенты (вызывать при изменении API-ключей в настройках). */
+  invalidateClientCache(): void {
+    this.clientCache.clear();
   }
 }

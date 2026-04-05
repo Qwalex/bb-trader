@@ -72,6 +72,7 @@ function normalizeOpenRouterAudioFormat(
 @Injectable()
 export class TranscriptService {
   private readonly logger = new Logger(TranscriptService.name);
+  private openRouterClientCache: { key: string; client: OpenRouter } | null = null;
 
   constructor(
     private readonly settings: SettingsService,
@@ -79,6 +80,20 @@ export class TranscriptService {
     @Inject(forwardRef(() => BybitService))
     private readonly bybit: BybitService,
   ) {}
+
+  private getOpenRouterClient(apiKey: string): OpenRouter {
+    if (this.openRouterClientCache?.key === apiKey) {
+      return this.openRouterClientCache.client;
+    }
+    const client = new OpenRouter({
+      apiKey,
+      httpReferer: OPENROUTER_SITE_URL,
+      xTitle: OPENROUTER_APP_TITLE,
+      timeoutMs: 180_000,
+    });
+    this.openRouterClientCache = { key: apiKey, client };
+    return client;
+  }
 
   private async resolveDefaultOrderUsdForParse(
     overrides?: TranscriptParseOverrides,
@@ -746,12 +761,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     messages: { role: string; content: unknown }[],
     ctx: { operation: string; kind?: ContentKind; fallbackModels?: string[] },
   ): Promise<unknown> {
-    const client = new OpenRouter({
-      apiKey,
-      httpReferer: OPENROUTER_SITE_URL,
-      xTitle: OPENROUTER_APP_TITLE,
-      timeoutMs: 180_000,
-    });
+    const client = this.getOpenRouterClient(apiKey);
 
     const schemaName =
       ctx.operation === 'classifyTradingMessage'

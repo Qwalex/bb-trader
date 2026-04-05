@@ -196,9 +196,32 @@ export class SettingsService {
     keys: string[],
     workspaceId?: string | null,
   ): Promise<Record<string, string | undefined>> {
+    if (keys.length === 0) return {};
+    const resolvedWorkspaceId = this.resolveWorkspaceId(workspaceId);
+    const rows = resolvedWorkspaceId
+      ? await this.prisma.setting.findMany({
+          where: { workspaceId: resolvedWorkspaceId, key: { in: keys } },
+        })
+      : [];
+    const dbMap = new Map(rows.map((r) => [r.key, r.value]));
     const out: Record<string, string | undefined> = {};
     for (const k of keys) {
-      out[k] = await this.get(k, workspaceId);
+      const dbVal = dbMap.get(k);
+      if (dbVal !== undefined && dbVal !== '') {
+        out[k] = dbVal;
+        continue;
+      }
+      const fromEnv = this.config.get<string>(k);
+      if (fromEnv !== undefined && fromEnv !== '') {
+        out[k] = fromEnv;
+        continue;
+      }
+      const fromProcess = process.env[k];
+      if (fromProcess !== undefined && fromProcess !== '') {
+        out[k] = fromProcess;
+        continue;
+      }
+      out[k] = ENV_FALLBACK[k];
     }
     return out;
   }
@@ -219,13 +242,10 @@ export class SettingsService {
     workspaceId?: string | null,
   ): Promise<{ key: string; value: string }[]> {
     const uniqueKeys = Array.from(new Set(keys.map((key) => key.trim()).filter((key) => key.length > 0)));
-    const rows = await Promise.all(
-      uniqueKeys.map(async (key) => {
-        const value = await this.get(key, workspaceId);
-        return { key, value: value ?? '' };
-      }),
-    );
-    return rows.sort((a, b) => a.key.localeCompare(b.key, 'ru'));
+    const map = await this.getMany(uniqueKeys, workspaceId);
+    return uniqueKeys
+      .map((key) => ({ key, value: map[key] ?? '' }))
+      .sort((a, b) => a.key.localeCompare(b.key, 'ru'));
   }
 
   static isSensitiveKey(key: string): boolean {

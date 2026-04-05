@@ -8,10 +8,33 @@ import { WorkspaceBootstrapService } from './workspace-bootstrap.service';
 
 @Injectable()
 export class AuthService {
+  private readonly contextCache = new Map<
+    string,
+    { ctx: AuthenticatedRequestContext; expiresAt: number }
+  >();
+  private readonly CONTEXT_CACHE_TTL_MS = 60_000;
+  private readonly CONTEXT_CACHE_MAX_SIZE = 1_000;
+
   constructor(
     private readonly config: ConfigService,
     private readonly workspaceBootstrap: WorkspaceBootstrapService,
   ) {}
+
+  private getCachedContext(userId: string): AuthenticatedRequestContext | null {
+    const entry = this.contextCache.get(userId);
+    if (!entry) return null;
+    if (Date.now() < entry.expiresAt) return entry.ctx;
+    this.contextCache.delete(userId);
+    return null;
+  }
+
+  private setCachedContext(userId: string, ctx: AuthenticatedRequestContext): void {
+    if (this.contextCache.size >= this.CONTEXT_CACHE_MAX_SIZE) {
+      const firstKey = this.contextCache.keys().next().value;
+      if (firstKey !== undefined) this.contextCache.delete(firstKey);
+    }
+    this.contextCache.set(userId, { ctx, expiresAt: Date.now() + this.CONTEXT_CACHE_TTL_MS });
+  }
 
   private getSupabaseJwtSecret(): string | null {
     const secret = this.config.get<string>('SUPABASE_JWT_SECRET')?.trim();
@@ -101,6 +124,11 @@ export class AuthService {
     userId: string,
     jwtClaims: { email: string | null; workspaceName: string | null; workspaceSlug: string | null },
   ): Promise<AuthenticatedRequestContext> {
+    const cached = this.getCachedContext(userId);
+    if (cached) return cached;
+
+    let ctx: AuthenticatedRequestContext;
+
     const admin = this.getSupabaseAdminClient();
     if (admin) {
       try {
@@ -116,13 +144,15 @@ export class AuthService {
             workspaceSlug:
               typeof metadata.workspace_slug === 'string' ? metadata.workspace_slug : null,
           });
-          return {
+          ctx = {
             userId,
             email: user.email ?? null,
             workspaceId: bootstrap.workspaceId,
             role: bootstrap.role,
             appRole: bootstrap.appRole,
           };
+          this.setCachedContext(userId, ctx);
+          return ctx;
         }
       } catch {
         // сеть / неверный service role URL — не рвём сессию, берём claims из JWT
@@ -135,13 +165,15 @@ export class AuthService {
       workspaceName: jwtClaims.workspaceName,
       workspaceSlug: jwtClaims.workspaceSlug,
     });
-    return {
+    ctx = {
       userId,
       email: jwtClaims.email,
       workspaceId: bootstrap.workspaceId,
       role: bootstrap.role,
       appRole: bootstrap.appRole,
     };
+    this.setCachedContext(userId, ctx);
+    return ctx;
   }
 
   async authenticateRequest(input: {

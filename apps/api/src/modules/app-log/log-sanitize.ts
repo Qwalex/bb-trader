@@ -59,69 +59,35 @@ export function stringifyPayload(payload: unknown, maxTotal = 100_000): string {
   }
 }
 
-/** Удаление старых записей при переполнении. */
+/**
+ * Удаление старых записей по дате — вместо COUNT(*) + N findMany.
+ * Приоритет: шумные debug/info удаляются за последние 6 ч, остальные — за 24 ч.
+ * Cron-задачи в AppLogService дополнительно чистят по своим расписаниям.
+ */
 export async function pruneOldLogs(
   prisma: PrismaService,
-  keepLast: number,
+  _keepLast: number,
   noiseMessages: readonly string[] = [],
 ): Promise<void> {
-  const count = await prisma.appLog.count();
-  if (count <= keepLast) {
-    return;
-  }
-  const excess = count - keepLast;
-  let remaining = excess;
+  const now = Date.now();
 
-  const deleteOldestWhere = async (
-    where: Record<string, unknown>,
-    limit: number,
-  ): Promise<number> => {
-    if (limit <= 0) return 0;
-    const rows = await prisma.appLog.findMany({
-      where: where as any,
-      orderBy: { createdAt: 'asc' },
-      take: limit,
-      select: { id: true },
+  // Шумные debug/info — удаляем старше 6 ч
+  const noiseCutoff = new Date(now - 6 * 60 * 60 * 1000);
+  if (noiseMessages.length > 0) {
+    await prisma.appLog.deleteMany({
+      where: {
+        message: { in: [...noiseMessages] },
+        createdAt: { lt: noiseCutoff },
+      },
     });
-    const ids = rows.map((r) => r.id);
-    if (!ids.length) return 0;
-    const res = await prisma.appLog.deleteMany({ where: { id: { in: ids } } });
-    return res.count ?? ids.length;
-  };
-
-  // Приоритет удаления: шумные debug → все debug → info noise → остальные info/system → warn → error (последними).
-  // Это защищает важные warn/error от вытеснения большим потоком debug/info.
-  remaining -= await deleteOldestWhere(
-    noiseMessages.length
-      ? { level: 'debug', message: { in: [...noiseMessages] } }
-      : { level: 'debug' },
-    remaining,
-  );
-  remaining -= await deleteOldestWhere(
-    { level: 'debug' },
-    remaining,
-  );
-  if (noiseMessages.length) {
-    remaining -= await deleteOldestWhere(
-      { level: 'info', message: { in: [...noiseMessages] } },
-      remaining,
-    );
   }
-  remaining -= await deleteOldestWhere(
-    { level: 'info' },
-    remaining,
-  );
-  remaining -= await deleteOldestWhere(
-    { level: 'warn' },
-    remaining,
-  );
-  remaining -= await deleteOldestWhere(
-    { level: 'error' },
-    remaining,
-  );
+  await prisma.appLog.deleteMany({
+    where: { level: 'debug', createdAt: { lt: noiseCutoff } },
+  });
 
-  // На всякий случай: если что-то осталось (неизвестные level), удаляем самые старые вообще.
-  if (remaining > 0) {
-    await deleteOldestWhere({}, remaining);
-  }
+  // Всё остальное — удаляем старше 24 ч
+  const regularCutoff = new Date(now - 24 * 60 * 60 * 1000);
+  await prisma.appLog.deleteMany({
+    where: { createdAt: { lt: regularCutoff } },
+  });
 }

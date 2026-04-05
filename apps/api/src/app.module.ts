@@ -60,7 +60,10 @@ function loadEnvFilePaths(): string[] {
     AuthModule,
     ScheduleModule.forRoot(),
     ThrottlerModule.forRoot({
-      throttlers: [{ ttl: 60_000, limit: 60 }],
+      throttlers: [
+        { name: 'default', ttl: 60_000, limit: 60 },
+        { name: 'heavy', ttl: 60_000, limit: 10 },
+      ],
     }),
     PrismaModule,
     AppLogModule,

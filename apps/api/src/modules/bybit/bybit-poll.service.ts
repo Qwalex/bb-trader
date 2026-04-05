@@ -10,21 +10,40 @@ export class BybitPollService {
   private lastPollAt = 0;
   private isPolling = false;
 
+  private cachedPollEveryMs = 30_000;
+  private pollIntervalCachedAt = 0;
+  private readonly INTERVAL_CACHE_TTL_MS = 60_000;
+
   constructor(
     private readonly bybit: BybitService,
     private readonly settings: SettingsService,
   ) {}
 
+  private async getPollEveryMs(): Promise<number> {
+    const now = Date.now();
+    if (now - this.pollIntervalCachedAt < this.INTERVAL_CACHE_TTL_MS) {
+      return this.cachedPollEveryMs;
+    }
+    const msRaw = await this.settings.get('POLLING_INTERVAL_MS');
+    let resolved: number;
+    if (msRaw === '0') {
+      resolved = 0;
+    } else {
+      const configuredMs = Number(msRaw);
+      resolved = Number.isFinite(configuredMs) && configuredMs > 0 ? configuredMs : 30_000;
+    }
+    this.cachedPollEveryMs = resolved;
+    this.pollIntervalCachedAt = now;
+    return resolved;
+  }
+
   @Interval(1_000)
   async tick(): Promise<void> {
-    const msRaw = await this.settings.get('POLLING_INTERVAL_MS');
-    if (msRaw === '0') {
+    const pollEveryMs = await this.getPollEveryMs();
+    if (pollEveryMs === 0) {
       return;
     }
 
-    const configuredMs = Number(msRaw);
-    const pollEveryMs =
-      Number.isFinite(configuredMs) && configuredMs > 0 ? configuredMs : 30_000;
     const now = Date.now();
     if (this.isPolling || now - this.lastPollAt < pollEveryMs) {
       return;

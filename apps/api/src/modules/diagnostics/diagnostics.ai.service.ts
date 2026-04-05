@@ -56,7 +56,23 @@ const DIAGNOSTICS_RESPONSE_JSON_SCHEMA = {
 
 @Injectable()
 export class DiagnosticsAiService {
+  private openRouterClientCache: { key: string; client: OpenRouter } | null = null;
+
   constructor(private readonly settings: SettingsService) {}
+
+  private getOpenRouterClient(apiKey: string): OpenRouter {
+    if (this.openRouterClientCache?.key === apiKey) {
+      return this.openRouterClientCache.client;
+    }
+    const client = new OpenRouter({
+      apiKey,
+      httpReferer: OPENROUTER_SITE_URL,
+      xTitle: OPENROUTER_APP_TITLE,
+      timeoutMs: 180_000,
+    });
+    this.openRouterClientCache = { key: apiKey, client };
+    return client;
+  }
 
   async auditCaseWithModel(
     model: string,
@@ -70,12 +86,7 @@ export class DiagnosticsAiService {
     const compactTrace = this.compactTrace(trace);
     const requestPreview = JSON.stringify(compactTrace).slice(0, 3000);
 
-    const client = new OpenRouter({
-      apiKey,
-      httpReferer: OPENROUTER_SITE_URL,
-      xTitle: OPENROUTER_APP_TITLE,
-      timeoutMs: 180_000,
-    });
+    const client = this.getOpenRouterClient(apiKey);
 
     const prompt = [
       'Ты — строгий диагност пайплайна торговых сигналов.',
