@@ -22,7 +22,7 @@ import { BybitService } from './bybit.service';
     forwardRef(() => SettingsModule),
     forwardRef(() => OrdersModule),
     forwardRef(() => TelegramModule),
-    AppLogModule,
+    forwardRef(() => AppLogModule),
   ],
   controllers: [BybitController],
   providers: [
