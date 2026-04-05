@@ -20,7 +20,7 @@ export default async function ForgotPasswordPage({
 }) {
   const session = await readDashboardSession();
   if (session) {
-    redirect(withBasePath('/'));
+    redirect('/');
   }
   const sp = await searchParams;
   const status = typeof sp.status === 'string' ? sp.status : undefined;

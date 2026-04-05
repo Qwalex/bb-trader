@@ -8,7 +8,7 @@ export async function POST(request: Request) {
   const form = await request.formData();
   const email = typeof form.get('email') === 'string' ? String(form.get('email')).trim() : '';
   const password = typeof form.get('password') === 'string' ? String(form.get('password')) : '';
-  const redirectTo = normalizeRedirectTarget(form.get('redirectTo'), withBasePath('/'));
+  const redirectTo = normalizeRedirectTarget(form.get('redirectTo'));
 
   try {
     const routeClient = createSupabaseRouteClient(request);

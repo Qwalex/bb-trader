@@ -24,12 +24,12 @@ export default async function LoginPage({
 }) {
   const session = await readDashboardSession();
   if (session) {
-    redirect(withBasePath('/'));
+    redirect('/');
   }
   const sp = await searchParams;
   const error = typeof sp.error === 'string' ? sp.error : undefined;
   const redirectToRaw = typeof sp.redirectTo === 'string' ? sp.redirectTo : undefined;
-  const redirectTo = normalizeRedirectTarget(redirectToRaw, withBasePath('/'));
+  const redirectTo = normalizeRedirectTarget(redirectToRaw);
 
   return (
     <div

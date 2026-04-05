@@ -14,7 +14,10 @@ services:
     volumes:
       - supabase-db-data-dev:/var/lib/postgresql/data
       # Analytics (Logflare): БД _supabase и схема _analytics — только при первом init тома.
-      # Уже существующий volume: вручную выполнить supabase/volumes/db/_supabase.sql и logs.sql или пересоздать том.
+      # Старый volume без _supabase (ошибка database "_supabase" does not exist):
+      #   docker compose exec -T db psql -U postgres -c "CREATE DATABASE _supabase WITH OWNER postgres;"
+      #   docker compose exec -T db psql -U postgres -d _supabase -c "CREATE SCHEMA IF NOT EXISTS _analytics; ALTER SCHEMA _analytics OWNER TO postgres;"
+      # либо пересоздать том supabase-db-data-dev.
       - ./supabase/volumes/db/_supabase.sql:/docker-entrypoint-initdb.d/migrations/97-_supabase.sql:ro
       - ./supabase/volumes/db/logs.sql:/docker-entrypoint-initdb.d/migrations/99-logs.sql:ro
     ports:

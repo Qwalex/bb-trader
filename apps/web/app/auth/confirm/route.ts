@@ -20,10 +20,7 @@ function failureRedirect(request: NextRequest, nextPath: string): NextResponse {
 export async function GET(request: NextRequest) {
   const tokenHash = request.nextUrl.searchParams.get('token_hash');
   const type = request.nextUrl.searchParams.get('type') as EmailOtpType | null;
-  const nextPath = normalizeRedirectTarget(
-    request.nextUrl.searchParams.get('next'),
-    withBasePath('/'),
-  );
+  const nextPath = normalizeRedirectTarget(request.nextUrl.searchParams.get('next'));
 
   if (!tokenHash || !type) {
     return failureRedirect(request, nextPath);

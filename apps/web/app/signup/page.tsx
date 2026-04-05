@@ -20,7 +20,7 @@ export default async function SignupPage({
 }) {
   const session = await readDashboardSession();
   if (session) {
-    redirect(withBasePath('/'));
+    redirect('/');
   }
   const sp = await searchParams;
   const error = typeof sp.error === 'string' ? sp.error : undefined;

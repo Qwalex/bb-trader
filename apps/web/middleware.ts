@@ -73,9 +73,11 @@ export async function middleware(request: NextRequest) {
   if (!user && !isPublic) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = `${basePath}/login`;
+    // pathname выше — без basePath; для hidden redirectTo нужен полный путь от origin (иначе "/" → потеря префикса).
+    const redirectAfterLogin = basePath ? `${basePath}${pathname}` : pathname;
     loginUrl.searchParams.set(
       'redirectTo',
-      `${request.nextUrl.pathname}${request.nextUrl.search}`,
+      `${redirectAfterLogin}${request.nextUrl.search}`,
     );
     return NextResponse.redirect(loginUrl);
   }
