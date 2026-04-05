@@ -6,6 +6,8 @@ import { SettingsService } from '../settings/settings.service';
 
 import { pruneOldLogs, stringifyPayload } from './log-sanitize';
 
+const PRUNE_THROTTLE_MS = 5 * 60_000;
+
 export type LogLevel = 'info' | 'warn' | 'error' | 'debug';
 export type LogCategory =
   | 'openrouter'
@@ -74,6 +76,7 @@ export class AppLogService {
   private readonly logger = new Logger(AppLogService.name);
   private dbFullMuteUntilTs = 0;
   private dbFullLastErrorTs = 0;
+  private lastPruneTs = 0;
   private logNoisyPolicyCache: { expiresAt: number; value: boolean } | null =
     null;
 
@@ -153,9 +156,13 @@ export class AppLogService {
           payload: payloadStr,
         },
       });
-      void pruneOldLogs(this.prisma, MAX_ROWS, NOISE_MESSAGES).catch((e) =>
-        this.logger.warn(`pruneOldLogs: ${String(e)}`),
-      );
+      const now = Date.now();
+      if (now - this.lastPruneTs >= PRUNE_THROTTLE_MS) {
+        this.lastPruneTs = now;
+        void pruneOldLogs(this.prisma, MAX_ROWS, NOISE_MESSAGES).catch((e) =>
+          this.logger.warn(`pruneOldLogs: ${String(e)}`),
+        );
+      }
     } catch (e) {
       const errText = String(e);
       if (this.isDbFullError(e)) {

@@ -42,8 +42,6 @@ self.addEventListener('fetch', (event) => {
     url.pathname.endsWith('.jpeg') ||
     url.pathname.endsWith('.webp') ||
     url.pathname.endsWith('.ico') ||
-    url.pathname.endsWith('.css') ||
-    url.pathname.endsWith('.js') ||
     url.pathname.endsWith('.woff') ||
     url.pathname.endsWith('.woff2');
 
