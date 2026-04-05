@@ -6,14 +6,16 @@ import { useEffect, useRef, useState } from 'react';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { getApiBase } from '../../lib/api';
 import { withBasePath } from '../../lib/auth';
-import { NAV_ITEMS } from '../../lib/nav-items';
+import { navItemsVisibleForUser, type NavItem } from '../../lib/nav-items';
 
 type UiPayload = {
   navMenuInBurger?: string[];
+  appRole?: string;
 };
 
 export function AppNavigation() {
   const [inBurger, setInBurger] = useState<Set<string>>(() => new Set());
+  const [isAppAdmin, setIsAppAdmin] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement | null>(null);
 
@@ -26,6 +28,7 @@ export function AppNavigation() {
         const data = (await res.json()) as UiPayload;
         const ids = Array.isArray(data.navMenuInBurger) ? data.navMenuInBurger : [];
         setInBurger(new Set(ids.map((x) => String(x).trim()).filter(Boolean)));
+        setIsAppAdmin(data.appRole === 'admin');
       } catch {
         // оставляем пустой набор → все пункты в полоске
       }
@@ -54,9 +57,10 @@ export function AppNavigation() {
     };
   }, [menuOpen]);
 
-  const primary: typeof NAV_ITEMS = [];
-  const secondary: typeof NAV_ITEMS = [];
-  for (const item of NAV_ITEMS) {
+  const visibleItems = navItemsVisibleForUser(isAppAdmin);
+  const primary: NavItem[] = [];
+  const secondary: NavItem[] = [];
+  for (const item of visibleItems) {
     if (inBurger.has(item.id)) secondary.push(item);
     else primary.push(item);
   }
