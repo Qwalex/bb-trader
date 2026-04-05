@@ -24,175 +24,25 @@ import {
   normalizePartialSignal,
   sanitizeSignalSource,
 } from './partial-signal.util';
+import {
+  CLASSIFIER_RESPONSE_JSON_SCHEMA,
+  FILTER_PATTERN_GENERATION_JSON_SCHEMA,
+  TRANSCRIPT_RESPONSE_JSON_SCHEMA,
+} from './transcript-json-schemas';
+import {
+  OPENROUTER_APP_TITLE,
+  OPENROUTER_BASE_RETRY_DELAY_MS,
+  OPENROUTER_MAX_RETRIES,
+  OPENROUTER_SITE_URL,
+  OPENROUTER_URL,
+} from './transcript-openrouter.constants';
+import { buildJsonSchemaRules, buildSystemPrompt } from './transcript-prompts';
 
 /** Опциональные дефолты для разбора (userbot: по чату). */
 export type TranscriptParseOverrides = {
   defaultOrderUsd?: number;
   leverageDefault?: number;
 };
-
-const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const OPENROUTER_SITE_URL = 'https://signals-bot.local';
-const OPENROUTER_APP_TITLE = 'SignalsBot';
-const OPENROUTER_MAX_RETRIES = 5;
-const OPENROUTER_BASE_RETRY_DELAY_MS = 1_000;
-
-const TRANSCRIPT_RESPONSE_JSON_SCHEMA = {
-  type: 'object',
-  properties: {
-    status: { type: 'string', enum: ['complete', 'incomplete'] },
-    signal: {
-      type: 'object',
-      properties: {
-        pair: {
-          type: ['string', 'null'],
-          description:
-            'USDT linear perp symbol BASEUSDT (e.g. BTCUSDT). If the message names only the base (BTC), output BTCUSDT. Null if unknown — separators/case normalized server-side',
-        },
-        direction: { type: ['string', 'null'], enum: ['long', 'short', null] },
-        entries: { type: ['array', 'null'], items: { type: 'number' }, minItems: 1 },
-        entryIsRange: {
-          type: ['boolean', 'null'],
-          description:
-            'true: entries are ONE zone [low, high] (range/zone wording); false: entries are DCA list; null if single entry or market',
-        },
-        stopLoss: { type: ['number', 'null'] },
-        takeProfits: {
-          type: ['array', 'null'],
-          items: { type: 'number' },
-          minItems: 1,
-        },
-        leverage: { type: ['number', 'null'], minimum: 1 },
-        orderUsd: { type: 'number', minimum: 0 },
-        capitalPercent: { type: 'number', minimum: 0, maximum: 100 },
-        source: { type: ['string', 'null'] },
-      },
-      required: [
-        'pair',
-        'direction',
-        'entries',
-        'entryIsRange',
-        'stopLoss',
-        'takeProfits',
-        'leverage',
-        'orderUsd',
-        'capitalPercent',
-        'source',
-      ],
-      additionalProperties: false,
-    },
-    missing: {
-      type: 'array',
-      items: {
-        type: 'string',
-        enum: ['pair', 'direction', 'entries', 'stopLoss', 'takeProfits', 'leverage'],
-      },
-    },
-    prompt: { type: ['string', 'null'] },
-  },
-  required: ['status', 'signal', 'missing', 'prompt'],
-  additionalProperties: false,
-} as const;
-
-const CLASSIFIER_RESPONSE_JSON_SCHEMA = {
-  type: 'object',
-  properties: {
-    kind: { type: 'string', enum: ['signal', 'close', 'reentry', 'result', 'other'] },
-    reason: { type: 'string' },
-  },
-  required: ['kind', 'reason'],
-  additionalProperties: false,
-} as const;
-
-const FILTER_PATTERN_GENERATION_JSON_SCHEMA = {
-  type: 'object',
-  properties: {
-    patterns: {
-      type: 'array',
-      items: { type: 'string', minLength: 2 },
-      minItems: 1,
-    },
-  },
-  required: ['patterns'],
-  additionalProperties: false,
-} as const;
-
-/** Общая схема ответа модели (с явным статусом); defaultOrderUsd — из настроек DEFAULT_ORDER_USD. */
-function buildJsonSchemaRules(defaultOrderUsd: number): string {
-  return `
-Return ONLY valid JSON (no markdown, no commentary) with this exact shape:
-{
-  "status": "complete" | "incomplete",
-  "signal": {
-    "pair": "BTCUSDT" | null,
-    "direction": "long" | "short" | null,
-    "entries": [number, ...] | null,
-    "entryIsRange": boolean | null,
-    "stopLoss": number | null,
-    "takeProfits": [number, ...] | null,
-    "leverage": number | null,
-    "orderUsd": number,
-    "capitalPercent": number,
-    "source": "string | null"
-  },
-  "missing": ["pair", "direction", ...],
-  "prompt": "Краткий вопрос пользователю на русском: каких данных не хватает" | null
-}
-Decision policy:
-1. First decide whether the message is a NEW actionable trade setup.
-2. If the message is not clearly a fresh setup, do NOT try to complete a signal. Return status="incomplete", keep required signal fields null, set missing=[], and set prompt=null.
-3. Use status="incomplete" with a clarifying question ONLY when the message is clearly a fresh setup but exactly 1 or 2 required fields are unknown or ambiguous.
-4. If 3 or more required fields are unknown/ambiguous, or the message is a report/update/commentary, do NOT ask a question. Return status="incomplete", missing=[], prompt=null.
-
-Special update mode:
-- If the user input contains sections named BASE_SIGNAL_JSON and UPDATE_MESSAGE, this is NOT a fresh setup classification task.
-- In that case, treat BASE_SIGNAL_JSON as the authoritative current signal state.
-- Extract only explicit changes from UPDATE_MESSAGE and merge them into BASE_SIGNAL_JSON.
-- Keep all unchanged fields from BASE_SIGNAL_JSON as-is.
-- ORIGINAL_SIGNAL_MESSAGE and QUOTED_MESSAGE are reference context only; do not discard known BASE_SIGNAL_JSON values just because they are absent in UPDATE_MESSAGE.
-- Return the merged signal. Ask a clarifying question only if UPDATE_MESSAGE makes a required field ambiguous after merging.
-
-Messages that are NOT a fresh setup unless they also contain a full new setup:
-- trade result or performance report
-- TP/SL hit report
-- profit/loss/PNL/percentage report
-- duration/period/statistics
-- closed/закрыт/закрыта/закрыто
-- recap, commentary, status update, or partial follow-up without enough setup fields
-
-Required fields for a valid fresh setup:
-- pair
-- direction
-- stopLoss
-- takeProfits
-
-Field rules:
-- pair: always the USDT linear perpetual symbol as BASEUSDT (e.g. BTCUSDT, ETHUSDT, 1000PEPEUSDT). If the message names only the base asset without a quote (BTC, ETH, SOL, PEPE), append USDT. Forms like ETH/USDT, BTC-USDT, ethusdt are fine; casing and separators are normalized server-side.
-- direction must be long or short.
-- entries and leverage are optional.
-- entries / entryIsRange — classify yourself from the text:
-  - Range (one entry band): if the text says opening should happen **within** a range/zone/band of values (English: open in a range, enter between A and B, in the zone; Russian: открытие в диапазоне, в зоне, вход в коридоре, между X и Y как границами одной зоны), that is always entryIsRange=true: entries=[lower, higher] ascending. Same for one interval with two bounds for a single "where to enter" idea (zone/диапазон/зона/коридор, or one "A – B" line as min/max of one band). Server uses range-entry rules; no midpoint; not DCA.
-  - List / enumeration (DCA): several separate entry prices (numbered list, multiple bullets, "Entry 1/2", distinct steps) without one band framing min/max of one zone. If prices are **only** listed separated by commas (or similar separators) with **no** dash/hyphen/en-dash between two prices as a single band and **no** wording about range/zone/band/диапазон/зона/коридор, treat as DCA: entryIsRange=false or omit, entries in message order. Server uses DCA rules.
-  - If unclear: use range only when both numbers are clearly lower and upper bound of one zone; otherwise treat as DCA list.
-- If the user gives no entry price, treat it as market entry: set entries to null and do NOT ask for clarification only because entries are missing. The order will be placed at market at the execution stage.
-- If the message gives BOTH a market entry option and a limit entry (labels such as Entry market / Entry limit, маркет и лимит, market vs limit, two entry lines where one is market and the other has a price), ALWAYS prefer the limit: set entries to the limit price(s) only. Do NOT set entries to null because "market" is also mentioned alongside an explicit limit price.
-- takeProfits: use only target/TP/цели/закрыть по prices — never put TP prices into entries.
-- If leverage is given as a range (e.g. "2 - 5"), use the midpoint and round up (2-5 => 4).
-- Extract prices only from explicit labels (Entry, Stop loss, SL, Targets/TP, etc.). Do not blend, infer, or average numbers from different fields.
-- Field labels without actual values (e.g. "Entry:", "SL:", "TP1:" with no number after them) do NOT count as known values.
-- takeProfits: one or more take-profit prices; several TPs mean equal split across levels.
-- orderUsd: total position notional in USDT (e.g. 10, 50, 100). If the user gives percent of balance instead, set orderUsd to 0 and set capitalPercent to that percent.
-- capitalPercent: use only when sizing by balance percent; otherwise 0.
-- Default sizing: if size is not specified, set orderUsd to ${defaultOrderUsd} and capitalPercent to 0.
-- source: ONLY if the user explicitly names the signal provider (Telegram channel, app, or group), e.g. "Binance Killers", "Crypto Signals". Otherwise set source to null. NEVER use "text", "image", "audio", or any input-format word as source.
-`;
-}
-
-function buildSystemPrompt(defaultOrderUsd: number): string {
-  return `You are a trading signal parser. Extract structured data from the user message.
-${buildJsonSchemaRules(defaultOrderUsd)}
-`;
-}
 
 type TranscriptMessagePart =
   | { type: 'text'; text: string }

@@ -7,6 +7,7 @@ import { TelegramModule } from '../telegram/telegram.module';
 import { TranscriptModule } from '../transcript/transcript.module';
 import { TelegramUserbotController } from './telegram-userbot.controller';
 import { TelegramUserbotService } from './telegram-userbot.service';
+import { UserbotPublishService } from './userbot-publish.service';
 import { UserbotSignalHashModule } from './userbot-signal-hash.module';
 
 @Module({
@@ -19,7 +20,7 @@ import { UserbotSignalHashModule } from './userbot-signal-hash.module';
     UserbotSignalHashModule,
   ],
   controllers: [TelegramUserbotController],
-  providers: [TelegramUserbotService],
+  providers: [UserbotPublishService, TelegramUserbotService],
   exports: [TelegramUserbotService],
 })
 export class TelegramUserbotModule {}

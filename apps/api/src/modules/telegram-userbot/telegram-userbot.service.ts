@@ -18,90 +18,30 @@ import {
 } from '../transcript/transcript.service';
 import { UserbotSignalHashService } from './userbot-signal-hash.service';
 import { parseSignalPriceArrayJson } from './userbot-signal-hash.util';
-
-type MessageKind = 'signal' | 'close' | 'reentry' | 'result' | 'other';
-type UserbotFilterKind = 'signal' | 'close' | 'result' | 'reentry';
-type UserbotFilterExampleMatch = {
-  kind: UserbotFilterKind;
-  score: number;
-  examplePreview: string;
-  requiresQuote: boolean;
-};
-type UserbotFilterPatternMatch = {
-  kind: UserbotFilterKind;
-  pattern: string;
-  requiresQuote: boolean;
-};
-type QrPhase =
-  | 'idle'
-  | 'starting'
-  | 'waiting_scan'
-  | 'authorized'
-  | 'cancelled'
-  | 'error';
-
-type QrState = {
-  phase: QrPhase;
-  loginUrl?: string;
-  qrDataUrl?: string;
-  startedAt?: string;
-  updatedAt?: string;
-  error?: string;
-};
-
-type ProcessIngestOptions = {
-  enforceBalanceGuard?: boolean;
-  source?: 'realtime' | 'poll' | 'manual-reread' | 'manual-reread-all';
-  telegramReceivedAt?: Date;
-  ingestCreatedAt?: Date;
-  enqueuedAtMs?: number;
-};
-
-type IngestProcessJob = {
-  ingest: {
-    id: string;
-    chatId: string;
-    messageId: string;
-    signalHash: string | null;
-    status: string;
-  };
-  /**
-   * Текст сообщения может быть большим. Чтобы очередь не раздувала память,
-   * храним текст inline только до лимита; иначе подтягиваем из БД по ingest.id.
-   */
-  text: string | null;
-  textLen: number;
-  meta?: { replyToMessageId?: string };
-  options?: ProcessIngestOptions;
-};
-
-type ActiveSignalLookup = {
-  id: string;
-  pair: string;
-  direction: string;
-  entries: string;
-  stopLoss: number;
-  takeProfits: string;
-  leverage: number;
-  orderUsd: number;
-  capitalPercent: number;
-  source: string | null;
-  sourceChatId: string | null;
-  sourceMessageId: string | null;
-};
-
-type SourceMartingaleMap = Record<string, number>;
-
-const USERBOT_POLL_INTERVAL_MS = 2000;
-const USERBOT_POLL_FETCH_LIMIT = 20;
-const USERBOT_PROCESSING_CONCURRENCY = 4;
-const USERBOT_MAX_QUEUE_DEFAULT = 300;
-const USERBOT_INLINE_TEXT_MAX_CHARS = 4_000;
-const USERBOT_MAX_MESSAGE_AGE_MINUTES_DEFAULT = 10;
-const USERBOT_MIN_BALANCE_USD_DEFAULT = 3;
-const USERBOT_BALANCE_CHECK_CACHE_MS = 30_000;
-const USERBOT_FILTER_MATCH_THRESHOLD = 0.34;
-const CLOSE_REOPEN_COOLDOWN_MS = 30_000;
+import {
+  CLOSE_REOPEN_COOLDOWN_MS,
+  USERBOT_BALANCE_CHECK_CACHE_MS,
+  USERBOT_FILTER_MATCH_THRESHOLD,
+  USERBOT_INLINE_TEXT_MAX_CHARS,
+  USERBOT_MAX_MESSAGE_AGE_MINUTES_DEFAULT,
+  USERBOT_MAX_QUEUE_DEFAULT,
+  USERBOT_MIN_BALANCE_USD_DEFAULT,
+  USERBOT_POLL_FETCH_LIMIT,
+  USERBOT_POLL_INTERVAL_MS,
+  USERBOT_PROCESSING_CONCURRENCY,
+} from './userbot.constants';
+import { UserbotPublishService } from './userbot-publish.service';
+import type {
+  ActiveSignalLookup,
+  IngestProcessJob,
+  MessageKind,
+  ProcessIngestOptions,
+  QrState,
+  SourceMartingaleMap,
+  UserbotFilterExampleMatch,
+  UserbotFilterKind,
+  UserbotFilterPatternMatch,
+} from './userbot.types';
 
 @Injectable()
 export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
@@ -145,6 +85,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     private readonly appLog: AppLogService,
     private readonly telegramBot: TelegramService,
     private readonly userbotSignalHash: UserbotSignalHashService,
+    private readonly userbotPublish: UserbotPublishService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -497,51 +438,22 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     await this.settings.set('SOURCE_MARTINGALE_MULTIPLIERS', JSON.stringify(map));
   }
 
-  async listPublishGroups() {
-    const prismaAny = this.prisma as any;
-    const rows = await prismaAny.tgUserbotPublishGroup.findMany({
-      orderBy: [{ enabled: 'desc' }, { title: 'asc' }],
-    });
-    return { items: rows };
+  listPublishGroups() {
+    return this.userbotPublish.listPublishGroups();
   }
 
-  async createOrUpdatePublishGroup(body: {
+  createOrUpdatePublishGroup(body: {
     id?: string;
     title?: string;
     chatId?: string;
     enabled?: boolean;
     publishEveryN?: number;
   }) {
-    const title = body.title?.trim() ?? '';
-    const chatId = body.chatId?.trim() ?? '';
-    const enabled = body.enabled !== false;
-    const publishEveryN = Math.max(1, Math.trunc(Number(body.publishEveryN ?? 1) || 1));
-    if (!title) return { ok: false, error: 'title обязателен' };
-    if (!chatId) return { ok: false, error: 'chatId обязателен' };
-
-    if (body.id?.trim()) {
-      const id = body.id.trim();
-      const prismaAny = this.prisma as any;
-      const updated = await prismaAny.tgUserbotPublishGroup.update({
-        where: { id },
-        data: { title, chatId, enabled, publishEveryN },
-      });
-      return { ok: true, item: updated };
-    }
-
-    const prismaAny = this.prisma as any;
-    const created = await prismaAny.tgUserbotPublishGroup.create({
-      data: { title, chatId, enabled, publishEveryN },
-    });
-    return { ok: true, item: created };
+    return this.userbotPublish.createOrUpdatePublishGroup(body);
   }
 
-  async deletePublishGroup(id: string) {
-    const v = id.trim();
-    if (!v) return { ok: false, error: 'id обязателен' };
-    const prismaAny = this.prisma as any;
-    await prismaAny.tgUserbotPublishGroup.delete({ where: { id: v } });
-    return { ok: true };
+  deletePublishGroup(id: string) {
+    return this.userbotPublish.deletePublishGroup(id);
   }
 
   /**
