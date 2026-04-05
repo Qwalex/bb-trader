@@ -72,8 +72,10 @@ export async function middleware(request: NextRequest) {
 
   if (!user && !isPublic) {
     const loginUrl = request.nextUrl.clone();
-    loginUrl.pathname = `${basePath}/login`;
-    // pathname выше — без basePath; для hidden redirectTo нужен полный путь от origin (иначе "/" → потеря префикса).
+    // NextURL.pathname задаётся БЕЗ basePath — фреймворк сам добавит префикс из next.config.
+    // Иначе получится /trade-dev/trade-dev/login.
+    loginUrl.pathname = '/login';
+    // Для query redirectTo нужен полный путь от origin (для new URL в route handlers).
     const redirectAfterLogin = basePath ? `${basePath}${pathname}` : pathname;
     loginUrl.searchParams.set(
       'redirectTo',
@@ -89,7 +91,7 @@ export async function middleware(request: NextRequest) {
       pathname === '/forgot-password')
   ) {
     const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = `${basePath}/`;
+    redirectUrl.pathname = '/';
     redirectUrl.search = '';
     return NextResponse.redirect(redirectUrl);
   }
