@@ -93,6 +93,7 @@ export default async function RootLayout({
               <Link href="/telegram-userbot">Userbot</Link>
               <Link href="/my-group">Моя группа</Link>
               <Link href="/filters">Фильтры</Link>
+              <Link href="/workspaces">Кабинеты</Link>
               <Link href="/settings">Настройки</Link>
               <form action={withBasePath('/auth/logout')} method="post">
                 <button

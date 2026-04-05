@@ -1,9 +1,10 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 
 import { CurrentUser } from '../auth/current-user.decorator';
 import type { AuthenticatedRequestContext } from '../auth/auth.types';
 import { CreateWorkspaceDto } from './create-workspace.dto';
+import { UpdateWorkspaceDto } from './update-workspace.dto';
 import { WorkspacesService } from './workspaces.service';
 
 @ApiTags('Workspaces')
@@ -26,5 +27,26 @@ export class WorkspacesController {
     @Body() body: CreateWorkspaceDto,
   ) {
     return this.workspaces.createForUser(user!.userId, body.login);
+  }
+
+  @ApiOperation({ summary: 'Переименовать кабинет (только владелец)' })
+  @ApiOkResponse({ description: 'Кабинет обновлён' })
+  @Patch(':id')
+  async update(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
+    @Param('id') id: string,
+    @Body() body: UpdateWorkspaceDto,
+  ) {
+    return this.workspaces.updateNameForOwner(user!.userId, id, body.name);
+  }
+
+  @ApiOperation({ summary: 'Удалить кабинет (только владелец, не последний)' })
+  @ApiOkResponse({ description: 'Кабинет удалён' })
+  @Delete(':id')
+  async remove(
+    @CurrentUser() user: AuthenticatedRequestContext | null,
+    @Param('id') id: string,
+  ) {
+    return this.workspaces.deleteForOwner(user!.userId, id);
   }
 }

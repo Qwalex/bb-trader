@@ -20,8 +20,6 @@ export function WorkspaceSwitcher() {
   const router = useRouter();
   const [workspaces, setWorkspaces] = useState<Ws[]>([]);
   const [selectedId, setSelectedId] = useState('');
-  const [newLogin, setNewLogin] = useState('');
-  const [busy, setBusy] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
 
@@ -32,7 +30,7 @@ export function WorkspaceSwitcher() {
         const res = await fetch(`${getApiBase()}/workspaces`);
         if (!res.ok) {
           if (!cancelled) {
-            setLoadError('Не удалось загрузить кабинеты');
+            setLoadError('×');
             setLoaded(true);
           }
           return;
@@ -63,7 +61,7 @@ export function WorkspaceSwitcher() {
         }
         setSelectedId(nextId);
       } catch {
-        if (!cancelled) setLoadError('Не удалось загрузить кабинеты');
+        if (!cancelled) setLoadError('×');
       } finally {
         if (!cancelled) setLoaded(true);
       }
@@ -86,36 +84,6 @@ export function WorkspaceSwitcher() {
     [router],
   );
 
-  const onCreate = useCallback(async () => {
-    const login = newLogin.trim();
-    if (!login || busy) return;
-    setBusy(true);
-    setLoadError(null);
-    try {
-      const res = await fetch(`${getApiBase()}/workspaces`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ login }),
-      });
-      if (!res.ok) {
-        setLoadError('Не удалось создать кабинет');
-        return;
-      }
-      const data = (await res.json()) as { workspace?: Ws };
-      const w = data.workspace;
-      if (!w?.id) return;
-      setWorkspaces((prev) =>
-        dedupeWorkspacesById([...prev, { id: w.id, name: w.name, slug: w.slug, role: w.role }]),
-      );
-      setNewLogin('');
-      onSelect(w.id);
-    } catch {
-      setLoadError('Не удалось создать кабинет');
-    } finally {
-      setBusy(false);
-    }
-  }, [busy, newLogin, onSelect]);
-
   const nameCounts = useMemo(() => {
     const m = new Map<string, number>();
     for (const w of workspaces) {
@@ -125,7 +93,7 @@ export function WorkspaceSwitcher() {
   }, [workspaces]);
 
   if (!loaded) {
-    return <span className="workspaceSwitcherMuted">…</span>;
+    return <span className="workspaceSwitcherCompactMuted">…</span>;
   }
 
   if (workspaces.length === 0) {
@@ -136,49 +104,18 @@ export function WorkspaceSwitcher() {
     (nameCounts.get(w.name) ?? 0) > 1 ? `${w.name} · ${w.slug}` : w.name;
 
   return (
-    <div className="workspaceSwitcher">
-      {loadError ? <span className="workspaceSwitcherErr">{loadError}</span> : null}
-      <div className="workspaceSwitcherRow">
-        <div className="workspaceSwitcherPick">
-          <span className="workspaceSwitcherPrefix">Кабинет</span>
-          <select
-            className="workspaceSwitcherSelect"
-            value={selectedId}
-            onChange={(e) => onSelect(e.target.value)}
-            aria-label="Выбор кабинета"
-          >
-            {workspaces.map((w) => (
-              <option key={w.id} value={w.id}>
-                {optionLabel(w)}
-              </option>
-            ))}
-          </select>
-        </div>
-        <span className="workspaceSwitcherSep" aria-hidden />
-        <div className="workspaceSwitcherAdd">
-          <input
-            className="workspaceSwitcherInput"
-            value={newLogin}
-            onChange={(e) => setNewLogin(e.target.value)}
-            placeholder="Новый логин"
-            aria-label="Логин нового кабинета"
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                void onCreate();
-              }
-            }}
-          />
-          <button
-            type="button"
-            className="btn btnSecondary workspaceSwitcherBtn"
-            disabled={busy}
-            onClick={() => void onCreate()}
-          >
-            Добавить
-          </button>
-        </div>
-      </div>
-    </div>
+    <select
+      className="workspaceSwitcherCompactSelect"
+      value={selectedId}
+      title={loadError ? 'Не удалось обновить список кабинетов' : 'Активный кабинет'}
+      onChange={(e) => onSelect(e.target.value)}
+      aria-label="Активный кабинет"
+    >
+      {workspaces.map((w) => (
+        <option key={w.id} value={w.id}>
+          {optionLabel(w)}
+        </option>
+      ))}
+    </select>
   );
 }
