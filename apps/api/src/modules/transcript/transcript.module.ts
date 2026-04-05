@@ -8,7 +8,7 @@ import { TranscriptService } from './transcript.service';
 @Module({
   imports: [
     forwardRef(() => SettingsModule),
-    AppLogModule,
+    forwardRef(() => AppLogModule),
     forwardRef(() => BybitModule),
   ],
   providers: [TranscriptService],
