@@ -40,4 +40,5 @@ ENV NEXT_TELEMETRY_DISABLED=1
 USER app
 EXPOSE 3000
 WORKDIR /app/apps/web
-CMD ["node", "node_modules/.bin/next", "start"]
+# next поднят в корневой node_modules workspace, локального apps/web/node_modules/.bin в образе нет
+CMD ["node", "/app/node_modules/next/dist/bin/next", "start"]
