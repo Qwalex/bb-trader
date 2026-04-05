@@ -3,17 +3,19 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { withBasePath } from '../../../lib/auth';
 import { normalizeRedirectTarget } from '../../../lib/redirect';
+import { getPublicOrigin } from '../../../lib/public-origin';
 import { createSupabaseRouteClient } from '../../../lib/supabase-route';
 
 function failureRedirect(request: NextRequest, nextPath: string): NextResponse {
+  const origin = getPublicOrigin(request);
   if (nextPath === withBasePath('/reset-password')) {
     return NextResponse.redirect(
-      new URL(`${withBasePath('/reset-password')}?status=failed`, request.url),
+      new URL(`${withBasePath('/reset-password')}?status=failed`, origin),
     );
   }
 
   return NextResponse.redirect(
-    new URL(`${withBasePath('/login')}?error=auth_callback_failed`, request.url),
+    new URL(`${withBasePath('/login')}?error=auth_callback_failed`, origin),
   );
 }
 
@@ -37,6 +39,6 @@ export async function GET(request: NextRequest) {
     return failureRedirect(request, nextPath);
   }
 
-  const response = NextResponse.redirect(new URL(nextPath, request.url));
+  const response = NextResponse.redirect(new URL(nextPath, getPublicOrigin(request)));
   return routeClient.setRedirectResponse(response);
 }

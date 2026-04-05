@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { withBasePath } from '../../../lib/auth';
-import { createSupabaseAdminClient } from '../../../lib/supabase-admin';
+import { getPublicOrigin, getPublicSiteBase } from '../../../lib/public-origin';
 import { createSupabaseRouteClient } from '../../../lib/supabase-route';
 
 function slugifyWorkspaceName(input: string): string {
@@ -20,12 +20,15 @@ export async function POST(request: Request) {
   const workspaceName =
     typeof form.get('workspaceName') === 'string' ? String(form.get('workspaceName')).trim() : '';
 
+  const origin = getPublicOrigin(request);
+  const fail = (q: string) => NextResponse.redirect(new URL(`${withBasePath('/signup')}?${q}`, origin));
+
   if (!email || !password || !workspaceName) {
-    return NextResponse.redirect(new URL(`${withBasePath('/signup')}?error=signup_failed`, request.url));
+    return fail('error=signup_failed');
   }
 
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() ?? `${new URL(request.url).origin}${withBasePath('')}`;
-  const signupRedirect = new URL(withBasePath('/auth/confirm'), siteUrl);
+  const siteBase = getPublicSiteBase(request);
+  const signupRedirect = new URL(withBasePath('/auth/confirm'), `${siteBase}/`);
   signupRedirect.searchParams.set('next', withBasePath('/login'));
 
   const routeClient = createSupabaseRouteClient(request);
@@ -42,21 +45,13 @@ export async function POST(request: Request) {
     },
   });
   if (error || !data.user) {
-    return NextResponse.redirect(new URL(`${withBasePath('/signup')}?error=signup_failed`, request.url));
+    return routeClient.setRedirectResponse(fail('error=signup_failed'));
   }
 
-  const admin = createSupabaseAdminClient();
-  const metadataUpdate = await admin.auth.admin.updateUserById(data.user.id, {
-    user_metadata: {
-      workspace_name: workspaceName,
-      workspace_slug: slugifyWorkspaceName(workspaceName),
-    },
-  });
-  if (metadataUpdate.error) {
-    return NextResponse.redirect(new URL(`${withBasePath('/signup')}?error=signup_failed`, request.url));
-  }
-
-  return NextResponse.redirect(
-    new URL(`${withBasePath('/signup')}?error=confirmation_required`, request.url),
+  // user_metadata задаётся через options.data; admin.updateUserById убран — при сбое service role
+  // был ложный signup_failed после успешной отправки письма.
+  const ok = NextResponse.redirect(
+    new URL(`${withBasePath('/signup')}?error=confirmation_required`, origin),
   );
+  return routeClient.setRedirectResponse(ok);
 }

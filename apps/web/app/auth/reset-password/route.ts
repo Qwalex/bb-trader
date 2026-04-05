@@ -1,11 +1,13 @@
 import { NextResponse } from 'next/server';
 
 import { withBasePath } from '../../../lib/auth';
+import { getPublicOrigin } from '../../../lib/public-origin';
 import { createSupabaseRouteClient } from '../../../lib/supabase-route';
 
 export async function POST(request: Request) {
   const form = await request.formData();
   const password = typeof form.get('password') === 'string' ? String(form.get('password')) : '';
+  const origin = getPublicOrigin(request);
 
   try {
     const routeClient = createSupabaseRouteClient(request);
@@ -15,10 +17,10 @@ export async function POST(request: Request) {
       throw error;
     }
     const response = NextResponse.redirect(
-      new URL(`${withBasePath('/reset-password')}?status=updated`, request.url),
+      new URL(`${withBasePath('/reset-password')}?status=updated`, origin),
     );
     return routeClient.setRedirectResponse(response);
   } catch {
-    return NextResponse.redirect(new URL(`${withBasePath('/reset-password')}?status=failed`, request.url));
+    return NextResponse.redirect(new URL(`${withBasePath('/reset-password')}?status=failed`, origin));
   }
 }
