@@ -51,7 +51,10 @@ export async function POST(request: Request) {
   // user_metadata задаётся через options.data; admin.updateUserById убран — при сбое service role
   // был ложный signup_failed после успешной отправки письма.
   const ok = NextResponse.redirect(
-    new URL(`${withBasePath('/signup')}?error=confirmation_required`, origin),
+    new URL(
+      `${withBasePath('/signup')}?error=confirmation_required&email=${encodeURIComponent(email)}`,
+      origin,
+    ),
   );
   return routeClient.setRedirectResponse(ok);
 }

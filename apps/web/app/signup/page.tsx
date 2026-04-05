@@ -13,6 +13,19 @@ function errorText(code: string | undefined): string | null {
   return null;
 }
 
+function resendText(code: string | undefined): string | null {
+  if (code === 'ok') {
+    return 'Письмо с подтверждением отправлено повторно. Проверьте входящие и папку «Спам».';
+  }
+  if (code === 'failed') {
+    return 'Не удалось отправить письмо. Подождите минуту и попробуйте снова или проверьте адрес.';
+  }
+  if (code === 'missing_email') {
+    return 'Укажите email, на который регистрировались.';
+  }
+  return null;
+}
+
 export default async function SignupPage({
   searchParams,
 }: {
@@ -24,6 +37,14 @@ export default async function SignupPage({
   }
   const sp = await searchParams;
   const error = typeof sp.error === 'string' ? sp.error : undefined;
+  const resend = typeof sp.resend === 'string' ? sp.resend : undefined;
+  const prefillEmail = typeof sp.email === 'string' ? sp.email : '';
+
+  const resendOpen =
+    error === 'confirmation_required' ||
+    resend === 'ok' ||
+    resend === 'failed' ||
+    resend === 'missing_email';
 
   return (
     <div className="authCard">
@@ -34,6 +55,9 @@ export default async function SignupPage({
       {errorText(error) && (
         <p className={error === 'confirmation_required' ? 'msg ok' : 'msg err'}>{errorText(error)}</p>
       )}
+      {resendText(resend) && (
+        <p className={resend === 'ok' ? 'msg ok' : 'msg err'}>{resendText(resend)}</p>
+      )}
       <form className="authForm" action={withBasePath('/auth/signup')} method="post">
         <label className="authFormField">
           <span className="authFormLabel">Email</span>
@@ -43,6 +67,7 @@ export default async function SignupPage({
             type="email"
             autoComplete="email"
             placeholder="you@example.com"
+            defaultValue={prefillEmail}
             required
           />
         </label>
@@ -75,6 +100,30 @@ export default async function SignupPage({
           Уже есть аккаунт? Войти
         </a>
       </form>
+
+      <details className="authResendBlock" open={resendOpen}>
+        <summary className="authResendSummary">Не пришло письмо с подтверждением?</summary>
+        <p className="authResendHint">
+          Укажите тот же email — отправим ссылку для подтверждения ещё раз.
+        </p>
+        <form className="authForm" action={withBasePath('/auth/resend-confirmation')} method="post">
+          <label className="authFormField">
+            <span className="authFormLabel">Email</span>
+            <input
+              className="authInput"
+              name="email"
+              type="email"
+              autoComplete="email"
+              placeholder="you@example.com"
+              defaultValue={prefillEmail}
+              required
+            />
+          </label>
+          <button type="submit" className="btn btnSecondary">
+            Отправить письмо снова
+          </button>
+        </form>
+      </details>
     </div>
   );
 }

@@ -636,6 +636,31 @@ button.btn.btnSm {
   margin-top: 0.15rem;
 }
 
+.authResendBlock {
+  margin-top: 1.35rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--border);
+}
+
+.authResendSummary {
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--accent);
+  list-style: none;
+}
+
+.authResendSummary::-webkit-details-marker {
+  display: none;
+}
+
+.authResendHint {
+  margin: 0.65rem 0 0.85rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
 @media (max-width: 768px) {
   .authCard {
     margin: 1.5rem auto;

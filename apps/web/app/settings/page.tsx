@@ -288,6 +288,11 @@ function computeNextModelHistoryString(saved: Row[], draft: Row[]): string {
   return JSON.stringify(hist);
 }
 
+/** Нормализованное JSON для сравнения: пустая строка и «битый» JSON ≡ []. */
+function canonicalModelHistoryJson(raw: string): string {
+  return JSON.stringify(parseModelHistory(raw));
+}
+
 function isSensitiveKey(key: string): boolean {
   const u = key.toUpperCase();
   return (
@@ -302,6 +307,9 @@ function isSensitiveKey(key: string): boolean {
 
 function formatPreviewValue(key: string, value: string): string {
   if (!value) return '(пусто)';
+  if (key === MODEL_HISTORY_KEY && canonicalModelHistoryJson(value) === '[]') {
+    return '(пусто)';
+  }
   if (isSensitiveKey(key)) return '•••• (скрыто)';
   const t = value.length > 200 ? `${value.slice(0, 200)}…` : value;
   return t;
@@ -370,11 +378,12 @@ function collectPendingChanges(
   }
 
   const nextHist = computeNextModelHistoryString(saved, draft);
-  if (!normCompare(nextHist, valueFor(saved, MODEL_HISTORY_KEY))) {
+  const savedHistCanonical = canonicalModelHistoryJson(valueFor(saved, MODEL_HISTORY_KEY));
+  if (!normCompare(nextHist, savedHistCanonical)) {
     out.push({
       key: MODEL_HISTORY_KEY,
       label: labelForKey(MODEL_HISTORY_KEY),
-      before: formatPreviewValue(MODEL_HISTORY_KEY, valueFor(saved, MODEL_HISTORY_KEY)),
+      before: formatPreviewValue(MODEL_HISTORY_KEY, savedHistCanonical),
       after: formatPreviewValue(MODEL_HISTORY_KEY, nextHist),
     });
   }
@@ -415,7 +424,8 @@ function buildPutOperations(
   }
 
   const nextHist = computeNextModelHistoryString(saved, draft);
-  if (!normCompare(nextHist, valueFor(saved, MODEL_HISTORY_KEY))) {
+  const savedHistCanonical = canonicalModelHistoryJson(valueFor(saved, MODEL_HISTORY_KEY));
+  if (!normCompare(nextHist, savedHistCanonical)) {
     ops.push({ key: MODEL_HISTORY_KEY, value: nextHist });
   }
 
