@@ -754,17 +754,21 @@ export default function SettingsPage() {
           </button>
         ) : sensitive ? (
           <div style={{ display: 'grid', gap: '0.45rem' }}>
-            <div style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>
-              {configured ? 'Секрет настроен' : 'Секрет не задан'}
+            <div style={{ color: 'var(--muted)', fontSize: '0.82rem', lineHeight: 1.45 }}>
+              {configured
+                ? 'В базе уже есть значение; оно не показывается в форме.'
+                : 'В базе пока нет значения для этого поля.'}{' '}
+              Выберите, что сделать при нажатии «Сохранить».
             </div>
             <select
               value={sensitiveMode}
               disabled={saving}
+              aria-label={`${label}: действие при сохранении`}
               onChange={(e) => setSensitiveMode(key, e.target.value as SensitiveMode)}
             >
-              <option value="keep">Оставить как есть</option>
-              <option value="replace">Заменить</option>
-              <option value="clear">Очистить</option>
+              <option value="keep">Не менять (оставить в базе как сейчас)</option>
+              <option value="replace">Записать новый ключ / токен</option>
+              <option value="clear">Удалить из базы (очистить)</option>
             </select>
             {sensitiveMode === 'replace' ? (
               <input
@@ -772,7 +776,7 @@ export default function SettingsPage() {
                 value={sensitiveDrafts[key] ?? ''}
                 name={key}
                 autoComplete="new-password"
-                placeholder={configured ? 'Введите новое значение' : 'Введите значение'}
+                placeholder={configured ? 'Новое значение' : 'Значение для записи в базу'}
                 onChange={(e) => setSensitiveDraftKey(key, e.target.value)}
               />
             ) : null}
