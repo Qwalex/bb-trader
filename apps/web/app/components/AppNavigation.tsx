@@ -66,7 +66,7 @@ export function AppNavigation() {
       <div className="navAppStrip">
         <WorkspaceSwitcher />
         {primary.map((item) => (
-          <Link key={item.id} href={withBasePath(item.href)} className="navAppLink">
+          <Link key={item.id} href={item.href} className="navAppLink">
             {item.label}
           </Link>
         ))}
@@ -88,7 +88,7 @@ export function AppNavigation() {
                   <Link
                     key={item.id}
                     role="menuitem"
-                    href={withBasePath(item.href)}
+                    href={item.href}
                     className="navBurgerLink"
                     onClick={() => setMenuOpen(false)}
                   >

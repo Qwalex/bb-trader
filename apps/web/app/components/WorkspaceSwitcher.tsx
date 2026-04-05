@@ -1,6 +1,5 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { ACTIVE_WORKSPACE_STORAGE_KEY } from '../../lib/active-workspace';
@@ -17,7 +16,6 @@ function dedupeWorkspacesById(list: Ws[]): Ws[] {
 }
 
 export function WorkspaceSwitcher() {
-  const router = useRouter();
   const [workspaces, setWorkspaces] = useState<Ws[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -71,18 +69,15 @@ export function WorkspaceSwitcher() {
     };
   }, []);
 
-  const onSelect = useCallback(
-    (id: string) => {
-      setSelectedId(id);
-      try {
-        localStorage.setItem(ACTIVE_WORKSPACE_STORAGE_KEY, id);
-      } catch {
-        /* noop */
-      }
-      router.refresh();
-    },
-    [router],
-  );
+  const onSelect = useCallback((id: string) => {
+    setSelectedId(id);
+    try {
+      localStorage.setItem(ACTIVE_WORKSPACE_STORAGE_KEY, id);
+    } catch {
+      /* noop */
+    }
+    window.location.reload();
+  }, []);
 
   const nameCounts = useMemo(() => {
     const m = new Map<string, number>();
