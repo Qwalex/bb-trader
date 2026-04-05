@@ -77,33 +77,41 @@ export class AppLogService {
   private dbFullMuteUntilTs = 0;
   private dbFullLastErrorTs = 0;
   private lastPruneTs = 0;
-  private logNoisyPolicyCache: { expiresAt: number; value: boolean } | null =
-    null;
+  private logNoisyPolicyCache = new Map<string, { expiresAt: number; value: boolean }>();
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly settings: SettingsService,
   ) {}
 
-  private async resolveLogNoisyEventsEnabled(): Promise<boolean> {
+  private normalizeWorkspaceId(workspaceId?: string | null): string | null {
+    const explicit = workspaceId?.trim();
+    if (explicit) {
+      return explicit;
+    }
+    const bootstrap = process.env.BOOTSTRAP_WORKSPACE_ID?.trim();
+    return bootstrap || null;
+  }
+
+  private async resolveLogNoisyEventsEnabled(workspaceId?: string | null): Promise<boolean> {
+    const ws = this.normalizeWorkspaceId(workspaceId);
+    const cacheKey = ws ?? '__global__';
     const now = Date.now();
-    if (
-      this.logNoisyPolicyCache &&
-      now < this.logNoisyPolicyCache.expiresAt
-    ) {
-      return this.logNoisyPolicyCache.value;
+    const cached = this.logNoisyPolicyCache.get(cacheKey);
+    if (cached && now < cached.expiresAt) {
+      return cached.value;
     }
     let raw: string | undefined;
     try {
-      raw = await this.settings.get('APPLOG_LOG_NOISY_EVENTS');
+      raw = await this.settings.get('APPLOG_LOG_NOISY_EVENTS', ws);
     } catch {
       raw = undefined;
     }
     const value = parseLogNoisySetting(raw);
-    this.logNoisyPolicyCache = {
+    this.logNoisyPolicyCache.set(cacheKey, {
       value,
       expiresAt: now + AppLogService.LOG_NOISY_POLICY_TTL_MS,
-    };
+    });
     return value;
   }
 
@@ -137,8 +145,10 @@ export class AppLogService {
     category: LogCategory,
     message: string,
     payload?: unknown,
+    options?: { workspaceId?: string | null },
   ): Promise<void> {
-    const logNoisyEvents = await this.resolveLogNoisyEventsEnabled();
+    const workspaceId = this.normalizeWorkspaceId(options?.workspaceId);
+    const logNoisyEvents = await this.resolveLogNoisyEventsEnabled(workspaceId);
     if (shouldSkipDbAppend(level, message, { logNoisyEvents })) {
       return;
     }
@@ -150,6 +160,7 @@ export class AppLogService {
         payload === undefined ? null : stringifyPayload(payload);
       await this.prisma.appLog.create({
         data: {
+          ...(workspaceId ? { workspaceId } : {}),
           level,
           category,
           message,

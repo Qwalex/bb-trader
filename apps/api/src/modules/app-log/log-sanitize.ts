@@ -68,26 +68,30 @@ export async function pruneOldLogs(
   prisma: PrismaService,
   _keepLast: number,
   noiseMessages: readonly string[] = [],
+  workspaceId?: string | null,
 ): Promise<void> {
   const now = Date.now();
+  const wsWhere =
+    workspaceId === undefined ? {} : { workspaceId: workspaceId ?? null };
 
   // Шумные debug/info — удаляем старше 6 ч
   const noiseCutoff = new Date(now - 6 * 60 * 60 * 1000);
   if (noiseMessages.length > 0) {
     await prisma.appLog.deleteMany({
       where: {
+        ...wsWhere,
         message: { in: [...noiseMessages] },
         createdAt: { lt: noiseCutoff },
       },
     });
   }
   await prisma.appLog.deleteMany({
-    where: { level: 'debug', createdAt: { lt: noiseCutoff } },
+    where: { ...wsWhere, level: 'debug', createdAt: { lt: noiseCutoff } },
   });
 
   // Всё остальное — удаляем старше 24 ч
   const regularCutoff = new Date(now - 24 * 60 * 60 * 1000);
   await prisma.appLog.deleteMany({
-    where: { createdAt: { lt: regularCutoff } },
+    where: { ...wsWhere, createdAt: { lt: regularCutoff } },
   });
 }

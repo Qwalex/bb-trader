@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Logger, Param, Post, Query } from '@nestjs/common';
 import {
   ApiBody,
   ApiOkResponse,
@@ -17,6 +17,8 @@ import { BybitService } from './bybit.service';
 @ApiTags('Bybit')
 @Controller('bybit')
 export class BybitController {
+  private readonly logger = new Logger(BybitController.name);
+
   constructor(
     private readonly bybit: BybitService,
     private readonly balanceSnapshots: BalanceSnapshotService,
@@ -39,6 +41,7 @@ export class BybitController {
     @Query('days') days?: string,
   ) {
     const workspaceId = requireWorkspaceId(user);
+    this.logger.debug(`balance-history requested workspace=${workspaceId} days=${days ?? 'default'}`);
     const d = days != null ? Number.parseInt(String(days), 10) : 30;
     const points = await this.balanceSnapshots.listRecent(
       Number.isFinite(d) ? d : 30,

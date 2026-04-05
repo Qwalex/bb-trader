@@ -1,4 +1,4 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Logger, Query } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 
 import { requireWorkspaceId } from '../../common/require-workspace-id';
@@ -9,6 +9,8 @@ import { AppLogService } from './app-log.service';
 @ApiTags('Logs')
 @Controller('logs')
 export class AppLogController {
+  private readonly logger = new Logger(AppLogController.name);
+
   constructor(private readonly appLog: AppLogService) {}
 
   @ApiOperation({ summary: 'Список логов приложения' })
@@ -21,10 +23,15 @@ export class AppLogController {
     @Query('limit') limit?: string,
     @Query('category') category?: string,
   ) {
-    return this.appLog.list({
+    const workspaceId = requireWorkspaceId(user);
+    const rows = await this.appLog.list({
       limit: limit ? parseInt(limit, 10) : 200,
       category: category?.trim() || undefined,
-      workspaceId: requireWorkspaceId(user),
+      workspaceId,
     });
+    this.logger.debug(
+      `logs list requested workspace=${workspaceId} category=${category?.trim() || 'all'} count=${rows.length}`,
+    );
+    return rows;
   }
 }
