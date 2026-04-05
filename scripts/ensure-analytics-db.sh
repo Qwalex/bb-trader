@@ -19,9 +19,25 @@ if [[ "$have_db" != "1" ]]; then
     "CREATE DATABASE _supabase WITH OWNER postgres;"
 fi
 
-echo "Ensuring schema _analytics..."
-docker compose -f "$FILE" exec -T db psql -U postgres -d _supabase -v ON_ERROR_STOP=1 -c \
-  "CREATE SCHEMA IF NOT EXISTS _analytics; ALTER SCHEMA _analytics OWNER TO postgres;"
+# Logflare подключается как supabase_admin (см. docker-compose analytics).
+echo "Granting supabase_admin access to _supabase..."
+docker compose -f "$FILE" exec -T db psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c \
+  "GRANT CONNECT ON DATABASE _supabase TO supabase_admin; GRANT ALL PRIVILEGES ON DATABASE _supabase TO supabase_admin;"
 
-echo "OK. Перезапустите analytics и studio, если они уже падали:"
+echo "Ensuring schema _analytics..."
+docker compose -f "$FILE" exec -T db psql -U postgres -d _supabase -v ON_ERROR_STOP=1 <<'SQL'
+CREATE SCHEMA IF NOT EXISTS _analytics;
+ALTER SCHEMA _analytics OWNER TO postgres;
+GRANT USAGE, CREATE ON SCHEMA _analytics TO supabase_admin;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA _analytics TO supabase_admin;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA _analytics TO supabase_admin;
+ALTER DEFAULT PRIVILEGES IN SCHEMA _analytics GRANT ALL ON TABLES TO supabase_admin;
+ALTER DEFAULT PRIVILEGES IN SCHEMA _analytics GRANT ALL ON SEQUENCES TO supabase_admin;
+SQL
+
+echo "OK. Перезапустите analytics и studio:"
 echo "  docker compose -f $FILE restart analytics studio"
+echo ""
+echo "Если команда exec пишет «service db is not running» — запустите стек из этого каталога:"
+echo "  docker compose -f $FILE up -d db"
+echo "Сообщения про queue_timeout / pool без FATAL _supabase обычно следствие недоступной БД выше."

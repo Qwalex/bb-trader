@@ -81,6 +81,7 @@ services:
       PG_META_DB_USER: supabase_admin
       PG_META_DB_PASSWORD: ${SUPABASE_DB_PASSWORD}
 
+  # Без БД _supabase Logflare падает (FATAL database "_supabase" does not exist), дальше — queue_timeout в пуле и рестарт контейнера.
   analytics:
     image: supabase/logflare:1.31.2
     restart: unless-stopped
