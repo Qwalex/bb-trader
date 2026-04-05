@@ -32,40 +32,40 @@ export default async function LoginPage({
   const redirectTo = normalizeRedirectTarget(redirectToRaw);
 
   return (
-    <div
-      className="card"
-      style={{ maxWidth: 420, margin: '3rem auto', padding: '1.2rem' }}
-    >
-      <h1 className="pageTitle" style={{ fontSize: '1.4rem', marginBottom: '0.75rem' }}>
-        Вход в SignalsBot
-      </h1>
-      <p style={{ color: 'var(--muted)', marginBottom: '1rem' }}>
+    <div className="authCard">
+      <h1 className="authCardTitle">Вход в SignalsBot</h1>
+      <p className="authCardIntro">
         Авторизуйтесь через email, чтобы открыть ваш кабинет и связанные данные.
       </p>
       {errorText(error) && <p className="msg err">{errorText(error)}</p>}
-      <form
-        action={withBasePath('/auth/login')}
-        method="post"
-        style={{ display: 'grid', gap: '0.8rem' }}
-      >
+      <form className="authForm" action={withBasePath('/auth/login')} method="post">
         <input type="hidden" name="redirectTo" value={redirectTo} />
-        <label style={{ display: 'grid', gap: '0.35rem' }}>
-          <span>Email</span>
-          <input name="email" type="email" autoComplete="email" required />
-        </label>
-        <label style={{ display: 'grid', gap: '0.35rem' }}>
-          <span>Пароль</span>
+        <label className="authFormField">
+          <span className="authFormLabel">Email</span>
           <input
+            className="authInput"
+            name="email"
+            type="email"
+            autoComplete="email"
+            placeholder="you@example.com"
+            required
+          />
+        </label>
+        <label className="authFormField">
+          <span className="authFormLabel">Пароль</span>
+          <input
+            className="authInput"
             type="password"
             name="password"
             autoComplete="current-password"
+            placeholder="••••••••"
             required
           />
         </label>
         <button type="submit" className="btn">
           Войти
         </button>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
+        <div className="authFormLinks">
           <a href={withBasePath('/signup')}>Регистрация</a>
           <a href={withBasePath('/forgot-password')}>Забыли пароль?</a>
         </div>

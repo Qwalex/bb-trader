@@ -20,23 +20,31 @@ export default async function ResetPasswordPage({
   const message = messageText(status);
 
   return (
-    <div className="card" style={{ maxWidth: 420, margin: '3rem auto', padding: '1.2rem' }}>
-      <h1 className="pageTitle" style={{ fontSize: '1.4rem', marginBottom: '0.75rem' }}>
-        Новый пароль
-      </h1>
-      <p style={{ color: 'var(--muted)', marginBottom: '1rem' }}>
+    <div className="authCard">
+      <h1 className="authCardTitle">Новый пароль</h1>
+      <p className="authCardIntro">
         Если вы открыли страницу из письма Supabase, задайте новый пароль ниже.
       </p>
       {message && <p className={message.ok ? 'msg ok' : 'msg err'}>{message.text}</p>}
-      <form action={withBasePath('/auth/reset-password')} method="post" style={{ display: 'grid', gap: '0.8rem' }}>
-        <label style={{ display: 'grid', gap: '0.35rem' }}>
-          <span>Новый пароль</span>
-          <input name="password" type="password" autoComplete="new-password" minLength={8} required />
+      <form className="authForm" action={withBasePath('/auth/reset-password')} method="post">
+        <label className="authFormField">
+          <span className="authFormLabel">Новый пароль</span>
+          <input
+            className="authInput"
+            name="password"
+            type="password"
+            autoComplete="new-password"
+            minLength={8}
+            placeholder="Не менее 8 символов"
+            required
+          />
         </label>
         <button type="submit" className="btn">
           Обновить пароль
         </button>
-        <a href={withBasePath('/login')}>Вернуться ко входу</a>
+        <a className="authFormFooterLink" href={withBasePath('/login')}>
+          Вернуться ко входу
+        </a>
       </form>
     </div>
   );

@@ -522,6 +522,133 @@ button.btn.btnSm {
   border: 1px solid rgba(239, 68, 68, 0.4);
 }
 
+/* Вход, регистрация, восстановление / сброс пароля */
+.authCard {
+  max-width: 420px;
+  margin: 3rem auto;
+  padding: 1.5rem 1.65rem;
+  border-radius: 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.04) inset,
+    0 12px 40px rgba(0, 0, 0, 0.35);
+}
+
+.authCardTitle {
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.5rem;
+  line-height: 1.25;
+  color: var(--foreground);
+}
+
+.authCardIntro {
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.55;
+  margin: 0 0 1.1rem;
+}
+
+.authCard .msg {
+  margin-bottom: 1rem;
+}
+
+.authForm {
+  display: grid;
+  gap: 1rem;
+}
+
+.authFormField {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0;
+}
+
+.authFormLabel {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.authInput {
+  width: 100%;
+  min-height: 46px;
+  padding: 0.55rem 0.85rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.32);
+  color: var(--foreground);
+  font-size: 1rem;
+  line-height: 1.35;
+  font-family: inherit;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    background 0.15s ease;
+}
+
+.authInput::placeholder {
+  color: var(--muted);
+  opacity: 0.72;
+}
+
+.authInput:hover {
+  border-color: rgba(139, 148, 158, 0.48);
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.authInput:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.22);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.authForm .btn[type='submit'] {
+  width: 100%;
+  margin-top: 0.25rem;
+  min-height: 46px;
+  font-size: 0.95rem;
+  border-radius: 8px;
+}
+
+.authFormLinks {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 0.1rem;
+}
+
+.authFormLinks a,
+.authFormFooterLink {
+  font-size: 0.88rem;
+}
+
+.authFormFooterLink {
+  display: inline-block;
+  margin-top: 0.15rem;
+}
+
+@media (max-width: 768px) {
+  .authCard {
+    margin: 1.5rem auto;
+    padding: 1.35rem 1.25rem;
+    max-width: min(420px, calc(100% - 2rem));
+  }
+
+  .authInput {
+    min-height: 48px;
+    font-size: 16px;
+  }
+}
+
 h1.pageTitle {
   font-size: 1.5rem;
   margin-bottom: 1.25rem;

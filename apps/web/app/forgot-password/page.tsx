@@ -27,23 +27,28 @@ export default async function ForgotPasswordPage({
   const message = messageText(status);
 
   return (
-    <div className="card" style={{ maxWidth: 420, margin: '3rem auto', padding: '1.2rem' }}>
-      <h1 className="pageTitle" style={{ fontSize: '1.4rem', marginBottom: '0.75rem' }}>
-        Восстановление пароля
-      </h1>
-      <p style={{ color: 'var(--muted)', marginBottom: '1rem' }}>
-        Укажите email, и мы отправим ссылку для смены пароля.
-      </p>
+    <div className="authCard">
+      <h1 className="authCardTitle">Восстановление пароля</h1>
+      <p className="authCardIntro">Укажите email, и мы отправим ссылку для смены пароля.</p>
       {message && <p className={message.ok ? 'msg ok' : 'msg err'}>{message.text}</p>}
-      <form action={withBasePath('/auth/forgot-password')} method="post" style={{ display: 'grid', gap: '0.8rem' }}>
-        <label style={{ display: 'grid', gap: '0.35rem' }}>
-          <span>Email</span>
-          <input name="email" type="email" autoComplete="email" required />
+      <form className="authForm" action={withBasePath('/auth/forgot-password')} method="post">
+        <label className="authFormField">
+          <span className="authFormLabel">Email</span>
+          <input
+            className="authInput"
+            name="email"
+            type="email"
+            autoComplete="email"
+            placeholder="you@example.com"
+            required
+          />
         </label>
         <button type="submit" className="btn">
           Отправить ссылку
         </button>
-        <a href={withBasePath('/login')}>Вернуться ко входу</a>
+        <a className="authFormFooterLink" href={withBasePath('/login')}>
+          Вернуться ко входу
+        </a>
       </form>
     </div>
   );
