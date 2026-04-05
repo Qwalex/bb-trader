@@ -214,7 +214,7 @@ Be conservative: if unsure, return "other".`;
         apiKey,
         model,
         messages,
-        { operation: 'classifyTradingMessage', kind: 'text' },
+        { operation: 'classifyTradingMessage', kind: 'text', workspaceId: ws },
       );
       const responseRaw =
         typeof content === 'string' ? content : JSON.stringify(content);
@@ -337,6 +337,7 @@ Task:
     try {
       const content = await this.callOpenRouter(apiKey, model, messages, {
         operation: 'generateFilterPatterns',
+        workspaceId: ws,
       });
       const responseRaw =
         typeof content === 'string' ? content : JSON.stringify(content);
@@ -442,6 +443,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     try {
       const content = await this.callOpenRouter(apiKey, model, messages, {
         operation: 'applyCorrection',
+        workspaceId: ws,
       });
       const ms = Date.now() - t0;
       this.logger.log(`applyCorrection: OpenRouter ok in ${ms}ms`);
@@ -518,6 +520,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     try {
       const content = await this.callOpenRouter(apiKey, model, messages, {
         operation: 'continueSignalDraft',
+        workspaceId: ws,
       });
       const ms = Date.now() - t0;
       this.logger.log(`continueSignalDraft: OpenRouter ok in ${ms}ms`);
@@ -618,6 +621,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
         operation: 'parse',
         kind,
         fallbackModels,
+        workspaceId: ws,
       });
       const ms = Date.now() - t0;
       this.logger.log(
@@ -775,7 +779,12 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     apiKey: string,
     model: string,
     messages: { role: string; content: unknown }[],
-    ctx: { operation: string; kind?: ContentKind; fallbackModels?: string[] },
+    ctx: {
+      operation: string;
+      kind?: ContentKind;
+      fallbackModels?: string[];
+      workspaceId?: string | null;
+    },
   ): Promise<unknown> {
     const client = this.getOpenRouterClient(apiKey);
 
@@ -809,14 +818,20 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       messages: sanitizeForOpenRouterLog(messages) as unknown[],
       responseFormat,
     };
-    await this.appLog.append('info', 'openrouter', `→ ${ctx.operation}`, {
-      url: OPENROUTER_URL,
-      method: 'POST',
-      operation: ctx.operation,
-      contentKind: ctx.kind,
-      /** Тело запроса (как уходит к OpenRouter, без секрета — ключ только в заголовке Authorization, не логируем) */
-      requestBody,
-    });
+    await this.appLog.append(
+      'info',
+      'openrouter',
+      `→ ${ctx.operation}`,
+      {
+        url: OPENROUTER_URL,
+        method: 'POST',
+        operation: ctx.operation,
+        contentKind: ctx.kind,
+        /** Тело запроса (как уходит к OpenRouter, без секрета — ключ только в заголовке Authorization, не логируем) */
+        requestBody,
+      },
+      { workspaceId: ctx.workspaceId },
+    );
 
     try {
       let res: unknown;
@@ -873,19 +888,25 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
             : rawContent
           : JSON.stringify(rawContent).slice(0, 24_000);
 
-      await this.appLog.append('info', 'openrouter', `← ${ctx.operation}`, {
-        operation: ctx.operation,
-        httpStatus: 200,
-        /** Текст ответа ассистента (модель) */
-        assistantContent: responsePreview,
-        /** Метаданные ответа OpenRouter (без дублирования полного текста) */
-        responseMeta: {
-          id: typedRes.id,
-          model: typedRes.model,
-          usage: typedRes.usage,
-          choicesCount: typedRes.choices?.length ?? 0,
+      await this.appLog.append(
+        'info',
+        'openrouter',
+        `← ${ctx.operation}`,
+        {
+          operation: ctx.operation,
+          httpStatus: 200,
+          /** Текст ответа ассистента (модель) */
+          assistantContent: responsePreview,
+          /** Метаданные ответа OpenRouter (без дублирования полного текста) */
+          responseMeta: {
+            id: typedRes.id,
+            model: typedRes.model,
+            usage: typedRes.usage,
+            choicesCount: typedRes.choices?.length ?? 0,
+          },
         },
-      });
+        { workspaceId: ctx.workspaceId },
+      );
 
       if (rawContent == null) {
         throw new Error('Empty response from OpenRouter');
@@ -912,6 +933,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
             errObj.error ?? errObj.cause ?? errObj.body,
           ),
         },
+        { workspaceId: ctx.workspaceId },
       );
       throw e;
     }

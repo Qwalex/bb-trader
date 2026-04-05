@@ -18,6 +18,7 @@ import { SettingsService } from '../settings/settings.service';
 
 type RunLatestParams = {
   limit?: number;
+  workspaceId: string;
 };
 
 @Injectable()
@@ -34,8 +35,9 @@ export class DiagnosticsService {
     private readonly metricsVerifier: DiagnosticsMetricsVerifier,
   ) {}
 
-  async runLatestBatch(params?: RunLatestParams) {
-    const models = await this.resolveDiagnosticModels();
+  async runLatestBatch(params: RunLatestParams) {
+    const workspaceId = params.workspaceId.trim();
+    const models = await this.resolveDiagnosticModels(workspaceId);
     if (models.length === 0) {
       return {
         ok: false,
@@ -43,13 +45,14 @@ export class DiagnosticsService {
           'Не заданы модели для диагностики. Заполните OPENROUTER_DIAGNOSTIC_MODELS или OPENROUTER_MODEL_TEXT/DEFAULT.',
       };
     }
-    const batchSize = await this.resolveBatchSize(params?.limit);
-    const maxLogLines = await this.resolveMaxLogLines();
+    const batchSize = await this.resolveBatchSize(workspaceId, params?.limit);
+    const maxLogLines = await this.resolveMaxLogLines(workspaceId);
     const queuedAhead =
       this.runningRunId !== null || this.queuedRunIds.size > 0;
 
     const run = await this.prisma.diagnosticRun.create({
       data: {
+        workspaceId,
         status: queuedAhead ? 'queued' : 'running',
         modelsJson: JSON.stringify(models),
         requestJson: JSON.stringify({
@@ -60,7 +63,7 @@ export class DiagnosticsService {
       },
     });
 
-    await this.appendRunLog(run.id, 'info', 'diagnostics', 'run started', {
+    await this.appendRunLog(workspaceId, run.id, 'info', 'diagnostics', 'run started', {
       models,
       batchSize,
       maxLogLines,
@@ -77,9 +80,15 @@ export class DiagnosticsService {
               where: { id: run.id },
               data: { status: 'running' },
             });
-            await this.appendRunLog(run.id, 'info', 'diagnostics', 'run dequeued and started');
+            await this.appendRunLog(
+              workspaceId,
+              run.id,
+              'info',
+              'diagnostics',
+              'run dequeued and started',
+            );
           }
-          await this.executeRun(run.id, models, batchSize, maxLogLines);
+          await this.executeRun(workspaceId, run.id, models, batchSize, maxLogLines);
         } finally {
           if (this.runningRunId === run.id) {
             this.runningRunId = null;
@@ -87,12 +96,14 @@ export class DiagnosticsService {
         }
       });
 
-    return this.getRunDetails(run.id);
+    return this.getRunDetails(run.id, workspaceId);
   }
 
-  async listRuns(limit = 20) {
+  async listRuns(limit = 20, workspaceId: string) {
     const take = clamp(limit, 1, 100);
+    const ws = workspaceId.trim();
     const rows = await this.prisma.diagnosticRun.findMany({
+      where: { workspaceId: ws },
       orderBy: { createdAt: 'desc' },
       take,
       select: {
@@ -113,11 +124,15 @@ export class DiagnosticsService {
     }));
   }
 
-  async getRunDetails(runId: string) {
+  async getRunDetails(runId: string, workspaceId: string) {
+    const ws = workspaceId.trim();
     const run = await this.prisma.diagnosticRun.findUnique({
       where: { id: runId },
     });
     if (!run) {
+      return { ok: false, error: 'Диагностический прогон не найден' };
+    }
+    if (run.workspaceId !== ws) {
       return { ok: false, error: 'Диагностический прогон не найден' };
     }
 
@@ -186,9 +201,15 @@ export class DiagnosticsService {
     };
   }
 
-  private async processCase(runId: string, models: string[], trace: DiagnosticCaseTrace) {
+  private async processCase(
+    workspaceId: string,
+    runId: string,
+    models: string[],
+    trace: DiagnosticCaseTrace,
+  ) {
     const diagnosticCase = await this.prisma.diagnosticCase.create({
       data: {
+        workspaceId,
         runId,
         ingestId: trace.ingest.id,
         signalId:
@@ -203,19 +224,28 @@ export class DiagnosticsService {
       },
     });
 
-    await this.appendCaseLog(runId, diagnosticCase.id, 'info', 'diagnostics', 'case started', {
-      ingestId: trace.ingest.id,
-      messageId: trace.ingest.messageId,
-      classification: trace.ingest.classification,
-      status: trace.ingest.status,
-    });
+    await this.appendCaseLog(
+      workspaceId,
+      runId,
+      diagnosticCase.id,
+      'info',
+      'diagnostics',
+      'case started',
+      {
+        ingestId: trace.ingest.id,
+        messageId: trace.ingest.messageId,
+        classification: trace.ingest.classification,
+        status: trace.ingest.status,
+      },
+    );
 
     let caseFailed = false;
     for (const model of models) {
       try {
-        const audited = await this.ai.auditCaseWithModel(model, trace);
+        const audited = await this.ai.auditCaseWithModel(model, trace, workspaceId);
         const modelResult = await this.prisma.diagnosticModelResult.create({
           data: {
+            workspaceId,
             runId,
             caseId: diagnosticCase.id,
             model,
@@ -227,29 +257,54 @@ export class DiagnosticsService {
             totalTokens: audited.usage?.totalTokens ?? null,
           },
         });
-        await this.persistSteps(runId, diagnosticCase.id, modelResult.id, audited.steps);
-        await this.appendCaseLog(runId, diagnosticCase.id, 'info', 'openrouter', 'model audit completed', {
-          model,
-          status: audited.status,
-          requestPreview: audited.requestPreview,
-          usage: audited.usage,
-        }, modelResult.id);
+        await this.persistSteps(workspaceId, runId, diagnosticCase.id, modelResult.id, audited.steps);
+        await this.appendCaseLog(
+          workspaceId,
+          runId,
+          diagnosticCase.id,
+          'info',
+          'openrouter',
+          'model audit completed',
+          {
+            model,
+            status: audited.status,
+            requestPreview: audited.requestPreview,
+            usage: audited.usage,
+          },
+          modelResult.id,
+        );
       } catch (e) {
         caseFailed = true;
         const error = e instanceof Error ? e.message : String(e);
-        await this.appendCaseLog(runId, diagnosticCase.id, 'error', 'openrouter', 'model audit failed', {
-          model,
-          error,
-        });
+        await this.appendCaseLog(
+          workspaceId,
+          runId,
+          diagnosticCase.id,
+          'error',
+          'openrouter',
+          'model audit failed',
+          {
+            model,
+            error,
+          },
+        );
       }
     }
 
     const verifierStep = this.metricsVerifier.verify(trace);
-    await this.persistSteps(runId, diagnosticCase.id, null, [verifierStep]);
+    await this.persistSteps(workspaceId, runId, diagnosticCase.id, null, [verifierStep]);
     if (verifierStep.status !== 'ok') {
-      await this.appendCaseLog(runId, diagnosticCase.id, 'warn', 'diagnostics', 'metrics verifier warning', {
-        issues: verifierStep.issues,
-      });
+      await this.appendCaseLog(
+        workspaceId,
+        runId,
+        diagnosticCase.id,
+        'warn',
+        'diagnostics',
+        'metrics verifier warning',
+        {
+          issues: verifierStep.issues,
+        },
+      );
     }
 
     await this.prisma.diagnosticCase.update({
@@ -261,6 +316,7 @@ export class DiagnosticsService {
   }
 
   private async persistSteps(
+    workspaceId: string,
     runId: string,
     caseId: string,
     modelResultId: string | null,
@@ -269,6 +325,7 @@ export class DiagnosticsService {
     for (const step of steps) {
       await this.prisma.diagnosticStepResult.create({
         data: {
+          workspaceId,
           runId,
           caseId,
           modelResultId: modelResultId ?? null,
@@ -286,6 +343,7 @@ export class DiagnosticsService {
   }
 
   private async appendRunLog(
+    workspaceId: string,
     runId: string,
     level: string,
     category: string,
@@ -294,6 +352,7 @@ export class DiagnosticsService {
   ) {
     await this.prisma.diagnosticLog.create({
       data: {
+        workspaceId,
         runId,
         level,
         category,
@@ -304,6 +363,7 @@ export class DiagnosticsService {
   }
 
   private async appendCaseLog(
+    workspaceId: string,
     runId: string,
     caseId: string,
     level: string,
@@ -314,6 +374,7 @@ export class DiagnosticsService {
   ) {
     await this.prisma.diagnosticLog.create({
       data: {
+        workspaceId,
         runId,
         caseId,
         modelResultId: modelResultId ?? null,
@@ -339,30 +400,30 @@ export class DiagnosticsService {
     return `Кейсов: ${cases}, модельных отчётов: ${modelResults}, warning: ${warnings}, error: ${errors}`;
   }
 
-  private async resolveDiagnosticModels(): Promise<string[]> {
-    const raw = await this.settings.get(DIAGNOSTIC_MODELS_KEY);
+  private async resolveDiagnosticModels(workspaceId: string): Promise<string[]> {
+    const raw = await this.settings.get(DIAGNOSTIC_MODELS_KEY, workspaceId);
     const parsed = parseStringList(raw);
     if (parsed.length > 0) {
       return parsed;
     }
     const fallback = [
-      (await this.settings.get('OPENROUTER_MODEL_TEXT'))?.trim(),
-      (await this.settings.get('OPENROUTER_MODEL_DEFAULT'))?.trim(),
+      (await this.settings.get('OPENROUTER_MODEL_TEXT', workspaceId))?.trim(),
+      (await this.settings.get('OPENROUTER_MODEL_DEFAULT', workspaceId))?.trim(),
       ...DEFAULT_DIAGNOSTIC_MODELS,
     ].filter((v): v is string => Boolean(v));
     return Array.from(new Set(fallback));
   }
 
-  private async resolveBatchSize(override?: number): Promise<number> {
+  private async resolveBatchSize(workspaceId: string, override?: number): Promise<number> {
     if (Number.isFinite(override)) {
       return clamp(Math.trunc(override as number), 1, 50);
     }
-    const raw = await this.settings.get(DIAGNOSTIC_BATCH_SIZE_KEY);
+    const raw = await this.settings.get(DIAGNOSTIC_BATCH_SIZE_KEY, workspaceId);
     return clamp(toFiniteInt(raw, DEFAULT_DIAGNOSTIC_BATCH_SIZE), 1, 50);
   }
 
-  private async resolveMaxLogLines(): Promise<number> {
-    const raw = await this.settings.get(DIAGNOSTIC_MAX_LOG_LINES_KEY);
+  private async resolveMaxLogLines(workspaceId: string): Promise<number> {
+    const raw = await this.settings.get(DIAGNOSTIC_MAX_LOG_LINES_KEY, workspaceId);
     return clamp(toFiniteInt(raw, DEFAULT_DIAGNOSTIC_MAX_LOG_LINES), 20, 500);
   }
 
@@ -388,6 +449,7 @@ export class DiagnosticsService {
   }
 
   private async executeRun(
+    workspaceId: string,
     runId: string,
     models: string[],
     batchSize: number,
@@ -397,6 +459,7 @@ export class DiagnosticsService {
       const traces = await this.traceBuilder.buildLatestIngestTraces({
         limit: batchSize,
         maxLogLines,
+        workspaceId,
       });
 
       await this.prisma.diagnosticRun.update({
@@ -405,7 +468,7 @@ export class DiagnosticsService {
       });
 
       for (const trace of traces) {
-        await this.processCase(runId, models, trace);
+        await this.processCase(workspaceId, runId, models, trace);
       }
 
       const runSummary = await this.buildRunSummary(runId);
@@ -417,7 +480,7 @@ export class DiagnosticsService {
           finishedAt: new Date(),
         },
       });
-      await this.appendRunLog(runId, 'info', 'diagnostics', 'run completed', {
+      await this.appendRunLog(workspaceId, runId, 'info', 'diagnostics', 'run completed', {
         summary: runSummary,
       });
     } catch (e) {
@@ -430,7 +493,7 @@ export class DiagnosticsService {
           finishedAt: new Date(),
         },
       });
-      await this.appendRunLog(runId, 'error', 'diagnostics', 'run failed', { error });
+      await this.appendRunLog(workspaceId, runId, 'error', 'diagnostics', 'run failed', { error });
     }
   }
 }

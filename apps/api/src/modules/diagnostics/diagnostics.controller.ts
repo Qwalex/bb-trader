@@ -46,8 +46,8 @@ export class DiagnosticsController {
     @CurrentUser() user: AuthenticatedRequestContext | null,
     @Body() body?: { limit?: number },
   ) {
-    requireWorkspaceId(user);
-    return this.diagnostics.runLatestBatch({ limit: body?.limit });
+    const workspaceId = requireWorkspaceId(user);
+    return this.diagnostics.runLatestBatch({ limit: body?.limit, workspaceId });
   }
 
   @ApiOperation({ summary: 'Список запусков диагностики' })
@@ -59,9 +59,9 @@ export class DiagnosticsController {
     @CurrentUser() user: AuthenticatedRequestContext | null,
     @Query('limit') limit?: string,
   ) {
-    requireWorkspaceId(user);
+    const workspaceId = requireWorkspaceId(user);
     const parsed = limit ? Number(limit) : undefined;
-    return this.diagnostics.listRuns(Number.isFinite(parsed) ? parsed : undefined);
+    return this.diagnostics.listRuns(Number.isFinite(parsed) ? parsed : undefined, workspaceId);
   }
 
   @ApiOperation({ summary: 'Детали запуска диагностики' })
@@ -73,8 +73,8 @@ export class DiagnosticsController {
     @CurrentUser() user: AuthenticatedRequestContext | null,
     @Param('id') id: string,
   ) {
-    requireWorkspaceId(user);
-    return this.diagnostics.getRunDetails(id);
+    const workspaceId = requireWorkspaceId(user);
+    return this.diagnostics.getRunDetails(id, workspaceId);
   }
 
   @ApiOperation({ summary: 'Сгенерировать торговые рекомендации' })
@@ -92,9 +92,10 @@ export class DiagnosticsController {
     @CurrentUser() user: AuthenticatedRequestContext | null,
     @Body() body?: { closedLimit?: number },
   ) {
-    requireWorkspaceId(user);
+    const workspaceId = requireWorkspaceId(user);
     return this.tradingAdvisor.generateAdvice({
       closedLimit: body?.closedLimit,
+      workspaceId,
     });
   }
 }

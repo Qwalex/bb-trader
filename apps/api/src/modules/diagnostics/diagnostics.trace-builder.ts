@@ -20,23 +20,26 @@ export class DiagnosticsTraceBuilder {
   async buildLatestIngestTraces(params: {
     limit: number;
     maxLogLines: number;
+    workspaceId: string;
   }): Promise<DiagnosticCaseTrace[]> {
+    const ws = params.workspaceId.trim();
     const [rows, dashboard, pnlSeriesDay, settingSnapshot, filterPatterns, filterExamples] =
       await Promise.all([
         this.prisma.tgUserbotIngest.findMany({
+          where: { workspaceId: ws },
           orderBy: { createdAt: 'desc' },
           take: params.limit,
         }),
-        this.orders.getDashboardStats(),
-        this.orders.getPnlSeries('day'),
-        this.readSettingsSnapshot(),
+        this.orders.getDashboardStats({ workspaceId: ws }),
+        this.orders.getPnlSeries('day', { workspaceId: ws }),
+        this.readSettingsSnapshot(ws),
         this.prisma.tgUserbotFilterPattern.findMany({
-          where: { enabled: true },
+          where: { workspaceId: ws, enabled: true },
           orderBy: { updatedAt: 'desc' },
           take: 120,
         }),
         this.prisma.tgUserbotFilterExample.findMany({
-          where: { enabled: true },
+          where: { workspaceId: ws, enabled: true },
           orderBy: { updatedAt: 'desc' },
           take: 120,
         }),
@@ -47,6 +50,7 @@ export class DiagnosticsTraceBuilder {
       const signal = await this.prisma.signal.findFirst({
         where: {
           deletedAt: null,
+          workspaceId: ws,
           sourceChatId: ingest.chatId,
           sourceMessageId: ingest.messageId,
         },
@@ -59,12 +63,18 @@ export class DiagnosticsTraceBuilder {
         },
       });
 
-      const logs = await this.findRelevantLogs(ingest.id, ingest.chatId, ingest.messageId, params.maxLogLines);
+      const logs = await this.findRelevantLogs(
+        ws,
+        ingest.id,
+        ingest.chatId,
+        ingest.messageId,
+        params.maxLogLines,
+      );
 
       let bybitSnapshot: unknown = null;
       if (signal?.id) {
         try {
-          bybitSnapshot = await this.bybit.getSignalExecutionDebugSnapshot(signal.id);
+          bybitSnapshot = await this.bybit.getSignalExecutionDebugSnapshot(signal.id, ws);
         } catch (e) {
           bybitSnapshot = { ok: false, error: String(e) };
         }
@@ -74,7 +84,9 @@ export class DiagnosticsTraceBuilder {
       const text = (ingest.text ?? '').trim();
       if (text.length > 0 && text.length <= 10_000) {
         try {
-          classificationReplay = await this.transcript.classifyTradingMessage(text);
+          classificationReplay = await this.transcript.classifyTradingMessage(text, {
+            workspaceId: ws,
+          });
         } catch (e) {
           classificationReplay = { ok: false, error: String(e) };
         }
@@ -152,6 +164,7 @@ export class DiagnosticsTraceBuilder {
   }
 
   private async findRelevantLogs(
+    workspaceId: string,
     ingestId: string,
     chatId: string,
     messageId: string,
@@ -159,11 +172,18 @@ export class DiagnosticsTraceBuilder {
   ) {
     return this.prisma.appLog.findMany({
       where: {
-        category: { in: ['telegram', 'openrouter', 'bybit', 'orders'] },
-        OR: [
-          { payload: { contains: ingestId } },
-          { payload: { contains: `"chatId":"${chatId}"` } },
-          { payload: { contains: `"messageId":"${messageId}"` } },
+        AND: [
+          {
+            OR: [{ workspaceId }, { workspaceId: null }],
+          },
+          {
+            category: { in: ['telegram', 'openrouter', 'bybit', 'orders'] },
+            OR: [
+              { payload: { contains: ingestId } },
+              { payload: { contains: `"chatId":"${chatId}"` } },
+              { payload: { contains: `"messageId":"${messageId}"` } },
+            ],
+          },
         ],
       },
       orderBy: { createdAt: 'desc' },
@@ -171,7 +191,7 @@ export class DiagnosticsTraceBuilder {
     });
   }
 
-  private async readSettingsSnapshot(): Promise<Record<string, string | null>> {
+  private async readSettingsSnapshot(workspaceId: string): Promise<Record<string, string | null>> {
     const keys = [
       'OPENROUTER_MODEL_DEFAULT',
       'OPENROUTER_MODEL_TEXT',
@@ -190,7 +210,7 @@ export class DiagnosticsTraceBuilder {
     ];
 
     const rows = await Promise.all(
-      keys.map(async (k) => ({ key: k, value: await this.settings.get(k) })),
+      keys.map(async (k) => ({ key: k, value: await this.settings.get(k, workspaceId) })),
     );
     const out: Record<string, string | null> = {};
     for (const row of rows) {

@@ -67,8 +67,9 @@ export class TradingAiAdvisorService {
     private readonly bybit: BybitService,
   ) {}
 
-  async generateAdvice(params?: { closedLimit?: number }) {
-    const apiKey = (await this.settings.get('OPENROUTER_API_KEY'))?.trim();
+  async generateAdvice(params: { closedLimit?: number; workspaceId: string }) {
+    const workspaceId = params.workspaceId.trim();
+    const apiKey = (await this.settings.get('OPENROUTER_API_KEY', workspaceId))?.trim();
     if (!apiKey) {
       return {
         ok: false,
@@ -76,7 +77,7 @@ export class TradingAiAdvisorService {
       };
     }
 
-    const model = (await this.settings.get('OPENROUTER_MODEL_AI_ADVISOR'))?.trim();
+    const model = (await this.settings.get('OPENROUTER_MODEL_AI_ADVISOR', workspaceId))?.trim();
     if (!model) {
       return {
         ok: false,
@@ -87,6 +88,7 @@ export class TradingAiAdvisorService {
 
     const context = await this.buildContext({
       closedLimit: params?.closedLimit,
+      workspaceId,
     });
 
     const client = new OpenRouter({
@@ -230,10 +232,12 @@ export class TradingAiAdvisorService {
     };
   }
 
-  private async buildContext(params?: { closedLimit?: number }) {
+  private async buildContext(params: { closedLimit?: number; workspaceId: string }) {
+    const workspaceId = params.workspaceId.trim();
     const closedLimit = Math.min(Math.max(params?.closedLimit ?? 600, 100), 4000);
     const closedSignals = await this.prisma.signal.findMany({
       where: {
+        workspaceId,
         deletedAt: null,
         status: { in: ['CLOSED_WIN', 'CLOSED_LOSS', 'CLOSED_MIXED'] },
       },
@@ -262,10 +266,11 @@ export class TradingAiAdvisorService {
       sourceExcludeRaw,
       balanceDetails,
     ] = await Promise.all([
-      this.orders.getDashboardStats(),
-      this.orders.getSourceStats(),
-      this.orders.getTopSources({ limit: 10 }),
+      this.orders.getDashboardStats({ workspaceId }),
+      this.orders.getSourceStats({ workspaceId }),
+      this.orders.getTopSources({ limit: 10, workspaceId }),
       this.prisma.tgUserbotChat.findMany({
+        where: { workspaceId },
         orderBy: { title: 'asc' },
         select: {
           chatId: true,
@@ -275,19 +280,22 @@ export class TradingAiAdvisorService {
           defaultEntryUsd: true,
         },
       }),
-      this.settings.getMany([
-        'DEFAULT_ORDER_USD',
-        'DEFAULT_LEVERAGE_ENABLED',
-        'DEFAULT_LEVERAGE',
-        'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',
-        'SOURCE_MARTINGALE_MULTIPLIERS',
-        'MIN_CAPITAL_AMOUNT',
-        'TELEGRAM_USERBOT_MIN_BALANCE_USD',
-        'POLLING_INTERVAL_MS',
-      ]),
-      this.settings.get('SOURCE_LIST'),
-      this.settings.get('SOURCE_EXCLUDE_LIST'),
-      this.bybit.getUnifiedUsdtBalanceDetails(),
+      this.settings.getMany(
+        [
+          'DEFAULT_ORDER_USD',
+          'DEFAULT_LEVERAGE_ENABLED',
+          'DEFAULT_LEVERAGE',
+          'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',
+          'SOURCE_MARTINGALE_MULTIPLIERS',
+          'MIN_CAPITAL_AMOUNT',
+          'TELEGRAM_USERBOT_MIN_BALANCE_USD',
+          'POLLING_INTERVAL_MS',
+        ],
+        workspaceId,
+      ),
+      this.settings.get('SOURCE_LIST', workspaceId),
+      this.settings.get('SOURCE_EXCLUDE_LIST', workspaceId),
+      this.bybit.getUnifiedUsdtBalanceDetails(workspaceId),
     ]);
 
     const byLeverage = new Map<

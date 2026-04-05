@@ -77,8 +77,9 @@ export class DiagnosticsAiService {
   async auditCaseWithModel(
     model: string,
     trace: DiagnosticCaseTrace,
+    workspaceId: string,
   ): Promise<DiagnosticModelAuditResult> {
-    const apiKey = (await this.settings.get('OPENROUTER_API_KEY'))?.trim();
+    const apiKey = (await this.settings.get('OPENROUTER_API_KEY', workspaceId.trim()))?.trim();
     if (!apiKey) {
       throw new Error('OPENROUTER_API_KEY не задан');
     }
