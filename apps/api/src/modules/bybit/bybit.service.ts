@@ -42,8 +42,12 @@ export class BybitService {
     return this.market.getLastPriceForPair(pair);
   }
 
-  wouldDuplicateActivePairDirection(pair: string, direction: 'long' | 'short') {
-    return this.exposure.wouldDuplicateActivePairDirection(pair, direction);
+  wouldDuplicateActivePairDirection(
+    pair: string,
+    direction: 'long' | 'short',
+    workspaceId?: string | null,
+  ) {
+    return this.exposure.wouldDuplicateActivePairDirection(pair, direction, workspaceId);
   }
 
   getLiveExposureSnapshot(workspaceId?: string | null) {
@@ -83,7 +87,7 @@ export class BybitService {
   placeSignalOrders(
     signal: SignalDto,
     rawMessage: string | undefined,
-    origin?: { chatId?: string; messageId?: string },
+    origin?: { chatId?: string; messageId?: string; workspaceId?: string | null },
   ): Promise<PlaceOrdersResult> {
     return this.placement.placeSignalOrders(signal, rawMessage, origin);
   }

@@ -146,8 +146,11 @@ export class SettingsService {
    * Строка настройки: число USDT ("10") или процент от equity ("10%").
    * Для режима % нужен balanceTotalUsd (суммарный USDT на счёте); иначе — fallback 10.
    */
-  async getDefaultOrderUsd(balanceTotalUsd?: number | null): Promise<number> {
-    const raw = await this.get('DEFAULT_ORDER_USD');
+  async getDefaultOrderUsd(
+    balanceTotalUsd?: number | null,
+    workspaceId?: string | null,
+  ): Promise<number> {
+    const raw = await this.get('DEFAULT_ORDER_USD', workspaceId);
     return this.resolveDefaultEntryUsdFromRaw(raw, balanceTotalUsd);
   }
 
@@ -157,11 +160,12 @@ export class SettingsService {
   async resolveDefaultEntryUsd(opts: {
     rawOverride?: string | null;
     balanceTotalUsd?: number | null;
+    workspaceId?: string | null;
   }): Promise<number> {
     const raw =
       opts.rawOverride != null && String(opts.rawOverride).trim() !== ''
         ? String(opts.rawOverride).trim()
-        : await this.get('DEFAULT_ORDER_USD');
+        : await this.get('DEFAULT_ORDER_USD', opts.workspaceId);
     return this.resolveDefaultEntryUsdFromRaw(raw, opts.balanceTotalUsd);
   }
 

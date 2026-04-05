@@ -17,6 +17,13 @@ function errorText(code: string | undefined): string | null {
   return null;
 }
 
+function noticeText(code: string | undefined): string | null {
+  if (code === 'confirm_link_used') {
+    return 'Ссылка из письма уже была открыта (так делают некоторые почтовые клиенты) или устарела. Если вы уже подтвердили email — войдите ниже. Если войти не получается, запросите новое письмо на странице регистрации.';
+  }
+  return null;
+}
+
 export default async function LoginPage({
   searchParams,
 }: {
@@ -28,6 +35,7 @@ export default async function LoginPage({
   }
   const sp = await searchParams;
   const error = typeof sp.error === 'string' ? sp.error : undefined;
+  const notice = typeof sp.notice === 'string' ? sp.notice : undefined;
   const redirectToRaw = typeof sp.redirectTo === 'string' ? sp.redirectTo : undefined;
   const redirectTo = normalizeRedirectTarget(redirectToRaw);
 
@@ -37,6 +45,7 @@ export default async function LoginPage({
       <p className="authCardIntro">
         Войдите по email. Переключение между кабинетами — в шапке после входа.
       </p>
+      {noticeText(notice) && <p className="msg ok">{noticeText(notice)}</p>}
       {errorText(error) && <p className="msg err">{errorText(error)}</p>}
       <form className="authForm" action={withBasePath('/auth/login')} method="post">
         <input type="hidden" name="redirectTo" value={redirectTo} />

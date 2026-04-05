@@ -91,10 +91,11 @@ export class OrdersService {
     signal: SignalDto,
     rawMessage: string | undefined,
     status: string,
-    origin?: { chatId?: string; messageId?: string },
+    origin?: { chatId?: string; messageId?: string; workspaceId?: string | null },
   ) {
     return this.prisma.signal.create({
       data: {
+        workspaceId: origin?.workspaceId?.trim() ? origin.workspaceId.trim() : undefined,
         pair: normalizeTradingPair(signal.pair),
         direction: signal.direction,
         entries: JSON.stringify(signal.entries),

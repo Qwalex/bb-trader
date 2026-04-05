@@ -34,164 +34,131 @@ export class BybitOrderSyncService {
   ) {}
 
   async pollOpenOrders(): Promise<void> {
-    const client = await this.bybitClient.getClient();
-    if (!client) {
+    const openSignals = await this.orders.listOpenSignals();
+    if (openSignals.length === 0) {
       return;
     }
 
-    await this.exposure.runStaleOrdersPlacedReconciliation(client);
-
-    const openSignals = await this.orders.listOpenSignals();
+    const byWs = new Map<string | null, typeof openSignals>();
     for (const sig of openSignals) {
-      for (const ord of sig.orders) {
-        if (!ord.bybitOrderId) continue;
-        try {
-          const st = await this.exposure.fetchOrderStatusFromExchange(
-            client,
-            sig.pair,
-            ord.bybitOrderId,
-            ord.qty != null ? Number(ord.qty) : undefined,
-          );
-          if (st) {
-            await this.orders.updateOrder(ord.id, {
-              status: st,
-              filledAt: isFilledOrderStatus(st) ? new Date() : undefined,
-            });
+      const key = sig.workspaceId ?? null;
+      const list = byWs.get(key) ?? [];
+      list.push(sig);
+      byWs.set(key, list);
+    }
+
+    for (const [ws, signals] of byWs) {
+      const client = await this.bybitClient.getClient(ws);
+      if (!client) {
+        continue;
+      }
+
+      await this.exposure.runStaleOrdersPlacedReconciliation(client, ws);
+
+      for (const sig of signals) {
+        for (const ord of sig.orders) {
+          if (!ord.bybitOrderId) continue;
+          try {
+            const st = await this.exposure.fetchOrderStatusFromExchange(
+              client,
+              sig.pair,
+              ord.bybitOrderId,
+              ord.qty != null ? Number(ord.qty) : undefined,
+            );
+            if (st) {
+              await this.orders.updateOrder(ord.id, {
+                status: st,
+                filledAt: isFilledOrderStatus(st) ? new Date() : undefined,
+              });
+            }
+          } catch (err) {
+            this.logger.debug(`poll order ${ord.bybitOrderId}: ${String(err)}`);
           }
-        } catch (err) {
-          this.logger.debug(`poll order ${ord.bybitOrderId}: ${String(err)}`);
         }
-      }
 
-      const fresh = await this.orders.getSignalWithOrders(sig.id);
-      if (!fresh) continue;
+        const fresh = await this.orders.getSignalWithOrders(sig.id);
+        if (!fresh) continue;
 
-      try {
-        await this.placement.ensureStopLossForMultiTpOpenPosition(client, fresh);
-      } catch (e) {
-        this.logger.warn(
-          `ensureStopLossForMultiTpOpenPosition: ${formatError(e)}`,
-        );
-      }
-
-      try {
-        await this.placement.placeTpSplitIfNeeded(client, fresh);
-      } catch (e) {
-        this.logger.warn(`placeTpSplitIfNeeded: ${formatError(e)}`);
-      }
-
-      try {
-        const symNorm = normalizeTradingPair(fresh.pair);
-        const livePositions = await this.exposure.getExchangePositions(
-          client,
-          symNorm,
-        );
-        const mainPosition = pickLiveExposurePositionForDirection(
-          livePositions,
-          fresh.direction as 'long' | 'short',
-        );
-        const posSize = mainPosition ? Math.abs(mainPosition.size) : 0;
-        const hadFill = fresh.orders.some((o) => isFilledOrderStatus(o.status));
-        if (hadFill && posSize === 0 && fresh.status === 'ORDERS_PLACED') {
-          void this.appLog.append(
-            'debug',
-            'bybit',
-            'poll: no live position for signal direction before close candidate evaluation',
-            {
-              signalId: fresh.id,
-              pair: symNorm,
-              direction: fresh.direction,
-              hadFill,
-              positionSnapshot: livePositions.map((row) => ({
-                side: row.side,
-                size: row.size,
-                positionIdx: row.positionIdx,
-                entryPrice: row.entryPrice,
-              })),
-            },
+        try {
+          await this.placement.ensureStopLossForMultiTpOpenPosition(client, fresh);
+        } catch (e) {
+          this.logger.warn(
+            `ensureStopLossForMultiTpOpenPosition: ${formatError(e)}`,
           );
-          const ourIds = new Set<string>(
-            fresh.orders
-              .map((o) => (o.bybitOrderId ? String(o.bybitOrderId) : ''))
-              .filter((id): id is string => id.length > 0),
-          );
-          const requestWindow = this.pnl.buildClosedPnlWindow(
-            fresh.createdAt,
-            new Date(),
-          );
-          const rows = await this.pnl.fetchClosedPnlRowsForSymbol(
+        }
+
+        try {
+          await this.placement.placeTpSplitIfNeeded(client, fresh);
+        } catch (e) {
+          this.logger.warn(`placeTpSplitIfNeeded: ${formatError(e)}`);
+        }
+
+        try {
+          const symNorm = normalizeTradingPair(fresh.pair);
+          const livePositions = await this.exposure.getExchangePositions(
             client,
             symNorm,
-            requestWindow.startTime,
-            requestWindow.endTime,
           );
-          const { totalPnl, hadParsedPnl } = this.pnl.sumClosedPnlForSignal(
-            rows,
-            ourIds,
-            fresh.direction,
-            fresh.createdAt,
+          const mainPosition = pickLiveExposurePositionForDirection(
+            livePositions,
+            fresh.direction as 'long' | 'short',
           );
-          if (hadParsedPnl) {
-            await this.orders.updateSignalStatus(fresh.id, {
-              status: totalPnl >= 0 ? 'CLOSED_WIN' : 'CLOSED_LOSS',
-              realizedPnl: totalPnl,
-              closedAt: new Date(),
-            });
-          } else if (ourIds.size > 0) {
-            const sibling =
-              await this.orders.findOlderClosedSiblingAfterNewerCreated(
-                symNorm,
-                fresh.direction,
-                fresh.id,
-                fresh.createdAt,
-              );
-            if (sibling) {
-              await this.orders.updateSignalStatus(fresh.id, {
-                status: 'CLOSED_MIXED',
-                realizedPnl: null,
-                closedAt: new Date(),
-              });
-              void this.appLog.append(
-                'info',
-                'bybit',
-                'poll: дубликат сигнала без orderId в closed PnL — CLOSED_MIXED',
-                {
-                  signalId: fresh.id,
-                  pair: symNorm,
-                  siblingId: sibling.id,
-                },
-              );
-            } else if (!hasOpenEntryOrders(fresh.orders)) {
-              const estimated = await this.pnl.estimateClosedPnlFromExecutions({
-                client,
-                symbol: symNorm,
+          const posSize = mainPosition ? Math.abs(mainPosition.size) : 0;
+          const hadFill = fresh.orders.some((o) => isFilledOrderStatus(o.status));
+          if (hadFill && posSize === 0 && fresh.status === 'ORDERS_PLACED') {
+            void this.appLog.append(
+              'debug',
+              'bybit',
+              'poll: no live position for signal direction before close candidate evaluation',
+              {
+                signalId: fresh.id,
+                pair: symNorm,
                 direction: fresh.direction,
-                createdAt: fresh.createdAt,
+                hadFill,
+                positionSnapshot: livePositions.map((row) => ({
+                  side: row.side,
+                  size: row.size,
+                  positionIdx: row.positionIdx,
+                  entryPrice: row.entryPrice,
+                })),
+              },
+            );
+            const ourIds = new Set<string>(
+              fresh.orders
+                .map((o) => (o.bybitOrderId ? String(o.bybitOrderId) : ''))
+                .filter((id): id is string => id.length > 0),
+            );
+            const requestWindow = this.pnl.buildClosedPnlWindow(
+              fresh.createdAt,
+              new Date(),
+            );
+            const rows = await this.pnl.fetchClosedPnlRowsForSymbol(
+              client,
+              symNorm,
+              requestWindow.startTime,
+              requestWindow.endTime,
+            );
+            const { totalPnl, hadParsedPnl } = this.pnl.sumClosedPnlForSignal(
+              rows,
+              ourIds,
+              fresh.direction,
+              fresh.createdAt,
+            );
+            if (hadParsedPnl) {
+              await this.orders.updateSignalStatus(fresh.id, {
+                status: totalPnl >= 0 ? 'CLOSED_WIN' : 'CLOSED_LOSS',
+                realizedPnl: totalPnl,
                 closedAt: new Date(),
               });
-              if (estimated !== undefined) {
-                await this.orders.updateSignalStatus(fresh.id, {
-                  status:
-                    estimated.netPnl > 0
-                      ? 'CLOSED_WIN'
-                      : estimated.netPnl < 0
-                        ? 'CLOSED_LOSS'
-                        : 'CLOSED_MIXED',
-                  realizedPnl: estimated.netPnl,
-                  closedAt: new Date(),
-                });
-                void this.appLog.append(
-                  'warn',
-                  'bybit',
-                  'poll: fallback PnL по execution list (closedPnL без orderId match)',
-                  {
-                    signalId: fresh.id,
-                    pair: symNorm,
-                    estimatedPnl: estimated.netPnl,
-                    trackedOrderIds: Array.from(ourIds),
-                  },
+            } else if (ourIds.size > 0) {
+              const sibling =
+                await this.orders.findOlderClosedSiblingAfterNewerCreated(
+                  symNorm,
+                  fresh.direction,
+                  fresh.id,
+                  fresh.createdAt,
                 );
-              } else {
+              if (sibling) {
                 await this.orders.updateSignalStatus(fresh.id, {
                   status: 'CLOSED_MIXED',
                   realizedPnl: null,
@@ -200,19 +167,66 @@ export class BybitOrderSyncService {
                 void this.appLog.append(
                   'info',
                   'bybit',
-                  'poll: позиция закрыта, но closed PnL не привязан к нашим orderId — CLOSED_MIXED',
+                  'poll: дубликат сигнала без orderId в closed PnL — CLOSED_MIXED',
                   {
                     signalId: fresh.id,
                     pair: symNorm,
-                    trackedOrderIds: Array.from(ourIds),
+                    siblingId: sibling.id,
                   },
                 );
+              } else if (!hasOpenEntryOrders(fresh.orders)) {
+                const estimated = await this.pnl.estimateClosedPnlFromExecutions({
+                  client,
+                  symbol: symNorm,
+                  direction: fresh.direction,
+                  createdAt: fresh.createdAt,
+                  closedAt: new Date(),
+                });
+                if (estimated !== undefined) {
+                  await this.orders.updateSignalStatus(fresh.id, {
+                    status:
+                      estimated.netPnl > 0
+                        ? 'CLOSED_WIN'
+                        : estimated.netPnl < 0
+                          ? 'CLOSED_LOSS'
+                          : 'CLOSED_MIXED',
+                    realizedPnl: estimated.netPnl,
+                    closedAt: new Date(),
+                  });
+                  void this.appLog.append(
+                    'warn',
+                    'bybit',
+                    'poll: fallback PnL по execution list (closedPnL без orderId match)',
+                    {
+                      signalId: fresh.id,
+                      pair: symNorm,
+                      estimatedPnl: estimated.netPnl,
+                      trackedOrderIds: Array.from(ourIds),
+                    },
+                  );
+                } else {
+                  await this.orders.updateSignalStatus(fresh.id, {
+                    status: 'CLOSED_MIXED',
+                    realizedPnl: null,
+                    closedAt: new Date(),
+                  });
+                  void this.appLog.append(
+                    'info',
+                    'bybit',
+                    'poll: позиция закрыта, но closed PnL не привязан к нашим orderId — CLOSED_MIXED',
+                    {
+                      signalId: fresh.id,
+                      pair: symNorm,
+                      trackedOrderIds: Array.from(ourIds),
+                    },
+                  );
+                }
               }
             }
           }
+        } catch (err) {
+          this.logger.debug(`poll position ${fresh.pair}: ${String(err)}`);
         }
-      } catch (err) {
-        this.logger.debug(`poll position ${fresh.pair}: ${String(err)}`);
       }
     }
   }

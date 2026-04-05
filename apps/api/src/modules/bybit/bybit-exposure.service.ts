@@ -45,9 +45,10 @@ export class BybitExposureService {
   async wouldDuplicateActivePairDirection(
     pair: string,
     direction: 'long' | 'short',
+    workspaceId?: string | null,
   ): Promise<boolean> {
     const symbol = normalizeTradingPair(pair);
-    const client = await this.bybitClient.getClient();
+    const client = await this.bybitClient.getClient(workspaceId);
     if (client) {
       try {
         const busy = await this.hasExchangeExposureForDirection(
@@ -65,7 +66,7 @@ export class BybitExposureService {
         // без API — остаёмся на записи БД
       }
     }
-    return this.orders.hasActiveSignalForPairAndDirection(pair, direction);
+    return this.orders.hasActiveSignalForPairAndDirection(pair, direction, workspaceId);
   }
 
   /**
@@ -768,7 +769,8 @@ export class BybitExposureService {
     }
 
     const symbol = normalizeTradingPair(signal.pair);
-    const client = await this.bybitClient.getClient(workspaceId);
+    const resolvedWorkspaceId = workspaceId ?? signal.workspaceId ?? null;
+    const client = await this.bybitClient.getClient(resolvedWorkspaceId);
     if (!client) {
       return {
         ok: false,
@@ -873,7 +875,8 @@ export class BybitExposureService {
     }
 
     const symbol = normalizeTradingPair(signal.pair);
-    const client = await this.bybitClient.getClient(workspaceId);
+    const resolvedWorkspaceId = workspaceId ?? signal.workspaceId ?? null;
+    const client = await this.bybitClient.getClient(resolvedWorkspaceId);
     if (!client) {
       return {
         ok: false,
@@ -1082,8 +1085,11 @@ export class BybitExposureService {
   /**
    * Первая фаза poll: снятие зависших ORDERS_PLACED при «чистой» бирже (состояние счётчиков в этом сервисе).
    */
-  async runStaleOrdersPlacedReconciliation(client: RestClientV5): Promise<void> {
-    const openSignals = await this.orders.listOpenSignals();
+  async runStaleOrdersPlacedReconciliation(
+    client: RestClientV5,
+    workspaceId?: string | null,
+  ): Promise<void> {
+    const openSignals = await this.orders.listOpenSignals(workspaceId);
     const staleCandidates = openSignals.filter((sig) => sig.status === 'ORDERS_PLACED');
     const uniquePairDirections = new Map<string, { pair: string; direction: 'long' | 'short' }>();
     for (const sig of staleCandidates) {
@@ -1167,7 +1173,11 @@ export class BybitExposureService {
         }
 
         const reconciledIds =
-          await this.orders.reconcileStaleOpenSignalsForPairAndDirection(pair, direction);
+          await this.orders.reconcileStaleOpenSignalsForPairAndDirection(
+            pair,
+            direction,
+            workspaceId,
+          );
         this.staleFlatPollCounts.delete(reconcileKey);
         if (reconciledIds.length > 0) {
           void this.appLog.append(

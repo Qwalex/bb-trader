@@ -48,7 +48,10 @@ export class BybitPlacementService {
     private readonly exposure: BybitExposureService,
   ) {}
 
-  private async resolveBumpToMinExchangeLot(chatId?: string): Promise<boolean> {
+  private async resolveBumpToMinExchangeLot(
+    chatId?: string,
+    workspaceId?: string | null,
+  ): Promise<boolean> {
     const trimmed = chatId?.trim();
     if (trimmed) {
       const row = await this.prisma.tgUserbotChat.findUnique({
@@ -59,7 +62,7 @@ export class BybitPlacementService {
         return row.minLotBump;
       }
     }
-    const raw = await this.settings.get('BUMP_TO_MIN_EXCHANGE_LOT');
+    const raw = await this.settings.get('BUMP_TO_MIN_EXCHANGE_LOT', workspaceId);
     return raw === 'true' || raw === '1';
   }
 
@@ -375,15 +378,18 @@ export class BybitPlacementService {
     }
   }
 
-  private async applySourceMartingaleSizing(signal: SignalDto): Promise<SignalDto> {
+  private async applySourceMartingaleSizing(
+    signal: SignalDto,
+    workspaceId?: string | null,
+  ): Promise<SignalDto> {
     const sourceRaw = String(signal.source ?? '').trim();
     if (!sourceRaw) {
       return signal;
     }
 
     const [rawMap, rawDefault] = await Promise.all([
-      this.settings.get('SOURCE_MARTINGALE_MULTIPLIERS'),
-      this.settings.get('SOURCE_MARTINGALE_DEFAULT_MULTIPLIER'),
+      this.settings.get('SOURCE_MARTINGALE_MULTIPLIERS', workspaceId),
+      this.settings.get('SOURCE_MARTINGALE_DEFAULT_MULTIPLIER', workspaceId),
     ]);
     const bySource = this.parseSourceMartingaleMap(rawMap);
     const defaultMultiplierParsed = Number(rawDefault);
@@ -396,7 +402,7 @@ export class BybitPlacementService {
       return signal;
     }
 
-    const prev = await this.orders.getLatestClosedSignalBySource(sourceRaw);
+    const prev = await this.orders.getLatestClosedSignalBySource(sourceRaw, workspaceId);
     if (!prev) {
       return signal;
     }
@@ -433,14 +439,15 @@ export class BybitPlacementService {
   async placeSignalOrders(
     signal: SignalDto,
     rawMessage: string | undefined,
-    origin?: { chatId?: string; messageId?: string },
+    origin?: { chatId?: string; messageId?: string; workspaceId?: string | null },
   ): Promise<PlaceOrdersResult> {
-    signal = await this.applySourceMartingaleSizing(signal);
+    const workspaceId = origin?.workspaceId?.trim() ? origin.workspaceId.trim() : null;
+    signal = await this.applySourceMartingaleSizing(signal, workspaceId);
     const symbol = normalizeTradingPair(signal.pair);
 
     const testnetMode =
-      (await this.settings.get('BYBIT_TESTNET')) === 'true';
-    const client = await this.bybitClient.getClient();
+      (await this.settings.get('BYBIT_TESTNET', workspaceId)) === 'true';
+    const client = await this.bybitClient.getClient(workspaceId);
     if (!client) {
       void this.appLog.append('error', 'bybit', 'placeSignalOrders: нет ключей API', {
         mode: testnetMode ? 'testnet' : 'mainnet',
@@ -453,19 +460,28 @@ export class BybitPlacementService {
       };
     }
 
-    const lockKey = `${symbol}:${signal.direction}`;
+    const lockKey = `${workspaceId ?? 'default'}:${symbol}:${signal.direction}`;
     return this.placementLock.runExclusive(lockKey, () =>
-      this.placeSignalOrdersLocked(signal, rawMessage, origin, symbol, client, testnetMode),
+      this.placeSignalOrdersLocked(
+        signal,
+        rawMessage,
+        origin,
+        symbol,
+        client,
+        testnetMode,
+        workspaceId,
+      ),
     );
   }
 
   private async placeSignalOrdersLocked(
     signal: SignalDto,
     rawMessage: string | undefined,
-    origin: { chatId?: string; messageId?: string } | undefined,
+    origin: { chatId?: string; messageId?: string; workspaceId?: string | null } | undefined,
     symbol: string,
     client: RestClientV5,
     _testnetMode: boolean,
+    workspaceId: string | null,
   ): Promise<PlaceOrdersResult> {
     const side: 'Buy' | 'Sell' = signal.direction === 'long' ? 'Buy' : 'Sell';
 
@@ -499,6 +515,7 @@ export class BybitPlacementService {
         await this.orders.hasActiveSignalForPairAndDirection(
           signal.pair,
           signal.direction,
+          workspaceId,
         )
       ) {
         void this.appLog.append('warn', 'bybit', 'placeSignalOrders: отказ (БД: ORDERS_PLACED, проверка биржи не удалась)', {
@@ -516,6 +533,7 @@ export class BybitPlacementService {
       await this.orders.hasActiveSignalForPairAndDirection(
         signal.pair,
         signal.direction,
+        workspaceId,
       )
     ) {
       void this.appLog.append('warn', 'bybit', 'placeSignalOrders: отказ (активный сигнал в БД)', {
@@ -563,8 +581,9 @@ export class BybitPlacementService {
       const balance = balanceDetails.availableUsd;
       const defaultOrderUsd = await this.settings.getDefaultOrderUsd(
         balanceDetails.totalUsd,
+        workspaceId,
       );
-      const minCapitalRaw = await this.settings.get('MIN_CAPITAL_AMOUNT');
+      const minCapitalRaw = await this.settings.get('MIN_CAPITAL_AMOUNT', workspaceId);
       const minCapitalParsed =
         minCapitalRaw != null && minCapitalRaw.trim() !== ''
           ? parseFloat(minCapitalRaw)
@@ -598,7 +617,7 @@ export class BybitPlacementService {
       } else {
         leveragedNotional = defaultOrderUsd;
       }
-      const maxLeverageRaw = await this.settings.get('MAX_LEVERAGE');
+      const maxLeverageRaw = await this.settings.get('MAX_LEVERAGE', workspaceId);
       const maxLeverage =
         maxLeverageRaw != null && Number.isFinite(Number(maxLeverageRaw)) && Number(maxLeverageRaw) > 0
           ? Math.round(Number(maxLeverageRaw))
@@ -669,7 +688,7 @@ export class BybitPlacementService {
         }
       }
 
-      const bumpToMin = await this.resolveBumpToMinExchangeLot(origin?.chatId);
+      const bumpToMin = await this.resolveBumpToMinExchangeLot(origin?.chatId, workspaceId);
       const minQtyErr = this.validateLeveragedNotionalVsMinQty({
         leveragedNotional,
         effectiveEntries,

@@ -42,6 +42,8 @@ import { buildJsonSchemaRules, buildSystemPrompt } from './transcript-prompts';
 export type TranscriptParseOverrides = {
   defaultOrderUsd?: number;
   leverageDefault?: number;
+  /** Кабинет для чтения OpenRouter / DEFAULT_* из SQLite (как в SettingsService.get). */
+  workspaceId?: string | null;
 };
 
 type TranscriptMessagePart =
@@ -105,13 +107,18 @@ export class TranscriptService {
     ) {
       return overrides.defaultOrderUsd;
     }
-    const details = await this.bybit.getUnifiedUsdtBalanceDetails();
-    return this.settings.getDefaultOrderUsd(details?.totalUsd);
+    const ws = overrides?.workspaceId;
+    const details = await this.bybit.getUnifiedUsdtBalanceDetails(ws);
+    return this.settings.getDefaultOrderUsd(details?.totalUsd, ws);
   }
 
   async classifyTradingMessage(
     text: string,
-    context?: { replyToMessageId?: string; quotedText?: string },
+    context?: {
+      replyToMessageId?: string;
+      quotedText?: string;
+      workspaceId?: string | null;
+    },
   ): Promise<{
     kind: 'signal' | 'close' | 'reentry' | 'result' | 'other';
     reason?: string;
@@ -154,6 +161,7 @@ Priority:
 Be conservative: if unsure, return "other".`;
     const replyToMessageId = context?.replyToMessageId?.trim() || undefined;
     const quotedText = context?.quotedText?.trim() || undefined;
+    const ws = context?.workspaceId;
     const requestPayload = {
       operation: 'classifyTradingMessage',
       text,
@@ -162,7 +170,7 @@ Be conservative: if unsure, return "other".`;
       prompt: classifierPrompt,
     };
 
-    const apiKey = await this.settings.get('OPENROUTER_API_KEY');
+    const apiKey = await this.settings.get('OPENROUTER_API_KEY', ws);
     if (!apiKey) {
       return {
         kind: this.classifyMessageHeuristic(text),
@@ -175,8 +183,8 @@ Be conservative: if unsure, return "other".`;
       };
     }
     const model =
-      (await this.resolveModelKeyWithDefault('OPENROUTER_MODEL_TEXT')) ??
-      (await this.settings.get('OPENROUTER_MODEL_DEFAULT'));
+      (await this.resolveModelKeyWithDefault('OPENROUTER_MODEL_TEXT', ws)) ??
+      (await this.settings.get('OPENROUTER_MODEL_DEFAULT', ws));
     if (!model) {
       return {
         kind: this.classifyMessageHeuristic(text),
@@ -393,13 +401,14 @@ Task:
     userComment: string,
     overrides?: TranscriptParseOverrides,
   ): Promise<TranscriptResult> {
-    const apiKey = await this.settings.get('OPENROUTER_API_KEY');
+    const ws = overrides?.workspaceId;
+    const apiKey = await this.settings.get('OPENROUTER_API_KEY', ws);
     if (!apiKey) {
       this.logger.warn('applyCorrection: OPENROUTER_API_KEY is missing');
       return { ok: false, error: 'OPENROUTER_API_KEY is not configured' };
     }
 
-    const model = await this.resolveModelKeyWithDefault('OPENROUTER_MODEL_TEXT');
+    const model = await this.resolveModelKeyWithDefault('OPENROUTER_MODEL_TEXT', ws);
     if (!model) {
       this.logger.warn('applyCorrection: OPENROUTER model is missing');
       return {
@@ -436,6 +445,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       this.logger.log(`applyCorrection: OpenRouter ok in ${ms}ms`);
       const levOpts = await this.getLeverageFieldOptions(
         overrides?.leverageDefault,
+        ws,
       );
       const result = this.finishTranscriptResult(
         this.parseModelContent(content, levOpts, defaultOrderUsd),
@@ -463,13 +473,14 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     newMessage: string,
     overrides?: TranscriptParseOverrides,
   ): Promise<TranscriptResult> {
-    const apiKey = await this.settings.get('OPENROUTER_API_KEY');
+    const ws = overrides?.workspaceId;
+    const apiKey = await this.settings.get('OPENROUTER_API_KEY', ws);
     if (!apiKey) {
       this.logger.warn('continueSignalDraft: OPENROUTER_API_KEY is missing');
       return { ok: false, error: 'OPENROUTER_API_KEY is not configured' };
     }
 
-    const model = await this.resolveModelKeyWithDefault('OPENROUTER_MODEL_TEXT');
+    const model = await this.resolveModelKeyWithDefault('OPENROUTER_MODEL_TEXT', ws);
     if (!model) {
       this.logger.warn('continueSignalDraft: OPENROUTER model is missing');
       return {
@@ -510,6 +521,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       this.logger.log(`continueSignalDraft: OpenRouter ok in ${ms}ms`);
       const levOpts = await this.getLeverageFieldOptions(
         overrides?.leverageDefault,
+        ws,
       );
       const result = this.finishTranscriptResult(
         this.parseModelContent(content, levOpts, defaultOrderUsd),
@@ -550,7 +562,8 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     },
     overrides?: TranscriptParseOverrides,
   ): Promise<TranscriptResult> {
-    const apiKey = await this.settings.get('OPENROUTER_API_KEY');
+    const ws = overrides?.workspaceId;
+    const apiKey = await this.settings.get('OPENROUTER_API_KEY', ws);
     if (!apiKey) {
       this.logger.warn('parse: OPENROUTER_API_KEY is missing');
       return { ok: false, error: 'OPENROUTER_API_KEY is not configured' };
@@ -562,7 +575,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
         : kind === 'image'
           ? 'OPENROUTER_MODEL_IMAGE'
           : 'OPENROUTER_MODEL_AUDIO';
-    const model = await this.resolveModelKeyWithDefault(modelKey);
+    const model = await this.resolveModelKeyWithDefault(modelKey, ws);
     if (!model) {
       this.logger.warn(`parse: ${modelKey} and OPENROUTER_MODEL_DEFAULT are missing`);
       return {
@@ -595,7 +608,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     this.logger.log(
       `parse: kind=${kind} model=${model} (textLen=${payload.text?.length ?? 0})`,
     );
-    const modelChain = await this.getModelChainForKind(kind, model);
+    const modelChain = await this.getModelChainForKind(kind, model, ws);
     const fallbackModels = modelChain.slice(1);
 
     try {
@@ -610,6 +623,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       );
       const levOpts = await this.getLeverageFieldOptions(
         overrides?.leverageDefault,
+        ws,
       );
       const parsed = this.finishTranscriptResult(
         this.parseModelContent(content, levOpts, defaultOrderUsd),
@@ -917,8 +931,9 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
   /** Настройки плеча из SQLite / env: опциональная подстановка или обязательное поле в сигнале. */
   private async getLeverageFieldOptions(
     overrideDefaultLeverage?: number | null,
+    workspaceId?: string | null,
   ): Promise<LeverageFieldOptions> {
-    const defRaw = await this.settings.get('DEFAULT_LEVERAGE');
+    const defRaw = await this.settings.get('DEFAULT_LEVERAGE', workspaceId);
     const parsed =
       defRaw != null && String(defRaw).trim() !== ''
         ? Number(String(defRaw).trim().replace(',', '.'))
@@ -1169,6 +1184,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
   private async getModelChainForKind(
     kind: ContentKind,
     primaryModel: string,
+    workspaceId?: string | null,
   ): Promise<string[]> {
     const chain: string[] = [primaryModel];
     const fallbackKey =
@@ -1177,7 +1193,9 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
         : kind === 'audio'
           ? 'OPENROUTER_MODEL_AUDIO_FALLBACK_1'
           : 'OPENROUTER_MODEL_TEXT_FALLBACK_1';
-    const fallbackModel = this.normalizeModelName(await this.settings.get(fallbackKey));
+    const fallbackModel = this.normalizeModelName(
+      await this.settings.get(fallbackKey, workspaceId),
+    );
     if (fallbackModel) {
       chain.push(fallbackModel);
     }
@@ -1198,12 +1216,15 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
 
   private async resolveModelKeyWithDefault(
     modelKey: string,
+    workspaceId?: string | null,
   ): Promise<string | undefined> {
-    const specific = this.normalizeModelName(await this.settings.get(modelKey));
+    const specific = this.normalizeModelName(await this.settings.get(modelKey, workspaceId));
     if (specific) {
       return specific;
     }
-    return this.normalizeModelName(await this.settings.get('OPENROUTER_MODEL_DEFAULT'));
+    return this.normalizeModelName(
+      await this.settings.get('OPENROUTER_MODEL_DEFAULT', workspaceId),
+    );
   }
 
   private formatOpenRouterError(error: unknown): string {

@@ -83,10 +83,17 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
   ) {}
 
+  /** Кабинет для SQLite/env настроек в сценариях без JWT (бот, poll). */
+  private bootstrapWorkspaceId(): string | null {
+    const w = process.env.BOOTSTRAP_WORKSPACE_ID?.trim();
+    return w && w.length > 0 ? w : null;
+  }
+
   /** Дефолт номинала с учётом DEFAULT_ORDER_USD и процента от equity. */
   private async getResolvedDefaultOrderUsd(): Promise<number> {
-    const d = await this.bybit.getUnifiedUsdtBalanceDetails();
-    return this.settings.getDefaultOrderUsd(d?.totalUsd);
+    const ws = this.bootstrapWorkspaceId();
+    const d = await this.bybit.getUnifiedUsdtBalanceDetails(ws);
+    return this.settings.getDefaultOrderUsd(d?.totalUsd, ws);
   }
 
   async onModuleInit(): Promise<void> {
@@ -741,8 +748,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }
 
-  private async getBoolSetting(key: string, fallback: boolean): Promise<boolean> {
-    const raw = await this.settings.get(key);
+  private async getBoolSetting(
+    key: string,
+    fallback: boolean,
+    workspaceId?: string | null,
+  ): Promise<boolean> {
+    const raw = await this.settings.get(key, workspaceId);
     if (raw == null || raw.trim() === '') {
       return fallback;
     }
@@ -800,7 +811,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     ctx: Context,
     opts?: { edit?: { chatId: number; messageId: number } },
   ): Promise<void> {
-    const details = await this.bybit.getUnifiedUsdtBalanceDetails();
+    const tws = this.bootstrapWorkspaceId();
+    const details = await this.bybit.getUnifiedUsdtBalanceDetails(tws);
     const balStr =
       details !== undefined && Number.isFinite(details.availableUsd)
         ? `баланс ${details.totalUsd.toFixed(2)} · доступный баланс ${details.availableUsd.toFixed(2)} USDT`
@@ -902,6 +914,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async handleMenuDiagnostics(ctx: Context): Promise<void> {
+    const tws = this.bootstrapWorkspaceId();
     const [
       userbotEnabled,
       apiId,
@@ -911,13 +924,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       chatsEnabled,
       minBalRaw,
     ] = await Promise.all([
-      this.getBoolSetting('TELEGRAM_USERBOT_ENABLED', false),
-      this.settings.get('TELEGRAM_USERBOT_API_ID'),
-      this.settings.get('TELEGRAM_USERBOT_API_HASH'),
-      this.settings.get('TELEGRAM_USERBOT_SESSION'),
+      this.getBoolSetting('TELEGRAM_USERBOT_ENABLED', false, tws),
+      this.settings.get('TELEGRAM_USERBOT_API_ID', tws),
+      this.settings.get('TELEGRAM_USERBOT_API_HASH', tws),
+      this.settings.get('TELEGRAM_USERBOT_SESSION', tws),
       this.prisma.tgUserbotChat.count(),
       this.prisma.tgUserbotChat.count({ where: { enabled: true } }),
-      this.settings.get('TELEGRAM_USERBOT_MIN_BALANCE_USD'),
+      this.settings.get('TELEGRAM_USERBOT_MIN_BALANCE_USD', tws),
     ]);
     const start = this.startOfToday();
     const [ingestTotal, ingestSignal, ingestPlaced, parseIncomplete, parseError] =
@@ -936,7 +949,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           where: { createdAt: { gte: start }, status: 'parse_error' },
         }),
       ]);
-    const details = await this.bybit.getUnifiedUsdtBalanceDetails();
+    const details = await this.bybit.getUnifiedUsdtBalanceDetails(tws);
     const balance = details?.availableUsd;
     const totalBal = details?.totalUsd;
     const minBal = Number(minBalRaw ?? '3');
@@ -947,7 +960,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       balance < minBal;
     let live: { bybitConnected: boolean; items: unknown[] };
     try {
-      live = await this.bybit.getLiveExposureSnapshot();
+      live = await this.bybit.getLiveExposureSnapshot(tws);
     } catch {
       live = { bybitConnected: false, items: [] };
     }
@@ -1303,6 +1316,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       const place = await this.bybit.placeSignalOrders(
         draft.signal,
         rawCombined,
+        { workspaceId: this.bootstrapWorkspaceId() },
       );
       if (place.ok) {
         this.drafts.delete(uid);
@@ -1493,7 +1507,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
             if (!rest) {
               const cur =
                 this.sourceOverrideByUser.get(uid)?.trim() ??
-                (await this.settings.get('SIGNAL_SOURCE'))?.trim() ??
+                (await this.settings.get('SIGNAL_SOURCE', this.bootstrapWorkspaceId()))?.trim() ??
                 '';
               await ctx.reply(
                 cur
@@ -1533,7 +1547,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
             if (text === '/stats' || text === '/сводка') {
               await this.handleMenuSummary(ctx);
             } else if (text === '/balance' || text === '/баланс') {
-              const d = await this.bybit.getUnifiedUsdtBalanceDetails();
+              const d = await this.bybit.getUnifiedUsdtBalanceDetails(this.bootstrapWorkspaceId());
               await ctx.reply(
                 d !== undefined && Number.isFinite(d.availableUsd)
                   ? `Баланс: ${d.totalUsd.toFixed(2)} USDT\nДоступный баланс: ${d.availableUsd.toFixed(2)} USDT`
@@ -1754,6 +1768,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const dup = await this.bybit.wouldDuplicateActivePairDirection(
       res.signal.pair,
       res.signal.direction,
+      this.bootstrapWorkspaceId(),
     );
     if (dup) {
       this.logger.warn(
@@ -1828,12 +1843,16 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }> {
     const row = await this.prisma.tgUserbotIngest.findUnique({
       where: { id: ingestId },
-      select: { text: true, chatId: true, messageId: true },
+      select: { text: true, chatId: true, messageId: true, workspaceId: true },
     });
     const text = row?.text?.trim();
     if (!text) {
       return { ok: false, error: 'Текст сообщения для подтверждения не найден' };
     }
+    const ingestWs =
+      row?.workspaceId != null && String(row.workspaceId).trim() !== ''
+        ? String(row.workspaceId).trim()
+        : this.bootstrapWorkspaceId();
     const [chat, details] = await Promise.all([
       row?.chatId
         ? this.prisma.tgUserbotChat.findUnique({
@@ -1841,11 +1860,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
             select: { title: true, defaultLeverage: true, defaultEntryUsd: true },
           })
         : Promise.resolve(null),
-      this.bybit.getUnifiedUsdtBalanceDetails(),
+      this.bybit.getUnifiedUsdtBalanceDetails(ingestWs),
     ]);
     const defaultOrderUsd = await this.settings.resolveDefaultEntryUsd({
       rawOverride: chat?.defaultEntryUsd,
       balanceTotalUsd: details?.totalUsd,
+      workspaceId: ingestWs,
     });
     const leverageDefault =
       chat?.defaultLeverage != null && chat.defaultLeverage >= 1
@@ -1854,7 +1874,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const parsed = await this.transcript.parse(
       'text',
       { text },
-      { defaultOrderUsd, leverageDefault },
+      { defaultOrderUsd, leverageDefault, workspaceId: ingestWs },
     );
     if (parsed.ok !== true) {
       return {
@@ -1871,6 +1891,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const place = await this.bybit.placeSignalOrders(parsed.signal, text, {
       chatId: row?.chatId ?? undefined,
       messageId: row?.messageId ?? undefined,
+      workspaceId: ingestWs,
     });
     if (!place.ok) {
       return { ok: false, error: formatError(place.error) };

@@ -970,17 +970,19 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
   private async buildTranscriptParseOverrides(
     chatId: string,
+    workspaceId?: string | null,
   ): Promise<TranscriptParseOverrides> {
     const [chat, details] = await Promise.all([
       this.prisma.tgUserbotChat.findUnique({
         where: { chatId },
         select: { defaultLeverage: true, defaultEntryUsd: true },
       }),
-      this.bybit.getUnifiedUsdtBalanceDetails(),
+      this.bybit.getUnifiedUsdtBalanceDetails(workspaceId),
     ]);
     const defaultOrderUsd = await this.settings.resolveDefaultEntryUsd({
       rawOverride: chat?.defaultEntryUsd,
       balanceTotalUsd: details?.totalUsd,
+      workspaceId,
     });
     const leverageDefault =
       chat?.defaultLeverage != null && chat.defaultLeverage >= 1
@@ -989,6 +991,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     return {
       defaultOrderUsd,
       leverageDefault,
+      workspaceId: workspaceId ?? undefined,
     };
   }
 
@@ -1211,6 +1214,15 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     options?: ProcessIngestOptions,
   ): Promise<void> {
     try {
+      const ingestWsRow = await this.prisma.tgUserbotIngest.findUnique({
+        where: { id: ingest.id },
+        select: { workspaceId: true },
+      });
+      const ingestWorkspaceId =
+        ingestWsRow?.workspaceId != null && String(ingestWsRow.workspaceId).trim() !== ''
+          ? String(ingestWsRow.workspaceId).trim()
+          : null;
+
       const processingStartedAt = new Date();
       const queueDelayMs = options?.enqueuedAtMs
         ? Math.max(0, Date.now() - options.enqueuedAtMs)
@@ -1235,7 +1247,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       });
 
       if (options?.enforceBalanceGuard) {
-        const lowBalance = await this.getLowBalanceGuardState();
+        const lowBalance = await this.getLowBalanceGuardState(ingestWorkspaceId);
         if (lowBalance.ignore) {
           this.appendIngestStageLog('warn', 'Userbot: skipped by low balance guard', ingest, {
             reason: lowBalance.reason ?? null,
@@ -1296,6 +1308,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       const useAiClassifier = await this.getBoolSetting(
         'TELEGRAM_USERBOT_USE_AI_CLASSIFIER',
         true,
+        ingestWorkspaceId,
       );
       const quotedText = replyToMessageId
         ? await this.fetchChatMessageText(ingest.chatId, replyToMessageId)
@@ -1308,6 +1321,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         groupName,
         replyToMessageId,
         quotedText,
+        ingestWorkspaceId,
       );
       let kind = cls.kind;
       const aiRequest = cls.aiRequest;
@@ -1355,6 +1369,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           messageId: ingest.messageId,
           text,
           replyToMessageId,
+          workspaceId: ingestWorkspaceId,
         });
         this.appendIngestStageLog(
           reentry.ok ? 'info' : 'warn',
@@ -1484,7 +1499,10 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       this.appendIngestStageLog('debug', 'Userbot: parse started', ingest, {
         kind,
       });
-      const parseOverrides = await this.buildTranscriptParseOverrides(ingest.chatId);
+      const parseOverrides = await this.buildTranscriptParseOverrides(
+        ingest.chatId,
+        ingestWorkspaceId,
+      );
       const parsed = await this.transcript.parse('text', { text }, parseOverrides);
       if (parsed.ok !== true) {
         const parseError = parsed.ok === false ? parsed.error : parsed.prompt;
@@ -1574,6 +1592,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         await this.bybit.wouldDuplicateActivePairDirection(
           signal.pair,
           signal.direction,
+          ingestWorkspaceId,
         )
       ) {
         const incomingSourceName = (chatMeta?.title ?? ingest.chatId).trim();
@@ -1581,6 +1600,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         const activeSignal = await this.findActiveSignalForPairAndDirection(
           signal.pair,
           signal.direction,
+          ingestWorkspaceId,
         );
 
         if (activeSignal) {
@@ -1709,6 +1729,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       const requireConfirmation = await this.getBoolSetting(
         'TELEGRAM_USERBOT_REQUIRE_CONFIRMATION',
         false,
+        ingestWorkspaceId,
       );
       if (requireConfirmation) {
         this.appendIngestStageLog('info', 'Userbot: waiting external confirmation', ingest, {
@@ -1787,6 +1808,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       const place = await this.bybit.placeSignalOrders(signal, text, {
         chatId: ingest.chatId,
         messageId: ingest.messageId,
+        workspaceId: ingestWorkspaceId,
       });
       if (!place.ok) {
         const placeError = formatError(place.error);
@@ -1989,6 +2011,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     messageId: string;
     text: string;
     replyToMessageId?: string;
+    workspaceId?: string | null;
   }): Promise<
     { ok: true; mode: 'updated' | 'replaced' } | { ok: false; error: string }
   > {
@@ -2031,7 +2054,10 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           ? this.fetchChatMessageText(params.chatId, replyToMessageId)
           : Promise.resolve(undefined),
       ]);
-      const reentryOverrides = await this.buildTranscriptParseOverrides(params.chatId);
+      const reentryOverrides = await this.buildTranscriptParseOverrides(
+        params.chatId,
+        params.workspaceId ?? null,
+      );
       const parsed = await this.transcript.parse(
         'text',
         {
@@ -2176,6 +2202,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       const place = await this.bybit.placeSignalOrders(nextSignal, params.text, {
         chatId: params.chatId,
         messageId: rootSource.messageId,
+        workspaceId: params.workspaceId ?? null,
       });
       if (!place.ok) {
         return { ok: false, error: formatError(place.error) };
@@ -2831,10 +2858,12 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   private async findActiveSignalForPairAndDirection(
     pair: string,
     direction: 'long' | 'short',
+    workspaceId?: string | null,
   ): Promise<ActiveSignalLookup | null> {
     const wantPair = normalizeTradingPair(pair);
     const rows = await this.prisma.signal.findMany({
       where: {
+        ...(workspaceId ? { workspaceId } : {}),
         deletedAt: null,
         status: { in: ['ORDERS_PLACED', 'OPEN', 'PARSED'] },
         direction,
@@ -3080,6 +3109,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     groupName?: string,
     replyToMessageId?: string,
     quotedText?: string,
+    workspaceId?: string | null,
   ): Promise<{ kind: MessageKind; aiRequest?: string; aiResponse?: string }> {
     const replyId = String(replyToMessageId ?? '').trim();
     const forcedKind =
@@ -3116,6 +3146,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     const ai = await this.transcript.classifyTradingMessage(text, {
       replyToMessageId,
       quotedText,
+      workspaceId,
     });
     const aiRequest = this.limitTrace(
       ai.debug?.request ??
@@ -3137,11 +3168,13 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     return { kind: ai.kind, aiRequest, aiResponse };
   }
 
-  private async getLowBalanceGuardState(): Promise<{
+  private async getLowBalanceGuardState(
+    workspaceId?: string | null,
+  ): Promise<{
     ignore: boolean;
     reason?: string;
   }> {
-    const snapshot = await this.getBalanceGuardSnapshot();
+    const snapshot = await this.getBalanceGuardSnapshot(workspaceId);
     if (snapshot.paused) {
       return {
         ignore: true,
@@ -3243,7 +3276,13 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     status: string;
   }) {
     try {
-      return await this.prisma.tgUserbotIngest.create({ data });
+      const bootstrapWs = process.env.BOOTSTRAP_WORKSPACE_ID?.trim();
+      return await this.prisma.tgUserbotIngest.create({
+        data: {
+          ...data,
+          ...(bootstrapWs ? { workspaceId: bootstrapWs } : {}),
+        },
+      });
     } catch (e) {
       if (this.isUniqueConstraintError(e)) {
         return null;
