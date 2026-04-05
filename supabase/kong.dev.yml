@@ -1,6 +1,29 @@
 _format_version: "2.1"
 
 services:
+  # GoTrue шлёт в письмах ссылки вида {API_EXTERNAL_URL}/verify?... при API_EXTERNAL_URL без /auth/v1
+  - name: auth-open-root
+    url: http://auth:9999
+    routes:
+      - name: auth-open-verify
+        strip_path: false
+        paths:
+          - /verify
+        plugins:
+          - name: cors
+      - name: auth-open-callback
+        strip_path: false
+        paths:
+          - /callback
+        plugins:
+          - name: cors
+      - name: auth-open-authorize
+        strip_path: false
+        paths:
+          - /authorize
+        plugins:
+          - name: cors
+
   - name: auth-v1
     url: http://auth:9999
     routes:
