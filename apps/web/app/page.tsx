@@ -1,17 +1,8 @@
-import dynamic from 'next/dynamic';
 import Link from 'next/link';
 
 import type { BalancePoint } from './components/BalanceChart';
 import { LiveExposurePanel } from './components/LiveExposurePanel';
-
-const BalanceChart = dynamic(
-  () => import('./components/BalanceChart').then((m) => m.BalanceChart),
-  { ssr: false },
-);
-const PnlChart = dynamic(
-  () => import('./components/PnlChart').then((m) => m.PnlChart),
-  { ssr: false },
-);
+import { LazyBalanceChart, LazyPnlChart } from './components/lazy-charts';
 
 import { fetchJson } from '../lib/api-server';
 
@@ -366,9 +357,7 @@ export default async function Home({
         <h2 className="pageTitle" style={{ fontSize: '1.1rem', marginTop: '1.25rem' }}>
           Суммарный баланс USDT
         </h2>
-        <div className="chartWrap">
-          <BalanceChart data={balanceHistory} />
-        </div>
+        <LazyBalanceChart data={balanceHistory} />
       </div>
       {top && (
         <div className="grid topSources" style={{ marginTop: '1rem' }}>
@@ -501,9 +490,7 @@ export default async function Home({
       <h2 className="pageTitle" style={{ fontSize: '1.1rem' }}>
         PnL по дням{source ? ` — ${source}` : ''}
       </h2>
-      <div className="chartWrap">
-        <PnlChart data={pnl} />
-      </div>
+      <LazyPnlChart data={pnl} />
       <LiveExposurePanel />
     </>
   );
