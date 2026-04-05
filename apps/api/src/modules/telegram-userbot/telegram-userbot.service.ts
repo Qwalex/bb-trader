@@ -2065,7 +2065,14 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         error: `Перезаход временно заблокирован после close (${Math.ceil(closeCooldownMs / 1000)}s)`,
       };
     }
-    this.bybit.suspendStaleReconcile(base.pair, base.direction, 'reentry flow');
+    const reentryWs =
+      prev.workspaceId?.trim() || params.workspaceId?.trim() || null;
+    this.bybit.suspendStaleReconcile(
+      base.pair,
+      base.direction,
+      'reentry flow',
+      reentryWs,
+    );
     try {
       void this.appLog.append('debug', 'telegram', 'Reentry: resolved root source message', {
         sourceChatId: params.chatId,
@@ -2219,7 +2226,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         source: base.source,
       };
 
-      const closed = await this.bybit.closeSignalManually(prev.id);
+      const closed = await this.bybit.closeSignalManually(prev.id, reentryWs);
       if (!closed.ok) {
         return {
           ok: false,
@@ -2230,7 +2237,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       const place = await this.bybit.placeSignalOrders(nextSignal, params.text, {
         chatId: params.chatId,
         messageId: rootSource.messageId,
-        workspaceId: params.workspaceId ?? null,
+        workspaceId: reentryWs,
       });
       if (!place.ok) {
         return { ok: false, error: formatError(place.error) };
@@ -2288,7 +2295,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
       return { ok: true, mode: 'replaced' };
     } finally {
-      this.bybit.resumeStaleReconcile(base.pair, base.direction);
+      this.bybit.resumeStaleReconcile(base.pair, base.direction, reentryWs);
     }
   }
 

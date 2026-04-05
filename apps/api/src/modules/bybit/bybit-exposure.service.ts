@@ -59,7 +59,13 @@ export class BybitExposureService {
         if (busy) {
           return true;
         }
-        await this.clearImmediateStaleDbBlockerIfExchangeFlat(symbol, direction, client, 'duplicate-check');
+        await this.clearImmediateStaleDbBlockerIfExchangeFlat(
+          symbol,
+          direction,
+          client,
+          'duplicate-check',
+          workspaceId,
+        );
         return false;
       } catch (e) {
         this.logger.warn(`wouldDuplicateActivePairDirection: ${formatError(e)}`);
@@ -1092,9 +1098,11 @@ export class BybitExposureService {
     const openSignals = await this.orders.listOpenSignals(workspaceId);
     const staleCandidates = openSignals.filter((sig) => sig.status === 'ORDERS_PLACED');
     const uniquePairDirections = new Map<string, { pair: string; direction: 'long' | 'short' }>();
+    const wsNorm = workspaceId?.trim() ?? 'null';
+    const wsKeyPrefix = `${wsNorm}:`;
     for (const sig of staleCandidates) {
       const symbol = normalizeTradingPair(sig.pair);
-      const key = this.stalePairDirectionKey(symbol, sig.direction as 'long' | 'short');
+      const key = this.staleReconcileStateKey(workspaceId, symbol, sig.direction as 'long' | 'short');
       if (!uniquePairDirections.has(key)) {
         uniquePairDirections.set(key, {
           pair: symbol,
@@ -1104,6 +1112,9 @@ export class BybitExposureService {
     }
 
     for (const existingKey of Array.from(this.staleFlatPollCounts.keys())) {
+      if (!existingKey.startsWith(wsKeyPrefix)) {
+        continue;
+      }
       if (!uniquePairDirections.has(existingKey)) {
         this.staleFlatPollCounts.delete(existingKey);
       }
@@ -1121,8 +1132,7 @@ export class BybitExposureService {
       );
     }
 
-    for (const { pair, direction } of uniquePairDirections.values()) {
-      const reconcileKey = this.stalePairDirectionKey(pair, direction);
+    for (const [reconcileKey, { pair, direction }] of uniquePairDirections) {
       if (this.staleReconcileSuspensions.has(reconcileKey)) {
         this.staleFlatPollCounts.delete(reconcileKey);
         const suspension = this.staleReconcileSuspensions.get(reconcileKey);
@@ -1224,11 +1234,14 @@ export class BybitExposureService {
     }
   }
 
-  stalePairDirectionKey(
+  /** Ключи счётчиков stale-reconcile и suspend — с префиксом кабинета, чтобы не смешивать multi-tenant. */
+  staleReconcileStateKey(
+    workspaceId: string | null | undefined,
     pair: string,
     direction: 'long' | 'short',
   ): string {
-    return `${normalizeTradingPair(pair)}:${direction}`;
+    const ws = workspaceId?.trim() ?? 'null';
+    return `${ws}:${normalizeTradingPair(pair)}:${direction}`;
   }
 
   async clearImmediateStaleDbBlockerIfExchangeFlat(
@@ -1236,15 +1249,17 @@ export class BybitExposureService {
     direction: 'long' | 'short',
     client: RestClientV5,
     reason: string,
+    workspaceId?: string | null,
   ): Promise<number> {
     const symbol = normalizeTradingPair(pair);
-    const reconcileKey = this.stalePairDirectionKey(symbol, direction);
+    const reconcileKey = this.staleReconcileStateKey(workspaceId, symbol, direction);
     if (this.staleReconcileSuspensions.has(reconcileKey)) {
       return 0;
     }
     const hasDbBlocker = await this.orders.hasOrdersPlacedSignalForPairAndDirection(
       symbol,
       direction,
+      workspaceId,
     );
     if (!hasDbBlocker) {
       return 0;
@@ -1276,6 +1291,7 @@ export class BybitExposureService {
     const reconciledIds = await this.orders.reconcileStaleOpenSignalsForPairAndDirection(
       symbol,
       direction,
+      workspaceId,
     );
     if (reconciledIds.length > 0) {
       this.staleFlatPollCounts.delete(reconcileKey);
@@ -1303,8 +1319,9 @@ export class BybitExposureService {
     pair: string,
     direction: 'long' | 'short',
     reason?: string,
+    workspaceId?: string | null,
   ): void {
-    const key = this.stalePairDirectionKey(pair, direction);
+    const key = this.staleReconcileStateKey(workspaceId, pair, direction);
     const prev = this.staleReconcileSuspensions.get(key);
     this.staleFlatPollCounts.delete(key);
     this.staleReconcileSuspensions.set(key, {
@@ -1322,8 +1339,9 @@ export class BybitExposureService {
   resumeStaleReconcile(
     pair: string,
     direction: 'long' | 'short',
+    workspaceId?: string | null,
   ): void {
-    const key = this.stalePairDirectionKey(pair, direction);
+    const key = this.staleReconcileStateKey(workspaceId, pair, direction);
     const prev = this.staleReconcileSuspensions.get(key);
     if (!prev) {
       return;

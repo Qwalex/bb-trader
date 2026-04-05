@@ -596,10 +596,12 @@ export class OrdersService {
     direction: string,
     excludeId: string,
     newerCreatedAt: Date,
+    workspaceId?: string | null,
   ) {
     const want = normalizeTradingPair(pair);
     return this.prisma.signal.findFirst({
       where: {
+        ...this.buildWorkspaceWhere(workspaceId),
         pair: want,
         direction,
         id: { not: excludeId },

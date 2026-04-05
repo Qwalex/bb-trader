@@ -508,6 +508,7 @@ export class BybitPlacementService {
         signal.direction,
         client,
         'place-before-db-check',
+        workspaceId,
       );
     } catch (e) {
       const msg = formatError(e);

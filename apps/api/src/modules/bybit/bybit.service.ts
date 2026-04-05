@@ -76,12 +76,17 @@ export class BybitService {
     pair: string,
     direction: 'long' | 'short',
     reason?: string,
+    workspaceId?: string | null,
   ) {
-    return this.exposure.suspendStaleReconcile(pair, direction, reason);
+    return this.exposure.suspendStaleReconcile(pair, direction, reason, workspaceId);
   }
 
-  resumeStaleReconcile(pair: string, direction: 'long' | 'short') {
-    return this.exposure.resumeStaleReconcile(pair, direction);
+  resumeStaleReconcile(
+    pair: string,
+    direction: 'long' | 'short',
+    workspaceId?: string | null,
+  ) {
+    return this.exposure.resumeStaleReconcile(pair, direction, workspaceId);
   }
 
   placeSignalOrders(

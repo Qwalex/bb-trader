@@ -157,6 +157,7 @@ export class BybitOrderSyncService {
                   fresh.direction,
                   fresh.id,
                   fresh.createdAt,
+                  ws,
                 );
               if (sibling) {
                 await this.orders.updateSignalStatus(fresh.id, {
