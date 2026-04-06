@@ -3088,6 +3088,8 @@ export class BybitService {
     const activeTpPrices = takeProfits.slice(0, Math.max(n, 0));
 
     let totalTpPlaced = 0;
+    /** Сколько раз реально вызывали submitOrder (reduce-only TP); если 0 — до API не дошли. */
+    let tpSubmitOrderCalls = 0;
     const bybitTpSubmitErrors: {
       tpIndex: number;
       priceStr: string;
@@ -3269,6 +3271,7 @@ export class BybitService {
         if (missingAtPrice <= 0) {
           break;
         }
+        tpSubmitOrderCalls++;
         const orderRes = await client.submitOrder({
           category: 'linear',
           symbol,
@@ -3328,16 +3331,27 @@ export class BybitService {
       tpOrdersPlaced: totalTpPlaced,
     });
     if (totalTpPlaced === 0 && activeTpPrices.length > 0 && qtyParts.length > 0) {
+      const noApiRoundTrip =
+        tpSubmitOrderCalls === 0 && bybitTpSubmitErrors.length === 0;
       void this.appLog.append(
         'warn',
         'bybit',
-        'placeTpSplit: tpOrdersPlaced=0 при ненулевом разбиении — см. отказы reduce-only или пропуски уровней выше',
+        noApiRoundTrip
+          ? 'placeTpSplit: tpOrdersPlaced=0 — до submitOrder не дошли (уровни пропущены), не ошибка API'
+          : 'placeTpSplit: tpOrdersPlaced=0 при ненулевом разбиении — см. bybitErrors или пропуски уровней выше',
         {
           symbol,
           signalId: s2.id,
           activeTpPrices,
           qtyParts,
+          tpSubmitOrderCalls,
           bybitErrors: bybitTpSubmitErrors,
+          ...(noApiRoundTrip
+            ? {
+                note:
+                  'bybitErrors пуст и submitOrder не вызывался: missingAtPrice≤0 (в БД уже есть живые/заполненные TP на этой цене), нулевой qty уровня или childQtyParts=0. См. логи «placeTpSplit: уровень TP пропущен» / «нулевой qty» выше по времени.',
+              }
+            : {}),
         },
       );
     }
