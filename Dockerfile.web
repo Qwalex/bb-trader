@@ -7,6 +7,9 @@ COPY apps ./apps
 
 RUN npm ci
 
+WORKDIR /app/packages/shared
+RUN npm run build
+
 WORKDIR /app/apps/web
 ARG STACK_SLUG=trade
 ARG API_INTERNAL_URL=http://api:3001
