@@ -14,7 +14,7 @@ import {
   type TpSlStepStartMode,
 } from '../settings/tp-sl-step.util';
 import { SettingsService } from '../settings/settings.service';
-import { TelegramService } from '../telegram/telegram.service';
+import type { TelegramService } from '../telegram/telegram.service';
 import { VkNotifyMirrorService } from '../vk/vk-notify-mirror.service';
 
 export interface PlaceOrdersResult {
@@ -177,7 +177,13 @@ export class BybitService {
     private readonly settings: SettingsService,
     @Inject(forwardRef(() => OrdersService))
     private readonly orders: OrdersService,
-    @Inject(forwardRef(() => TelegramService))
+    @Inject(
+      forwardRef(() => {
+        // Ленивая загрузка: иначе цикл telegram → transcript → bybit → telegram даёт undefined в DI.
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        return require('../telegram/telegram.service').TelegramService;
+      }),
+    )
     private readonly telegram: TelegramService,
     @Inject(forwardRef(() => VkNotifyMirrorService))
     private readonly vkNotifyMirror: VkNotifyMirrorService,
