@@ -2385,9 +2385,9 @@ export class BybitService {
             });
 
           const side = String(row?.side ?? '');
-          // Эталон — mark/last, не avgPrice: после TP SL часто переносится на уровень TP
+          // Эталон — markPrice (PositionV5), не avgPrice: после TP SL часто переносится на уровень TP
           // (выше входа для лонга / ниже для шорта); относительно входа это «неверно», для биржи — норма.
-          const refRaw = row?.markPrice ?? row?.lastPrice ?? '';
+          const refRaw = row?.markPrice ?? '';
           const ref = parseFloat(String(refRaw));
           if (Number.isFinite(ref) && ref > 0) {
             const invalidForShort = side === 'Sell' && !(stopLoss > ref);
