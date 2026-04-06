@@ -2355,6 +2355,7 @@ export class BybitService {
 
   /**
    * SL на всю позицию (UTA). Без `tpslMode` Bybit V5 часто отклоняет запрос.
+   * При ok=false в failReason — текст ответа API (retCode/retMsg), предпроверка или исключение.
    */
   private async applyPositionStopLossFull(
     client: RestClientV5,
@@ -2362,7 +2363,7 @@ export class BybitService {
     stopLoss: number,
     context: string,
     positionIdx: 0 | 1 | 2 = 0,
-  ): Promise<boolean> {
+  ): Promise<{ ok: boolean; failReason?: string }> {
     try {
       // Если SL заведомо по неверную сторону от цены позиции, не долбим биржу повторно.
       try {
@@ -2389,10 +2390,11 @@ export class BybitService {
             const invalidForShort = side === 'Sell' && !(stopLoss > basePrice);
             const invalidForLong = side === 'Buy' && !(stopLoss < basePrice);
             if (invalidForShort || invalidForLong) {
+              const failReason = `precheck: SL=${stopLoss} invalid for side=${side} entry=${basePrice}`;
               this.logger.debug(
-                `skip setTradingStop (${context}) ${symbol}: SL=${stopLoss} invalid for side=${side} base=${basePrice}`,
+                `skip setTradingStop (${context}) ${symbol}: ${failReason}`,
               );
-              return false;
+              return { ok: false, failReason };
             }
           }
         }
@@ -2411,31 +2413,34 @@ export class BybitService {
         slOrderType: 'Market',
       });
       if (res.retCode === 34040) {
-        return true;
+        return { ok: true };
       }
       if (res.retCode !== 0) {
+        const retMsg = String(res.retMsg ?? '');
+        const failReason = `retCode=${res.retCode} retMsg=${retMsg}`;
         this.logger.warn(
-          `setTradingStop SL (${context}) ${symbol}: retCode=${res.retCode} ${res.retMsg}`,
+          `setTradingStop SL (${context}) ${symbol}: ${failReason}`,
         );
         void this.appLog.append('warn', 'bybit', 'setTradingStop SL отклонён', {
           symbol,
           context,
           retCode: res.retCode,
-          retMsg: String(res.retMsg ?? ''),
+          retMsg,
         });
-        return false;
+        return { ok: false, failReason };
       }
-      return true;
+      return { ok: true };
     } catch (e) {
+      const failReason = formatError(e);
       this.logger.warn(
-        `setTradingStop SL (${context}) ${symbol}: ${formatError(e)}`,
+        `setTradingStop SL (${context}) ${symbol}: ${failReason}`,
       );
       void this.appLog.append('warn', 'bybit', 'setTradingStop SL исключение', {
         symbol,
         context,
-        error: formatError(e),
+        error: failReason,
       });
-      return false;
+      return { ok: false, failReason };
     }
   }
 
@@ -2815,23 +2820,24 @@ export class BybitService {
 
     const newSlFormatted = parseFloat(this.formatPriceToTick(newSl, tickSize));
 
-    const ok = await this.applyPositionStopLossFull(
+    const slRes = await this.applyPositionStopLossFull(
       client,
       symbol,
       newSlFormatted,
       'tp_sl_step',
       positionIdx,
     );
-    if (!ok) {
+    if (!slRes.ok) {
       void this.appLog.append('warn', 'bybit', 'TP_SL_STEP: setTradingStop не применён', {
         signalId: fresh.id,
         symbol,
         newSl: newSlFormatted,
         filledCount,
         targetStep,
+        bybitError: slRes.failReason ?? 'unknown',
       });
       this.logger.warn(
-        `TP_SL_STEP: setTradingStop вернул false signalId=${fresh.id} ${symbol} newSl=${newSlFormatted}`,
+        `TP_SL_STEP: setTradingStop не применён signalId=${fresh.id} ${symbol} newSl=${newSlFormatted} ${slRes.failReason ?? ''}`,
       );
       return;
     }
