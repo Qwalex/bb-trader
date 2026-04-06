@@ -112,6 +112,11 @@ const KEYS = [
   },
   { key: 'TELEGRAM_WHITELIST', label: 'Telegram user IDs (через запятую)' },
   { key: 'POLLING_INTERVAL_MS', label: 'Polling (0 = отключить опрос Bybit)' },
+  {
+    key: 'TP_SL_STEP_ENABLED',
+    label:
+      'Подтягивать SL после исполнения TP (BE после TP1, затем к предыдущему TP; true/false, по умолчанию true)',
+  },
 ] as const;
 
 const BOOLEAN_KEYS = new Set<string>([
@@ -126,6 +131,7 @@ const BOOLEAN_KEYS = new Set<string>([
   'TELEGRAM_USERBOT_NOTIFY_RESULT_WITHOUT_ENTRY',
   'TELEGRAM_USERBOT_CANCEL_STALE_ORDERS_ON_RESULT_WITHOUT_ENTRY',
   'TELEGRAM_NOTIFY_API_TRADE_CANCELLED',
+  'TP_SL_STEP_ENABLED',
 ]);
 const MODEL_KEYS = new Set<string>(
   KEYS.map(({ key }) => key).filter((key) => key.startsWith('OPENROUTER_MODEL_')),
@@ -173,6 +179,7 @@ const SETTINGS_SECTIONS: { id: string; title: string; keys: string[] }[] = [
       'DEFAULT_LEVERAGE',
       'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',
       'POLLING_INTERVAL_MS',
+      'TP_SL_STEP_ENABLED',
     ],
   },
   {
