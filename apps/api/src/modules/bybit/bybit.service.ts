@@ -2636,7 +2636,7 @@ export class BybitService {
    *   TP2 сработал → SL на уровень TP1
    *   TP3 сработал → SL на уровень TP2  …и т.д.
    *
-   * Управляется настройкой TP_SL_STEP_ENABLED (по умолчанию включено).
+   * Управляется настройкой TP_SL_STEP_ENABLED (по умолчанию выключено; включить = true в БД).
    * `tpSlStep` в БД хранит индекс последнего применённого шага (−1 = ни разу).
    */
   private async stepStopLossIfTpFilled(
@@ -2656,7 +2656,7 @@ export class BybitService {
     },
   ): Promise<void> {
     const enabled = await this.settings.get('TP_SL_STEP_ENABLED');
-    if (enabled === 'false') {
+    if (enabled === undefined || enabled.trim().toLowerCase() !== 'true') {
       return;
     }
 

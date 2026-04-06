@@ -115,7 +115,7 @@ const KEYS = [
   {
     key: 'TP_SL_STEP_ENABLED',
     label:
-      'Подтягивать SL после исполнения TP (BE после TP1, затем к предыдущему TP; true/false, по умолчанию true)',
+      'Подтягивать SL после исполнения TP (BE после TP1, затем к предыдущему TP; по умолчанию выключено — включите переключателем)',
   },
 ] as const;
 
@@ -133,6 +133,7 @@ const BOOLEAN_KEYS = new Set<string>([
   'TELEGRAM_NOTIFY_API_TRADE_CANCELLED',
   'TP_SL_STEP_ENABLED',
 ]);
+
 const MODEL_KEYS = new Set<string>(
   KEYS.map(({ key }) => key).filter((key) => key.startsWith('OPENROUTER_MODEL_')),
 );
@@ -420,7 +421,8 @@ export default function SettingsPage() {
   const hasPendingChanges = pendingChanges.length > 0;
 
   const valueForDraft = (key: string) => valueFor(draftRows, key);
-  const boolValueFor = (key: string) => valueForDraft(key).toLowerCase() === 'true';
+  const boolValueFor = (key: string) =>
+    valueForDraft(key).trim().toLowerCase() === 'true';
   const modelHistory = useMemo(
     () => parseModelHistory(valueForDraft(MODEL_HISTORY_KEY)),
     [draftRows],
