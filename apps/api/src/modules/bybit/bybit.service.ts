@@ -2802,6 +2802,18 @@ export class BybitService {
       newSl = sorted[filledCount - 2]!;
     }
 
+    // Bybit: для лонга SL строго ниже mark, для шорта — строго выше. Уровень «предыдущего TP»
+    // после отката цены может оказаться по неверную сторону от mark — поджимаем на 1 тик от mark.
+    const markRef = parseFloat(String(posRow.markPrice ?? '0'));
+    const tickNum = parseFloat(tickSize);
+    if (Number.isFinite(markRef) && markRef > 0 && Number.isFinite(tickNum) && tickNum > 0) {
+      if (direction === 'short' && newSl <= markRef) {
+        newSl = this.snapPriceToTickNum(markRef + tickNum, tickSize);
+      } else if (direction === 'long' && newSl >= markRef) {
+        newSl = this.snapPriceToTickNum(markRef - tickNum, tickSize);
+      }
+    }
+
     // Проверяем, что новый SL улучшает текущий (движется в сторону цены, не назад)
     const currentSl = fresh.stopLoss;
     const improves =
