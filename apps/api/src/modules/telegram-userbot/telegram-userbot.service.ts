@@ -16,21 +16,22 @@ import * as QRCode from 'qrcode';
 import { formatError } from '../../common/format-error';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppLogService } from '../app-log/app-log.service';
-import { BybitService } from '../bybit/bybit.service';
-import { OrdersService } from '../orders/orders.service';
 import { SettingsService } from '../settings/settings.service';
-import { TelegramService } from '../telegram/telegram.service';
 import {
   parseSourceTpSlStepMap,
   parseTpSlStepStart,
   type SourceTpSlStepMap,
   type TpSlStepStartMode,
 } from '../settings/tp-sl-step.util';
-import { VkNotifyMirrorService } from '../vk/vk-notify-mirror.service';
+/** До Bybit/Orders/Telegram: иначе orders → telegram раньше transcript. */
 import {
   TranscriptService,
   type TranscriptParseOverrides,
 } from '../transcript/transcript.service';
+import { BybitService } from '../bybit/bybit.service';
+import { OrdersService } from '../orders/orders.service';
+import { TelegramService } from '../telegram/telegram.service';
+import { VkNotifyMirrorService } from '../vk/vk-notify-mirror.service';
 import { UserbotSignalHashService } from './userbot-signal-hash.service';
 import { parseSignalPriceArrayJson } from './userbot-signal-hash.util';
 

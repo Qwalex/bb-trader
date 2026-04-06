@@ -15,7 +15,7 @@ import {
   vkSplitMessage,
 } from './vk-bot-format.util';
 import { VkApiClient } from './vk-api.client';
-import { VkBotService } from './vk-bot.service';
+import type { VkBotService } from './vk-bot.service';
 import { vkInlineKeyboard, vkPayload } from './vk-keyboard.util';
 
 type ExternalConfirmationResult = {
@@ -36,7 +36,13 @@ export class VkNotifyMirrorService {
     @Inject(forwardRef(() => BybitService))
     private readonly bybit: BybitService,
     private readonly vkApi: VkApiClient,
-    @Inject(forwardRef(() => VkBotService))
+    @Inject(
+      forwardRef(() => {
+        // Иначе цикл bybit → vk-notify → vk-bot → transcript: TranscriptService в VkBotService = undefined.
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        return require('./vk-bot.service').VkBotService;
+      }),
+    )
     private readonly vkBot: VkBotService,
   ) {}
 
