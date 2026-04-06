@@ -2385,12 +2385,15 @@ export class BybitService {
             });
 
           const side = String(row?.side ?? '');
-          const basePrice = Number(row?.avgPrice ?? 0);
-          if (Number.isFinite(basePrice) && basePrice > 0) {
-            const invalidForShort = side === 'Sell' && !(stopLoss > basePrice);
-            const invalidForLong = side === 'Buy' && !(stopLoss < basePrice);
+          // Эталон — mark/last, не avgPrice: после TP SL часто переносится на уровень TP
+          // (выше входа для лонга / ниже для шорта); относительно входа это «неверно», для биржи — норма.
+          const refRaw = row?.markPrice ?? row?.lastPrice ?? '';
+          const ref = parseFloat(String(refRaw));
+          if (Number.isFinite(ref) && ref > 0) {
+            const invalidForShort = side === 'Sell' && !(stopLoss > ref);
+            const invalidForLong = side === 'Buy' && !(stopLoss < ref);
             if (invalidForShort || invalidForLong) {
-              const failReason = `precheck: SL=${stopLoss} invalid for side=${side} entry=${basePrice}`;
+              const failReason = `precheck: SL=${stopLoss} invalid for side=${side} mark=${ref}`;
               this.logger.debug(
                 `skip setTradingStop (${context}) ${symbol}: ${failReason}`,
               );
