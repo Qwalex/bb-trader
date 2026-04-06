@@ -3346,10 +3346,10 @@ export class BybitService {
       const noApiRoundTrip =
         tpSubmitOrderCalls === 0 && bybitTpSubmitErrors.length === 0;
       void this.appLog.append(
-        'warn',
+        noApiRoundTrip ? 'info' : 'warn',
         'bybit',
         noApiRoundTrip
-          ? 'placeTpSplit: tpOrdersPlaced=0 — до submitOrder не дошли (уровни пропущены), не ошибка API'
+          ? 'placeTpSplit: новые TP на биржу не отправлялись — уровни уже учтены в БД или нулевой qty (ожидаемо)'
           : 'placeTpSplit: tpOrdersPlaced=0 при ненулевом разбиении — см. bybitErrors или пропуски уровней выше',
         {
           symbol,
@@ -3361,7 +3361,7 @@ export class BybitService {
           ...(noApiRoundTrip
             ? {
                 note:
-                  'bybitErrors пуст и submitOrder не вызывался: missingAtPrice≤0 (в БД уже есть живые/заполненные TP на этой цене), нулевой qty уровня или childQtyParts=0. См. логи «placeTpSplit: уровень TP пропущен» / «нулевой qty» выше по времени.',
+                  'Идемпотентность: missingAtPrice≤0 (в БД уже есть живые/исполненные TP на этой цене), нулевой qty уровня или childQtyParts=0 — повторно не дублируем.',
               }
             : {}),
         },
