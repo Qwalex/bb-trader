@@ -13,7 +13,7 @@ import { normalizeTradingPair, type SignalDto } from '@repo/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { BybitService } from '../bybit/bybit.service';
 import { SettingsService } from '../settings/settings.service';
-import { TelegramService } from '../telegram/telegram.service';
+import type { TelegramService } from '../telegram/telegram.service';
 import { UserbotSignalHashService } from '../telegram-userbot/userbot-signal-hash.service';
 
 import { formatError } from '../../common/format-error';
@@ -50,7 +50,13 @@ export class OrdersService {
     private readonly settings: SettingsService,
     @Inject(forwardRef(() => BybitService))
     private readonly bybit: BybitService,
-    @Inject(forwardRef(() => TelegramService))
+    @Inject(
+      forwardRef(() => {
+        // Не тянуть telegram.service при загрузке orders (цикл с TelegramService → TranscriptService).
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        return require('../telegram/telegram.service').TelegramService;
+      }),
+    )
     private readonly telegram: TelegramService,
     private readonly userbotSignalHash: UserbotSignalHashService,
   ) {}

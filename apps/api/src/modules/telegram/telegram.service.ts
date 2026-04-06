@@ -16,14 +16,15 @@ import type { Order, Signal } from '@prisma/client';
 import { formatError } from '../../common/format-error';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppLogService } from '../app-log/app-log.service';
-import { BybitService } from '../bybit/bybit.service';
-import { OrdersService } from '../orders/orders.service';
 import { SettingsService } from '../settings/settings.service';
 import {
   mergePartialSignals,
   sanitizeSignalSource,
 } from '../transcript/partial-signal.util';
+/** До Bybit/Orders: иначе orders → telegram раньше transcript и TranscriptService в DI = undefined. */
 import { TranscriptService } from '../transcript/transcript.service';
+import { BybitService } from '../bybit/bybit.service';
+import { OrdersService } from '../orders/orders.service';
 
 type DraftPhase = 'collecting' | 'ready' | 'awaiting_source';
 
