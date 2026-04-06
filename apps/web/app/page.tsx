@@ -163,7 +163,7 @@ export default async function Home({
 
   return (
     <>
-      <h1 className="pageTitle">Дашборд Test</h1>
+      <h1 className="pageTitle">Дашборд Test 1</h1>
       {err && (
         <p className="msg err" style={{ marginBottom: '1rem' }}>
           {err} — проверьте, что API запущен и NEXT_PUBLIC_API_URL верный.
