@@ -107,8 +107,13 @@ export async function pruneOldLogs(
       remaining,
     );
   }
+  // Остальной info (bybit, openrouter, …) вытесняем раньше, чем vk — чтобы диагностика Callback API не пропадала в потоке.
   remaining -= await deleteOldestWhere(
-    { level: 'info' },
+    { level: 'info', category: { not: 'vk' } },
+    remaining,
+  );
+  remaining -= await deleteOldestWhere(
+    { level: 'info', category: 'vk' },
     remaining,
   );
   remaining -= await deleteOldestWhere(

@@ -2663,10 +2663,18 @@ export class BybitService {
     let takeProfits: number[];
     try {
       takeProfits = JSON.parse(fresh.takeProfits) as number[];
-    } catch {
+    } catch (e) {
+      this.logger.warn(
+        `TP_SL_STEP: takeProfits JSON parse error signalId=${fresh.id}: ${formatError(e)}`,
+      );
+      void this.appLog.append('warn', 'bybit', 'TP_SL_STEP: ошибка разбора takeProfits', {
+        signalId: fresh.id,
+        error: formatError(e),
+      });
       return;
     }
     if (takeProfits.length === 0) {
+      this.logger.debug(`TP_SL_STEP: пустой takeProfits signalId=${fresh.id}`);
       return;
     }
 
@@ -2696,24 +2704,51 @@ export class BybitService {
     }
 
     if (maxFilledIdx < 0) {
-      return; // Ни один TP ещё не сработал
+      this.logger.debug(
+        `TP_SL_STEP: нет исполненного TP signalId=${fresh.id} ${symbol}`,
+      );
+      return;
     }
 
     const filledCount = maxFilledIdx + 1; // 1-based: сколько TP заполнено
     const targetStep = filledCount - 1;   // 0-based индекс шага
 
     if (fresh.tpSlStep >= targetStep) {
-      return; // Этот шаг уже был применён
+      this.logger.debug(
+        `TP_SL_STEP: шаг уже применён signalId=${fresh.id} tpSlStep=${fresh.tpSlStep} targetStep=${targetStep}`,
+      );
+      return;
     }
+
+    this.logger.log(
+      `TP_SL_STEP: попытка signalId=${fresh.id} ${symbol} filledCount=${filledCount} targetStep=${targetStep} tpSlStep=${fresh.tpSlStep}`,
+    );
 
     // Получаем позицию один раз — нужна для avgPrice и positionIdx
     let posInfo;
     try {
       posInfo = await client.getPositionInfo({ category: 'linear', symbol });
-    } catch {
+    } catch (e) {
+      this.logger.warn(
+        `TP_SL_STEP: getPositionInfo exception ${symbol}: ${formatError(e)}`,
+      );
+      void this.appLog.append('warn', 'bybit', 'TP_SL_STEP: getPositionInfo исключение', {
+        signalId: fresh.id,
+        symbol,
+        error: formatError(e),
+      });
       return;
     }
     if (posInfo.retCode !== 0) {
+      this.logger.warn(
+        `TP_SL_STEP: getPositionInfo retCode=${posInfo.retCode} ${symbol} signalId=${fresh.id}`,
+      );
+      void this.appLog.append('warn', 'bybit', 'TP_SL_STEP: getPositionInfo отказ', {
+        signalId: fresh.id,
+        symbol,
+        retCode: posInfo.retCode,
+        retMsg: String(posInfo.retMsg ?? ''),
+      });
       return;
     }
     const posRows = posInfo.result?.list ?? [];
@@ -2722,7 +2757,15 @@ export class BybitService {
       return sz > 1e-12;
     });
     if (!posRow) {
-      return; // Позиция уже закрыта
+      this.logger.warn(
+        `TP_SL_STEP: нет открытой позиции при исполненном TP signalId=${fresh.id} ${symbol} filledCount=${filledCount}`,
+      );
+      void this.appLog.append('warn', 'bybit', 'TP_SL_STEP: исполнен TP, позиция на бирже 0', {
+        signalId: fresh.id,
+        symbol,
+        filledCount,
+      });
+      return;
     }
     const positionIdx = (posRow.positionIdx ?? 0) as 0 | 1 | 2;
 
@@ -2732,6 +2775,14 @@ export class BybitService {
       // Безубыток: avgPrice ± 1 тик
       const avgEntry = parseFloat(String(posRow.avgPrice ?? '0'));
       if (!Number.isFinite(avgEntry) || avgEntry <= 0) {
+        this.logger.warn(
+          `TP_SL_STEP: невалидный avgPrice signalId=${fresh.id} ${symbol}`,
+        );
+        void this.appLog.append('warn', 'bybit', 'TP_SL_STEP: нет avgPrice для BE', {
+          signalId: fresh.id,
+          symbol,
+          avgPriceRaw: posRow.avgPrice,
+        });
         return;
       }
       const tick = parseFloat(tickSize);
@@ -2748,9 +2799,17 @@ export class BybitService {
     const improves =
       direction === 'long' ? newSl > currentSl : newSl < currentSl;
     if (!improves) {
-      this.logger.debug(
-        `stepStopLossIfTpFilled: ${symbol} skip — newSl=${newSl} не улучшает currentSl=${currentSl}`,
+      this.logger.warn(
+        `TP_SL_STEP: SL не улучшается signalId=${fresh.id} ${symbol} dir=${direction} newSl=${newSl} currentSl=${currentSl}`,
       );
+      void this.appLog.append('warn', 'bybit', 'TP_SL_STEP: новый SL не лучше текущего', {
+        signalId: fresh.id,
+        symbol,
+        direction,
+        newSl,
+        currentSl,
+        filledCount,
+      });
       return;
     }
 
@@ -2764,6 +2823,16 @@ export class BybitService {
       positionIdx,
     );
     if (!ok) {
+      void this.appLog.append('warn', 'bybit', 'TP_SL_STEP: setTradingStop не применён', {
+        signalId: fresh.id,
+        symbol,
+        newSl: newSlFormatted,
+        filledCount,
+        targetStep,
+      });
+      this.logger.warn(
+        `TP_SL_STEP: setTradingStop вернул false signalId=${fresh.id} ${symbol} newSl=${newSlFormatted}`,
+      );
       return;
     }
 
