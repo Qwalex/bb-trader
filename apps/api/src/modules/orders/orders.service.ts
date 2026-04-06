@@ -3,6 +3,7 @@ import {
   forwardRef,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
@@ -12,7 +13,10 @@ import { normalizeTradingPair, type SignalDto } from '@repo/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { BybitService } from '../bybit/bybit.service';
 import { SettingsService } from '../settings/settings.service';
+import { TelegramService } from '../telegram/telegram.service';
 import { UserbotSignalHashService } from '../telegram-userbot/userbot-signal-hash.service';
+
+import { formatError } from '../../common/format-error';
 
 export interface TradesFilter {
   signalId?: string;
@@ -39,11 +43,15 @@ export interface TradesFilter {
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly settings: SettingsService,
     @Inject(forwardRef(() => BybitService))
     private readonly bybit: BybitService,
+    @Inject(forwardRef(() => TelegramService))
+    private readonly telegram: TelegramService,
     private readonly userbotSignalHash: UserbotSignalHashService,
   ) {}
 
@@ -363,7 +371,7 @@ export class OrdersService {
     type: string,
     payload?: unknown,
   ) {
-    return this.prisma.signalEvent.create({
+    const row = await this.prisma.signalEvent.create({
       data: {
         signalId,
         type,
@@ -371,6 +379,12 @@ export class OrdersService {
           payload === undefined ? null : JSON.stringify(payload),
       },
     });
+    void this.telegram
+      .notifyTradeSignalEvent({ signalId, type, payload })
+      .catch((e) =>
+        this.logger.warn(`notifyTradeSignalEvent: ${formatError(e)}`),
+      );
+    return row;
   }
 
   async updateOrder(

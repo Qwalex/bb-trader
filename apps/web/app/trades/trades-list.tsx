@@ -191,13 +191,23 @@ export function TradesList({ items, sourceOptions }: Props) {
         details = `было chat ${short(pFrom?.sourceChatId)} / msg ${short(pFrom?.sourceMessageId)} → стало chat ${short(pTo?.sourceChatId)} / msg ${short(pTo?.sourceMessageId)}`;
       } else if (raw.type === 'TP_SL_STEPPED') {
         const filledCount = typeof p.filledCount === 'number' ? p.filledCount : null;
+        const anchorFilledCount =
+          typeof p.anchorFilledCount === 'number' ? p.anchorFilledCount : filledCount;
+        const startTpNumber =
+          typeof p.startTpNumber === 'number' ? p.startTpNumber : 1;
         const prevSl = typeof p.previousSl === 'number' ? p.previousSl : null;
         const nextSl = typeof p.newSl === 'number' ? p.newSl : null;
         const fmtSl = (v: number | null) =>
           v !== null ? v.toLocaleString('ru-RU', { maximumFractionDigits: 8 }) : '—';
         const target =
-          filledCount === 1 ? 'безубыток' : filledCount !== null ? `TP${filledCount - 1}` : '—';
-        details = `после TP${filledCount ?? '?'} → SL ${fmtSl(prevSl)} → ${fmtSl(nextSl)} (${target})`;
+          anchorFilledCount === 1
+            ? 'безубыток'
+            : anchorFilledCount !== null
+              ? `TP${anchorFilledCount - 1}`
+              : '—';
+        const startHint =
+          startTpNumber > 1 ? ` · старт лестницы с TP${startTpNumber}` : '';
+        details = `после TP${filledCount ?? '?'} → SL ${fmtSl(prevSl)} → ${fmtSl(nextSl)} (${target})${startHint}`;
       }
     }
     const titles: Record<string, string> = {

@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
+import { TRADE_SIGNAL_NOTIFY_EVENT_OPTIONS } from '@repo/shared';
+
 import { EntrySizingControl } from '../components/EntrySizingControl';
 import { getApiBase } from '../../lib/api';
 import { parseStoredEntry, serializeEntry } from '../../lib/entry-sizing';
@@ -106,6 +108,15 @@ const KEYS = [
       'Telegram: уведомлять об отмене сделки/ордеров (по умолчанию да; false / 0 / off — отключить)',
   },
   {
+    key: 'TELEGRAM_NOTIFY_TRADE_EVENTS',
+    label:
+      'Telegram: уведомлять о событиях по сделкам (журнал: SL после TP, закрытие Bybit, перезаход и т.д.; по умолчанию вкл.)',
+  },
+  {
+    key: 'TELEGRAM_NOTIFY_TRADE_EVENT_TYPES',
+    label: 'Telegram: фильтр типов событий сделки (список ниже)',
+  },
+  {
     key: 'SIGNAL_SOURCE',
     label:
       'Источник сигналов (канал / приложение, для статистики: Binance Killers, Crypto Signals, …)',
@@ -113,9 +124,9 @@ const KEYS = [
   { key: 'TELEGRAM_WHITELIST', label: 'Telegram user IDs (через запятую)' },
   { key: 'POLLING_INTERVAL_MS', label: 'Polling (0 = отключить опрос Bybit)' },
   {
-    key: 'TP_SL_STEP_ENABLED',
+    key: 'TP_SL_STEP_START',
     label:
-      'Подтягивать SL после исполнения TP (BE после TP1, затем к предыдущему TP; по умолчанию выключено — включите переключателем)',
+      'Подтягивание SL после TP: с какого уровня начинать лестницу (off / tp1–tp5). Устаревший TP_SL_STEP_ENABLED=true в БД эквивалентен tp1, пока не задана эта строка',
   },
 ] as const;
 
@@ -131,7 +142,6 @@ const BOOLEAN_KEYS = new Set<string>([
   'TELEGRAM_USERBOT_NOTIFY_RESULT_WITHOUT_ENTRY',
   'TELEGRAM_USERBOT_CANCEL_STALE_ORDERS_ON_RESULT_WITHOUT_ENTRY',
   'TELEGRAM_NOTIFY_API_TRADE_CANCELLED',
-  'TP_SL_STEP_ENABLED',
 ]);
 
 const MODEL_KEYS = new Set<string>(
@@ -180,7 +190,7 @@ const SETTINGS_SECTIONS: { id: string; title: string; keys: string[] }[] = [
       'DEFAULT_LEVERAGE',
       'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',
       'POLLING_INTERVAL_MS',
-      'TP_SL_STEP_ENABLED',
+      'TP_SL_STEP_START',
     ],
   },
   {
@@ -220,6 +230,8 @@ const SETTINGS_SECTIONS: { id: string; title: string; keys: string[] }[] = [
       'TELEGRAM_USERBOT_NOTIFY_RESULT_WITHOUT_ENTRY',
       'TELEGRAM_USERBOT_CANCEL_STALE_ORDERS_ON_RESULT_WITHOUT_ENTRY',
       'TELEGRAM_NOTIFY_API_TRADE_CANCELLED',
+      'TELEGRAM_NOTIFY_TRADE_EVENTS',
+      'TELEGRAM_NOTIFY_TRADE_EVENT_TYPES',
       'SIGNAL_SOURCE',
       'TELEGRAM_WHITELIST',
     ],
@@ -464,6 +476,29 @@ export default function SettingsPage() {
     setDraftRows((prev) => upsertRow(prev, key, value));
   }
 
+  function tradeEventSelectionFromDraft(raw: string): Set<string> {
+    const t = raw.trim();
+    const allIds: string[] = TRADE_SIGNAL_NOTIFY_EVENT_OPTIONS.map(
+      (o: { id: string }) => o.id,
+    );
+    const all = new Set<string>(allIds);
+    if (!t) {
+      return new Set<string>(all);
+    }
+    try {
+      const p = JSON.parse(t) as unknown;
+      if (!Array.isArray(p)) {
+        return new Set<string>(all);
+      }
+      if (p.length === 0) {
+        return new Set<string>();
+      }
+      return new Set<string>(p.map((x: unknown) => String(x)));
+    } catch {
+      return new Set<string>(all);
+    }
+  }
+
   async function saveAll() {
     const ops = buildPutOperations(savedRows, draftRows);
     if (ops.length === 0) return;
@@ -602,6 +637,168 @@ export default function SettingsPage() {
   }
 
   function renderSettingField(key: string) {
+    if (key === 'TELEGRAM_NOTIFY_TRADE_EVENTS') {
+      const raw = valueForDraft(key).trim().toLowerCase();
+      const on =
+        raw === '' || raw === 'true' || raw === '1' || raw === 'yes';
+      const label = LABEL_BY_KEY[key] ?? key;
+      return (
+        <label key={key} className="settingRowSwitch">
+          <span>{label}</span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={on}
+            aria-label={label}
+            className={`switch ${on ? 'on' : 'off'}`}
+            disabled={saving}
+            onClick={() => {
+              setDraftKey(key, on ? 'false' : 'true');
+            }}
+          >
+            <span className="switchThumb" />
+          </button>
+        </label>
+      );
+    }
+    if (key === 'TELEGRAM_NOTIFY_TRADE_EVENT_TYPES') {
+      const label = LABEL_BY_KEY[key] ?? key;
+      const raw = valueForDraft(key);
+      const selected = tradeEventSelectionFromDraft(raw);
+      const catalogIds = TRADE_SIGNAL_NOTIFY_EVENT_OPTIONS.map(
+        (o: { id: string }) => o.id,
+      );
+      const allSelected = catalogIds.every((id) => selected.has(id));
+      const setSelection = (next: Set<string>) => {
+        const ordered = catalogIds.filter((id) => next.has(id));
+        if (ordered.length === catalogIds.length) {
+          setDraftKey(key, '');
+        } else if (ordered.length === 0) {
+          setDraftKey(key, '[]');
+        } else {
+          setDraftKey(key, JSON.stringify(ordered));
+        }
+      };
+      return (
+        <div key={key} style={{ gridColumn: '1 / -1' }}>
+          <span style={{ display: 'block', marginBottom: '0.35rem' }}>{label}</span>
+          <p style={{ color: 'var(--muted)', fontSize: '0.88rem', margin: '0 0 0.6rem' }}>
+            Работает, если включены уведомления о событиях сделки (переключатель выше). Пустое
+            значение (все галочки) — слать все типы; снимите лишние — в БД сохранится JSON-массив
+            id.
+          </p>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+            <button
+              type="button"
+              className="btn"
+              disabled={saving}
+              onClick={() => setSelection(new Set(catalogIds))}
+            >
+              Все типы
+            </button>
+            <button
+              type="button"
+              className="btn"
+              disabled={saving}
+              onClick={() => setSelection(new Set())}
+            >
+              Ни одного
+            </button>
+          </div>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+              gap: '0.35rem 0.75rem',
+              maxHeight: 'min(320px, 50vh)',
+              overflowY: 'auto',
+              padding: '0.5rem',
+              border: '1px solid var(--border)',
+              borderRadius: 6,
+              background: 'var(--card)',
+            }}
+          >
+            {TRADE_SIGNAL_NOTIFY_EVENT_OPTIONS.map((opt: { id: string; labelRu: string }) => (
+              <label
+                key={opt.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '0.45rem',
+                  fontSize: '0.88rem',
+                  cursor: 'pointer',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={selected.has(opt.id)}
+                  disabled={saving}
+                  onChange={(e) => {
+                    const next = new Set(selected);
+                    if (e.target.checked) {
+                      next.add(opt.id);
+                    } else {
+                      next.delete(opt.id);
+                    }
+                    setSelection(next);
+                  }}
+                />
+                <span>
+                  <code style={{ fontSize: '0.78rem' }}>{opt.id}</code>
+                  <br />
+                  <span style={{ color: 'var(--muted)' }}>{opt.labelRu}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          {!allSelected && selected.size > 0 && (
+            <p style={{ color: 'var(--muted)', fontSize: '0.75rem', marginTop: '0.35rem' }}>
+              JSON: <code>{valueForDraft(key) || '[]'}</code>
+            </p>
+          )}
+        </div>
+      );
+    }
+    if (key === 'TP_SL_STEP_START') {
+      const raw = valueForDraft(key).trim().toLowerCase();
+      const legacyOn =
+        valueForDraft('TP_SL_STEP_ENABLED').trim().toLowerCase() === 'true';
+      const effectiveRaw =
+        raw !== '' ? raw : legacyOn ? 'tp1' : 'off';
+      const v = ['off', 'tp1', 'tp2', 'tp3', 'tp4', 'tp5'].includes(effectiveRaw)
+        ? effectiveRaw
+        : 'off';
+      const label = LABEL_BY_KEY[key] ?? key;
+      return (
+        <label key={key} style={{ gridColumn: '1 / -1' }}>
+          <span>{label}</span>
+          <p style={{ color: 'var(--muted)', fontSize: '0.88rem', margin: '0.35rem 0 0.5rem' }}>
+            tp1: после 1-го TP — безубыток, далее SL к предыдущим TP. tp2: первый шаг только после 2-го TP
+            (безубыток), и т.д. До выбранного TP лестница не трогает SL.
+          </p>
+          <select
+            value={v}
+            disabled={saving}
+            onChange={(e) => setDraftKey(key, e.target.value)}
+            style={{
+              maxWidth: '520px',
+              padding: '0.45rem',
+              borderRadius: 4,
+              border: '1px solid var(--border)',
+              background: 'var(--card)',
+              color: 'var(--foreground)',
+            }}
+          >
+            <option value="off">Выключено</option>
+            <option value="tp1">С 1-го TP (классика)</option>
+            <option value="tp2">Со 2-го TP</option>
+            <option value="tp3">С 3-го TP</option>
+            <option value="tp4">С 4-го TP</option>
+            <option value="tp5">С 5-го TP</option>
+          </select>
+        </label>
+      );
+    }
     if (key === 'DEFAULT_ORDER_USD') {
       const raw = valueForDraft(key);
       const p = parseStoredEntry(raw);

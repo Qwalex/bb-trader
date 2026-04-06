@@ -7,6 +7,12 @@ import { formatError } from '../../common/format-error';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppLogService } from '../app-log/app-log.service';
 import { OrdersService } from '../orders/orders.service';
+import {
+  parseSourceTpSlStepMap,
+  parseTpSlStepStart,
+  tpSlStepStartToTpNumber,
+  type TpSlStepStartMode,
+} from '../settings/tp-sl-step.util';
 import { SettingsService } from '../settings/settings.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { VkNotifyMirrorService } from '../vk/vk-notify-mirror.service';
@@ -2644,15 +2650,37 @@ export class BybitService {
    *   TP2 сработал → SL на уровень TP1
    *   TP3 сработал → SL на уровень TP2  …и т.д.
    *
-   * Управляется настройкой TP_SL_STEP_ENABLED (по умолчанию выключено; включить = true в БД).
-   * `tpSlStep` в БД хранит индекс последнего применённого шага (−1 = ни разу).
+   * Режим: `TP_SL_STEP_START` = off | tp1..tp5 (глобально), переопределение по источнику —
+   * JSON `SOURCE_TP_SL_STEP_START` { "имя чата lower": "tp2" }. Устаревшее `TP_SL_STEP_ENABLED=true` ≡ tp1.
+   * `tpSlStep` в БД хранит индекс последнего применённого шага (−1 = ни разу), в координатах «якоря» лестницы.
    */
+  private async resolveTpSlStepModeForSignal(
+    source: string | null | undefined,
+  ): Promise<TpSlStepStartMode> {
+    const mapRaw = await this.settings.get('SOURCE_TP_SL_STEP_START');
+    const map = parseSourceTpSlStepMap(mapRaw);
+    const key = String(source ?? '').trim().toLowerCase();
+    if (key && map[key] !== undefined) {
+      return map[key]!;
+    }
+    const explicit = await this.settings.get('TP_SL_STEP_START');
+    if (explicit !== undefined && String(explicit).trim() !== '') {
+      return parseTpSlStepStart(explicit);
+    }
+    const legacy = await this.settings.get('TP_SL_STEP_ENABLED');
+    if (String(legacy ?? '').trim().toLowerCase() === 'true') {
+      return 'tp1';
+    }
+    return 'off';
+  }
+
   private async stepStopLossIfTpFilled(
     client: RestClientV5,
     fresh: {
       id: string;
       pair: string;
       direction: string;
+      source: string | null;
       stopLoss: number;
       takeProfits: string;
       tpSlStep: number;
@@ -2663,8 +2691,12 @@ export class BybitService {
       }[];
     },
   ): Promise<void> {
-    const enabled = await this.settings.get('TP_SL_STEP_ENABLED');
-    if (enabled === undefined || enabled.trim().toLowerCase() !== 'true') {
+    const mode = await this.resolveTpSlStepModeForSignal(fresh.source);
+    if (mode === 'off') {
+      return;
+    }
+    const startTpNumber = tpSlStepStartToTpNumber(mode);
+    if (startTpNumber < 1) {
       return;
     }
 
@@ -2720,8 +2752,17 @@ export class BybitService {
       return;
     }
 
-    const filledCount = maxFilledIdx + 1; // 1-based: сколько TP заполнено
-    const targetStep = filledCount - 1;   // 0-based индекс шага
+    const filledCount = maxFilledIdx + 1; // 1-based: сколько TP заполнено подряд с TP1
+
+    if (filledCount < startTpNumber) {
+      this.logger.debug(
+        `TP_SL_STEP: старт лестницы с TP${startTpNumber}, сейчас filledCount=${filledCount} signalId=${fresh.id}`,
+      );
+      return;
+    }
+
+    const anchorFilledCount = filledCount - startTpNumber + 1;
+    const targetStep = anchorFilledCount - 1;
 
     if (fresh.tpSlStep >= targetStep) {
       this.logger.debug(
@@ -2731,7 +2772,7 @@ export class BybitService {
     }
 
     this.logger.log(
-      `TP_SL_STEP: попытка signalId=${fresh.id} ${symbol} filledCount=${filledCount} targetStep=${targetStep} tpSlStep=${fresh.tpSlStep}`,
+      `TP_SL_STEP: попытка signalId=${fresh.id} ${symbol} mode=${mode} startTp=${startTpNumber} filledCount=${filledCount} anchor=${anchorFilledCount} targetStep=${targetStep} tpSlStep=${fresh.tpSlStep}`,
     );
 
     // Получаем позицию один раз — нужна для avgPrice и positionIdx
@@ -2779,9 +2820,9 @@ export class BybitService {
     }
     const positionIdx = (posRow.positionIdx ?? 0) as 0 | 1 | 2;
 
-    // Вычисляем целевой SL
+    // Вычисляем целевой SL (якорь 1 = безубыток, далее — на предыдущий TP в лестнице)
     let newSl: number;
-    if (filledCount === 1) {
+    if (anchorFilledCount === 1) {
       // Безубыток: avgPrice ± 1 тик
       const avgEntry = parseFloat(String(posRow.avgPrice ?? '0'));
       if (!Number.isFinite(avgEntry) || avgEntry <= 0) {
@@ -2800,8 +2841,14 @@ export class BybitService {
         ? avgEntry - tick
         : avgEntry + tick;
     } else {
-      // SL на предыдущий уровень TP
-      newSl = sorted[filledCount - 2]!;
+      const idx = anchorFilledCount - 2;
+      if (idx < 0 || idx >= sorted.length) {
+        this.logger.debug(
+          `TP_SL_STEP: нет уровня TP для idx=${idx} len=${sorted.length} signalId=${fresh.id}`,
+        );
+        return;
+      }
+      newSl = sorted[idx]!;
     }
 
     // Bybit: для лонга SL строго ниже mark, для шорта — строго выше. Уровень «предыдущего TP»
@@ -2831,6 +2878,8 @@ export class BybitService {
         newSl,
         currentSl,
         filledCount,
+        anchorFilledCount,
+        startTpNumber,
       });
       return;
     }
@@ -2850,6 +2899,8 @@ export class BybitService {
         symbol,
         newSl: newSlFormatted,
         filledCount,
+        anchorFilledCount,
+        startTpNumber,
         targetStep,
         bybitError: slRes.failReason ?? 'unknown',
       });
@@ -2867,6 +2918,9 @@ export class BybitService {
 
     await this.orders.createSignalEvent(fresh.id, 'TP_SL_STEPPED', {
       filledCount,
+      anchorFilledCount,
+      startTpNumber,
+      tpSlMode: mode,
       step: targetStep,
       previousSl: currentSl,
       newSl: newSlFormatted,
@@ -2876,13 +2930,16 @@ export class BybitService {
       signalId: fresh.id,
       symbol,
       filledCount,
+      anchorFilledCount,
+      startTpNumber,
+      mode,
       step: targetStep,
       previousSl: currentSl,
       newSl: newSlFormatted,
     });
 
     this.logger.log(
-      `stepStopLossIfTpFilled: ${symbol} filledCount=${filledCount} previousSl=${currentSl} → newSl=${newSlFormatted}`,
+      `stepStopLossIfTpFilled: ${symbol} filledCount=${filledCount} anchor=${anchorFilledCount} previousSl=${currentSl} → newSl=${newSlFormatted}`,
     );
   }
 

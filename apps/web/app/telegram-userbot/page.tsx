@@ -51,6 +51,8 @@ type UserbotChat = {
   martingaleMultiplier: number | null;
   /** null — наследовать глобальный BUMP_TO_MIN_EXCHANGE_LOT */
   minLotBump?: boolean | null;
+  /** null — наследовать глобальный TP_SL_STEP_START */
+  tpSlStepStart?: string | null;
 };
 
 type TodayMetrics = {
@@ -1327,6 +1329,55 @@ export default function TelegramUserbotPage() {
                   <option value="false">Ошибка</option>
                   <option value="true">До min</option>
                 </select>
+                </div>
+                <div className="userbotChatFieldCompact">
+                  <span
+                    className="userbotChatFieldCompactLabel"
+                    title="С какого TP начинать лестницу подтягивания SL (как в общих настройках)"
+                  >
+                    SL после TP
+                  </span>
+                  <select
+                    className="userbotCellInput userbotCellInputCompact userbotCellSelectCompact"
+                    value={chat.tpSlStepStart ?? ''}
+                    title="Пусто — как в настройках API; иначе off или tp1…tp5 для этого чата (source)"
+                    aria-label="Подтягивание SL после TP для источника"
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      const next: string | null = v === '' ? null : v;
+                      const same =
+                        (next === null && (chat.tpSlStepStart === null || chat.tpSlStepStart === undefined)) ||
+                        next === chat.tpSlStepStart;
+                      if (same) return;
+                      void runAction(`tpsl-${chat.chatId}`, async () => {
+                        const res = await fetch(
+                          `${getApiBase()}/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
+                          {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ tpSlStepStart: next }),
+                          },
+                        );
+                        if (!res.ok) {
+                          throw new Error(`Ошибка сохранения (${res.status})`);
+                        }
+                        setChats((prev) =>
+                          prev.map((row) =>
+                            row.id === chat.id ? { ...row, tpSlStepStart: next } : row,
+                          ),
+                        );
+                        setMsg({ type: 'ok', text: 'Режим SL после TP для источника сохранён' });
+                      });
+                    }}
+                  >
+                    <option value="">Как общие</option>
+                    <option value="off">Выключено</option>
+                    <option value="tp1">С TP1</option>
+                    <option value="tp2">С TP2</option>
+                    <option value="tp3">С TP3</option>
+                    <option value="tp4">С TP4</option>
+                    <option value="tp5">С TP5</option>
+                  </select>
                 </div>
               </div>
               <div className="userbotChatCardParamEntry">

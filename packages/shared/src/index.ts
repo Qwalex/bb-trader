@@ -80,3 +80,9 @@ export type SignalStatus =
   | 'CLOSED_LOSS'
   | 'CLOSED_MIXED'
   | 'OPEN';
+
+export {
+  TRADE_SIGNAL_NOTIFY_EVENT_OPTIONS,
+  parseTradeSignalNotifyEventFilter,
+  type TradeSignalNotifyEventId,
+} from './trade-signal-events';

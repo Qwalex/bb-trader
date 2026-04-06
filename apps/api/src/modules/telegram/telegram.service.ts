@@ -9,6 +9,7 @@ import {
 import { Context, Markup, Telegraf } from 'telegraf';
 
 import type { SignalDto } from '@repo/shared';
+import { parseTradeSignalNotifyEventFilter } from '@repo/shared';
 
 import type { Order, Signal } from '@prisma/client';
 
@@ -714,6 +715,115 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       };
     }
     return { ok: true, deliveredTo };
+  }
+
+  /**
+   * Уведомление в бота о записи в журнале событий сделки (SignalEvent).
+   * По умолчанию включено (TELEGRAM_NOTIFY_TRADE_EVENTS не false/0/off).
+   * TELEGRAM_NOTIFY_TRADE_EVENT_TYPES: JSON-массив id типов; пусто = все; [] = ни одного.
+   * Не дублирует отдельные уведомления: отмена сделки (уже есть текст «Сделка отменена»),
+   * result без входа (уже есть своё сообщение).
+   */
+  async notifyTradeSignalEvent(params: {
+    signalId: string;
+    type: string;
+    payload?: unknown;
+  }): Promise<void> {
+    const skipTypes = new Set<string>([
+      'BYBIT_TRADE_DELETE_CLEANUP_SUCCESS',
+      'USERBOT_RESULT_WITHOUT_ENTRY',
+    ]);
+    if (skipTypes.has(params.type)) {
+      return;
+    }
+    const raw = (await this.settings.get('TELEGRAM_NOTIFY_TRADE_EVENTS'))
+      ?.trim()
+      .toLowerCase();
+    const off = raw === 'false' || raw === '0' || raw === 'off' || raw === 'no';
+    if (off) {
+      return;
+    }
+    const filterRaw = await this.settings.get('TELEGRAM_NOTIFY_TRADE_EVENT_TYPES');
+    const evFilter = parseTradeSignalNotifyEventFilter(filterRaw);
+    if (evFilter.mode === 'none') {
+      return;
+    }
+    if (evFilter.mode === 'only' && !evFilter.types.has(params.type)) {
+      return;
+    }
+    if (!this.bot) {
+      return;
+    }
+    const ids = await this.getWhitelistUserIds();
+    if (ids.length === 0) {
+      return;
+    }
+
+    const title = this.tradeSignalEventTitleRu(params.type);
+    let pairLine = '';
+    let sourceLine = '';
+    try {
+      const sig = await this.prisma.signal.findFirst({
+        where: { id: params.signalId, deletedAt: null },
+        select: { pair: true, source: true },
+      });
+      if (sig) {
+        pairLine = `\nПара: <code>${this.tgEsc((sig.pair ?? '').trim().toUpperCase())}</code>`;
+        const src = sig.source?.trim();
+        if (src) {
+          sourceLine = `\nИсточник: <code>${this.tgEsc(src)}</code>`;
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    let payloadBlock = '';
+    if (params.payload !== undefined) {
+      const text =
+        typeof params.payload === 'string'
+          ? params.payload
+          : JSON.stringify(params.payload, null, 0);
+      const clipped = text.length > 2800 ? `${text.slice(0, 2800)}…` : text;
+      payloadBlock = `\n<pre>${this.tgEsc(clipped)}</pre>`;
+    }
+
+    const msg =
+      `<b>${this.tgEsc(title)}</b>\n` +
+      `Сделка: <code>${this.tgEsc(params.signalId)}</code>` +
+      pairLine +
+      sourceLine +
+      `\nТип: <code>${this.tgEsc(params.type)}</code>` +
+      payloadBlock;
+
+    for (const uid of ids) {
+      try {
+        await this.bot.telegram.sendMessage(uid, msg, { parse_mode: 'HTML' });
+      } catch (e) {
+        this.logger.warn(`notifyTradeSignalEvent -> ${uid}: ${formatError(e)}`);
+      }
+    }
+  }
+
+  private tradeSignalEventTitleRu(type: string): string {
+    const m: Record<string, string> = {
+      BYBIT_TRADE_DELETE_CLEANUP_PENDING: 'Очистка Bybit: в процессе',
+      BYBIT_TRADE_DELETE_CLEANUP_FAILED: 'Очистка Bybit: ошибка',
+      BYBIT_TRADE_DELETE_CLEANUP_SUCCESS: 'Очистка Bybit: готово',
+      BYBIT_CLOSE_PENDING: 'Закрытие на Bybit ожидает подтверждения',
+      BYBIT_CLOSE_FAILED: 'Ошибка закрытия на Bybit',
+      BYBIT_CLOSE_SUCCESS: 'Сделка закрыта на Bybit',
+      TP_SL_STEPPED: 'SL подтянут после TP',
+      TELEGRAM_LINK_UPDATED: 'Привязка к сообщению Telegram',
+      SIGNAL_CANCELLED_BY_SOURCE_PRIORITY: 'Сигнал отменён (приоритет источника)',
+      REENTRY_UPDATED: 'Перезаход обновил параметры',
+      REENTRY_REPLACED_OLD: 'Старый сигнал заменён',
+      REENTRY_REPLACED_NEW: 'Создан новый сигнал',
+      CANCELLED_BY_CHAT: 'Отмена в чате',
+      USERBOT_RESULT_WITHOUT_ENTRY: 'Результат без входа',
+      USERBOT_RESULT_WITHOUT_ENTRY_CANCELLED: 'Отмена ордеров: result без входа',
+    };
+    return m[type] ?? type;
   }
 
   private tgEsc(s: string): string {

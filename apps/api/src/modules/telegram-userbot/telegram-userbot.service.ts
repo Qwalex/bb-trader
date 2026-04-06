@@ -17,8 +17,15 @@ import { formatError } from '../../common/format-error';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppLogService } from '../app-log/app-log.service';
 import { BybitService } from '../bybit/bybit.service';
+import { OrdersService } from '../orders/orders.service';
 import { SettingsService } from '../settings/settings.service';
 import { TelegramService } from '../telegram/telegram.service';
+import {
+  parseSourceTpSlStepMap,
+  parseTpSlStepStart,
+  type SourceTpSlStepMap,
+  type TpSlStepStartMode,
+} from '../settings/tp-sl-step.util';
 import { VkNotifyMirrorService } from '../vk/vk-notify-mirror.service';
 import {
   TranscriptService,
@@ -150,6 +157,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     private readonly settings: SettingsService,
     private readonly transcript: TranscriptService,
     private readonly bybit: BybitService,
+    private readonly orders: OrdersService,
     private readonly appLog: AppLogService,
     private readonly telegramBot: TelegramService,
     @Inject(forwardRef(() => VkNotifyMirrorService))
@@ -446,17 +454,19 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   }
 
   async listChats() {
-    const [rows, bySource] = await Promise.all([
+    const [rows, bySource, tpSlBySource] = await Promise.all([
       this.prisma.tgUserbotChat.findMany({
         orderBy: [{ enabled: 'desc' }, { title: 'asc' }],
       }),
       this.getSourceMartingaleMap(),
+      this.getSourceTpSlStepMap(),
     ]);
     return rows.map((row) => ({
       ...row,
       sourcePriority: this.normalizeSourcePriority((row as { sourcePriority?: number }).sourcePriority),
       martingaleMultiplier:
         bySource[row.title.trim().toLowerCase()] ?? null,
+      tpSlStepStart: tpSlBySource[row.title.trim().toLowerCase()] ?? null,
     }));
   }
 
@@ -488,6 +498,28 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   private async getSourceMartingaleMap(): Promise<SourceMartingaleMap> {
     const raw = await this.settings.get('SOURCE_MARTINGALE_MULTIPLIERS');
     return this.parseSourceMartingaleMap(raw);
+  }
+
+  private async getSourceTpSlStepMap(): Promise<SourceTpSlStepMap> {
+    const raw = await this.settings.get('SOURCE_TP_SL_STEP_START');
+    return parseSourceTpSlStepMap(raw);
+  }
+
+  private async setSourceTpSlStepStart(
+    sourceName: string,
+    mode: TpSlStepStartMode | null,
+  ): Promise<void> {
+    const source = sourceName.trim().toLowerCase();
+    if (!source) {
+      return;
+    }
+    const map = await this.getSourceTpSlStepMap();
+    if (mode === null) {
+      delete map[source];
+    } else {
+      map[source] = mode;
+    }
+    await this.settings.set('SOURCE_TP_SL_STEP_START', JSON.stringify(map));
   }
 
   private async setSourceMartingaleMultiplier(
@@ -996,6 +1028,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       sourcePriority?: number | null;
       /** null = наследовать глобальный BUMP_TO_MIN_EXCHANGE_LOT */
       minLotBump?: boolean | null;
+      /** null = наследовать глобальный TP_SL_STEP_START; иначе off | tp1..tp5 */
+      tpSlStepStart?: string | null;
     },
   ) {
     const entryNorm =
@@ -1060,6 +1094,20 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       const rowTitle = String(row?.title ?? chatId);
       await this.setSourceMartingaleMultiplier(rowTitle, martingaleNorm);
     }
+
+    if (body.tpSlStepStart !== undefined) {
+      const rowTitle = String(row?.title ?? chatId);
+      const raw = body.tpSlStepStart;
+      if (raw === null || String(raw).trim() === '') {
+        await this.setSourceTpSlStepStart(rowTitle, null);
+      } else {
+        await this.setSourceTpSlStepStart(
+          rowTitle,
+          parseTpSlStepStart(String(raw)),
+        );
+      }
+    }
+
     await this.refreshEnabledChatsCache();
     return { ok: true };
   }
@@ -1708,25 +1756,23 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
               return;
             }
             const reasonText = `сигнал отменен по преоритету - ${incomingPriority} (${incomingSourceName})`;
-            await this.prisma.signalEvent.create({
-              data: {
-                signalId: activeSignal.id,
-                type: 'SIGNAL_CANCELLED_BY_SOURCE_PRIORITY',
-                payload: JSON.stringify({
-                  reason: reasonText,
-                  incomingSourceName,
-                  incomingPriority,
-                  replacedSourceName: activeSource.sourceName,
-                  replacedPriority: activeSource.priority,
-                  replacedBySignal: {
-                    sourceChatId: ingest.chatId,
-                    sourceMessageId: ingest.messageId,
-                    pair: signal.pair,
-                    direction: signal.direction,
-                  },
-                }),
+            await this.orders.createSignalEvent(
+              activeSignal.id,
+              'SIGNAL_CANCELLED_BY_SOURCE_PRIORITY',
+              {
+                reason: reasonText,
+                incomingSourceName,
+                incomingPriority,
+                replacedSourceName: activeSource.sourceName,
+                replacedPriority: activeSource.priority,
+                replacedBySignal: {
+                  sourceChatId: ingest.chatId,
+                  sourceMessageId: ingest.messageId,
+                  pair: signal.pair,
+                  direction: signal.direction,
+                },
               },
-            });
+            );
             this.appendIngestStageLog(
               'info',
               'Userbot: previous signal cancelled by higher-priority source',
@@ -2209,23 +2255,17 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
               : undefined,
           },
         });
-        await this.prisma.signalEvent.create({
-          data: {
-            signalId: prev.id,
-            type: 'REENTRY_UPDATED',
-            payload: JSON.stringify({
-              sourceChatId: params.chatId,
-              sourceMessageId: rootSource.messageId,
-              reentryMessageId: params.messageId,
-              changedFields: {
-                stopLoss: hasStopLossChanged
-                  ? { from: base.stopLoss, to: nextStopLoss }
-                  : null,
-                takeProfits: hasTakeProfitsChanged
-                  ? { from: base.takeProfits, to: nextTakeProfits }
-                  : null,
-              },
-            }),
+        await this.orders.createSignalEvent(prev.id, 'REENTRY_UPDATED', {
+          sourceChatId: params.chatId,
+          sourceMessageId: rootSource.messageId,
+          reentryMessageId: params.messageId,
+          changedFields: {
+            stopLoss: hasStopLossChanged
+              ? { from: base.stopLoss, to: nextStopLoss }
+              : null,
+            takeProfits: hasTakeProfitsChanged
+              ? { from: base.takeProfits, to: nextTakeProfits }
+              : null,
           },
         });
         void this.appLog.append('info', 'telegram', 'Перезаход: обновлены SL/TP в существующем сигнале', {
@@ -2295,39 +2335,27 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         where: { id: prev.id },
         data: { deletedAt: new Date() },
       });
-      await this.prisma.signalEvent.create({
-        data: {
-          signalId: prev.id,
-          type: 'REENTRY_REPLACED_OLD',
-          payload: JSON.stringify({
-            reason: 'Перезаход: старый сигнал заменен новым',
-            sourceChatId: params.chatId,
-            sourceMessageId: rootSource.messageId,
-            reentryMessageId: params.messageId,
-            newSignalId: place.signalId,
-          }),
-        },
+      await this.orders.createSignalEvent(prev.id, 'REENTRY_REPLACED_OLD', {
+        reason: 'Перезаход: старый сигнал заменен новым',
+        sourceChatId: params.chatId,
+        sourceMessageId: rootSource.messageId,
+        reentryMessageId: params.messageId,
+        newSignalId: place.signalId,
       });
       if (place.signalId) {
-        await this.prisma.signalEvent.create({
-          data: {
-            signalId: place.signalId,
-            type: 'REENTRY_REPLACED_NEW',
-            payload: JSON.stringify({
-              reason: 'Перезаход: создан новый сигнал',
-              sourceChatId: params.chatId,
-              sourceMessageId: rootSource.messageId,
-              reentryMessageId: params.messageId,
-              oldSignalId: prev.id,
-              mergedFields: {
-                entries: nextSignal.entries,
-                stopLoss: nextSignal.stopLoss,
-                takeProfits: nextSignal.takeProfits,
-                leverage: nextSignal.leverage,
-                orderUsd: nextSignal.orderUsd,
-                capitalPercent: nextSignal.capitalPercent,
-              },
-            }),
+        await this.orders.createSignalEvent(place.signalId, 'REENTRY_REPLACED_NEW', {
+          reason: 'Перезаход: создан новый сигнал',
+          sourceChatId: params.chatId,
+          sourceMessageId: rootSource.messageId,
+          reentryMessageId: params.messageId,
+          oldSignalId: prev.id,
+          mergedFields: {
+            entries: nextSignal.entries,
+            stopLoss: nextSignal.stopLoss,
+            takeProfits: nextSignal.takeProfits,
+            leverage: nextSignal.leverage,
+            orderUsd: nextSignal.orderUsd,
+            capitalPercent: nextSignal.capitalPercent,
           },
         });
       }
@@ -2475,17 +2503,11 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         };
       }
       this.setCloseCooldown(closeSignal.pair, closeSignal.direction);
-      await this.prisma.signalEvent.create({
-        data: {
-          signalId: signal.id,
-          type: 'CANCELLED_BY_CHAT',
-          payload: JSON.stringify({
-            reason: 'Сигнал отменен в чате (closed/cancel)',
-            sourceChatId: params.chatId,
-            sourceMessageId: rootSource.messageId,
-            closeMessageId: params.messageId,
-          }),
-        },
+      await this.orders.createSignalEvent(signal.id, 'CANCELLED_BY_CHAT', {
+        reason: 'Сигнал отменен в чате (closed/cancel)',
+        sourceChatId: params.chatId,
+        sourceMessageId: rootSource.messageId,
+        closeMessageId: params.messageId,
       });
 
       void this.appLog.append(
@@ -2621,18 +2643,12 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         error: notify.error ?? 'Не удалось отправить уведомление result без входа',
       };
     }
-    await this.prisma.signalEvent.create({
-      data: {
-        signalId: signal.id,
-        type: 'USERBOT_RESULT_WITHOUT_ENTRY',
-        payload: JSON.stringify({
-          sourceChatId: params.chatId,
-          sourceMessageId: lookup.rootSource.messageId,
-          resultMessageId: params.messageId,
-          replyToMessageId,
-          ingestId: params.ingestId,
-        }),
-      },
+    await this.orders.createSignalEvent(signal.id, 'USERBOT_RESULT_WITHOUT_ENTRY', {
+      sourceChatId: params.chatId,
+      sourceMessageId: lookup.rootSource.messageId,
+      resultMessageId: params.messageId,
+      replyToMessageId,
+      ingestId: params.ingestId,
     });
     const autoCancel = await this.getBoolSetting(
       'TELEGRAM_USERBOT_CANCEL_STALE_ORDERS_ON_RESULT_WITHOUT_ENTRY',
@@ -2656,19 +2672,17 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         };
       }
       this.setCloseCooldown(closeSignal.pair, closeSignal.direction);
-      await this.prisma.signalEvent.create({
-        data: {
-          signalId: signal.id,
-          type: 'USERBOT_RESULT_WITHOUT_ENTRY_CANCELLED',
-          payload: JSON.stringify({
-            sourceChatId: params.chatId,
-            sourceMessageId: lookup.rootSource.messageId,
-            resultMessageId: params.messageId,
-            ingestId: params.ingestId,
-            reason: 'Автоматическая отмена ордеров: result получен без фактического входа',
-          }),
+      await this.orders.createSignalEvent(
+        signal.id,
+        'USERBOT_RESULT_WITHOUT_ENTRY_CANCELLED',
+        {
+          sourceChatId: params.chatId,
+          sourceMessageId: lookup.rootSource.messageId,
+          resultMessageId: params.messageId,
+          ingestId: params.ingestId,
+          reason: 'Автоматическая отмена ордеров: result получен без фактического входа',
         },
-      });
+      );
       return { ok: true, mode: 'result_without_entry_cancelled', signalId: signal.id };
     } finally {
       this.endPairDirectionTransition(closeSignal.pair, closeSignal.direction);
