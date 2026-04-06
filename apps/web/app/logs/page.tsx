@@ -39,7 +39,10 @@ function isNoiseLogEvent(message: string): boolean {
   return (
     msg === 'poll: stale signal kept because exchange exposure still exists' ||
     msg === 'poll: reconcile stale pass started' ||
-    msg === 'Userbot: duplicate ingest skipped'
+    msg === 'Userbot: duplicate ingest skipped' ||
+    msg ===
+      'placeTpSplit: уровень TP пропущен — в БД уже учтены ордера на этой цене (проверьте, что статусы совпадают с биржей)' ||
+    msg === 'placeTpSplit: число TP уменьшено из-за minQty лота'
   );
 }
 

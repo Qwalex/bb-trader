@@ -22,9 +22,16 @@ const NOISE_MESSAGES = [
   'Userbot: duplicate ingest skipped',
 ] as const;
 
+/** Частые ожидаемые warn по TP — не пишем в БД по умолчанию; при переполнении вытесняются раньше прочих warn. */
+const NOISE_WARN_MESSAGES = [
+  'placeTpSplit: уровень TP пропущен — в БД уже учтены ордера на этой цене (проверьте, что статусы совпадают с биржей)',
+  'placeTpSplit: число TP уменьшено из-за minQty лота',
+] as const;
+
 /** Не пишем в БД (страница /logs): высокочастотный отладочный шум. */
 const SKIP_DB_APPEND_MESSAGES = new Set<string>([
   ...NOISE_MESSAGES,
+  ...NOISE_WARN_MESSAGES,
   'poll: stale reconcile skipped because pair is suspended',
   'poll: stale reconcile postponed until clean state repeats',
   'poll: no stale signals found to reconcile for clean exchange side',
@@ -154,9 +161,12 @@ export class AppLogService {
           payload: payloadStr,
         },
       });
-      void pruneOldLogs(this.prisma, MAX_ROWS, NOISE_MESSAGES).catch((e) =>
-        this.logger.warn(`pruneOldLogs: ${String(e)}`),
-      );
+      void pruneOldLogs(
+        this.prisma,
+        MAX_ROWS,
+        NOISE_MESSAGES,
+        NOISE_WARN_MESSAGES,
+      ).catch((e) => this.logger.warn(`pruneOldLogs: ${String(e)}`));
     } catch (e) {
       const errText = String(e);
       if (this.isDbFullError(e)) {
@@ -201,7 +211,7 @@ export class AppLogService {
     try {
       const result = await this.prisma.appLog.deleteMany({
         where: {
-          message: { in: [...NOISE_MESSAGES] },
+          message: { in: [...NOISE_MESSAGES, ...NOISE_WARN_MESSAGES] },
           createdAt: { lt: olderThan },
         },
       });

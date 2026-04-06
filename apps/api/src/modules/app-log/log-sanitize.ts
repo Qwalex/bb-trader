@@ -64,6 +64,7 @@ export async function pruneOldLogs(
   prisma: PrismaService,
   keepLast: number,
   noiseMessages: readonly string[] = [],
+  noiseWarnMessages: readonly string[] = [],
 ): Promise<void> {
   const count = await prisma.appLog.count();
   if (count <= keepLast) {
@@ -89,8 +90,8 @@ export async function pruneOldLogs(
     return res.count ?? ids.length;
   };
 
-  // Приоритет удаления: шумные debug → все debug → info noise → остальные info/system → warn → error (последними).
-  // Это защищает важные warn/error от вытеснения большим потоком debug/info.
+  // Приоритет удаления: шумные debug → все debug → info noise → остальные info/system → шумные warn → warn → error.
+  // Это защищает важные warn/error от вытеснения большим потоком debug/info и частыми ожидаемыми предупреждениями.
   remaining -= await deleteOldestWhere(
     noiseMessages.length
       ? { level: 'debug', message: { in: [...noiseMessages] } }
@@ -116,6 +117,12 @@ export async function pruneOldLogs(
     { level: 'info', category: 'vk' },
     remaining,
   );
+  if (noiseWarnMessages.length) {
+    remaining -= await deleteOldestWhere(
+      { level: 'warn', message: { in: [...noiseWarnMessages] } },
+      remaining,
+    );
+  }
   remaining -= await deleteOldestWhere(
     { level: 'warn' },
     remaining,
