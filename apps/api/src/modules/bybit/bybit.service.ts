@@ -2695,7 +2695,8 @@ export class BybitService {
     const symbol = normalizeTradingPair(fresh.pair);
     const { tickSize } = await this.getLinearInstrumentFilters(client, symbol);
 
-    // Находим максимальный индекс полностью исполненного уровня TP
+    // Сколько уровней TP подряд с TP1 имеют Filled (без «дырок»). Иначе один ложный TP4 в БД
+    // давал max индекс 3 и шаг «после TP4», хотя TP1–TP3 не исполнялись.
     let maxFilledIdx = -1;
     for (let i = 0; i < sorted.length; i++) {
       const priceStr = this.formatPriceToTick(sorted[i]!, tickSize);
@@ -2706,9 +2707,10 @@ export class BybitService {
           this.formatPriceToTick(Number(o.price), tickSize) === priceStr &&
           BybitService.isFilledOrderStatus(o.status),
       );
-      if (hasFilled) {
-        maxFilledIdx = i;
+      if (!hasFilled) {
+        break;
       }
+      maxFilledIdx = i;
     }
 
     if (maxFilledIdx < 0) {

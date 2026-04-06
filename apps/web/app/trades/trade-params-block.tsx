@@ -61,8 +61,9 @@ function fmtMartingaleStep(step: number | null | undefined): string {
 }
 
 /**
- * Возвращает Set цен TP-уровней (округлённых), по которым есть Filled TP-ордер.
- * tick оценивается как минимальная разница цен в массиве (≥ 1e-9), либо очень мелкая единица.
+ * Возвращает Set цен TP-уровней, по которым есть Filled TP-ордер.
+ * Допуск строго меньше половины минимального расстояния между соседними уровнями,
+ * иначе одна цена исполнения на бирже может «зажечь» два соседних TP в UI.
  */
 function buildFilledTpPrices(
   tps: number[],
@@ -71,17 +72,18 @@ function buildFilledTpPrices(
   const result = new Set<number>();
   if (!orders || orders.length === 0 || tps.length === 0) return result;
 
-  // Оцениваем tick как наименьший шаг между соседними уровнями (или 1e-8)
   const sorted = [...tps].sort((a, b) => a - b);
-  let tick = 1e-8;
+  let minGap = Infinity;
   for (let i = 1; i < sorted.length; i++) {
     const diff = sorted[i]! - sorted[i - 1]!;
-    if (diff > 1e-9 && diff < tick * 1e9) {
-      tick = Math.min(tick === 1e-8 ? diff : tick, diff) / 100;
+    if (diff > 1e-12 && diff < minGap) {
+      minGap = diff;
     }
   }
-  // Сравниваем с допуском ≤ tick * 0.5 (≤ полшага)
-  const eps = Math.max(tick * 50, 1e-9);
+  const eps =
+    Number.isFinite(minGap) && minGap < Infinity
+      ? minGap * 0.49
+      : Math.max(Math.abs(sorted[0] ?? 0) * 1e-8, 1e-9);
 
   for (const tp of tps) {
     const hasFilled = orders.some(
