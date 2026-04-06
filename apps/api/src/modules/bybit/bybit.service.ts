@@ -3088,6 +3088,12 @@ export class BybitService {
     const activeTpPrices = takeProfits.slice(0, Math.max(n, 0));
 
     let totalTpPlaced = 0;
+    const bybitTpSubmitErrors: {
+      tpIndex: number;
+      priceStr: string;
+      retCode: number;
+      retMsg: string;
+    }[] = [];
 
     if (qtyParts.length === 0) {
       const splitDiag = this.buildTpSplitDiagnostics({
@@ -3289,14 +3295,22 @@ export class BybitService {
           missingAtPrice--;
           liveTpByPrice.set(priceStr, (liveTpByPrice.get(priceStr) ?? 0) + 1);
         } else {
+          const retCode = orderRes.retCode;
+          const retMsg = String(orderRes.retMsg ?? '');
+          bybitTpSubmitErrors.push({
+            tpIndex: ti,
+            priceStr,
+            retCode,
+            retMsg,
+          });
           this.logger.warn(
             `TP reduce-only (уровень ${ti}) ${symbol}: ${formatError(orderRes.retMsg ?? 'submitOrder')}`,
           );
           void this.appLog.append('warn', 'bybit', 'TP: отказ reduce-only', {
             symbol,
             tpIndex: ti,
-            retCode: orderRes.retCode,
-            retMsg: String(orderRes.retMsg ?? ''),
+            retCode,
+            retMsg,
           });
         }
       }
@@ -3323,6 +3337,7 @@ export class BybitService {
           signalId: s2.id,
           activeTpPrices,
           qtyParts,
+          bybitErrors: bybitTpSubmitErrors,
         },
       );
     }
