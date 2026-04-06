@@ -2631,6 +2631,170 @@ export class BybitService {
   }
 
   /**
+   * После исполнения каждого TP-уровня подтягивает SL:
+   *   TP1 сработал → SL в безубыток (avgPrice ± 1 тик)
+   *   TP2 сработал → SL на уровень TP1
+   *   TP3 сработал → SL на уровень TP2  …и т.д.
+   *
+   * Управляется настройкой TP_SL_STEP_ENABLED (по умолчанию включено).
+   * `tpSlStep` в БД хранит индекс последнего применённого шага (−1 = ни разу).
+   */
+  private async stepStopLossIfTpFilled(
+    client: RestClientV5,
+    fresh: {
+      id: string;
+      pair: string;
+      direction: string;
+      stopLoss: number;
+      takeProfits: string;
+      tpSlStep: number;
+      orders: {
+        orderKind: string;
+        price: number | null;
+        status: string | null;
+      }[];
+    },
+  ): Promise<void> {
+    const enabled = await this.settings.get('TP_SL_STEP_ENABLED');
+    if (enabled === 'false') {
+      return;
+    }
+
+    let takeProfits: number[];
+    try {
+      takeProfits = JSON.parse(fresh.takeProfits) as number[];
+    } catch {
+      return;
+    }
+    if (takeProfits.length === 0) {
+      return;
+    }
+
+    const direction = fresh.direction === 'short' ? 'short' : 'long';
+    // Сортируем: для лонга по возрастанию (TP1 ближе к входу), для шорта по убыванию
+    const sorted = [...takeProfits].sort((a, b) =>
+      direction === 'long' ? a - b : b - a,
+    );
+
+    const symbol = normalizeTradingPair(fresh.pair);
+    const { tickSize } = await this.getLinearInstrumentFilters(client, symbol);
+
+    // Находим максимальный индекс полностью исполненного уровня TP
+    let maxFilledIdx = -1;
+    for (let i = 0; i < sorted.length; i++) {
+      const priceStr = this.formatPriceToTick(sorted[i]!, tickSize);
+      const hasFilled = fresh.orders.some(
+        (o) =>
+          o.orderKind === 'TP' &&
+          o.price !== null &&
+          this.formatPriceToTick(Number(o.price), tickSize) === priceStr &&
+          BybitService.isFilledOrderStatus(o.status),
+      );
+      if (hasFilled) {
+        maxFilledIdx = i;
+      }
+    }
+
+    if (maxFilledIdx < 0) {
+      return; // Ни один TP ещё не сработал
+    }
+
+    const filledCount = maxFilledIdx + 1; // 1-based: сколько TP заполнено
+    const targetStep = filledCount - 1;   // 0-based индекс шага
+
+    if (fresh.tpSlStep >= targetStep) {
+      return; // Этот шаг уже был применён
+    }
+
+    // Получаем позицию один раз — нужна для avgPrice и positionIdx
+    let posInfo;
+    try {
+      posInfo = await client.getPositionInfo({ category: 'linear', symbol });
+    } catch {
+      return;
+    }
+    if (posInfo.retCode !== 0) {
+      return;
+    }
+    const posRows = posInfo.result?.list ?? [];
+    const posRow = posRows.find((r) => {
+      const sz = r?.size ? Math.abs(parseFloat(String(r.size))) : 0;
+      return sz > 1e-12;
+    });
+    if (!posRow) {
+      return; // Позиция уже закрыта
+    }
+    const positionIdx = (posRow.positionIdx ?? 0) as 0 | 1 | 2;
+
+    // Вычисляем целевой SL
+    let newSl: number;
+    if (filledCount === 1) {
+      // Безубыток: avgPrice ± 1 тик
+      const avgEntry = parseFloat(String(posRow.avgPrice ?? '0'));
+      if (!Number.isFinite(avgEntry) || avgEntry <= 0) {
+        return;
+      }
+      const tick = parseFloat(tickSize);
+      newSl = direction === 'long'
+        ? avgEntry - tick
+        : avgEntry + tick;
+    } else {
+      // SL на предыдущий уровень TP
+      newSl = sorted[filledCount - 2]!;
+    }
+
+    // Проверяем, что новый SL улучшает текущий (движется в сторону цены, не назад)
+    const currentSl = fresh.stopLoss;
+    const improves =
+      direction === 'long' ? newSl > currentSl : newSl < currentSl;
+    if (!improves) {
+      this.logger.debug(
+        `stepStopLossIfTpFilled: ${symbol} skip — newSl=${newSl} не улучшает currentSl=${currentSl}`,
+      );
+      return;
+    }
+
+    const newSlFormatted = parseFloat(this.formatPriceToTick(newSl, tickSize));
+
+    const ok = await this.applyPositionStopLossFull(
+      client,
+      symbol,
+      newSlFormatted,
+      'tp_sl_step',
+      positionIdx,
+    );
+    if (!ok) {
+      return;
+    }
+
+    // Обновляем БД: новый SL + шаг
+    await this.prisma.signal.update({
+      where: { id: fresh.id },
+      data: { stopLoss: newSlFormatted, tpSlStep: targetStep },
+    });
+
+    await this.orders.createSignalEvent(fresh.id, 'TP_SL_STEPPED', {
+      filledCount,
+      step: targetStep,
+      previousSl: currentSl,
+      newSl: newSlFormatted,
+    });
+
+    void this.appLog.append('info', 'bybit', 'SL подтянут после TP', {
+      signalId: fresh.id,
+      symbol,
+      filledCount,
+      step: targetStep,
+      previousSl: currentSl,
+      newSl: newSlFormatted,
+    });
+
+    this.logger.log(
+      `stepStopLossIfTpFilled: ${symbol} filledCount=${filledCount} previousSl=${currentSl} → newSl=${newSlFormatted}`,
+    );
+  }
+
+  /**
    * Как только появляется позиция — синхронизируем TP/SL под её текущий размер.
    * Если объём позиции вырос после частичных входов, довыставляем недостающие TP
    * только на непокрытую часть.
@@ -3988,6 +4152,12 @@ export class BybitService {
         await this.placeTpSplitIfNeeded(client, fresh);
       } catch (e) {
         this.logger.warn(`placeTpSplitIfNeeded: ${formatError(e)}`);
+      }
+
+      try {
+        await this.stepStopLossIfTpFilled(client, fresh);
+      } catch (e) {
+        this.logger.warn(`stepStopLossIfTpFilled: ${formatError(e)}`);
       }
 
       try {

@@ -1,3 +1,9 @@
+type TradeParamsOrder = {
+  orderKind: string;
+  price: number | null;
+  status: string;
+};
+
 type TradeParamsSignal = {
   entries: string | number[];
   stopLoss: number;
@@ -6,6 +12,7 @@ type TradeParamsSignal = {
   orderUsd: number;
   capitalPercent: number;
   martingaleStep?: number | null;
+  orders?: TradeParamsOrder[];
 };
 
 function parseNumArray(raw: string | number[] | undefined): number[] {
@@ -53,6 +60,74 @@ function fmtMartingaleStep(step: number | null | undefined): string {
   return `#${Math.trunc(step)}`;
 }
 
+/**
+ * Возвращает Set цен TP-уровней (округлённых), по которым есть Filled TP-ордер.
+ * tick оценивается как минимальная разница цен в массиве (≥ 1e-9), либо очень мелкая единица.
+ */
+function buildFilledTpPrices(
+  tps: number[],
+  orders: TradeParamsOrder[] | undefined,
+): Set<number> {
+  const result = new Set<number>();
+  if (!orders || orders.length === 0 || tps.length === 0) return result;
+
+  // Оцениваем tick как наименьший шаг между соседними уровнями (или 1e-8)
+  const sorted = [...tps].sort((a, b) => a - b);
+  let tick = 1e-8;
+  for (let i = 1; i < sorted.length; i++) {
+    const diff = sorted[i]! - sorted[i - 1]!;
+    if (diff > 1e-9 && diff < tick * 1e9) {
+      tick = Math.min(tick === 1e-8 ? diff : tick, diff) / 100;
+    }
+  }
+  // Сравниваем с допуском ≤ tick * 0.5 (≤ полшага)
+  const eps = Math.max(tick * 50, 1e-9);
+
+  for (const tp of tps) {
+    const hasFilled = orders.some(
+      (o) =>
+        o.orderKind === 'TP' &&
+        o.price !== null &&
+        Math.abs(Number(o.price) - tp) <= eps &&
+        o.status.toLowerCase() === 'filled',
+    );
+    if (hasFilled) {
+      result.add(tp);
+    }
+  }
+  return result;
+}
+
+function TpLevelList({
+  tps,
+  filledPrices,
+}: {
+  tps: number[];
+  filledPrices: Set<number>;
+}) {
+  if (tps.length === 0) return <span>—</span>;
+  return (
+    <span>
+      {tps.map((tp, i) => {
+        const filled = filledPrices.has(tp);
+        const priceStr = tp.toLocaleString('ru-RU', { maximumFractionDigits: 8 });
+        return (
+          <span key={i}>
+            {i > 0 && <span style={{ opacity: 0.5 }}>, </span>}
+            <span
+              style={filled ? { color: 'var(--success, #4caf50)', fontWeight: 600 } : undefined}
+              title={filled ? 'TP исполнен' : undefined}
+            >
+              {priceStr}
+              {filled && <span style={{ marginLeft: '0.2em' }}>✓</span>}
+            </span>
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
 export function TradeParamsBlock({ signal }: { signal: TradeParamsSignal }) {
   const entries = parseNumArray(signal.entries);
   const tps = parseNumArray(signal.takeProfits);
@@ -61,6 +136,8 @@ export function TradeParamsBlock({ signal }: { signal: TradeParamsSignal }) {
     : '—';
   const levStr =
     signal.leverage != null ? `${signal.leverage}×` : '—';
+
+  const filledTpPrices = buildFilledTpPrices(tps, signal.orders);
 
   return (
     <details className="tradeParamsDetails">
@@ -71,7 +148,7 @@ export function TradeParamsBlock({ signal }: { signal: TradeParamsSignal }) {
         <dt>SL</dt>
         <dd>{slStr}</dd>
         <dt>TP</dt>
-        <dd>{fmtPrices(tps)}</dd>
+        <dd><TpLevelList tps={tps} filledPrices={filledTpPrices} /></dd>
         <dt>Плечо</dt>
         <dd>{levStr}</dd>
         <dt>Сумма входа</dt>

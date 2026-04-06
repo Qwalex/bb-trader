@@ -189,6 +189,15 @@ export function TradesList({ items, sourceOptions }: Props) {
         const short = (v: unknown) =>
           typeof v === 'string' && v.length > 10 ? `${v.slice(0, 6)}…` : String(v ?? '—');
         details = `было chat ${short(pFrom?.sourceChatId)} / msg ${short(pFrom?.sourceMessageId)} → стало chat ${short(pTo?.sourceChatId)} / msg ${short(pTo?.sourceMessageId)}`;
+      } else if (raw.type === 'TP_SL_STEPPED') {
+        const filledCount = typeof p.filledCount === 'number' ? p.filledCount : null;
+        const prevSl = typeof p.previousSl === 'number' ? p.previousSl : null;
+        const nextSl = typeof p.newSl === 'number' ? p.newSl : null;
+        const fmtSl = (v: number | null) =>
+          v !== null ? v.toLocaleString('ru-RU', { maximumFractionDigits: 8 }) : '—';
+        const target =
+          filledCount === 1 ? 'безубыток' : filledCount !== null ? `TP${filledCount - 1}` : '—';
+        details = `после TP${filledCount ?? '?'} → SL ${fmtSl(prevSl)} → ${fmtSl(nextSl)} (${target})`;
       }
     }
     const titles: Record<string, string> = {
@@ -200,6 +209,7 @@ export function TradesList({ items, sourceOptions }: Props) {
       REENTRY_REPLACED_OLD: 'Старый сигнал заменён',
       REENTRY_REPLACED_NEW: 'Создан новый сигнал',
       TELEGRAM_LINK_UPDATED: 'Привязка к сообщению Telegram',
+      TP_SL_STEPPED: 'SL подтянут после TP',
     };
     const title = titles[raw.type] ?? raw.type;
     return details ? `${title}: ${details}` : title;

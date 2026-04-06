@@ -27,6 +27,8 @@ model Signal {
   status         String // OPEN, ORDERS_PLACED, CLOSED_WIN, CLOSED_LOSS, CLOSED_MIXED, FAILED
   realizedPnl    Float?
   closedAt       DateTime?
+  /// Индекс последнего применённого шага подтягивания SL: -1 = не применялось, 0 = BE после TP1, 1 = SL на TP1 после TP2, …
+  tpSlStep       Int      @default(-1)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   deletedAt      DateTime?

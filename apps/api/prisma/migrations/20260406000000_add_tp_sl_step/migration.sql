@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Signal" ADD COLUMN "tpSlStep" INTEGER NOT NULL DEFAULT -1;
