@@ -40,6 +40,7 @@ services:
       NEXT_BASE_PATH: "/${STACK_SLUG:-trade-dev}"
       NEXT_PUBLIC_API_URL: "/${STACK_SLUG:-trade-dev}-api"
       API_INTERNAL_URL: ${WEB_API_INTERNAL_URL:-http://api:3001}
+      SETTINGS_PAGE_PASSWORD: ${SETTINGS_PAGE_PASSWORD:-}
     ports:
       - "127.0.0.1:3013:3000"
     depends_on:
