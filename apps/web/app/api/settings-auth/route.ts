@@ -15,7 +15,7 @@ function hashValue(value: string): string {
 
 function isAuthenticated(cookieValue: string | undefined): boolean {
   const expected = process.env.SETTINGS_PAGE_PASSWORD?.trim() ?? '';
-  if (!expected) return true;
+  if (!expected) return false;
   return cookieValue === hashValue(expected);
 }
 
@@ -43,7 +43,14 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const configuredPassword = process.env.SETTINGS_PAGE_PASSWORD?.trim() ?? '';
   if (!configuredPassword) {
-    return NextResponse.json({ authenticated: true, enabled: false });
+    return NextResponse.json(
+      {
+        authenticated: false,
+        enabled: false,
+        message: 'Пароль для страницы настроек не настроен на web-сервере',
+      },
+      { status: 503 },
+    );
   }
 
   const payload = (await request.json().catch(() => null)) as { password?: string } | null;

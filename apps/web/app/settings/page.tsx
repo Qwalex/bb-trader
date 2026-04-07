@@ -448,7 +448,14 @@ export default function SettingsPage() {
         if (!res.ok) throw new Error(String(res.status));
         const j = (await res.json()) as {
           authenticated: boolean;
+          enabled?: boolean;
         };
+        if (j.enabled === false) {
+          setAuthError('Пароль не настроен на web-сервере (SETTINGS_PAGE_PASSWORD)');
+          setAuthenticated(false);
+          setLoading(false);
+          return;
+        }
         setAuthenticated(Boolean(j.authenticated));
         if (j.authenticated) {
           await loadSettings();
@@ -684,7 +691,8 @@ export default function SettingsPage() {
         body: JSON.stringify({ password: authPassword }),
       });
       if (!res.ok) {
-        setAuthError('Неверный пароль');
+        const j = (await res.json().catch(() => null)) as { message?: string } | null;
+        setAuthError(j?.message ?? 'Неверный пароль');
         return;
       }
       setAuthenticated(true);
