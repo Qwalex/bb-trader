@@ -8,6 +8,18 @@ import { EntrySizingControl } from '../components/EntrySizingControl';
 import { getApiBase } from '../../lib/api';
 import { parseStoredEntry, serializeEntry } from '../../lib/entry-sizing';
 
+function normalizeBasePath(raw: string | undefined): string {
+  const t = (raw ?? '').trim();
+  if (!t || t === '/') return '';
+  return (t.startsWith('/') ? t : `/${t}`).replace(/\/+$/, '');
+}
+
+const appBasePath = normalizeBasePath(process.env.NEXT_PUBLIC_BASE_PATH);
+function withAppBasePath(url: string): string {
+  if (!url.startsWith('/')) return url;
+  return `${appBasePath}${url}`;
+}
+
 const MODEL_HISTORY_KEY = 'OPENROUTER_MODEL_HISTORY';
 const DIAGNOSTIC_MODELS_KEY = 'OPENROUTER_DIAGNOSTIC_MODELS';
 const KEYS = [
@@ -432,7 +444,7 @@ export default function SettingsPage() {
   useEffect(() => {
     void (async () => {
       try {
-        const res = await fetch('/api/settings-auth');
+        const res = await fetch(withAppBasePath('/api/settings-auth'));
         if (!res.ok) throw new Error(String(res.status));
         const j = (await res.json()) as {
           authenticated: boolean;
@@ -462,7 +474,7 @@ export default function SettingsPage() {
   const boolValueFor = (key: string) =>
     valueForDraft(key).trim().toLowerCase() === 'true';
   const modelHistory = useMemo(
-    () => parseModelHistory(valueForDraft(MODEL_HISTORY_KEY)),
+    () => parseModelHistory(valueFor(draftRows, MODEL_HISTORY_KEY)),
     [draftRows],
   );
 
@@ -666,7 +678,7 @@ export default function SettingsPage() {
     setAuthSubmitting(true);
     setAuthError(null);
     try {
-      const res = await fetch('/api/settings-auth', {
+      const res = await fetch(withAppBasePath('/api/settings-auth'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: authPassword }),
@@ -686,7 +698,9 @@ export default function SettingsPage() {
   }
 
   async function logout() {
-    await fetch('/api/settings-auth', { method: 'DELETE' }).catch(() => undefined);
+    await fetch(withAppBasePath('/api/settings-auth'), { method: 'DELETE' }).catch(
+      () => undefined,
+    );
     setAuthenticated(false);
     setAuthPassword('');
   }
@@ -699,13 +713,14 @@ export default function SettingsPage() {
     return (
       <>
         <h1 className="pageTitle">Настройки</h1>
-        <div className="card" style={{ maxWidth: 480 }}>
+        <div className="card settingsAuthCard">
           <p style={{ color: 'var(--muted)', marginBottom: '0.75rem' }}>
             Страница защищена паролем.
           </p>
           {authError && <p className="msg err">{authError}</p>}
-          <div style={{ display: 'grid', gap: '0.6rem' }}>
+          <div className="settingsAuthForm">
             <input
+              className="settingsAuthInput"
               type="password"
               value={authPassword}
               autoComplete="current-password"

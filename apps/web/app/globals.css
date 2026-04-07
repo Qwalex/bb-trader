@@ -450,6 +450,43 @@ th {
   cursor: not-allowed;
 }
 
+.settingsAuthCard {
+  max-width: 480px;
+}
+
+.settingsAuthForm {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.settingsAuthInput {
+  width: 100%;
+  min-height: 42px;
+  padding: 0.55rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 0.92rem;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.settingsAuthInput::placeholder {
+  color: var(--muted);
+}
+
+.settingsAuthInput:hover {
+  border-color: rgba(139, 148, 158, 0.45);
+}
+
+.settingsAuthInput:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
 button.btnDanger {
   padding: 0.6rem 1rem;
   background: #b91c1c;
