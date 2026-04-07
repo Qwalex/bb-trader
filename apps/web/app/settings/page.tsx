@@ -397,6 +397,11 @@ export default function SettingsPage() {
   const [savedRows, setSavedRows] = useState<Row[]>([]);
   const [draftRows, setDraftRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
+  const [authChecking, setAuthChecking] = useState(true);
+  const [authenticated, setAuthenticated] = useState(false);
+  const [authPassword, setAuthPassword] = useState('');
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authSubmitting, setAuthSubmitting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'ok' | 'err'; text: string } | null>(
     null,
@@ -407,21 +412,42 @@ export default function SettingsPage() {
   const [newExcludedSource, setNewExcludedSource] = useState('');
   const [newDiagnosticModel, setNewDiagnosticModel] = useState('');
 
+  async function loadSettings() {
+    try {
+      const res = await fetch(`${getApiBase()}/settings/raw`);
+      if (!res.ok) throw new Error(String(res.status));
+      const j = (await res.json()) as {
+        settings: Row[];
+      };
+      const list = j.settings ?? [];
+      setSavedRows(list);
+      setDraftRows(list);
+    } catch {
+      setMessage({ type: 'err', text: 'Не удалось загрузить настройки' });
+    } finally {
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
     void (async () => {
       try {
-        const res = await fetch(`${getApiBase()}/settings/raw`);
+        const res = await fetch('/api/settings-auth');
         if (!res.ok) throw new Error(String(res.status));
         const j = (await res.json()) as {
-          settings: Row[];
+          authenticated: boolean;
         };
-        const list = j.settings ?? [];
-        setSavedRows(list);
-        setDraftRows(list);
+        setAuthenticated(Boolean(j.authenticated));
+        if (j.authenticated) {
+          await loadSettings();
+        } else {
+          setLoading(false);
+        }
       } catch {
-        setMessage({ type: 'err', text: 'Не удалось загрузить настройки' });
-      } finally {
+        setAuthError('Не удалось проверить доступ к странице настроек');
         setLoading(false);
+      } finally {
+        setAuthChecking(false);
       }
     })();
   }, []);
@@ -634,6 +660,75 @@ export default function SettingsPage() {
     } finally {
       setResettingStats(false);
     }
+  }
+
+  async function submitPassword() {
+    setAuthSubmitting(true);
+    setAuthError(null);
+    try {
+      const res = await fetch('/api/settings-auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: authPassword }),
+      });
+      if (!res.ok) {
+        setAuthError('Неверный пароль');
+        return;
+      }
+      setAuthenticated(true);
+      setLoading(true);
+      await loadSettings();
+    } catch {
+      setAuthError('Не удалось выполнить вход');
+    } finally {
+      setAuthSubmitting(false);
+    }
+  }
+
+  async function logout() {
+    await fetch('/api/settings-auth', { method: 'DELETE' }).catch(() => undefined);
+    setAuthenticated(false);
+    setAuthPassword('');
+  }
+
+  if (authChecking) {
+    return <p style={{ color: 'var(--muted)' }}>Проверка доступа…</p>;
+  }
+
+  if (!authenticated) {
+    return (
+      <>
+        <h1 className="pageTitle">Настройки</h1>
+        <div className="card" style={{ maxWidth: 480 }}>
+          <p style={{ color: 'var(--muted)', marginBottom: '0.75rem' }}>
+            Страница защищена паролем.
+          </p>
+          {authError && <p className="msg err">{authError}</p>}
+          <div style={{ display: 'grid', gap: '0.6rem' }}>
+            <input
+              type="password"
+              value={authPassword}
+              autoComplete="current-password"
+              placeholder="Введите пароль"
+              onChange={(e) => setAuthPassword(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !authSubmitting && authPassword.trim()) {
+                  void submitPassword();
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="btn"
+              disabled={authSubmitting || !authPassword.trim()}
+              onClick={() => void submitPassword()}
+            >
+              {authSubmitting ? 'Проверка…' : 'Войти'}
+            </button>
+          </div>
+        </div>
+      </>
+    );
   }
 
   function renderSettingField(key: string) {
@@ -904,6 +999,11 @@ export default function SettingsPage() {
           {message.text}
         </p>
       )}
+      <div style={{ marginBottom: '0.8rem' }}>
+        <button type="button" className="btn btnSecondary" onClick={() => void logout()}>
+          Выйти из настроек
+        </button>
+      </div>
       <div className="settingsAccordion" style={{ marginTop: '0.75rem' }}>
         {SETTINGS_SECTIONS.map((section) => (
           <details key={section.id} className="card">
