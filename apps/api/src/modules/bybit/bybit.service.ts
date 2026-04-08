@@ -3266,6 +3266,7 @@ export class BybitService {
     }
 
     const liveTpByPrice = new Map<string, number>();
+    let liveOpenTpQtyTotal = 0;
     const filledTpByPrice = new Map<string, number>();
     for (const o of s2.orders) {
       if (o.orderKind !== 'TP') {
@@ -3277,12 +3278,23 @@ export class BybitService {
       const p = this.formatPriceToTick(Number(o.price), tickSize);
       if (BybitService.isOpenOrderStatus(o.status)) {
         liveTpByPrice.set(p, (liveTpByPrice.get(p) ?? 0) + 1);
+        const oq = Number(o.qty ?? 0);
+        if (Number.isFinite(oq) && oq > 0) {
+          liveOpenTpQtyTotal += oq;
+        }
       } else if (BybitService.isFilledOrderStatus(o.status)) {
         filledTpByPrice.set(p, (filledTpByPrice.get(p) ?? 0) + 1);
       }
     }
+    let remainingReduceOnlyQty = parseFloat(
+      this.formatQtyToStep(Math.max(0, posSize - liveOpenTpQtyTotal), qtyStep),
+    );
+    let tpCapacityReached = false;
 
     for (let ti = 0; ti < activeTpPrices.length; ti++) {
+      if (tpCapacityReached || remainingReduceOnlyQty <= 0) {
+        break;
+      }
       const tpPrice = activeTpPrices[ti]!;
       const levelQtyStr = qtyParts[ti];
       if (!levelQtyStr || parseFloat(levelQtyStr) <= 0) {
@@ -3345,7 +3357,29 @@ export class BybitService {
       }
 
       for (const qtyPart of childQtyParts) {
-        if (missingAtPrice <= 0) {
+        if (missingAtPrice <= 0 || tpCapacityReached || remainingReduceOnlyQty <= 0) {
+          break;
+        }
+        const rawQtyPartNum = parseFloat(qtyPart);
+        if (!Number.isFinite(rawQtyPartNum) || rawQtyPartNum <= 0) {
+          continue;
+        }
+        const qtyToSubmit = Math.min(rawQtyPartNum, remainingReduceOnlyQty);
+        const qtyToSubmitStr = this.formatQtyToStep(qtyToSubmit, qtyStep);
+        const qtyToSubmitNum = parseFloat(qtyToSubmitStr);
+        if (!Number.isFinite(qtyToSubmitNum) || qtyToSubmitNum <= 0) {
+          void this.appLog.append(
+            'info',
+            'bybit',
+            'placeTpSplit: остановка выставления TP — исчерпан доступный reduce-only объём',
+            {
+              symbol,
+              signalId: s2.id,
+              remainingReduceOnlyQty,
+              requestedQtyPart: qtyPart,
+            },
+          );
+          tpCapacityReached = true;
           break;
         }
         tpSubmitOrderCalls++;
@@ -3354,7 +3388,7 @@ export class BybitService {
           symbol,
           side: closeSide,
           orderType: 'Limit',
-          qty: qtyPart,
+          qty: qtyToSubmitStr,
           price: priceStr,
           timeInForce: 'GTC',
           positionIdx,
@@ -3367,13 +3401,22 @@ export class BybitService {
           orderKind: 'TP',
           side: closeSide,
           price: tpPrice,
-          qty: parseFloat(qtyPart),
+          qty: qtyToSubmitNum,
           status: orderRes.retCode === 0 ? 'NEW' : 'FAILED',
         });
         if (orderRes.retCode === 0) {
           totalTpPlaced++;
           missingAtPrice--;
           liveTpByPrice.set(priceStr, (liveTpByPrice.get(priceStr) ?? 0) + 1);
+          remainingReduceOnlyQty = Math.max(
+            0,
+            parseFloat(
+              this.formatQtyToStep(
+                Math.max(0, remainingReduceOnlyQty - qtyToSubmitNum),
+                qtyStep,
+              ),
+            ),
+          );
         } else {
           const retCode = orderRes.retCode;
           const retMsg = String(orderRes.retMsg ?? '');
@@ -3392,6 +3435,9 @@ export class BybitService {
             retCode,
             retMsg,
           });
+          if (retCode === 110017) {
+            tpCapacityReached = true;
+          }
         }
       }
     }
