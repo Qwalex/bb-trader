@@ -26,17 +26,16 @@ export class SettingsController {
   @Get()
   async list() {
     const rows = await this.settings.list();
+    const sensitiveName = /(secret|key|token|password|session|hash)/i;
     const redacted = rows.map((r) =>
-      r.key.toLowerCase().includes('secret') ||
-      r.key.toLowerCase().includes('key') ||
-      r.key.toLowerCase().includes('token')
+      sensitiveName.test(r.key)
         ? { key: r.key, value: r.value ? '***' : '' }
         : { key: r.key, value: r.value },
     );
     return { settings: redacted };
   }
 
-  /** Full values for local dashboard (no auth in plan). */
+  /** Full values for local dashboard (guarded by API auth). */
   @ApiOperation({ summary: 'Список настроек без маскировки (raw)' })
   @ApiOkResponse({ description: 'Raw-настройки получены' })
   @Get('raw')
@@ -84,5 +83,25 @@ export class SettingsController {
     }
     await this.settings.resetAllData();
     return { ok: true };
+  }
+
+  @ApiOperation({ summary: 'Очистить скомпрометированные секреты (после incident)' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { confirm: { type: 'boolean', example: true } },
+    },
+  })
+  @ApiBadRequestResponse({ description: 'Не передано confirm=true' })
+  @ApiOkResponse({ description: 'Секреты очищены' })
+  @Post('incident/purge-secrets')
+  async purgeCompromisedSecrets(@Body() body: { confirm?: boolean }) {
+    if (body?.confirm !== true) {
+      throw new BadRequestException(
+        'Укажите { "confirm": true } для очистки скомпрометированных секретов',
+      );
+    }
+    const result = await this.settings.purgeCompromisedSecrets();
+    return { ok: true, ...result };
   }
 }

@@ -2,6 +2,7 @@ import { Body, Controller, Get, Logger, Post, Res } from '@nestjs/common';
 import type { Response } from 'express';
 
 import { AppLogService } from '../app-log/app-log.service';
+import { Public } from '../../common/public.decorator';
 import { VkBotService } from './vk-bot.service';
 
 /**
@@ -22,6 +23,7 @@ export class VkCallbackController {
   ) {}
 
   /** GET в браузере не используется ВК; отдаём подсказку вместо 404 «Cannot GET». */
+  @Public()
   @Get('callback')
   callbackGet(@Res() res: Response): void {
     res
@@ -32,6 +34,7 @@ export class VkCallbackController {
       );
   }
 
+  @Public()
   @Post('callback')
   async callback(@Body() body: unknown, @Res() res: Response): Promise<void> {
     const b = body as Record<string, unknown>;

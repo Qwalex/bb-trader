@@ -9,6 +9,14 @@ function isPasswordConfigured(): boolean {
   return Boolean(process.env.SETTINGS_PAGE_PASSWORD?.trim());
 }
 
+function buildApiAuthHeader(): Record<string, string> {
+  const token = process.env.NEXT_PUBLIC_API_ACCESS_TOKEN?.trim();
+  if (!token) {
+    return {};
+  }
+  return { Authorization: `Bearer ${token}` };
+}
+
 function hashValue(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
@@ -34,10 +42,42 @@ export async function GET(request: Request) {
     .find((part) => part.startsWith(`${COOKIE_NAME}=`))
     ?.slice(`${COOKIE_NAME}=`.length);
 
-  return NextResponse.json({
-    enabled: isPasswordConfigured(),
-    authenticated: isAuthenticated(cookieValue),
-  });
+  const localAuth = isAuthenticated(cookieValue);
+  if (!localAuth) {
+    return NextResponse.json({
+      enabled: isPasswordConfigured(),
+      authenticated: false,
+    });
+  }
+
+  try {
+    const apiBase = process.env.API_INTERNAL_URL?.replace(/\/$/, '');
+    if (!apiBase) {
+      return NextResponse.json({
+        enabled: isPasswordConfigured(),
+        authenticated: localAuth,
+      });
+    }
+    const probe = await fetch(`${apiBase}/health`, {
+      cache: 'no-store',
+      headers: buildApiAuthHeader(),
+    });
+    if (!probe.ok) {
+      return NextResponse.json({
+        enabled: isPasswordConfigured(),
+        authenticated: false,
+      });
+    }
+    return NextResponse.json({
+      enabled: isPasswordConfigured(),
+      authenticated: true,
+    });
+  } catch {
+    return NextResponse.json({
+      enabled: isPasswordConfigured(),
+      authenticated: false,
+    });
+  }
 }
 
 export async function POST(request: Request) {

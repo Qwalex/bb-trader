@@ -13,7 +13,7 @@ import { normalizeTradingPair, type SignalDto } from '@repo/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { BybitService } from '../bybit/bybit.service';
 import { SettingsService } from '../settings/settings.service';
-import type { TelegramService } from '../telegram/telegram.service';
+import { TelegramService } from '../telegram/telegram.service';
 import { UserbotSignalHashService } from '../telegram-userbot/userbot-signal-hash.service';
 
 import { formatError } from '../../common/format-error';
@@ -50,18 +50,13 @@ export class OrdersService {
     private readonly settings: SettingsService,
     @Inject(forwardRef(() => BybitService))
     private readonly bybit: BybitService,
-    @Inject(
-      forwardRef(() => {
-        // Не тянуть telegram.service при загрузке orders (цикл с TelegramService → TranscriptService).
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        return require('../telegram/telegram.service').TelegramService;
-      }),
-    )
+    @Inject(forwardRef(() => TelegramService))
     private readonly telegram: TelegramService,
     private readonly userbotSignalHash: UserbotSignalHashService,
   ) {}
 
   private static readonly ACTIVE_SIGNAL_STATUSES = new Set([
+    'PENDING',
     'ORDERS_PLACED',
     'OPEN',
     'PARSED',
@@ -92,24 +87,34 @@ export class OrdersService {
     status: string,
     origin?: { chatId?: string; messageId?: string },
   ) {
-    return this.prisma.signal.create({
-      data: {
-        pair: normalizeTradingPair(signal.pair),
-        direction: signal.direction,
-        entries: JSON.stringify(signal.entries),
-        entryIsRange: signal.entryIsRange === true,
-        stopLoss: signal.stopLoss,
-        takeProfits: JSON.stringify(signal.takeProfits),
-        leverage: signal.leverage,
-        orderUsd: signal.orderUsd,
-        capitalPercent: signal.capitalPercent,
-        source: signal.source ?? null,
-        sourceChatId: origin?.chatId ?? null,
-        sourceMessageId: origin?.messageId ?? null,
-        rawMessage: rawMessage ?? null,
-        status,
-      },
-    });
+    try {
+      return await this.prisma.signal.create({
+        data: {
+          pair: normalizeTradingPair(signal.pair),
+          direction: signal.direction,
+          entries: JSON.stringify(signal.entries),
+          entryIsRange: signal.entryIsRange === true,
+          stopLoss: signal.stopLoss,
+          takeProfits: JSON.stringify(signal.takeProfits),
+          leverage: signal.leverage,
+          orderUsd: signal.orderUsd,
+          capitalPercent: signal.capitalPercent,
+          source: signal.source ?? null,
+          sourceChatId: origin?.chatId ?? null,
+          sourceMessageId: origin?.messageId ?? null,
+          rawMessage: rawMessage ?? null,
+          status,
+        },
+      });
+    } catch (e) {
+      const msg = formatError(e);
+      if (msg.includes('Signal_active_pair_direction_unique')) {
+        throw new BadRequestException(
+          `По паре ${normalizeTradingPair(signal.pair)} уже есть активный сигнал ${signal.direction.toUpperCase()}`,
+        );
+      }
+      throw e;
+    }
   }
 
   async updateSignalStatus(
@@ -263,7 +268,7 @@ export class OrdersService {
           deletedAt: null,
           sourceChatId: normalizedChat,
           sourceMessageId: normalizedMsg,
-          status: { in: ['ORDERS_PLACED', 'OPEN', 'PARSED'] },
+          status: { in: ['PENDING', 'ORDERS_PLACED', 'OPEN', 'PARSED'] },
         },
         select: { id: true },
       });
@@ -433,7 +438,11 @@ export class OrdersService {
         'Нельзя удалить активную сделку: сначала закройте позицию/ордера на бирже',
       );
     }
-    if (row.status === 'ORDERS_PLACED' || row.status === 'OPEN') {
+    if (
+      row.status === 'PENDING' ||
+      row.status === 'ORDERS_PLACED' ||
+      row.status === 'OPEN'
+    ) {
       const cleanup = await this.bybit.cleanupExchangeBeforeDeletingPlacedSignal(id);
       if (!cleanup.ok) {
         const tail = cleanup.details ? `: ${cleanup.details}` : '';
@@ -525,7 +534,7 @@ export class OrdersService {
     return this.prisma.signal.findMany({
       where: {
         deletedAt: null,
-        status: { in: ['ORDERS_PLACED', 'OPEN'] },
+        status: { in: ['PENDING', 'ORDERS_PLACED', 'OPEN'] },
       },
       include: { orders: true },
       orderBy: { createdAt: 'asc' },
@@ -596,7 +605,7 @@ export class OrdersService {
   ): Promise<boolean> {
     const want = normalizeTradingPair(pair);
     const open = await this.prisma.signal.findMany({
-      where: { deletedAt: null, status: 'ORDERS_PLACED', direction },
+      where: { deletedAt: null, status: { in: ['PENDING', 'ORDERS_PLACED'] }, direction },
       select: { pair: true },
     });
     return open.some((r) => normalizeTradingPair(r.pair) === want);
@@ -612,7 +621,7 @@ export class OrdersService {
   ): Promise<string[]> {
     const want = normalizeTradingPair(pair);
     const open = await this.prisma.signal.findMany({
-      where: { deletedAt: null, status: 'ORDERS_PLACED', direction },
+      where: { deletedAt: null, status: { in: ['PENDING', 'ORDERS_PLACED'] }, direction },
       select: { id: true, pair: true },
     });
     const ids = open
@@ -710,7 +719,7 @@ export class OrdersService {
     const openRows = await this.prisma.signal.findMany({
       where: {
         deletedAt: null,
-        status: { in: ['ORDERS_PLACED', 'OPEN', 'PARSED'] },
+        status: { in: ['PENDING', 'ORDERS_PLACED', 'OPEN', 'PARSED'] },
         ...(statsResetAt ? { createdAt: { gte: statsResetAt } } : {}),
         ...(source ? { source } : {}),
       },
@@ -912,7 +921,12 @@ export class OrdersService {
       if (row.status === 'CLOSED_WIN' || row.status === 'CLOSED_LOSS' || row.status === 'CLOSED_MIXED') {
         return row.closedAt != null && row.closedAt >= statsResetAt;
       }
-      if (row.status === 'ORDERS_PLACED' || row.status === 'OPEN' || row.status === 'PARSED') {
+      if (
+        row.status === 'PENDING' ||
+        row.status === 'ORDERS_PLACED' ||
+        row.status === 'OPEN' ||
+        row.status === 'PARSED'
+      ) {
         return row.createdAt >= statsResetAt;
       }
       return false;
@@ -954,6 +968,7 @@ export class OrdersService {
         acc.closedMixed += 1;
         acc.closedTotal += 1;
       } else if (
+        r.status === 'PENDING' ||
         r.status === 'ORDERS_PLACED' ||
         r.status === 'OPEN' ||
         r.status === 'PARSED'

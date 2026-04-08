@@ -98,7 +98,7 @@ export class BybitController {
   @ApiOkResponse({ description: 'Статус job получен' })
   @Get('recalc-closed-pnl/:jobId')
   async recalcClosedPnlJobStatus(@Param('jobId') jobId: string) {
-    const status = this.bybit.getRecalcClosedPnlJobStatus(jobId);
+    const status = await this.bybit.getRecalcClosedPnlJobStatus(jobId);
     if (!status) {
       return { ok: false, error: 'Job not found', jobId };
     }

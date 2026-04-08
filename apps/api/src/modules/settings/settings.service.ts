@@ -19,6 +19,18 @@ const ENV_FALLBACK: Record<string, string> = {
 
 @Injectable()
 export class SettingsService {
+  private static readonly COMPROMISED_SECRET_KEYS = [
+    'BYBIT_API_KEY_MAINNET',
+    'BYBIT_API_SECRET_MAINNET',
+    'BYBIT_API_KEY_TESTNET',
+    'BYBIT_API_SECRET_TESTNET',
+    'OPENROUTER_API_KEY',
+    'TELEGRAM_BOT_TOKEN',
+    'TELEGRAM_USERBOT_API_HASH',
+    'TELEGRAM_USERBOT_2FA_PASSWORD',
+    'TELEGRAM_USERBOT_SESSION',
+  ] as const;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
@@ -112,5 +124,20 @@ export class SettingsService {
       await tx.appLog.deleteMany();
       await tx.setting.deleteMany();
     });
+  }
+
+  async purgeCompromisedSecrets(): Promise<{ updated: number; keys: string[] }> {
+    let updated = 0;
+    for (const key of SettingsService.COMPROMISED_SECRET_KEYS) {
+      const res = await this.prisma.setting.updateMany({
+        where: { key },
+        data: { value: '' },
+      });
+      updated += res.count;
+    }
+    return {
+      updated,
+      keys: [...SettingsService.COMPROMISED_SECRET_KEYS],
+    };
   }
 }

@@ -4,11 +4,9 @@
 
 ## Структура
 
-| Путь | Описание |
-|------|----------|
-| `apps/api` | NestJS: Telegram, Transcript (OpenRouter), Bybit, Orders, Settings, Prisma |
-| `apps/web` | Next.js 16: дашборд, сделки, **логи** (`/logs`), настройки |
-| `packages/shared` | Общие типы (`SignalDto` и др.) |
+- `apps/api` — NestJS: Telegram, Transcript (OpenRouter), Bybit, Orders, Settings, Prisma.
+- `apps/web` — Next.js 16: дашборд, сделки, **логи** (`/logs`), настройки.
+- `packages/shared` — общие типы (`SignalDto` и др.).
 
 ## Быстрый старт
 
@@ -22,7 +20,18 @@ cd packages/shared && npm run build && cd ../..
 cd apps/api && npx prisma db push && cd ../..
 ```
 
-3. Разработка (API на `:3001`, web на `:3000`):
+1. Добавьте защиту API (обязательно для dev/test/prod):
+
+```bash
+# apps/api/.env
+API_ACCESS_TOKEN=change-me-very-strong-token
+API_CORS_ORIGINS=http://localhost:3000
+
+# apps/web/.env.local
+NEXT_PUBLIC_API_ACCESS_TOKEN=change-me-very-strong-token
+```
+
+1. Разработка (API на `:3001`, web на `:3000`):
 
 ```bash
 npm run dev
@@ -68,6 +77,15 @@ docker compose up --build
 4. **«Подтвердить»** — проверка дубликата по паре и выставление ордеров. После **успешной** постановки черновик и контекст диалога сбрасываются. **«Отмена»** или `/cancel` — сброс черновика.
 5. **Размер позиции:** в сигнале задаётся **сумма в USDT** (номинал по всем входам). Если в тексте не указано иначе, подставляется значение настройки **`DEFAULT_ORDER_USD`** (SQLite/`/settings` или переменная окружения; при отсутствии — 10 USDT). Старый вариант «процент от депозита» поддерживается, если в JSON задан только `capitalPercent` (без суммы в USDT).
 6. **Дубликат пары:** при настроенных ключах Bybit решение принимается по **API биржи** (учитываются только ордера со статусами «живых» — New, Untriggered и т.д., не Filled/Cancelled/Deactivated). Пара нормализуется (`BTC-USDT` → `BTCUSDT`), чтобы совпадали БД и биржа. Если биржа «чистая», а в SQLite остался `ORDERS_PLACED`, запись **автоматически переводится** в `CLOSED_MIXED`. Без ключей Bybit возможна только проверка по БД.
+
+## Security incident checklist
+
+Если секреты когда-либо были доступны через `GET /settings/raw`, выполните:
+
+1. `POST /settings/incident/purge-secrets` с телом `{ "confirm": true }` (очистка в SQLite).
+2. Ротацию во внешних системах: Bybit API keys, OpenRouter key, Telegram bot token, Telegram userbot session/API hash/2FA.
+3. Перезапуск `api` и `web` с новыми значениями env.
+4. Проверку, что `GET /settings/raw` без авторизации недоступен.
 
 ## Важно
 

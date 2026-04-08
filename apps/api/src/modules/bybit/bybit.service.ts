@@ -14,7 +14,7 @@ import {
   type TpSlStepStartMode,
 } from '../settings/tp-sl-step.util';
 import { SettingsService } from '../settings/settings.service';
-import type { TelegramService } from '../telegram/telegram.service';
+import { TelegramService } from '../telegram/telegram.service';
 import { VkNotifyMirrorService } from '../vk/vk-notify-mirror.service';
 
 export interface PlaceOrdersResult {
@@ -168,6 +168,7 @@ export class BybitService {
   private readonly staleFlatPollCounts = new Map<string, number>();
   private readonly staleReconcileSuspensions = new Map<string, { count: number; reason?: string }>();
   private static readonly STALE_RECONCILE_REQUIRED_CLEAN_POLLS = 3;
+  private readonly placementLocks = new Set<string>();
   private recalcQueue: Promise<void> = Promise.resolve();
   private readonly recalcJobs = new Map<string, RecalcClosedPnlJobStatus>();
   private readonly recalcJobOrder: string[] = [];
@@ -177,13 +178,7 @@ export class BybitService {
     private readonly settings: SettingsService,
     @Inject(forwardRef(() => OrdersService))
     private readonly orders: OrdersService,
-    @Inject(
-      forwardRef(() => {
-        // Ленивая загрузка: иначе цикл telegram → transcript → bybit → telegram даёт undefined в DI.
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        return require('../telegram/telegram.service').TelegramService;
-      }),
-    )
+    @Inject(forwardRef(() => TelegramService))
     private readonly telegram: TelegramService,
     @Inject(forwardRef(() => VkNotifyMirrorService))
     private readonly vkNotifyMirror: VkNotifyMirrorService,
@@ -591,22 +586,54 @@ export class BybitService {
     const sl = signal.stopLoss;
     const tps = signal.takeProfits;
 
+    const primaryEntry = entries.length > 0 ? entries[0]! : Number(marketEntryPrice);
     if (signal.direction === 'long') {
       if (!(sl < minEntry)) {
         return `Некорректный SL для LONG: SL (${sl}) должен быть ниже входа (${minEntry}).`;
       }
-      if (tps.some((tp) => tp <= minEntry)) {
-        return `Некорректный TP для LONG: TP должен быть выше входа (${minEntry}).`;
+      if (tps.some((tp) => tp <= primaryEntry)) {
+        return `Некорректный TP для LONG: TP должен быть выше основного входа (${primaryEntry}).`;
       }
     } else {
       if (!(sl > maxEntry)) {
         return `Некорректный SL для SHORT: SL (${sl}) должен быть выше входа (${maxEntry}).`;
       }
-      if (tps.some((tp) => tp >= maxEntry)) {
-        return `Некорректный TP для SHORT: TP должен быть ниже входа (${maxEntry}).`;
+      if (tps.some((tp) => tp >= primaryEntry)) {
+        return `Некорректный TP для SHORT: TP должен быть ниже основного входа (${primaryEntry}).`;
       }
     }
     return undefined;
+  }
+
+  private buildPlacementLockKey(pair: string, direction: 'long' | 'short'): string {
+    return `${normalizeTradingPair(pair)}:${direction}`;
+  }
+
+  private async resolveEntryPositionIdx(
+    client: RestClientV5,
+    symbol: string,
+    side: 'Buy' | 'Sell',
+  ): Promise<0 | 1 | 2> {
+    try {
+      const pos = await client.getPositionInfo({
+        category: 'linear',
+        symbol,
+      });
+      if (pos.retCode !== 0) {
+        return 0;
+      }
+      const rows = pos.result?.list ?? [];
+      const hasHedgeRows = rows.some((r) => {
+        const idx = Number(r.positionIdx ?? 0);
+        return idx === 1 || idx === 2;
+      });
+      if (!hasHedgeRows) {
+        return 0;
+      }
+      return side === 'Buy' ? 1 : 2;
+    } catch {
+      return 0;
+    }
   }
 
   /**
@@ -1939,6 +1966,14 @@ export class BybitService {
     }
 
     const side: 'Buy' | 'Sell' = signal.direction === 'long' ? 'Buy' : 'Sell';
+    const lockKey = this.buildPlacementLockKey(signal.pair, signal.direction);
+    if (this.placementLocks.has(lockKey)) {
+      return {
+        ok: false,
+        error: `По паре ${symbol} уже идёт размещение ${signal.direction.toUpperCase()} сигнала. Повторите через пару секунд.`,
+      };
+    }
+    this.placementLocks.add(lockKey);
 
     try {
       const lastPrice = await this.getLastPrice(client, symbol);
@@ -2010,12 +2045,22 @@ export class BybitService {
       } else {
         leveragedNotional = defaultOrderUsd;
       }
-      await client.setLeverage({
+      const leverageRes = await client.setLeverage({
         category: 'linear',
         symbol,
         buyLeverage: String(signal.leverage),
         sellLeverage: String(signal.leverage),
       });
+      if (leverageRes.retCode !== 0) {
+        const errText = `setLeverage failed: ${leverageRes.retCode} ${String(leverageRes.retMsg ?? '')}`;
+        void this.appLog.append('error', 'bybit', 'setLeverage отклонён', {
+          symbol,
+          leverage: signal.leverage,
+          retCode: leverageRes.retCode,
+          retMsg: String(leverageRes.retMsg ?? ''),
+        });
+        return { ok: false, error: errText };
+      }
 
       const { qtyStep, minQty, tickSize } = await this.getLinearInstrumentFilters(
         client,
@@ -2111,9 +2156,10 @@ export class BybitService {
           entries: effectiveEntries,
         },
         rawMessage,
-        'ORDERS_PLACED',
+        'PENDING',
         origin,
       );
+      const entryPositionIdx = await this.resolveEntryPositionIdx(client, symbol, side);
 
       const bybitIds: string[] = [];
       /**
@@ -2141,7 +2187,7 @@ export class BybitService {
           side,
           orderType: 'Market',
           qty,
-          positionIdx: 0,
+          positionIdx: entryPositionIdx,
         });
 
         const oid = orderRes.result?.orderId;
@@ -2199,7 +2245,7 @@ export class BybitService {
           qty,
           price: String(price),
           timeInForce: 'GTC' as const,
-          positionIdx: 0 as const,
+          positionIdx: entryPositionIdx as 0 | 1 | 2,
           ...(shouldUseStop
             ? {
                 orderFilter: 'StopOrder' as const,
@@ -2268,6 +2314,7 @@ export class BybitService {
           }
         }
       }
+      await this.orders.updateSignalStatus(signalRow.id, { status: 'ORDERS_PLACED' });
 
       void this.appLog.append('info', 'bybit', 'placeSignalOrders: успех', {
         symbol,
@@ -2287,6 +2334,8 @@ export class BybitService {
         error: msg,
       });
       return { ok: false, error: msg };
+    } finally {
+      this.placementLocks.delete(lockKey);
     }
   }
 
@@ -4032,6 +4081,24 @@ export class BybitService {
     this.recalcJobs.set(jobId, job);
     this.recalcJobOrder.push(jobId);
     this.pruneOldRecalcJobs();
+    void this.prisma.recalcClosedPnlJob.upsert({
+      where: { id: jobId },
+      create: {
+        id: jobId,
+        status: 'queued',
+        dryRun,
+        limit,
+      },
+      update: {
+        status: 'queued',
+        dryRun,
+        limit,
+        error: null,
+        resultJson: null,
+        startedAt: null,
+        finishedAt: null,
+      },
+    });
 
     this.recalcQueue = this.recalcQueue
       .catch(() => undefined)
@@ -4040,15 +4107,39 @@ export class BybitService {
         if (!current) return;
         current.status = 'running';
         current.startedAt = new Date().toISOString();
+        await this.prisma.recalcClosedPnlJob.update({
+          where: { id: jobId },
+          data: {
+            status: 'running',
+            startedAt: new Date(current.startedAt),
+          },
+        });
         try {
           const result = await this.recalcClosedSignalsPnl({ dryRun, limit });
           current.status = 'completed';
           current.result = result;
           current.finishedAt = new Date().toISOString();
+          await this.prisma.recalcClosedPnlJob.update({
+            where: { id: jobId },
+            data: {
+              status: 'completed',
+              finishedAt: new Date(current.finishedAt),
+              resultJson: JSON.stringify(result),
+              error: null,
+            },
+          });
         } catch (e) {
           current.status = 'failed';
           current.error = formatError(e);
           current.finishedAt = new Date().toISOString();
+          await this.prisma.recalcClosedPnlJob.update({
+            where: { id: jobId },
+            data: {
+              status: 'failed',
+              finishedAt: new Date(current.finishedAt),
+              error: current.error,
+            },
+          });
           this.logger.error(`recalc job ${jobId} failed: ${current.error}`);
         }
       });
@@ -4056,9 +4147,38 @@ export class BybitService {
     return { ...job };
   }
 
-  getRecalcClosedPnlJobStatus(jobId: string): RecalcClosedPnlJobStatus | null {
-    const job = this.recalcJobs.get(jobId);
-    return job ? { ...job } : null;
+  async getRecalcClosedPnlJobStatus(
+    jobId: string,
+  ): Promise<RecalcClosedPnlJobStatus | null> {
+    const memoryJob = this.recalcJobs.get(jobId);
+    if (memoryJob) {
+      return { ...memoryJob };
+    }
+    const row = await this.prisma.recalcClosedPnlJob.findUnique({
+      where: { id: jobId },
+    });
+    if (!row) {
+      return null;
+    }
+    let result: RecalcClosedPnlResult | undefined;
+    if (row.resultJson) {
+      try {
+        result = JSON.parse(row.resultJson) as RecalcClosedPnlResult;
+      } catch {
+        result = undefined;
+      }
+    }
+    return {
+      jobId: row.id,
+      status: row.status as RecalcClosedPnlJobStatus['status'],
+      dryRun: row.dryRun,
+      limit: row.limit,
+      createdAt: row.createdAt.toISOString(),
+      startedAt: row.startedAt?.toISOString(),
+      finishedAt: row.finishedAt?.toISOString(),
+      result,
+      error: row.error ?? undefined,
+    };
   }
 
   private pruneOldRecalcJobs(): void {

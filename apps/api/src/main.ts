@@ -1,7 +1,10 @@
 import { LogLevel } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import { Reflector } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
+import { ApiAuthGuard } from './common/api-auth.guard';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -14,7 +17,19 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     logger: logLevels,
   });
-  app.enableCors({ origin: true });
+  app.useGlobalGuards(
+    new ApiAuthGuard(app.get(Reflector), app.get(ConfigService)),
+  );
+  const allowedOriginsRaw = process.env.API_CORS_ORIGINS ?? '';
+  const allowedOrigins = allowedOriginsRaw
+    .split(',')
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+  const allowAnyOrigin = process.env.NODE_ENV !== 'production';
+  app.enableCors({
+    origin:
+      allowedOrigins.length > 0 ? allowedOrigins : allowAnyOrigin ? true : false,
+  });
 
   const swaggerServer = process.env.API_SWAGGER_SERVER?.trim();
   if (!swaggerServer) {

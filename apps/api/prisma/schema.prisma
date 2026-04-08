@@ -24,7 +24,7 @@ model Signal {
   sourceChatId   String?
   sourceMessageId String?
   rawMessage     String?
-  status         String // OPEN, ORDERS_PLACED, CLOSED_WIN, CLOSED_LOSS, CLOSED_MIXED, FAILED
+  status         String // PENDING, OPEN, ORDERS_PLACED, CLOSED_WIN, CLOSED_LOSS, CLOSED_MIXED, FAILED
   realizedPnl    Float?
   closedAt       DateTime?
   /// Индекс последнего применённого шага подтягивания SL: -1 = не применялось, 0 = BE после TP1, 1 = SL на TP1 после TP2, …
@@ -38,6 +38,20 @@ model Signal {
   @@index([sourceChatId, sourceMessageId])
   @@index([deletedAt, createdAt])
   @@index([deletedAt, closedAt])
+}
+
+model RecalcClosedPnlJob {
+  id         String   @id
+  status     String // queued | running | completed | failed
+  dryRun     Boolean
+  limit      Int
+  createdAt  DateTime @default(now())
+  startedAt  DateTime?
+  finishedAt DateTime?
+  resultJson String?
+  error      String?
+
+  @@index([createdAt])
 }
 
 model SignalEvent {
