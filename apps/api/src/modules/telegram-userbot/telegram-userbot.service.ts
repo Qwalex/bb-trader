@@ -1630,7 +1630,11 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         kind,
       });
       const parseOverrides = await this.buildTranscriptParseOverrides(ingest.chatId);
-      const parsed = await this.transcript.parse('text', { text }, parseOverrides);
+      const parsed = await this.transcript.parse(
+        'text',
+        { text, skipResultHeuristicGuard: kind === 'signal' },
+        parseOverrides,
+      );
       if (parsed.ok !== true) {
         const parseError = parsed.ok === false ? parsed.error : parsed.prompt;
         this.appendIngestStageLog('warn', 'Userbot: parse did not produce a signal', ingest, {

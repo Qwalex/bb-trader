@@ -671,6 +671,11 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       imageMime?: string;
       audioBase64?: string;
       audioMime?: string;
+      /**
+       * Если upstream (например userbot AI-классификатор) уже решил, что это "signal",
+       * не применяем ранний эвристический guard "result" (который экономит запросы).
+       */
+      skipResultHeuristicGuard?: boolean;
       reentryContext?: {
         baseSignal: Partial<SignalDto>;
         rootSourceMessageId?: string;
@@ -712,6 +717,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     if (
       kind === 'text' &&
       typeof payload.text === 'string' &&
+      !payload.skipResultHeuristicGuard &&
       this.classifyHeuristic(payload.text) === 'result'
     ) {
       return {
@@ -1368,7 +1374,10 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       /[a-z0-9]{2,20}\s*\/\s*usdt\b/i.test(text) ||
       /\b[a-z0-9]{2,20}usdt\b/i.test(text);
     const hasDirectionHint =
-      /\b(long|short)\b/.test(t) || /(лонг|шорт)/u.test(t);
+      /\b(long|short|buy|sell)\b/.test(t) ||
+      /(лонг|шорт)/u.test(t) ||
+      /(длинн(?:ая|ую|ой)?\s+позици|в\s+лонг)/u.test(t) ||
+      /(коротк(?:ая|ую|ой)?\s+позици|в\s+шорт)/u.test(t);
     const hasStopHint =
       /\b(sl|stop[\s-]?loss)\b/.test(t) || /(стоп|стоп-лосс)/u.test(t);
     const hasTpHint =
@@ -1384,7 +1393,11 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     const hasResultPattern =
       /profit\s*:|pnl\s*:|tp\s*\d+\s*✅|duration\s*:|period\s*:/u.test(t) ||
       /✅\s*$/.test(t);
-    if (hasResultKeywords || (hasPercent && hasResultPattern)) {
+    if (
+      (hasResultKeywords || (hasPercent && hasResultPattern)) &&
+      // Если текст похож на полноценный сетап (пара+SL+TP), не считаем это “result”.
+      !(hasPairHint && hasStopHint && hasTpHint)
+    ) {
       return 'result';
     }
     return 'other';
