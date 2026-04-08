@@ -2051,7 +2051,8 @@ export class BybitService {
         buyLeverage: String(signal.leverage),
         sellLeverage: String(signal.leverage),
       });
-      if (leverageRes.retCode !== 0) {
+      // 110043 = leverage not modified (уже выставлено нужное плечо)
+      if (leverageRes.retCode !== 0 && leverageRes.retCode !== 110043) {
         const errText = `setLeverage failed: ${leverageRes.retCode} ${String(leverageRes.retMsg ?? '')}`;
         void this.appLog.append('error', 'bybit', 'setLeverage отклонён', {
           symbol,
@@ -2060,6 +2061,13 @@ export class BybitService {
           retMsg: String(leverageRes.retMsg ?? ''),
         });
         return { ok: false, error: errText };
+      }
+      if (leverageRes.retCode === 110043) {
+        void this.appLog.append('info', 'bybit', 'setLeverage: плечо уже было установлено', {
+          symbol,
+          leverage: signal.leverage,
+          retCode: leverageRes.retCode,
+        });
       }
 
       const { qtyStep, minQty, tickSize } = await this.getLinearInstrumentFilters(
