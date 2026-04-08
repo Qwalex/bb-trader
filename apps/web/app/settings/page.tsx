@@ -138,7 +138,7 @@ const KEYS = [
   {
     key: 'TP_SL_STEP_START',
     label:
-      'Подтягивание SL после TP: с какого уровня начинать лестницу (off / tp1–tp5). Устаревший TP_SL_STEP_ENABLED=true в БД эквивалентен tp1, пока не задана эта строка',
+      'Подтягивание SL после TP: с какого уровня начинать лестницу (off / tp1–tp5). Устаревший TP_SL_STEP_ENABLED=true в БД эквивалентен tp2, пока не задана эта строка',
   },
 ] as const;
 
@@ -882,7 +882,7 @@ export default function SettingsPage() {
       const legacyOn =
         valueForDraft('TP_SL_STEP_ENABLED').trim().toLowerCase() === 'true';
       const effectiveRaw =
-        raw !== '' ? raw : legacyOn ? 'tp1' : 'off';
+        raw !== '' ? raw : legacyOn ? 'tp2' : 'off';
       const v = ['off', 'tp1', 'tp2', 'tp3', 'tp4', 'tp5'].includes(effectiveRaw)
         ? effectiveRaw
         : 'off';
@@ -891,8 +891,8 @@ export default function SettingsPage() {
         <label key={key} style={{ gridColumn: '1 / -1' }}>
           <span>{label}</span>
           <p style={{ color: 'var(--muted)', fontSize: '0.88rem', margin: '0.35rem 0 0.5rem' }}>
-            tp1: после 1-го TP — безубыток, далее SL к предыдущим TP. tp2: первый шаг только после 2-го TP
-            (безубыток), и т.д. До выбранного TP лестница не трогает SL.
+            tp1: после 1-го TP — безубыток, далее SL к предыдущим TP. tp2: до 2-го TP не двигаем; на 2-м — безубыток;
+            далее на TP1, TP2, TP3… До выбранного TP лестница не трогает SL.
           </p>
           <select
             value={v}

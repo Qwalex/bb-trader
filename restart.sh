@@ -12,6 +12,7 @@ LAST_GOOD_ENV="$ROOT_DIR/.last-good-deploy.env"
 HISTORY_LOG="$ROOT_DIR/.deploy-history.log"
 # При ошибке деплоя — append логов контейнеров для разбора на VPS.
 COMPOSE_FAILURE_LOG="$ROOT_DIR/.deploy-compose-failure.log"
+SMOKE_SCRIPT="$ROOT_DIR/scripts/smoke-check.sh"
 
 LOG_FILE="$(mktemp -t "${PROJECT_NAME}-restart.XXXXXX.log")"
 
@@ -71,6 +72,19 @@ write_last_good_registry_env() {
 deploy_from_registry() {
   docker compose pull
   docker compose up -d --remove-orphans
+  run_smoke_check
+}
+
+run_smoke_check() {
+  if [[ "${SKIP_SMOKE_CHECK:-0}" == "1" ]]; then
+    echo "Smoke check skipped (SKIP_SMOKE_CHECK=1)."
+    return 0
+  fi
+  if [[ ! -f "$SMOKE_SCRIPT" ]]; then
+    echo "Smoke script not found: $SMOKE_SCRIPT"
+    return 1
+  fi
+  bash "$SMOKE_SCRIPT"
 }
 
 # Дописывает в файл снимок `docker compose logs` (для анализа после сбоя).
@@ -154,7 +168,7 @@ if [[ -n "${API_IMAGE:-}" && -n "${WEB_IMAGE:-}" ]]; then
     report_deploy_failure_no_rollback
   fi
 else
-  if docker compose up -d --build --remove-orphans; then
+  if docker compose up -d --build --remove-orphans && run_smoke_check; then
     GIT_REF="$(git rev-parse --short HEAD 2>/dev/null || echo local-build)"
     append_deploy_history "ok" "$GIT_REF"
   else

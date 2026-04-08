@@ -2700,14 +2700,13 @@ export class BybitService {
   }
 
   /**
-   * После исполнения каждого TP-уровня подтягивает SL:
-   *   TP1 сработал → SL в безубыток (avgPrice ± 1 тик)
-   *   TP2 сработал → SL на уровень TP1
-   *   TP3 сработал → SL на уровень TP2  …и т.д.
+   * После исполнения TP подряд с TP1 подтягивает SL (шаги «якоря» зависят от `TP_SL_STEP_START`):
+   *   tp1: TP1 → BE, TP2 → TP1, TP3 → TP2 …
+   *   tp2: промежуток в 1 TP — до TP2 не двигаем SL; TP2 → BE; TP3 → TP1; TP4 → TP2; … сколько угодно уровней.
    *
    * Режим: `TP_SL_STEP_START` = off | tp1..tp5 (глобально), переопределение по источнику —
-   * JSON `SOURCE_TP_SL_STEP_START` { "имя чата lower": "tp2" }. Устаревшее `TP_SL_STEP_ENABLED=true` ≡ tp1.
-   * `tpSlStep` в БД хранит индекс последнего применённого шага (−1 = ни разу), в координатах «якоря» лестницы.
+   * JSON `SOURCE_TP_SL_STEP_START` { "имя чата lower": "tp2" }. Устаревшее `TP_SL_STEP_ENABLED=true` ≡ tp2.
+   * `tpSlStep` в БД — индекс последнего применённого шага (−1 = ни разу), в координатах «якоря» лестницы.
    */
   private async resolveTpSlStepModeForSignal(
     source: string | null | undefined,
@@ -2724,7 +2723,7 @@ export class BybitService {
     }
     const legacy = await this.settings.get('TP_SL_STEP_ENABLED');
     if (String(legacy ?? '').trim().toLowerCase() === 'true') {
-      return 'tp1';
+      return 'tp2';
     }
     return 'off';
   }
@@ -2875,7 +2874,7 @@ export class BybitService {
     }
     const positionIdx = (posRow.positionIdx ?? 0) as 0 | 1 | 2;
 
-    // Вычисляем целевой SL (якорь 1 = безубыток, далее — на предыдущий TP в лестнице)
+    // Якорь 1 = безубыток; далее SL на TP с индексом anchorFilledCount−2 (для tp2 первый шаг — после 2-го TP)
     let newSl: number;
     if (anchorFilledCount === 1) {
       // Безубыток: avgPrice ± 1 тик

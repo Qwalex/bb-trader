@@ -1,6 +1,7 @@
 /**
  * Режим подтягивания SL после TP: с какого номера TP начинать лестницу (BE → предыдущие TP).
- * `tp1` — как раньше при TP_SL_STEP_ENABLED=true; `off` — выкл.
+ * `tp1` — лестница с первого TP; `tp2` — зазор в 1 TP (до второго не двигаем SL), затем BE и далее по предыдущим TP.
+ * Устаревшее `TP_SL_STEP_ENABLED=true` и значения `true`/`1` в парсере — по умолчанию `tp2`; `off` — выкл.
  */
 export type TpSlStepStartMode = 'off' | 'tp1' | 'tp2' | 'tp3' | 'tp4' | 'tp5';
 
@@ -26,7 +27,7 @@ export function parseTpSlStepStart(
     return s as TpSlStepStartMode;
   }
   if (s === 'true' || s === '1') {
-    return 'tp1';
+    return 'tp2';
   }
   return 'off';
 }
