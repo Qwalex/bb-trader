@@ -78,6 +78,20 @@ export class TelegramUserbotController {
     return this.userbot.listChats();
   }
 
+  @ApiOperation({ summary: 'Расход OpenRouter по источникам' })
+  @ApiQuery({
+    name: 'period',
+    required: false,
+    enum: ['day', '3d', 'week', 'month', 'year'],
+  })
+  @ApiOkResponse({ description: 'Агрегированная статистика OpenRouter получена' })
+  @Get('openrouter-spend')
+  async openrouterSpend(
+    @Query('period') period?: 'day' | '3d' | 'week' | 'month' | 'year',
+  ) {
+    return this.userbot.getOpenrouterSpendAnalytics(period ?? 'day');
+  }
+
   /**
    * Сообщения из TgUserbotIngest для ручной привязки сделки (chat id + message id).
    */

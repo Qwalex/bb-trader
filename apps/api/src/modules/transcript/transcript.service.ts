@@ -31,6 +31,13 @@ export type TranscriptParseOverrides = {
   leverageDefault?: number;
 };
 
+type OpenRouterLogContext = {
+  chatId?: string;
+  source?: string;
+  ingestId?: string;
+  stage?: string;
+};
+
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_SITE_URL = 'https://signals-bot.local';
 const OPENROUTER_APP_TITLE = 'SignalsBot';
@@ -246,7 +253,11 @@ export class TranscriptService {
 
   async classifyTradingMessage(
     text: string,
-    context?: { replyToMessageId?: string; quotedText?: string },
+    context?: {
+      replyToMessageId?: string;
+      quotedText?: string;
+      logContext?: OpenRouterLogContext;
+    },
   ): Promise<{
     kind: 'signal' | 'close' | 'reentry' | 'result' | 'other';
     reason?: string;
@@ -341,7 +352,11 @@ Be conservative: if unsure, return "other".`;
         apiKey,
         model,
         messages,
-        { operation: 'classifyTradingMessage', kind: 'text' },
+        {
+          operation: 'classifyTradingMessage',
+          kind: 'text',
+          logContext: context?.logContext,
+        },
       );
       const responseRaw =
         typeof content === 'string' ? content : JSON.stringify(content);
@@ -687,6 +702,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
         partial: Partial<SignalDto>;
         userTurns: string[];
       };
+      openrouterLogContext?: OpenRouterLogContext;
     },
     overrides?: TranscriptParseOverrides,
   ): Promise<TranscriptResult> {
@@ -744,6 +760,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
         operation: 'parse',
         kind,
         fallbackModels,
+        logContext: payload.openrouterLogContext,
       });
       const ms = Date.now() - t0;
       this.logger.log(
@@ -900,7 +917,12 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     apiKey: string,
     model: string,
     messages: { role: string; content: unknown }[],
-    ctx: { operation: string; kind?: ContentKind; fallbackModels?: string[] },
+    ctx: {
+      operation: string;
+      kind?: ContentKind;
+      fallbackModels?: string[];
+      logContext?: OpenRouterLogContext;
+    },
   ): Promise<unknown> {
     const client = new OpenRouter({
       apiKey,
@@ -946,6 +968,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       contentKind: ctx.kind,
       /** Тело запроса (как уходит к OpenRouter, без секрета — ключ только в заголовке Authorization, не логируем) */
       requestBody,
+      logContext: ctx.logContext,
     });
 
     try {
@@ -1016,6 +1039,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
           usage: typedRes.usage,
           choicesCount: typedRes.choices?.length ?? 0,
         },
+        logContext: ctx.logContext,
       });
 
       if (rawContent == null) {

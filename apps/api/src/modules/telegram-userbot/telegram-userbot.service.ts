@@ -107,6 +107,7 @@ type ActiveSignalLookup = {
 };
 
 type SourceMartingaleMap = Record<string, number>;
+type OpenrouterSpendPeriod = 'day' | '3d' | 'week' | 'month' | 'year';
 
 const USERBOT_POLL_INTERVAL_MS = 2000;
 const USERBOT_POLL_FETCH_LIMIT = 20;
@@ -455,12 +456,13 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   }
 
   async listChats() {
-    const [rows, bySource, tpSlBySource] = await Promise.all([
+    const [rows, bySource, tpSlBySource, openrouterSpendTodayByChatId] = await Promise.all([
       this.prisma.tgUserbotChat.findMany({
         orderBy: [{ enabled: 'desc' }, { title: 'asc' }],
       }),
       this.getSourceMartingaleMap(),
       this.getSourceTpSlStepMap(),
+      this.getTodayOpenRouterSpendByChatId(),
     ]);
     return rows.map((row) => ({
       ...row,
@@ -468,7 +470,191 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       martingaleMultiplier:
         bySource[row.title.trim().toLowerCase()] ?? null,
       tpSlStepStart: tpSlBySource[row.title.trim().toLowerCase()] ?? null,
+      openrouterCostTodayUsd: openrouterSpendTodayByChatId[row.chatId] ?? 0,
     }));
+  }
+
+  private parseNumberOrNull(value: unknown): number | null {
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value : null;
+    }
+    if (typeof value === 'string') {
+      const n = Number(value.trim());
+      return Number.isFinite(n) ? n : null;
+    }
+    return null;
+  }
+
+  private extractOpenrouterCostUsd(payloadRaw: string | null): { chatId: string; costUsd: number } | null {
+    if (!payloadRaw) return null;
+    try {
+      const payload = JSON.parse(payloadRaw) as {
+        responseMeta?: {
+          cost?: unknown;
+          totalCost?: unknown;
+          total_cost?: unknown;
+          usage?: { cost?: unknown; totalCost?: unknown; total_cost?: unknown };
+        };
+        logContext?: { chatId?: unknown };
+      };
+      const chatId = String(payload.logContext?.chatId ?? '').trim();
+      if (!chatId) return null;
+      const meta = payload.responseMeta ?? {};
+      const usage = meta.usage ?? {};
+      const candidate =
+        this.parseNumberOrNull(meta.cost) ??
+        this.parseNumberOrNull(meta.totalCost) ??
+        this.parseNumberOrNull(meta.total_cost) ??
+        this.parseNumberOrNull(usage.cost) ??
+        this.parseNumberOrNull(usage.totalCost) ??
+        this.parseNumberOrNull(usage.total_cost);
+      if (candidate == null || candidate <= 0) return null;
+      return { chatId, costUsd: candidate };
+    } catch {
+      return null;
+    }
+  }
+
+  private extractOpenrouterCostWithMeta(
+    payloadRaw: string | null,
+  ): { chatId: string; costUsd: number } | null {
+    return this.extractOpenrouterCostUsd(payloadRaw);
+  }
+
+  private async getTodayOpenRouterSpendByChatId(): Promise<Record<string, number>> {
+    const dayStart = new Date();
+    dayStart.setHours(0, 0, 0, 0);
+    const logs = await this.prisma.appLog.findMany({
+      where: {
+        category: 'openrouter',
+        message: { startsWith: '← ' },
+        createdAt: { gte: dayStart },
+      },
+      select: { payload: true },
+    });
+    const sums: Record<string, number> = {};
+    for (const row of logs) {
+      const parsed = this.extractOpenrouterCostUsd(row.payload);
+      if (!parsed) continue;
+      sums[parsed.chatId] = (sums[parsed.chatId] ?? 0) + parsed.costUsd;
+    }
+    return sums;
+  }
+
+  private resolveOpenrouterPeriodStart(period: OpenrouterSpendPeriod, now = new Date()): Date {
+    const start = new Date(now);
+    if (period === 'day') {
+      start.setHours(0, 0, 0, 0);
+      return start;
+    }
+    if (period === '3d') {
+      start.setDate(start.getDate() - 2);
+      start.setHours(0, 0, 0, 0);
+      return start;
+    }
+    if (period === 'week') {
+      start.setDate(start.getDate() - 6);
+      start.setHours(0, 0, 0, 0);
+      return start;
+    }
+    if (period === 'month') {
+      start.setMonth(start.getMonth() - 1);
+      return start;
+    }
+    start.setFullYear(start.getFullYear() - 1);
+    return start;
+  }
+
+  private bucketKeyByPeriod(d: Date, period: OpenrouterSpendPeriod): string {
+    if (period === 'day') {
+      return new Date(
+        d.getFullYear(),
+        d.getMonth(),
+        d.getDate(),
+        d.getHours(),
+        0,
+        0,
+        0,
+      ).toISOString();
+    }
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).toISOString();
+  }
+
+  async getOpenrouterSpendAnalytics(period: OpenrouterSpendPeriod = 'day') {
+    const safePeriod: OpenrouterSpendPeriod =
+      period === 'day' ||
+      period === '3d' ||
+      period === 'week' ||
+      period === 'month' ||
+      period === 'year'
+        ? period
+        : 'day';
+    const startAt = this.resolveOpenrouterPeriodStart(safePeriod);
+    const endAt = new Date();
+    const [logs, chats] = await Promise.all([
+      this.prisma.appLog.findMany({
+        where: {
+          category: 'openrouter',
+          message: { startsWith: '← ' },
+          createdAt: { gte: startAt, lte: endAt },
+        },
+        select: { createdAt: true, payload: true },
+        orderBy: { createdAt: 'asc' },
+      }),
+      this.prisma.tgUserbotChat.findMany({
+        select: { chatId: true, title: true },
+      }),
+    ]);
+    const titleByChatId = new Map<string, string>();
+    for (const c of chats) {
+      titleByChatId.set(c.chatId, c.title);
+    }
+
+    const sourceTotals = new Map<string, { chatId: string; source: string; totalUsd: number; requests: number }>();
+    const bucketTotals = new Map<string, { at: string; totalUsd: number }>();
+    let totalUsd = 0;
+    let requests = 0;
+
+    for (const log of logs) {
+      const parsed = this.extractOpenrouterCostWithMeta(log.payload);
+      if (!parsed) continue;
+      const sourceName = titleByChatId.get(parsed.chatId) ?? parsed.chatId;
+      const currentSource = sourceTotals.get(parsed.chatId) ?? {
+        chatId: parsed.chatId,
+        source: sourceName,
+        totalUsd: 0,
+        requests: 0,
+      };
+      currentSource.totalUsd += parsed.costUsd;
+      currentSource.requests += 1;
+      sourceTotals.set(parsed.chatId, currentSource);
+
+      const bucketKey = this.bucketKeyByPeriod(log.createdAt, safePeriod);
+      const currentBucket = bucketTotals.get(bucketKey) ?? { at: bucketKey, totalUsd: 0 };
+      currentBucket.totalUsd += parsed.costUsd;
+      bucketTotals.set(bucketKey, currentBucket);
+
+      totalUsd += parsed.costUsd;
+      requests += 1;
+    }
+
+    return {
+      period: safePeriod,
+      startAt: startAt.toISOString(),
+      endAt: endAt.toISOString(),
+      totalUsd: Number(totalUsd.toFixed(8)),
+      requests,
+      bySource: Array.from(sourceTotals.values())
+        .map((s) => ({
+          ...s,
+          avgUsd: s.requests > 0 ? Number((s.totalUsd / s.requests).toFixed(8)) : 0,
+          totalUsd: Number(s.totalUsd.toFixed(8)),
+        }))
+        .sort((a, b) => b.totalUsd - a.totalUsd),
+      timeline: Array.from(bucketTotals.values())
+        .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime())
+        .map((p) => ({ ...p, totalUsd: Number(p.totalUsd.toFixed(8)) })),
+    };
   }
 
   private parseSourceMartingaleMap(raw: string | undefined): SourceMartingaleMap {
@@ -1453,6 +1639,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         groupName,
         replyToMessageId,
         quotedText,
+        ingest.chatId,
+        ingest.id,
       );
       let kind = cls.kind;
       const aiRequest = cls.aiRequest;
@@ -1632,7 +1820,16 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       const parseOverrides = await this.buildTranscriptParseOverrides(ingest.chatId);
       const parsed = await this.transcript.parse(
         'text',
-        { text, skipResultHeuristicGuard: kind === 'signal' },
+        {
+          text,
+          skipResultHeuristicGuard: kind === 'signal',
+          openrouterLogContext: {
+            chatId: ingest.chatId,
+            source: groupName,
+            ingestId: ingest.id,
+            stage: 'parse',
+          },
+        },
         parseOverrides,
       );
       if (parsed.ok !== true) {
@@ -3222,6 +3419,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     groupName?: string,
     replyToMessageId?: string,
     quotedText?: string,
+    chatId?: string,
+    ingestId?: string,
   ): Promise<{ kind: MessageKind; aiRequest?: string; aiResponse?: string }> {
     const replyId = String(replyToMessageId ?? '').trim();
     const forcedKind =
@@ -3258,6 +3457,12 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     const ai = await this.transcript.classifyTradingMessage(text, {
       replyToMessageId,
       quotedText,
+      logContext: {
+        chatId,
+        source: groupName,
+        ingestId,
+        stage: 'classify',
+      },
     });
     const aiRequest = this.limitTrace(
       ai.debug?.request ??

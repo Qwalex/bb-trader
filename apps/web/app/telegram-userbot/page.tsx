@@ -53,6 +53,8 @@ type UserbotChat = {
   minLotBump?: boolean | null;
   /** null — наследовать глобальный TP_SL_STEP_START */
   tpSlStepStart?: string | null;
+  /** Потрачено на OpenRouter по источнику за сегодня (USD). */
+  openrouterCostTodayUsd?: number;
 };
 
 type TodayMetrics = {
@@ -1130,6 +1132,10 @@ export default function TelegramUserbotPage() {
                 <span>— · </span>
               )}
               <code>{chat.chatId}</code>
+              <span aria-hidden="true"> · </span>
+              <span title="Сумма OpenRouter по источнику за сегодня">
+                ${Number(chat.openrouterCostTodayUsd ?? 0).toFixed(4)}
+              </span>
             </div>
             <div className="userbotChatCardParams">
               <div className="userbotChatCardParamCompact">
