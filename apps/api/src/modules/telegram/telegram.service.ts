@@ -76,6 +76,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     private readonly settings: SettingsService,
+    @Inject(forwardRef(() => TranscriptService))
     private readonly transcript: TranscriptService,
     @Inject(forwardRef(() => BybitService))
     private readonly bybit: BybitService,
