@@ -33,6 +33,14 @@ type SpendResponse = {
   timeline: Array<{ at: string; totalUsd: number }>;
 };
 
+type OpenrouterBalance = {
+  ok: boolean;
+  balanceUsd: number | null;
+  lowBalance?: boolean;
+  thresholdUsd?: number;
+  error?: string;
+};
+
 const PERIOD_OPTIONS: Array<{ id: Period; label: string }> = [
   { id: 'day', label: 'За день' },
   { id: '3d', label: 'За 3 дня' },
@@ -59,18 +67,32 @@ export default function OpenrouterSpendPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<SpendResponse | null>(null);
+  const [balance, setBalance] = useState<OpenrouterBalance | null>(null);
 
   useEffect(() => {
     void (async () => {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(
-          `${getApiBase()}/telegram-userbot/openrouter-spend?period=${encodeURIComponent(period)}`,
-        );
-        if (!res.ok) throw new Error(String(res.status));
-        const json = (await res.json()) as SpendResponse;
-        setData(json);
+        const [spendRes, balanceRes] = await Promise.all([
+          fetch(
+            `${getApiBase()}/telegram-userbot/openrouter-spend?period=${encodeURIComponent(period)}`,
+          ),
+          fetch(`${getApiBase()}/telegram-userbot/openrouter-balance`),
+        ]);
+        if (!spendRes.ok) throw new Error(String(spendRes.status));
+        const [spendJson, balanceJson] = await Promise.all([
+          spendRes.json() as Promise<SpendResponse>,
+          balanceRes.ok
+            ? (balanceRes.json() as Promise<OpenrouterBalance>)
+            : Promise.resolve<OpenrouterBalance>({
+                ok: false,
+                balanceUsd: null,
+                error: String(balanceRes.status),
+              }),
+        ]);
+        setData(spendJson);
+        setBalance(balanceJson);
       } catch {
         setError('Не удалось загрузить аналитику OpenRouter');
       } finally {
@@ -118,6 +140,19 @@ export default function OpenrouterSpendPage() {
       {!loading && data && (
         <>
           <div className="grid" style={{ marginBottom: '1rem' }}>
+            <div className={`card ${balance?.lowBalance ? 'cardWarn' : ''}`}>
+              <h3>Текущий баланс OpenRouter</h3>
+              <div className="value">
+                {balance?.balanceUsd != null ? formatUsd(balance.balanceUsd) : '—'}
+              </div>
+              <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
+                {balance?.ok === false
+                  ? `Не удалось загрузить: ${balance.error ?? 'ошибка API'}`
+                  : balance?.lowBalance
+                    ? `Внимание: баланс ниже ${Number(balance.thresholdUsd ?? 2).toFixed(2)}$`
+                    : 'Актуальный доступный баланс OpenRouter.'}
+              </p>
+            </div>
             <div className="card">
               <h3>Всего потрачено</h3>
               <div className="value">{formatUsd(data.totalUsd)}</div>
