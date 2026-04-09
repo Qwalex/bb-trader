@@ -29,6 +29,7 @@ export class SettingsService {
     'TELEGRAM_USERBOT_API_HASH',
     'TELEGRAM_USERBOT_2FA_PASSWORD',
     'TELEGRAM_USERBOT_SESSION',
+    'TELEGRAM_USERBOT_MTPROXY_URL',
   ] as const;
 
   constructor(

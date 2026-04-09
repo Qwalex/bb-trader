@@ -87,6 +87,10 @@ const KEYS = [
   { key: 'TELEGRAM_USERBOT_API_ID', label: 'Telegram Userbot API ID (my.telegram.org)' },
   { key: 'TELEGRAM_USERBOT_API_HASH', label: 'Telegram Userbot API Hash (my.telegram.org)' },
   { key: 'TELEGRAM_USERBOT_2FA_PASSWORD', label: 'Telegram Userbot 2FA password (если включен)' },
+  {
+    key: 'TELEGRAM_USERBOT_MTPROXY_URL',
+    label: 'Telegram Userbot MTProxy URL (формат https://t.me/proxy?server=...&port=...&secret=...)',
+  },
   { key: 'TELEGRAM_USERBOT_ENABLED', label: 'Userbot: включен (true/false)' },
   {
     key: 'TELEGRAM_USERBOT_POLL_INTERVAL_MS',
@@ -233,6 +237,7 @@ const SETTINGS_SECTIONS: { id: string; title: string; keys: string[] }[] = [
       'TELEGRAM_USERBOT_API_ID',
       'TELEGRAM_USERBOT_API_HASH',
       'TELEGRAM_USERBOT_2FA_PASSWORD',
+      'TELEGRAM_USERBOT_MTPROXY_URL',
       'TELEGRAM_USERBOT_ENABLED',
       'TELEGRAM_USERBOT_POLL_INTERVAL_MS',
       'TELEGRAM_USERBOT_USE_AI_CLASSIFIER',
@@ -319,6 +324,7 @@ function isSensitiveKey(key: string): boolean {
     u.includes('SECRET') ||
     u.includes('TOKEN') ||
     u.includes('PASSWORD') ||
+    u.includes('MTPROXY') ||
     u === 'OPENROUTER_API_KEY' ||
     u.includes('API_HASH') ||
     u.includes('2FA')

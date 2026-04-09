@@ -284,6 +284,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
   async connectFromStoredSession() {
     const creds = await this.getApiCreds();
+    const clientOptions = await this.getTelegramClientOptions();
     const session = (await this.settings.get('TELEGRAM_USERBOT_SESSION'))?.trim();
     if (!session) {
       return {
@@ -296,7 +297,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       new StringSession(session),
       creds.apiId,
       creds.apiHash,
-      { connectionRetries: 5 },
+      clientOptions,
     );
     await client.connect();
     const authorized = await this.isClientAuthorized(client);
@@ -338,12 +339,13 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     }
 
     const creds = await this.getApiCreds();
+    const clientOptions = await this.getTelegramClientOptions();
     await this.stopQrClient();
     const qrClient = new TelegramClient(
       new StringSession(''),
       creds.apiId,
       creds.apiHash,
-      { connectionRetries: 5 },
+      clientOptions,
     );
     await qrClient.connect();
     this.qrClient = qrClient;
@@ -3738,6 +3740,52 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       );
     }
     return { apiId, apiHash };
+  }
+
+  private async getTelegramClientOptions(): Promise<Record<string, unknown>> {
+    const options: Record<string, unknown> = { connectionRetries: 5 };
+    const mtProxy = await this.getMtProxyConfig();
+    if (mtProxy) {
+      options.proxy = mtProxy;
+    }
+    return options;
+  }
+
+  private async getMtProxyConfig(): Promise<
+    { ip: string; port: number; secret: string; MTProxy: true } | null
+  > {
+    const raw = (await this.settings.get('TELEGRAM_USERBOT_MTPROXY_URL'))?.trim();
+    if (!raw) {
+      return null;
+    }
+
+    const normalized = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    let url: URL;
+    try {
+      url = new URL(normalized);
+    } catch {
+      throw new Error(
+        'Неверный TELEGRAM_USERBOT_MTPROXY_URL: ожидается ссылка вида https://t.me/proxy?server=...&port=...&secret=...',
+      );
+    }
+
+    const server = url.searchParams.get('server')?.trim() ?? '';
+    const secret = url.searchParams.get('secret')?.trim() ?? '';
+    const portRaw = url.searchParams.get('port')?.trim() ?? '';
+    const port = Number.parseInt(portRaw, 10);
+
+    if (!server || !secret || !Number.isFinite(port) || port < 1 || port > 65535) {
+      throw new Error(
+        'Неверный TELEGRAM_USERBOT_MTPROXY_URL: нужны параметры server, port (1..65535) и secret.',
+      );
+    }
+
+    return {
+      ip: server,
+      port,
+      secret,
+      MTProxy: true,
+    };
   }
 
   private async isClientAuthorized(client: TelegramClient | null): Promise<boolean> {
