@@ -144,6 +144,11 @@ const KEYS = [
     label:
       'Подтягивание SL после TP: с какого уровня начинать лестницу (off / tp1–tp5). Устаревший TP_SL_STEP_ENABLED=true в БД эквивалентен tp2, пока не задана эта строка',
   },
+  {
+    key: 'TP_SL_STEP_RANGE',
+    label:
+      'Подтягивание SL: диапазон лестницы (1–5 TP «назад» по счёту исполненных TP; пусто = как номер старта). Переопределение по чату: SOURCE_TP_SL_STEP_RANGE',
+  },
 ] as const;
 
 const BOOLEAN_KEYS = new Set<string>([
@@ -171,6 +176,8 @@ const LABEL_BY_KEY = Object.fromEntries(KEYS.map(({ key, label }) => [key, label
 const EXTRA_LABELS: Record<string, string> = {
   SOURCE_LIST: 'Список источников (source)',
   SOURCE_EXCLUDE_LIST: 'Исключённые источники (аналитика)',
+  SOURCE_TP_SL_STEP_RANGE:
+    'Переопределение диапазона SL после TP по источнику (JSON: имя чата lower → 1..5)',
   DASHBOARD_TODOS: 'Заметки дашборда (удобнее редактировать на главной странице)',
   [DIAGNOSTIC_MODELS_KEY]: 'Модели для диагностики',
   [MODEL_HISTORY_KEY]: 'История моделей OpenRouter (автообновление)',
@@ -208,6 +215,7 @@ const SETTINGS_SECTIONS: { id: string; title: string; keys: string[] }[] = [
       'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',
       'POLLING_INTERVAL_MS',
       'TP_SL_STEP_START',
+      'TP_SL_STEP_RANGE',
     ],
   },
   {
@@ -564,14 +572,37 @@ export default function SettingsPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ key, value }),
         });
-        if (!res.ok) throw new Error(String(res.status));
-        next = upsertRow(next, key, value);
+        if (!res.ok) {
+          let detail = `${res.status}`;
+          try {
+            const j = (await res.json()) as { message?: string | string[] };
+            const m = j?.message;
+            if (typeof m === 'string') {
+              detail = m;
+            } else if (Array.isArray(m)) {
+              detail = m.join('; ');
+            }
+          } catch {
+            /* ignore */
+          }
+          throw new Error(detail);
+        }
+        let storedValue = value;
+        if (key === 'TP_SL_STEP_RANGE') {
+          storedValue = value.trim();
+        } else if (key === 'SOURCE_TP_SL_STEP_RANGE' && value.trim() === '') {
+          storedValue = '{}';
+        }
+        next = upsertRow(next, key, storedValue);
       }
       setSavedRows(next);
       setDraftRows(next);
       setMessage({ type: 'ok', text: 'Настройки сохранены' });
-    } catch {
-      setMessage({ type: 'err', text: 'Ошибка сохранения' });
+    } catch (e) {
+      setMessage({
+        type: 'err',
+        text: e instanceof Error ? e.message : 'Ошибка сохранения',
+      });
     } finally {
       setSaving(false);
     }
@@ -898,8 +929,9 @@ export default function SettingsPage() {
         <label key={key} style={{ gridColumn: '1 / -1' }}>
           <span>{label}</span>
           <p style={{ color: 'var(--muted)', fontSize: '0.88rem', margin: '0.35rem 0 0.5rem' }}>
-            tp1: после 1-го TP — безубыток, далее SL к предыдущим TP. tp2: до 2-го TP не двигаем; на 2-м — безубыток;
-            далее на TP1, TP2, TP3… До выбранного TP лестница не трогает SL.
+            Старт: до выбранного TP лестница не двигает SL; на стартовом — безубыток, далее SL на уровни TP по полю
+            «диапазон» (см. TP_SL_STEP_RANGE). Пример при диапазоне = старту: tp1 — классика (TP1→BE, TP2→TP1…);
+            tp2 — как раньше по умолчанию (до TP2 не двигаем, затем BE→TP1→TP2…).
           </p>
           <select
             value={v}
@@ -920,6 +952,42 @@ export default function SettingsPage() {
             <option value="tp3">С 3-го TP</option>
             <option value="tp4">С 4-го TP</option>
             <option value="tp5">С 5-го TP</option>
+          </select>
+        </label>
+      );
+    }
+    if (key === 'TP_SL_STEP_RANGE') {
+      const raw = valueForDraft(key).trim();
+      const v =
+        raw === '' || !['1', '2', '3', '4', '5'].includes(raw) ? '' : raw;
+      const label = LABEL_BY_KEY[key] ?? key;
+      return (
+        <label key={key} style={{ gridColumn: '1 / -1' }}>
+          <span>{label}</span>
+          <p style={{ color: 'var(--muted)', fontSize: '0.88rem', margin: '0.35rem 0 0.5rem' }}>
+            После стартового шага (безубыток) цена SL берётся у TP с номером «текущее число исполненных TP подряд
+            минус диапазон минус 1» в списке TP. Пустое значение — диапазон совпадает с номером стартового TP
+            (поведение по умолчанию, как до этой настройки).
+          </p>
+          <select
+            value={v}
+            disabled={saving}
+            onChange={(e) => setDraftKey(key, e.target.value)}
+            style={{
+              maxWidth: '520px',
+              padding: '0.45rem',
+              borderRadius: 4,
+              border: '1px solid var(--border)',
+              background: 'var(--card)',
+              color: 'var(--foreground)',
+            }}
+          >
+            <option value="">Как у стартового TP (по умолчанию)</option>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
           </select>
         </label>
       );

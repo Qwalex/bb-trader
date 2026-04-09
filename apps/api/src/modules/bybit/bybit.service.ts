@@ -9,7 +9,10 @@ import { AppLogService } from '../app-log/app-log.service';
 import { OrdersService } from '../orders/orders.service';
 import {
   parseSourceTpSlStepMap,
+  parseSourceTpSlStepRangeMap,
+  parseTpSlStepRangeOptional,
   parseTpSlStepStart,
+  resolveEffectiveTpSlRange,
   tpSlStepStartToTpNumber,
   type TpSlStepStartMode,
 } from '../settings/tp-sl-step.util';
@@ -2708,32 +2711,55 @@ export class BybitService {
   }
 
   /**
-   * После исполнения TP подряд с TP1 подтягивает SL (шаги «якоря» зависят от `TP_SL_STEP_START`):
-   *   tp1: TP1 → BE, TP2 → TP1, TP3 → TP2 …
-   *   tp2: промежуток в 1 TP — до TP2 не двигаем SL; TP2 → BE; TP3 → TP1; TP4 → TP2; … сколько угодно уровней.
+   * После исполнения TP подряд с TP1 подтягивает SL.
    *
-   * Режим: `TP_SL_STEP_START` = off | tp1..tp5 (глобально), переопределение по источнику —
-   * JSON `SOURCE_TP_SL_STEP_START` { "имя чата lower": "tp2" }. Устаревшее `TP_SL_STEP_ENABLED=true` ≡ tp2.
-   * `tpSlStep` в БД — индекс последнего применённого шага (−1 = ни разу), в координатах «якоря» лестницы.
+   * `TP_SL_STEP_START` — с какого номера TP начинать (до этого SL не двигается); первый шаг — безубыток.
+   * `TP_SL_STEP_RANGE` (1..5), опционально: после старта SL ставится на TP с индексом `filledCount − range − 1`
+   * в отсортированном списке TP; при `filledCount == start` всегда BE. Если настройка пуста — range = start
+   * (как раньше: tp1 → диапазон 1, tp2 → 2).
+   *
+   * Переопределение по источнику: `SOURCE_TP_SL_STEP_START`, `SOURCE_TP_SL_STEP_RANGE`.
+   * Устаревшее `TP_SL_STEP_ENABLED=true` ≡ tp2.
+   * `tpSlStep` в БД — последний применённый `targetStep` = `filledCount − start` (−1 = ни разу).
    */
-  private async resolveTpSlStepModeForSignal(
+  private async resolveTpSlLadderConfigForSignal(
     source: string | null | undefined,
-  ): Promise<TpSlStepStartMode> {
+  ): Promise<{
+    mode: TpSlStepStartMode;
+    startNum: number;
+    rangeNum: number;
+  } | null> {
     const mapRaw = await this.settings.get('SOURCE_TP_SL_STEP_START');
     const map = parseSourceTpSlStepMap(mapRaw);
+    const rangeMapRaw = await this.settings.get('SOURCE_TP_SL_STEP_RANGE');
+    const rangeMap = parseSourceTpSlStepRangeMap(rangeMapRaw);
     const key = String(source ?? '').trim().toLowerCase();
+    let mode: TpSlStepStartMode;
     if (key && map[key] !== undefined) {
-      return map[key]!;
+      mode = map[key]!;
+    } else {
+      const explicit = await this.settings.get('TP_SL_STEP_START');
+      if (explicit !== undefined && String(explicit).trim() !== '') {
+        mode = parseTpSlStepStart(explicit);
+      } else {
+        const legacy = await this.settings.get('TP_SL_STEP_ENABLED');
+        mode =
+          String(legacy ?? '').trim().toLowerCase() === 'true' ? 'tp2' : 'off';
+      }
     }
-    const explicit = await this.settings.get('TP_SL_STEP_START');
-    if (explicit !== undefined && String(explicit).trim() !== '') {
-      return parseTpSlStepStart(explicit);
+    if (mode === 'off') {
+      return null;
     }
-    const legacy = await this.settings.get('TP_SL_STEP_ENABLED');
-    if (String(legacy ?? '').trim().toLowerCase() === 'true') {
-      return 'tp2';
-    }
-    return 'off';
+    const startNum = tpSlStepStartToTpNumber(mode);
+    const globalRange = parseTpSlStepRangeOptional(
+      await this.settings.get('TP_SL_STEP_RANGE'),
+    );
+    const sourceRange = key ? rangeMap[key] : undefined;
+    const rangeNum = resolveEffectiveTpSlRange(
+      startNum,
+      sourceRange !== undefined ? sourceRange : globalRange,
+    );
+    return { mode, startNum, rangeNum };
   }
 
   private async stepStopLossIfTpFilled(
@@ -2753,11 +2779,11 @@ export class BybitService {
       }[];
     },
   ): Promise<void> {
-    const mode = await this.resolveTpSlStepModeForSignal(fresh.source);
-    if (mode === 'off') {
+    const ladder = await this.resolveTpSlLadderConfigForSignal(fresh.source);
+    if (!ladder) {
       return;
     }
-    const startTpNumber = tpSlStepStartToTpNumber(mode);
+    const { mode, startNum: startTpNumber, rangeNum } = ladder;
     if (startTpNumber < 1) {
       return;
     }
@@ -2823,8 +2849,7 @@ export class BybitService {
       return;
     }
 
-    const anchorFilledCount = filledCount - startTpNumber + 1;
-    const targetStep = anchorFilledCount - 1;
+    const targetStep = filledCount - startTpNumber;
 
     if (fresh.tpSlStep >= targetStep) {
       this.logger.debug(
@@ -2834,7 +2859,7 @@ export class BybitService {
     }
 
     this.logger.log(
-      `TP_SL_STEP: попытка signalId=${fresh.id} ${symbol} mode=${mode} startTp=${startTpNumber} filledCount=${filledCount} anchor=${anchorFilledCount} targetStep=${targetStep} tpSlStep=${fresh.tpSlStep}`,
+      `TP_SL_STEP: попытка signalId=${fresh.id} ${symbol} mode=${mode} startTp=${startTpNumber} range=${rangeNum} filledCount=${filledCount} targetStep=${targetStep} tpSlStep=${fresh.tpSlStep}`,
     );
 
     // Получаем позицию один раз — нужна для avgPrice и positionIdx
@@ -2882,11 +2907,15 @@ export class BybitService {
     }
     const positionIdx = (posRow.positionIdx ?? 0) as 0 | 1 | 2;
 
-    // Якорь 1 = безубыток; далее SL на TP с индексом anchorFilledCount−2 (для tp2 первый шаг — после 2-го TP)
+    // Первый шаг лестницы (filledCount == startTpNumber) — безубыток; иначе TP с индексом filledCount − rangeNum − 1.
+    // Если индекс ещё отрицательный (широкий диапазон) — остаёмся на BE до накопления исполненных TP.
+    const avgEntry = parseFloat(String(posRow.avgPrice ?? '0'));
+    const tick = parseFloat(tickSize);
+    const idxTp = filledCount - rangeNum - 1;
+    const useBreakeven =
+      filledCount === startTpNumber || (filledCount > startTpNumber && idxTp < 0);
     let newSl: number;
-    if (anchorFilledCount === 1) {
-      // Безубыток: avgPrice ± 1 тик
-      const avgEntry = parseFloat(String(posRow.avgPrice ?? '0'));
+    if (useBreakeven) {
       if (!Number.isFinite(avgEntry) || avgEntry <= 0) {
         this.logger.warn(
           `TP_SL_STEP: невалидный avgPrice signalId=${fresh.id} ${symbol}`,
@@ -2898,19 +2927,21 @@ export class BybitService {
         });
         return;
       }
-      const tick = parseFloat(tickSize);
-      newSl = direction === 'long'
-        ? avgEntry - tick
-        : avgEntry + tick;
-    } else {
-      const idx = anchorFilledCount - 2;
-      if (idx < 0 || idx >= sorted.length) {
-        this.logger.debug(
-          `TP_SL_STEP: нет уровня TP для idx=${idx} len=${sorted.length} signalId=${fresh.id}`,
+      if (!Number.isFinite(tick) || tick <= 0) {
+        this.logger.warn(
+          `TP_SL_STEP: невалидный tickSize для BE signalId=${fresh.id} ${symbol}`,
         );
         return;
       }
-      newSl = sorted[idx]!;
+      newSl = direction === 'long' ? avgEntry - tick : avgEntry + tick;
+    } else {
+      if (idxTp >= sorted.length) {
+        this.logger.debug(
+          `TP_SL_STEP: нет уровня TP для idx=${idxTp} len=${sorted.length} signalId=${fresh.id}`,
+        );
+        return;
+      }
+      newSl = sorted[idxTp]!;
     }
 
     // Bybit: для лонга SL строго ниже mark, для шорта — строго выше. Уровень «предыдущего TP»
@@ -2925,83 +2956,100 @@ export class BybitService {
       }
     }
 
-    // Проверяем, что новый SL улучшает текущий (движется в сторону цены, не назад)
     const currentSl = fresh.stopLoss;
+    const newSlFormatted = parseFloat(this.formatPriceToTick(newSl, tickSize));
+    const currentSlTicked = parseFloat(this.formatPriceToTick(currentSl, tickSize));
     const improves =
-      direction === 'long' ? newSl > currentSl : newSl < currentSl;
-    if (!improves) {
+      direction === 'long'
+        ? newSlFormatted > currentSlTicked
+        : newSlFormatted < currentSlTicked;
+    const tickTol =
+      Number.isFinite(tickNum) && tickNum > 0 ? tickNum * 0.6 : 1e-8;
+    const alreadyThere =
+      Number.isFinite(newSlFormatted) &&
+      Number.isFinite(currentSlTicked) &&
+      Math.abs(newSlFormatted - currentSlTicked) <= tickTol;
+    if (!improves && !alreadyThere) {
       this.logger.warn(
-        `TP_SL_STEP: SL не улучшается signalId=${fresh.id} ${symbol} dir=${direction} newSl=${newSl} currentSl=${currentSl}`,
+        `TP_SL_STEP: SL не улучшается (возможен вручную ужесточённый SL) signalId=${fresh.id} ${symbol} dir=${direction} newSl=${newSlFormatted} currentSl=${currentSlTicked}`,
       );
       void this.appLog.append('warn', 'bybit', 'TP_SL_STEP: новый SL не лучше текущего', {
         signalId: fresh.id,
         symbol,
         direction,
-        newSl,
-        currentSl,
+        newSl: newSlFormatted,
+        currentSl: currentSlTicked,
         filledCount,
-        anchorFilledCount,
         startTpNumber,
+        rangeNum,
+        hint:
+          'Если SL на бирже уже лучше цели лестницы (например после ручной правки), шаг не продвигается.',
       });
       return;
     }
 
-    const newSlFormatted = parseFloat(this.formatPriceToTick(newSl, tickSize));
-
-    const slRes = await this.applyPositionStopLossFull(
-      client,
-      symbol,
-      newSlFormatted,
-      'tp_sl_step',
-      positionIdx,
-    );
-    if (!slRes.ok) {
+    let slOk = true;
+    let slFailReason: string | undefined;
+    if (improves) {
+      const slRes = await this.applyPositionStopLossFull(
+        client,
+        symbol,
+        newSlFormatted,
+        'tp_sl_step',
+        positionIdx,
+      );
+      slOk = slRes.ok;
+      slFailReason = slRes.failReason;
+    }
+    if (!slOk) {
       void this.appLog.append('warn', 'bybit', 'TP_SL_STEP: setTradingStop не применён', {
         signalId: fresh.id,
         symbol,
         newSl: newSlFormatted,
         filledCount,
-        anchorFilledCount,
         startTpNumber,
+        rangeNum,
         targetStep,
-        bybitError: slRes.failReason ?? 'unknown',
+        bybitError: slFailReason ?? 'unknown',
       });
       this.logger.warn(
-        `TP_SL_STEP: setTradingStop не применён signalId=${fresh.id} ${symbol} newSl=${newSlFormatted} ${slRes.failReason ?? ''}`,
+        `TP_SL_STEP: setTradingStop не применён signalId=${fresh.id} ${symbol} newSl=${newSlFormatted} ${slFailReason ?? ''}`,
       );
       return;
     }
 
-    // Обновляем БД: новый SL + шаг
+    const nextSlDb = improves ? newSlFormatted : currentSlTicked;
     await this.prisma.signal.update({
       where: { id: fresh.id },
-      data: { stopLoss: newSlFormatted, tpSlStep: targetStep },
+      data: { stopLoss: nextSlDb, tpSlStep: targetStep },
     });
 
     await this.orders.createSignalEvent(fresh.id, 'TP_SL_STEPPED', {
       filledCount,
-      anchorFilledCount,
       startTpNumber,
+      rangeNum,
       tpSlMode: mode,
       step: targetStep,
-      previousSl: currentSl,
+      previousSl: currentSlTicked,
       newSl: newSlFormatted,
+      exchangeSkipped: !improves,
     });
 
     void this.appLog.append('info', 'bybit', 'SL подтянут после TP', {
       signalId: fresh.id,
       symbol,
       filledCount,
-      anchorFilledCount,
       startTpNumber,
+      rangeNum,
       mode,
       step: targetStep,
-      previousSl: currentSl,
+      previousSl: currentSlTicked,
       newSl: newSlFormatted,
+      exchangeSkipped: !improves,
     });
 
     this.logger.log(
-      `stepStopLossIfTpFilled: ${symbol} filledCount=${filledCount} anchor=${anchorFilledCount} previousSl=${currentSl} → newSl=${newSlFormatted}`,
+      `stepStopLossIfTpFilled: ${symbol} filledCount=${filledCount} range=${rangeNum} previousSl=${currentSlTicked} → newSl=${newSlFormatted}`,
     );
   }
 

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   forwardRef,
   Inject,
   Injectable,
@@ -19,8 +20,10 @@ import { AppLogService } from '../app-log/app-log.service';
 import { SettingsService } from '../settings/settings.service';
 import {
   parseSourceTpSlStepMap,
+  parseSourceTpSlStepRangeMap,
   parseTpSlStepStart,
   type SourceTpSlStepMap,
+  type SourceTpSlStepRangeMap,
   type TpSlStepStartMode,
 } from '../settings/tp-sl-step.util';
 /** До Bybit/Orders/Telegram: иначе orders → telegram раньше transcript. */
@@ -463,20 +466,23 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   }
 
   async listChats() {
-    const [rows, bySource, tpSlBySource, openrouterSpendTodayByChatId] = await Promise.all([
-      this.prisma.tgUserbotChat.findMany({
-        orderBy: [{ enabled: 'desc' }, { title: 'asc' }],
-      }),
-      this.getSourceMartingaleMap(),
-      this.getSourceTpSlStepMap(),
-      this.getTodayOpenRouterSpendByChatId(),
-    ]);
+    const [rows, bySource, tpSlBySource, tpSlRangeBySource, openrouterSpendTodayByChatId] =
+      await Promise.all([
+        this.prisma.tgUserbotChat.findMany({
+          orderBy: [{ enabled: 'desc' }, { title: 'asc' }],
+        }),
+        this.getSourceMartingaleMap(),
+        this.getSourceTpSlStepMap(),
+        this.getSourceTpSlStepRangeMap(),
+        this.getTodayOpenRouterSpendByChatId(),
+      ]);
     return rows.map((row) => ({
       ...row,
       sourcePriority: this.normalizeSourcePriority((row as { sourcePriority?: number }).sourcePriority),
       martingaleMultiplier:
         bySource[row.title.trim().toLowerCase()] ?? null,
       tpSlStepStart: tpSlBySource[row.title.trim().toLowerCase()] ?? null,
+      tpSlStepRange: tpSlRangeBySource[row.title.trim().toLowerCase()] ?? null,
       openrouterCostTodayUsd: openrouterSpendTodayByChatId[row.chatId] ?? 0,
     }));
   }
@@ -787,6 +793,11 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     return parseSourceTpSlStepMap(raw);
   }
 
+  private async getSourceTpSlStepRangeMap(): Promise<SourceTpSlStepRangeMap> {
+    const raw = await this.settings.get('SOURCE_TP_SL_STEP_RANGE');
+    return parseSourceTpSlStepRangeMap(raw);
+  }
+
   private async setSourceTpSlStepStart(
     sourceName: string,
     mode: TpSlStepStartMode | null,
@@ -802,6 +813,28 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       map[source] = mode;
     }
     await this.settings.set('SOURCE_TP_SL_STEP_START', JSON.stringify(map));
+  }
+
+  private async setSourceTpSlStepRange(
+    sourceName: string,
+    range: number | null,
+  ): Promise<void> {
+    const source = sourceName.trim().toLowerCase();
+    if (!source) {
+      return;
+    }
+    const map = await this.getSourceTpSlStepRangeMap();
+    if (range === null || !Number.isFinite(range)) {
+      delete map[source];
+    } else {
+      const n = Math.trunc(range);
+      if (n < 1 || n > 5) {
+        delete map[source];
+      } else {
+        map[source] = n;
+      }
+    }
+    await this.settings.set('SOURCE_TP_SL_STEP_RANGE', JSON.stringify(map));
   }
 
   private async setSourceMartingaleMultiplier(
@@ -1313,6 +1346,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       minLotBump?: boolean | null;
       /** null = наследовать глобальный TP_SL_STEP_START; иначе off | tp1..tp5 */
       tpSlStepStart?: string | null;
+      /** null = сбросить переопределение и наследовать глобальный TP_SL_STEP_RANGE; иначе 1..5 */
+      tpSlStepRange?: number | null;
     },
   ) {
     const entryNorm =
@@ -1388,6 +1423,27 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           rowTitle,
           parseTpSlStepStart(String(raw)),
         );
+      }
+    }
+
+    if (body.tpSlStepRange !== undefined) {
+      const rowTitle = String(row?.title ?? chatId);
+      const r = body.tpSlStepRange;
+      if (r === null) {
+        await this.setSourceTpSlStepRange(rowTitle, null);
+      } else {
+        if (!Number.isFinite(r)) {
+          throw new BadRequestException(
+            'tpSlStepRange: ожидается null или целое 1–5',
+          );
+        }
+        const n = Math.trunc(r as number);
+        if (n < 1 || n > 5) {
+          throw new BadRequestException(
+            `tpSlStepRange: ожидается целое 1–5, получено ${JSON.stringify(r)}`,
+          );
+        }
+        await this.setSourceTpSlStepRange(rowTitle, n);
       }
     }
 

@@ -53,6 +53,8 @@ type UserbotChat = {
   minLotBump?: boolean | null;
   /** null — наследовать глобальный TP_SL_STEP_START */
   tpSlStepStart?: string | null;
+  /** null — наследовать глобальный TP_SL_STEP_RANGE */
+  tpSlStepRange?: number | null;
   /** Потрачено на OpenRouter по источнику за сегодня (USD). */
   openrouterCostTodayUsd?: number;
 };
@@ -1383,6 +1385,76 @@ export default function TelegramUserbotPage() {
                     <option value="tp3">С TP3</option>
                     <option value="tp4">С TP4</option>
                     <option value="tp5">С TP5</option>
+                  </select>
+                </div>
+                <div className="userbotChatFieldCompact">
+                  <span
+                    className="userbotChatFieldCompactLabel"
+                    title="Диапазон лестницы SL (1–5); пусто — как в общих настройках"
+                  >
+                    SL диапазон
+                  </span>
+                  <select
+                    className="userbotCellInput userbotCellInputCompact userbotCellSelectCompact"
+                    value={
+                      chat.tpSlStepRange != null && chat.tpSlStepRange >= 1 && chat.tpSlStepRange <= 5
+                        ? String(chat.tpSlStepRange)
+                        : ''
+                    }
+                    title="Пусто — глобальный TP_SL_STEP_RANGE или по умолчанию (= старт); иначе 1..5 для этого источника"
+                    aria-label="Диапазон подтягивания SL после TP"
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      const next: number | null = v === '' ? null : Number.parseInt(v, 10);
+                      const same =
+                        (next === null &&
+                          (chat.tpSlStepRange === null || chat.tpSlStepRange === undefined)) ||
+                        next === chat.tpSlStepRange;
+                      if (same) return;
+                      void runAction(`tpsl-range-${chat.chatId}`, async () => {
+                        const res = await fetch(
+                          `${getApiBase()}/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
+                          {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ tpSlStepRange: next }),
+                          },
+                        );
+                        if (!res.ok) {
+                          let detail = `Ошибка сохранения (${res.status})`;
+                          try {
+                            const j = (await res.json()) as {
+                              message?: string | string[];
+                            };
+                            const m = j?.message;
+                            if (typeof m === 'string') {
+                              detail = m;
+                            } else if (Array.isArray(m)) {
+                              detail = m.join('; ');
+                            }
+                          } catch {
+                            /* ignore */
+                          }
+                          throw new Error(detail);
+                        }
+                        setChats((prev) =>
+                          prev.map((row) =>
+                            row.id === chat.id ? { ...row, tpSlStepRange: next } : row,
+                          ),
+                        );
+                        setMsg({
+                          type: 'ok',
+                          text: 'Диапазон SL после TP для источника сохранён',
+                        });
+                      });
+                    }}
+                  >
+                    <option value="">Как общие</option>
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                    <option value="5">5</option>
                   </select>
                 </div>
               </div>

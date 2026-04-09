@@ -329,6 +329,12 @@ export class TelegramUserbotController {
           description:
             'null — наследовать глобальный TP_SL_STEP_START; off | tp1 | tp2 | tp3 | tp4 | tp5',
         },
+        tpSlStepRange: {
+          type: 'integer',
+          nullable: true,
+          description:
+            'null — сбросить и наследовать глобальный TP_SL_STEP_RANGE; иначе 1..5 (шаг лестницы SL в TP)',
+        },
       },
     },
   })
@@ -345,6 +351,7 @@ export class TelegramUserbotController {
       sourcePriority?: number | null;
       minLotBump?: boolean | null;
       tpSlStepStart?: string | null;
+      tpSlStepRange?: number | null;
     },
   ) {
     return this.userbot.updateChat(chatId, body);

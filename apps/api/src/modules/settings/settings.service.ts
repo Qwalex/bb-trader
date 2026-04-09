@@ -7,6 +7,10 @@ import {
   parseDefaultEntryRaw,
   resolveDefaultEntryToUsd,
 } from './entry-sizing.util';
+import {
+  normalizeSourceTpSlStepRangeJsonForPersist,
+  normalizeTpSlStepRangeForPersist,
+} from './tp-sl-step.util';
 
 /** JSON-массив заметок на дашборде: `{ id, text }[]` */
 export const DASHBOARD_TODOS_SETTING_KEY = 'DASHBOARD_TODOS';
@@ -24,6 +28,10 @@ const ENV_FALLBACK: Record<string, string> = {
   BUMP_TO_MIN_EXCHANGE_LOT: 'false',
   /** Если true — в AppLog (БД) писать шумные события; по умолчанию false */
   APPLOG_LOG_NOISY_EVENTS: 'false',
+  /**
+   * Пусто — эффективный диапазон подтягивания SL = номер стартового TP (как при пустой строке в БД).
+   */
+  TP_SL_STEP_RANGE: '',
 };
 
 @Injectable()
@@ -99,10 +107,21 @@ export class SettingsService {
   }
 
   async set(key: string, value: string): Promise<void> {
+    let normalized = value;
+    try {
+      if (key === 'TP_SL_STEP_RANGE') {
+        normalized = normalizeTpSlStepRangeForPersist(value);
+      } else if (key === 'SOURCE_TP_SL_STEP_RANGE') {
+        normalized = normalizeSourceTpSlStepRangeJsonForPersist(value);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new BadRequestException(msg);
+    }
     await this.prisma.setting.upsert({
       where: { key },
-      create: { key, value },
-      update: { value },
+      create: { key, value: normalized },
+      update: { value: normalized },
     });
   }
 
