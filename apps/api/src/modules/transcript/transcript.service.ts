@@ -266,9 +266,22 @@ export class TranscriptService {
   private async fetchGenerationCostUsd(
     apiKey: string,
     generationId: string | undefined,
+    meta?: { operation?: string; logContext?: OpenRouterLogContext },
   ): Promise<number | null> {
     const id = String(generationId ?? '').trim();
-    if (!id) return null;
+    if (!id) {
+      await this.appLog.append('warn', 'openrouter', '↔ generation lookup skipped: missing id', {
+        operation: meta?.operation,
+        logContext: meta?.logContext,
+      });
+      return null;
+    }
+    await this.appLog.append('info', 'openrouter', '↔ generation lookup started', {
+      operation: meta?.operation,
+      generationId: id,
+      url: OPENROUTER_GENERATION_URL,
+      logContext: meta?.logContext,
+    });
     try {
       const res = await fetch(
         `${OPENROUTER_GENERATION_URL}?id=${encodeURIComponent(id)}`,
@@ -280,7 +293,16 @@ export class TranscriptService {
           },
         },
       );
-      if (!res.ok) return null;
+      if (!res.ok) {
+        await this.appLog.append('warn', 'openrouter', '↔ generation lookup failed', {
+          operation: meta?.operation,
+          generationId: id,
+          httpStatus: res.status,
+          statusText: res.statusText,
+          logContext: meta?.logContext,
+        });
+        return null;
+      }
       const json = (await res.json()) as {
         data?: { total_cost?: unknown; usage?: unknown; cost?: unknown };
       };
@@ -289,8 +311,24 @@ export class TranscriptService {
         this.parseNumberOrNull(data.total_cost) ??
         this.parseNumberOrNull(data.cost) ??
         this.parseNumberOrNull(data.usage);
+      await this.appLog.append('info', 'openrouter', '↔ generation lookup completed', {
+        operation: meta?.operation,
+        generationId: id,
+        httpStatus: res.status,
+        totalCost: data.total_cost ?? null,
+        cost: data.cost ?? null,
+        usage: data.usage ?? null,
+        resolvedCostUsd: cost ?? null,
+        logContext: meta?.logContext,
+      });
       return cost != null && cost >= 0 ? cost : null;
-    } catch {
+    } catch (e) {
+      await this.appLog.append('error', 'openrouter', '↔ generation lookup exception', {
+        operation: meta?.operation,
+        generationId: id,
+        error: this.formatOpenRouterError(e),
+        logContext: meta?.logContext,
+      });
       return null;
     }
   }
@@ -1003,7 +1041,10 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
           ? (typedRes.usage as Record<string, unknown>)
           : undefined;
       // Источник истины по деньгам: Generation API по id ответа.
-      const generationCostUsd = await this.fetchGenerationCostUsd(apiKey, typedRes.id);
+      const generationCostUsd = await this.fetchGenerationCostUsd(apiKey, typedRes.id, {
+        operation: ctx.operation,
+        logContext: ctx.logContext,
+      });
       const resolvedCostUsd = generationCostUsd;
 
       const rawContent = typedRes.choices?.[0]?.message?.content;
