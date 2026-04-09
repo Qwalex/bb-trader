@@ -87,7 +87,7 @@ type IngestProcessJob = {
    */
   text: string | null;
   textLen: number;
-  meta?: { replyToMessageId?: string };
+  meta?: { replyToMessageId?: string; signalExternalId?: string };
   options?: ProcessIngestOptions;
 };
 
@@ -104,6 +104,7 @@ type ActiveSignalLookup = {
   source: string | null;
   sourceChatId: string | null;
   sourceMessageId: string | null;
+  signalExternalId?: string | null;
 };
 
 type SourceMartingaleMap = Record<string, number>;
@@ -1246,6 +1247,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
             m.text!,
             {
               replyToMessageId: m.replyToMessageId,
+              signalExternalId: this.extractSignalExternalId(m.text),
             },
             {
               source: 'poll',
@@ -1485,6 +1487,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         text.trim(),
         {
           replyToMessageId,
+          signalExternalId: this.extractSignalExternalId(text),
         },
         {
           source: 'realtime',
@@ -1501,7 +1504,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     chatId: string,
     messageId: string,
     text: string,
-    meta?: { replyToMessageId?: string },
+    meta?: { replyToMessageId?: string; signalExternalId?: string },
     options?: ProcessIngestOptions,
   ): Promise<void> {
     const dedupMessageKey = `${chatId}:${messageId}`;
@@ -1654,7 +1657,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       status: string;
     },
     text: string,
-    meta?: { replyToMessageId?: string },
+    meta?: { replyToMessageId?: string; signalExternalId?: string },
     options?: ProcessIngestOptions,
   ): Promise<void> {
     try {
@@ -1707,6 +1710,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         | null;
       const groupName = chatMeta?.title?.trim() || ingest.chatId;
       const replyToMessageId = meta?.replyToMessageId?.trim() || undefined;
+      const signalExternalId =
+        meta?.signalExternalId?.trim() || this.extractSignalExternalId(text) || undefined;
       const hasQuotedSource = Boolean(replyToMessageId);
       const patternMatch = await this.matchFilterKindByPatterns(
         groupName,
@@ -1762,7 +1767,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       const aiRequest = cls.aiRequest;
       let aiResponse = cls.aiResponse;
       let ignoredOtherError: string | null = null;
-      if (!hasQuotedSource && (kind === 'close' || kind === 'reentry')) {
+      if (!hasQuotedSource && !signalExternalId && (kind === 'close' || kind === 'reentry')) {
         const previousKind = kind;
         kind = 'other';
         ignoredOtherError =
@@ -1794,6 +1799,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         kind,
         hasQuotedSource,
         replyToMessageId: replyToMessageId ?? null,
+        signalExternalId: signalExternalId ?? null,
         classifiedAt: new Date().toISOString(),
         processingElapsedMs: Date.now() - processingStartedAt.getTime(),
       });
@@ -1804,6 +1810,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           messageId: ingest.messageId,
           text,
           replyToMessageId,
+          signalExternalId,
         });
         this.appendIngestStageLog(
           reentry.ok ? 'info' : 'warn',
@@ -1832,6 +1839,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           chatId: ingest.chatId,
           messageId: ingest.messageId,
           replyToMessageId,
+          signalExternalId,
         });
         this.appendIngestStageLog(
           closeResult.ok ? 'info' : 'warn',
@@ -1876,6 +1884,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           messageId: ingest.messageId,
           text,
           replyToMessageId,
+          signalExternalId,
           quotedText,
         });
         this.appendIngestStageLog(
@@ -2261,6 +2270,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       const place = await this.bybit.placeSignalOrders(signal, text, {
         chatId: ingest.chatId,
         messageId: ingest.messageId,
+        signalExternalId,
       });
       if (!place.ok) {
         const placeError = formatError(place.error);
@@ -2463,16 +2473,22 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     messageId: string;
     text: string;
     replyToMessageId?: string;
+    signalExternalId?: string;
   }): Promise<
     { ok: true; mode: 'updated' | 'replaced' } | { ok: false; error: string }
   > {
-    const replyToMessageId = params.replyToMessageId?.trim();
-    if (!replyToMessageId) {
-      return { ok: false, error: 'Сообщение о перезаходе без цитаты исходного сигнала' };
+    const replyToMessageId = params.replyToMessageId?.trim() || undefined;
+    const signalExternalId = params.signalExternalId?.trim() || undefined;
+    if (!replyToMessageId && !signalExternalId) {
+      return {
+        ok: false,
+        error: 'Сообщение о перезаходе без цитаты исходного сигнала и без SIGNAL ID',
+      };
     }
     const lookup = await this.findActiveSignalFromReply({
       chatId: params.chatId,
       replyToMessageId,
+      signalExternalId,
       flowLabel: 'Reentry',
     });
     if (!lookup.ok) {
@@ -2501,7 +2517,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
       const [originalMessageText, quotedMessageText] = await Promise.all([
         this.fetchChatMessageText(params.chatId, rootSource.messageId),
-        replyToMessageId !== rootSource.messageId
+        replyToMessageId && replyToMessageId !== rootSource.messageId
           ? this.fetchChatMessageText(params.chatId, replyToMessageId)
           : Promise.resolve(undefined),
       ]);
@@ -2644,6 +2660,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       const place = await this.bybit.placeSignalOrders(nextSignal, params.text, {
         chatId: params.chatId,
         messageId: rootSource.messageId,
+        signalExternalId: params.signalExternalId?.trim() || undefined,
       });
       if (!place.ok) {
         return { ok: false, error: formatError(place.error) };
@@ -2785,14 +2802,20 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     chatId: string;
     messageId: string;
     replyToMessageId?: string;
+    signalExternalId?: string;
   }): Promise<{ ok: true } | { ok: false; error: string }> {
-    const replyToMessageId = params.replyToMessageId?.trim();
-    if (!replyToMessageId) {
-      return { ok: false, error: 'Сообщение о закрытии без цитаты исходного сигнала' };
+    const replyToMessageId = params.replyToMessageId?.trim() || undefined;
+    const signalExternalId = params.signalExternalId?.trim() || undefined;
+    if (!replyToMessageId && !signalExternalId) {
+      return {
+        ok: false,
+        error: 'Сообщение о закрытии без цитаты исходного сигнала и без SIGNAL ID',
+      };
     }
     const lookup = await this.findActiveSignalFromReply({
       chatId: params.chatId,
       replyToMessageId,
+      signalExternalId,
       flowLabel: 'Close',
     });
     if (!lookup.ok) {
@@ -2852,6 +2875,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     messageId: string;
     text: string;
     replyToMessageId?: string;
+    signalExternalId?: string;
     quotedText?: string;
   }): Promise<
     | {
@@ -2866,13 +2890,18 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       }
     | { ok: false; error: string }
   > {
-    const replyToMessageId = params.replyToMessageId?.trim();
-    if (!replyToMessageId) {
-      return { ok: false, error: 'Сообщение о результате без цитаты исходного сигнала' };
+    const replyToMessageId = params.replyToMessageId?.trim() || undefined;
+    const signalExternalId = params.signalExternalId?.trim() || undefined;
+    if (!replyToMessageId && !signalExternalId) {
+      return {
+        ok: false,
+        error: 'Сообщение о результате без цитаты исходного сигнала и без SIGNAL ID',
+      };
     }
     const lookup = await this.findActiveSignalFromReply({
       chatId: params.chatId,
       replyToMessageId,
+      signalExternalId,
       flowLabel: 'Result',
     });
     if (!lookup.ok) {
@@ -3020,7 +3049,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
   private async findActiveSignalFromReply(params: {
     chatId: string;
-    replyToMessageId: string;
+    replyToMessageId?: string;
+    signalExternalId?: string;
     flowLabel: 'Close' | 'Reentry' | 'Result';
   }): Promise<
     | {
@@ -3035,9 +3065,36 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       }
     | { ok: false; error: string }
   > {
+    const replyToMessageId = params.replyToMessageId?.trim() || undefined;
+    const signalExternalId = params.signalExternalId?.trim() || undefined;
+    if (!replyToMessageId && !signalExternalId) {
+      return {
+        ok: false,
+        error: 'Нужна цитата исходного сигнала или SIGNAL ID',
+      };
+    }
+    if (!replyToMessageId && signalExternalId) {
+      const signal = await this.findActiveSignalByExternalId(params.chatId, signalExternalId);
+      if (signal) {
+        return {
+          ok: true,
+          signal,
+          rootSource: {
+            messageId: signal.sourceMessageId ?? '',
+            chain: [],
+            matchedSignalMessageIds: [],
+            stopReason: 'resolved_by_signal_external_id',
+          },
+        };
+      }
+      return {
+        ok: false,
+        error: `Для SIGNAL ID ${signalExternalId} активный сигнал не найден`,
+      };
+    }
     const rootSource = await this.resolveRootSignalSourceMessageId(
       params.chatId,
-      params.replyToMessageId,
+      replyToMessageId!,
     );
     const signal = await this.prisma.signal.findFirst({
       where: {
@@ -3063,6 +3120,24 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       },
     });
     if (!signal) {
+      if (signalExternalId) {
+        const signalByExternalId = await this.findActiveSignalByExternalId(
+          params.chatId,
+          signalExternalId,
+        );
+        if (signalByExternalId) {
+          return {
+            ok: true,
+            signal: signalByExternalId,
+            rootSource: {
+              messageId: signalByExternalId.sourceMessageId ?? rootSource.messageId,
+              chain: rootSource.chain,
+              matchedSignalMessageIds: rootSource.matchedSignalMessageIds,
+              stopReason: `${rootSource.stopReason};fallback_signal_external_id`,
+            },
+          };
+        }
+      }
       const lookup = await this.collectSignalLookupDiagnostics(
         params.chatId,
         rootSource.messageId,
@@ -3074,7 +3149,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         `${params.flowLabel}: active signal not found for resolved root`,
         {
           sourceChatId: params.chatId,
-          quotedMessageId: params.replyToMessageId,
+          quotedMessageId: replyToMessageId,
+          signalExternalId: signalExternalId ?? null,
           rootSourceMessageId: rootSource.messageId,
           rootResolution: {
             chain: rootSource.chain,
@@ -3086,10 +3162,41 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       );
       return {
         ok: false,
-        error: `Для цитаты ${params.chatId}:${params.replyToMessageId} активный сигнал не найден (root: ${rootSource.messageId})`,
+        error: `Для цитаты ${params.chatId}:${replyToMessageId} активный сигнал не найден (root: ${rootSource.messageId})`,
       };
     }
     return { ok: true, signal, rootSource };
+  }
+
+  private async findActiveSignalByExternalId(
+    chatId: string,
+    signalExternalId: string,
+  ): Promise<ActiveSignalLookup | null> {
+    const row = await (this.prisma as any).signal.findFirst({
+      where: {
+        deletedAt: null,
+        sourceChatId: chatId,
+        signalExternalId,
+        status: { in: ['ORDERS_PLACED', 'OPEN', 'PARSED'] },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        pair: true,
+        direction: true,
+        entries: true,
+        stopLoss: true,
+        takeProfits: true,
+        leverage: true,
+        orderUsd: true,
+        capitalPercent: true,
+        source: true,
+        sourceChatId: true,
+        sourceMessageId: true,
+        signalExternalId: true,
+      },
+    });
+    return (row ?? null) as ActiveSignalLookup | null;
   }
 
   private async resolveRootSignalSourceMessageId(
@@ -4193,6 +4300,18 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       );
     }
     return this.readNumericString(value);
+  }
+
+  private extractSignalExternalId(text: unknown): string | undefined {
+    const raw = typeof text === 'string' ? text : '';
+    if (!raw) {
+      return undefined;
+    }
+    const normalized = raw.replace(/\u00a0/g, ' ');
+    const match = normalized.match(
+      /(?:^|[^\p{L}\p{N}_])signal\s*id\s*[:#\-]?\s*([A-Za-z0-9][A-Za-z0-9._/-]{0,127})/iu,
+    );
+    return match?.[1]?.trim();
   }
 
   private readBooleanish(value: unknown): boolean {

@@ -23,6 +23,7 @@ model Signal {
   source         String?
   sourceChatId   String?
   sourceMessageId String?
+  signalExternalId String?
   rawMessage     String?
   status         String // PENDING, OPEN, ORDERS_PLACED, CLOSED_WIN, CLOSED_LOSS, CLOSED_MIXED, FAILED
   realizedPnl    Float?
@@ -36,6 +37,7 @@ model Signal {
   events         SignalEvent[]
 
   @@index([sourceChatId, sourceMessageId])
+  @@index([sourceChatId, signalExternalId])
   @@index([deletedAt, createdAt])
   @@index([deletedAt, closedAt])
 }

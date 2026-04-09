@@ -85,7 +85,7 @@ export class OrdersService {
     signal: SignalDto,
     rawMessage: string | undefined,
     status: string,
-    origin?: { chatId?: string; messageId?: string },
+    origin?: { chatId?: string; messageId?: string; signalExternalId?: string },
   ) {
     try {
       return await this.prisma.signal.create({
@@ -102,6 +102,7 @@ export class OrdersService {
           source: signal.source ?? null,
           sourceChatId: origin?.chatId ?? null,
           sourceMessageId: origin?.messageId ?? null,
+          signalExternalId: origin?.signalExternalId?.trim() || null,
           rawMessage: rawMessage ?? null,
           status,
         },

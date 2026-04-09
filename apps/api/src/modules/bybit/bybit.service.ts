@@ -1886,7 +1886,7 @@ export class BybitService {
   async placeSignalOrders(
     signal: SignalDto,
     rawMessage: string | undefined,
-    origin?: { chatId?: string; messageId?: string },
+    origin?: { chatId?: string; messageId?: string; signalExternalId?: string },
   ): Promise<PlaceOrdersResult> {
     signal = await this.applySourceMartingaleSizing(signal);
     const symbol = normalizeTradingPair(signal.pair);
