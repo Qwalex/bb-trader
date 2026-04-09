@@ -556,15 +556,24 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       const json = (await res.json()) as {
         data?: Array<{
           id?: unknown;
-          pricing?: { prompt?: unknown; completion?: unknown };
+          pricing?: {
+            prompt?: unknown;
+            completion?: unknown;
+            input?: unknown;
+            output?: unknown;
+          };
         }>;
       };
       const byModel: Record<string, { inputPerToken: number; outputPerToken: number }> = {};
       for (const model of json.data ?? []) {
         const id = String(model?.id ?? '').trim();
         if (!id) continue;
-        const inputPerToken = this.parseNumberOrNull(model?.pricing?.prompt);
-        const outputPerToken = this.parseNumberOrNull(model?.pricing?.completion);
+        const inputPerToken =
+          this.parseNumberOrNull(model?.pricing?.prompt) ??
+          this.parseNumberOrNull(model?.pricing?.input);
+        const outputPerToken =
+          this.parseNumberOrNull(model?.pricing?.completion) ??
+          this.parseNumberOrNull(model?.pricing?.output);
         if (
           inputPerToken == null ||
           outputPerToken == null ||
@@ -592,10 +601,12 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         responseMeta?: {
           model?: unknown;
           cost?: unknown;
+          costUsd?: unknown;
           totalCost?: unknown;
           total_cost?: unknown;
           usage?: {
             cost?: unknown;
+            costUsd?: unknown;
             totalCost?: unknown;
             total_cost?: unknown;
             promptTokens?: unknown;
@@ -611,9 +622,11 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       const meta = payload.responseMeta ?? {};
       const usage = meta.usage ?? {};
       const candidate =
+        this.parseNumberOrNull(meta.costUsd) ??
         this.parseNumberOrNull(meta.cost) ??
         this.parseNumberOrNull(meta.totalCost) ??
         this.parseNumberOrNull(meta.total_cost) ??
+        this.parseNumberOrNull(usage.costUsd) ??
         this.parseNumberOrNull(usage.cost) ??
         this.parseNumberOrNull(usage.totalCost) ??
         this.parseNumberOrNull(usage.total_cost) ??
