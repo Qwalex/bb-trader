@@ -120,6 +120,7 @@ const USERBOT_MIN_BALANCE_USD_DEFAULT = 3;
 const USERBOT_BALANCE_CHECK_CACHE_MS = 30_000;
 const USERBOT_FILTER_MATCH_THRESHOLD = 0.34;
 const CLOSE_REOPEN_COOLDOWN_MS = 30_000;
+const CRITICAL_NOTIFY_URL = 'https://dev.qwalex.ru/notify/';
 
 @Injectable()
 export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
@@ -154,6 +155,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         maxAgeMs: number;
       }
     | undefined;
+  private lastCriticalNotifyAtByKey = new Map<string, number>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -1867,7 +1869,6 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         'text',
         {
           text,
-          skipResultHeuristicGuard: kind === 'signal',
           openrouterLogContext: {
             chatId: ingest.chatId,
             source: groupName,
@@ -2215,6 +2216,12 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           stage: 'bybit',
           error: placeError,
         });
+        await this.notifyCriticalExternalApiUnavailable('bybit', {
+          ingestId: ingest.id,
+          chatId: ingest.chatId,
+          stage: 'bybit',
+          error: placeError,
+        });
         return;
       }
 
@@ -2242,20 +2249,37 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       });
     } catch (e) {
       const err = formatError(e);
+      const isCriticalClassify = err.startsWith('CRITICAL_CLASSIFY:');
+      const normalizedErr = isCriticalClassify
+        ? err.replace(/^CRITICAL_CLASSIFY:\s*/, '')
+        : err;
       this.appendIngestStageLog('error', 'Userbot: pipeline exception', ingest, {
-        error: err,
+        error: normalizedErr,
       });
       await this.updateIngest(ingest.id, {
         status: 'parse_error',
-        error: err,
+        error: normalizedErr,
       });
-      await this.notifySignalFailureToBot({
-        ingestId: ingest.id,
-        chatId: ingest.chatId,
-        token: this.extractTokenHint(text),
-        stage: 'transcript',
-        error: err,
-      });
+      if (!isCriticalClassify) {
+        await this.notifySignalFailureToBot({
+          ingestId: ingest.id,
+          chatId: ingest.chatId,
+          token: this.extractTokenHint(text),
+          stage: 'transcript',
+          error: normalizedErr,
+        });
+      }
+      if (!isCriticalClassify) {
+        const lowered = normalizedErr.toLowerCase();
+        const criticalApi: 'bybit' | 'openrouter' =
+          lowered.includes('bybit') ? 'bybit' : 'openrouter';
+        await this.notifyCriticalExternalApiUnavailable(criticalApi, {
+          ingestId: ingest.id,
+          chatId: ingest.chatId,
+          stage: criticalApi === 'bybit' ? 'bybit' : 'transcript',
+          error: normalizedErr,
+        });
+      }
     }
   }
 
@@ -3524,7 +3548,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     ingestId: string;
     chatId: string;
     token: string;
-    stage: 'transcript' | 'bybit';
+    stage: 'classify' | 'transcript' | 'bybit';
     error: string;
     missingData?: string[];
   }): Promise<void> {
@@ -3551,6 +3575,74 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(
         `Failed to notify bot about signal error ingestId=${params.ingestId}: ${notify.error ?? 'unknown'}`,
       );
+      await this.notifyCriticalExternalApiUnavailable('telegram', {
+        ingestId: params.ingestId,
+        chatId: params.chatId,
+        stage: params.stage,
+        error: notify.error ?? 'notifyUserbotSignalFailure failed',
+      });
+    }
+  }
+
+  private isLikelyApiUnavailable(errorText: string, api: 'openrouter' | 'bybit' | 'telegram'): boolean {
+    const t = errorText.toLowerCase();
+    const common =
+      t.includes('timeout') ||
+      t.includes('timed out') ||
+      t.includes('econnrefused') ||
+      t.includes('enotfound') ||
+      t.includes('eai_again') ||
+      t.includes('fetch failed') ||
+      t.includes('socket hang up') ||
+      t.includes('network error') ||
+      t.includes('service unavailable') ||
+      t.includes('bad gateway') ||
+      t.includes('gateway timeout') ||
+      t.includes('internal server error') ||
+      t.includes('status 5');
+    if (api === 'openrouter') {
+      return common || t.includes('openrouter недоступен') || t.includes('openrouter');
+    }
+    if (api === 'bybit') {
+      return common || t.includes('bybit unavailable') || t.includes('bybit');
+    }
+    return common || t.includes('telegram bot не запущен') || t.includes('telegram_whitelist пуст');
+  }
+
+  private async notifyCriticalExternalApiUnavailable(
+    api: 'openrouter' | 'bybit' | 'telegram',
+    params: { ingestId?: string | null; chatId?: string | null; stage?: string | null; error: string },
+  ): Promise<void> {
+    if (!this.isLikelyApiUnavailable(params.error, api)) {
+      return;
+    }
+    const dedupKey = `${api}:${params.chatId ?? 'n/a'}:${params.stage ?? 'n/a'}`;
+    const now = Date.now();
+    const prev = this.lastCriticalNotifyAtByKey.get(dedupKey) ?? 0;
+    if (now - prev < 60_000) {
+      return;
+    }
+    this.lastCriticalNotifyAtByKey.set(dedupKey, now);
+    const text =
+      `[CRITICAL API UNAVAILABLE]\n` +
+      `api=${api}\n` +
+      `ingestId=${params.ingestId ?? 'n/a'}\n` +
+      `chatId=${params.chatId ?? 'n/a'}\n` +
+      `stage=${params.stage ?? 'n/a'}\n` +
+      `error=${params.error}`;
+    try {
+      const res = await fetch(CRITICAL_NOTIFY_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      if (!res.ok) {
+        this.logger.warn(
+          `critical notify failed: status=${res.status} api=${api} ingestId=${params.ingestId ?? 'n/a'}`,
+        );
+      }
+    } catch (e) {
+      this.logger.warn(`critical notify error: ${formatError(e)}`);
     }
   }
 
@@ -3597,16 +3689,47 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     if (!useAiClassifier) {
       return { kind: 'other' };
     }
-    const ai = await this.transcript.classifyTradingMessage(text, {
-      replyToMessageId,
-      quotedText,
-      logContext: {
-        chatId,
-        source: groupName,
-        ingestId,
+    let ai: Awaited<ReturnType<TranscriptService['classifyTradingMessage']>>;
+    try {
+      ai = await this.transcript.classifyTradingMessage(text, {
+        replyToMessageId,
+        quotedText,
+        logContext: {
+          chatId,
+          source: groupName,
+          ingestId,
+          stage: 'classify',
+        },
+      });
+    } catch (e) {
+      const err = formatError(e);
+      this.logger.error(
+        `CRITICAL: OpenRouter classify unavailable (ingestId=${ingestId ?? 'n/a'}, chatId=${chatId ?? 'n/a'}): ${err}`,
+      );
+      await this.appLog.append('error', 'system', 'CRITICAL: OpenRouter classify unavailable', {
+        ingestId: ingestId ?? null,
+        chatId: chatId ?? null,
+        groupName: groupName ?? null,
+        error: err,
         stage: 'classify',
-      },
-    });
+      });
+      if (ingestId && chatId) {
+        await this.notifySignalFailureToBot({
+          ingestId,
+          chatId,
+          token: this.extractTokenHint(text),
+          stage: 'classify',
+          error: err,
+        });
+      }
+      await this.notifyCriticalExternalApiUnavailable('openrouter', {
+        ingestId: ingestId ?? null,
+        chatId: chatId ?? null,
+        stage: 'classify',
+        error: err,
+      });
+      throw new Error(`CRITICAL_CLASSIFY:${err}`);
+    }
     const aiRequest = this.limitTrace(
       ai.debug?.request ??
         JSON.stringify({

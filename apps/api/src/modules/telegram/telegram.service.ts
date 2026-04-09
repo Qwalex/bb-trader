@@ -520,7 +520,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     /** Название группы/канала из userbot (TgUserbotChat.title), если есть */
     groupTitle?: string;
     token: string;
-    stage: 'transcript' | 'bybit';
+    stage: 'classify' | 'transcript' | 'bybit';
     error: string;
     missingData?: string[];
   }): Promise<{ ok: boolean; deliveredTo: number; error?: string }> {
@@ -533,7 +533,11 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
 
     const stageText =
-      params.stage === 'transcript' ? 'транскрибации/разбора' : 'установки ордеров на Bybit';
+      params.stage === 'classify'
+        ? 'классификации'
+        : params.stage === 'transcript'
+          ? 'транскрибации/разбора'
+          : 'установки ордеров на Bybit';
     const missing =
       params.missingData && params.missingData.length > 0
         ? `\nНе хватило данных: ${params.missingData.join(', ')}`

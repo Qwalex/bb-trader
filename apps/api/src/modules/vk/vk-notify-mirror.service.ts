@@ -147,7 +147,7 @@ export class VkNotifyMirrorService {
     chatId: string;
     groupTitle?: string;
     token: string;
-    stage: 'transcript' | 'bybit';
+    stage: 'classify' | 'transcript' | 'bybit';
     error: string;
     missingData?: string[];
   }): Promise<void> {
@@ -156,7 +156,11 @@ export class VkNotifyMirrorService {
     if (ids.length === 0) return;
 
     const stageText =
-      params.stage === 'transcript' ? 'транскрибации/разбора' : 'установки ордеров на Bybit';
+      params.stage === 'classify'
+        ? 'классификации'
+        : params.stage === 'transcript'
+          ? 'транскрибации/разбора'
+          : 'установки ордеров на Bybit';
     const missing =
       params.missingData && params.missingData.length > 0
         ? `\nНе хватило данных: ${params.missingData.join(', ')}`

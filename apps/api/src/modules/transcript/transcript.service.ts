@@ -355,29 +355,13 @@ Be conservative: if unsure, return "other".`;
 
     const apiKey = await this.settings.get('OPENROUTER_API_KEY');
     if (!apiKey) {
-      return {
-        kind: this.classifyMessageHeuristic(text),
-        reason: 'OPENROUTER_API_KEY is missing, fallback to heuristic',
-        debug: {
-          request: JSON.stringify(requestPayload),
-          response: 'OPENROUTER_API_KEY is missing',
-          usedFallback: true,
-        },
-      };
+      throw new Error('OpenRouter недоступен: OPENROUTER_API_KEY is missing');
     }
     const model =
       (await this.resolveModelKeyWithDefault('OPENROUTER_MODEL_TEXT')) ??
       (await this.settings.get('OPENROUTER_MODEL_DEFAULT'));
     if (!model) {
-      return {
-        kind: this.classifyMessageHeuristic(text),
-        reason: 'OpenRouter model is missing, fallback to heuristic',
-        debug: {
-          request: JSON.stringify(requestPayload),
-          response: 'OPENROUTER model is missing',
-          usedFallback: true,
-        },
-      };
+      throw new Error('OpenRouter недоступен: model is missing');
     }
 
     try {
@@ -411,16 +395,7 @@ Be conservative: if unsure, return "other".`;
           parsed.result.ok === false
             ? parsed.result.error
             : 'Classifier parse returned non-error result';
-        return {
-          kind: this.classifyMessageHeuristic(text),
-          reason,
-          debug: {
-            model,
-            request: JSON.stringify({ ...requestPayload, model, messages }),
-            response: responseRaw,
-            usedFallback: true,
-          },
-        };
+        throw new Error(`Classifier вернул невалидный JSON: ${reason}`);
       }
       const root = parsed.value as { kind?: string; reason?: string };
       if (
@@ -441,27 +416,9 @@ Be conservative: if unsure, return "other".`;
           },
         };
       }
-      return {
-        kind: this.classifyMessageHeuristic(text),
-        reason: 'Classifier returned unknown kind',
-        debug: {
-          model,
-          request: JSON.stringify({ ...requestPayload, model, messages }),
-          response: responseRaw,
-          usedFallback: true,
-        },
-      };
+      throw new Error('Classifier returned unknown kind');
     } catch (e) {
-      return {
-        kind: this.classifyMessageHeuristic(text),
-        reason: this.formatOpenRouterError(e),
-        debug: {
-          model,
-          request: JSON.stringify(requestPayload),
-          response: this.formatOpenRouterError(e),
-          usedFallback: true,
-        },
-      };
+      throw new Error(`OpenRouter classifyTradingMessage failed: ${this.formatOpenRouterError(e)}`);
     }
   }
 
@@ -731,11 +688,6 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       imageMime?: string;
       audioBase64?: string;
       audioMime?: string;
-      /**
-       * Если upstream (например userbot AI-классификатор) уже решил, что это "signal",
-       * не применяем ранний эвристический guard "result" (который экономит запросы).
-       */
-      skipResultHeuristicGuard?: boolean;
       reentryContext?: {
         baseSignal: Partial<SignalDto>;
         rootSourceMessageId?: string;
@@ -775,23 +727,6 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     const defaultOrderUsd: number = await this.resolveDefaultOrderUsdForParse(
       overrides,
     );
-    if (
-      kind === 'text' &&
-      typeof payload.text === 'string' &&
-      !payload.skipResultHeuristicGuard &&
-      this.classifyHeuristic(payload.text) === 'result'
-    ) {
-      return {
-        ok: 'incomplete',
-        partial: {
-          orderUsd: defaultOrderUsd,
-          capitalPercent: 0,
-        },
-        missing: [],
-        prompt:
-          'Похоже на отчёт по уже закрытой/отработанной сделке, а не на новый сигнал. Новый ордер не создаю.',
-      };
-    }
     const messages = this.buildMessages(kind, payload, defaultOrderUsd);
     const t0 = Date.now();
     this.logger.log(
@@ -1445,63 +1380,4 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     return String(error);
   }
 
-  private classifyHeuristic(text: string): 'signal' | 'result' | 'other' {
-    const t = text.toLowerCase();
-    const hasPairHint =
-      /[a-z0-9]{2,20}\s*\/\s*usdt\b/i.test(text) ||
-      /\b[a-z0-9]{2,20}usdt\b/i.test(text);
-    const hasDirectionHint =
-      /\b(long|short|buy|sell)\b/.test(t) ||
-      /(лонг|шорт)/u.test(t) ||
-      /(длинн(?:ая|ую|ой)?\s+позици|в\s+лонг)/u.test(t) ||
-      /(коротк(?:ая|ую|ой)?\s+позици|в\s+шорт)/u.test(t);
-    const hasStopHint =
-      /\b(sl|stop[\s-]?loss)\b/.test(t) || /(стоп|стоп-лосс)/u.test(t);
-    const hasTpHint =
-      /\b(tp|take[\s-]?profit|target|targets)\b/.test(t) ||
-      /(тейк|тейк-профит|цели|цель)/u.test(t);
-    if (hasPairHint && hasDirectionHint && hasStopHint && hasTpHint) {
-      return 'signal';
-    }
-    const hasResultKeywords =
-      /\b(result|profit|pnl|closed|tp hit|sl hit|duration|period)\b/.test(t) ||
-      /(результат|прибыль|убыток|закрыт|закрыта|закрыто)/u.test(t);
-    const hasPercent = /[-+]?\d+(?:[.,]\d+)?\s*%/u.test(t);
-    const hasResultPattern =
-      /profit\s*:|pnl\s*:|tp\s*\d+\s*✅|duration\s*:|period\s*:/u.test(t) ||
-      /✅\s*$/.test(t);
-    if (
-      (hasResultKeywords || (hasPercent && hasResultPattern)) &&
-      // Если текст похож на полноценный сетап (пара+SL+TP), не считаем это “result”.
-      !(hasPairHint && hasStopHint && hasTpHint)
-    ) {
-      return 'result';
-    }
-    return 'other';
-  }
-
-  private classifyMessageHeuristic(
-    text: string,
-  ): 'signal' | 'close' | 'reentry' | 'result' | 'other' {
-    const t = text.toLowerCase();
-    const hasCloseWord =
-      /\b(close|closed|cancel(?:led)?|force close)\b/u.test(t) ||
-      /(?<!\p{L})(закрыт|закрыта|закрыто|закрыли|закрываем|отмена|отменен|отмена)(?!\p{L})/u.test(
-        t,
-      );
-    const hasTpOrSl =
-      /\b(tp|take[\s-]?profit|sl|stop[\s-]?loss|target(?:\s+\d+)?\s+reached)\b/u.test(t) ||
-      /(?<!\p{L})(тейк|стоп|цель|цели)(?!\p{L})/u.test(t) ||
-      /✅|❌|🟢|🔴/.test(text);
-    if (hasCloseWord && !hasTpOrSl) {
-      return 'close';
-    }
-    if (
-      /\b(re[-\s]?entry|reentry|re[\s-]enter)\b/u.test(t) ||
-      /(?<!\p{L})(перезаход|перезаходим|перезайти)(?!\p{L})/u.test(t)
-    ) {
-      return 'reentry';
-    }
-    return this.classifyHeuristic(text);
-  }
 }
