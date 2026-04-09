@@ -77,6 +77,11 @@ a:hover {
   padding: 1rem 1.25rem;
 }
 
+.cardWarn {
+  border-color: rgba(239, 68, 68, 0.7);
+  background: linear-gradient(0deg, rgba(239, 68, 68, 0.1), rgba(239, 68, 68, 0.1)), var(--card);
+}
+
 .card h3 {
   font-size: 0.75rem;
   color: var(--muted);

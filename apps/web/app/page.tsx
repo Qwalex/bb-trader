@@ -50,6 +50,15 @@ type UserbotStatus = {
     reason?: string;
   };
 };
+type OpenrouterBalance = {
+  ok: boolean;
+  balanceUsd: number | null;
+  totalCreditsUsd: number | null;
+  totalUsageUsd: number | null;
+  lowBalance?: boolean;
+  thresholdUsd?: number;
+  error?: string;
+};
 
 export default async function Home({
   searchParams,
@@ -63,6 +72,7 @@ export default async function Home({
   let top: TopSources | null = null;
   let sourceOptions: string[] = [];
   let userbotStatus: UserbotStatus | null = null;
+  let openrouterBalance: OpenrouterBalance | null = null;
   let err: string | null = null;
   try {
     const q = new URLSearchParams();
@@ -126,6 +136,11 @@ export default async function Home({
     // Userbot status is optional for dashboard render.
   }
   try {
+    openrouterBalance = await fetchJson<OpenrouterBalance>('/telegram-userbot/openrouter-balance');
+  } catch {
+    // Баланс OpenRouter опционален.
+  }
+  try {
     const bh = await fetchJson<{ points: BalancePoint[] }>('/bybit/balance-history?days=30');
     balanceHistory = bh.points ?? [];
   } catch {
@@ -175,6 +190,21 @@ export default async function Home({
             `Автоматическая установка ордеров приостановлена: доступный баланс ниже порога ${guard.minBalanceUsd.toFixed(2)}$`}
         </p>
       )}
+      <div className="grid" style={{ marginBottom: '1rem' }}>
+        <div className={`card ${openrouterBalance?.lowBalance ? 'cardWarn' : ''}`}>
+          <h3>Баланс OpenRouter (текущий)</h3>
+          <div className="value">
+            {openrouterBalance?.balanceUsd != null ? `${openrouterBalance.balanceUsd.toFixed(4)}$` : '—'}
+          </div>
+          <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
+            {openrouterBalance?.ok === false
+              ? `Не удалось загрузить: ${openrouterBalance.error ?? 'ошибка API'}`
+              : openrouterBalance?.lowBalance
+                ? `Внимание: баланс ниже ${Number(openrouterBalance.thresholdUsd ?? 2).toFixed(2)}$`
+                : `Кредит: ${openrouterBalance?.totalCreditsUsd != null ? openrouterBalance.totalCreditsUsd.toFixed(4) : '—'}$ · Использовано: ${openrouterBalance?.totalUsageUsd != null ? openrouterBalance.totalUsageUsd.toFixed(4) : '—'}$`}
+          </p>
+        </div>
+      </div>
       <form className="filters" method="get" action="/trade">
         <label>
           Источник

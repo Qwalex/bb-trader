@@ -1,4 +1,5 @@
 import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
 import { OpenRouter } from '@openrouter/sdk';
@@ -14,6 +15,7 @@ import {
 import { AppLogService } from '../app-log/app-log.service';
 import { sanitizeForOpenRouterLog } from '../app-log/log-sanitize';
 import { BybitService } from '../bybit/bybit.service';
+import { PrismaService } from '../../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { SignalParseDto } from './dto/signal-parse.dto';
 import {
@@ -40,10 +42,14 @@ type OpenRouterLogContext = {
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_GENERATION_URL = 'https://openrouter.ai/api/v1/generation';
+const OPENROUTER_CREDITS_URL = 'https://openrouter.ai/api/v1/credits';
 const OPENROUTER_SITE_URL = 'https://signals-bot.local';
 const OPENROUTER_APP_TITLE = 'SignalsBot';
 const OPENROUTER_MAX_RETRIES = 5;
 const OPENROUTER_RETRY_DELAY_MS = 1_000;
+const OPENROUTER_GENERATION_LOOKUP_MAX_ATTEMPTS = 8;
+const OPENROUTER_GENERATION_LOOKUP_DELAY_MS = 1_500;
+const OPENROUTER_GENERATION_WORKER_BATCH = 50;
 
 const TRANSCRIPT_RESPONSE_JSON_SCHEMA = {
   type: 'object',
@@ -234,9 +240,74 @@ export class TranscriptService {
   constructor(
     private readonly settings: SettingsService,
     private readonly appLog: AppLogService,
+    private readonly prisma: PrismaService,
     @Inject(forwardRef(() => BybitService))
     private readonly bybit: BybitService,
   ) {}
+
+  async getOpenrouterBalance(): Promise<{
+    ok: boolean;
+    balanceUsd: number | null;
+    totalCreditsUsd: number | null;
+    totalUsageUsd: number | null;
+    error?: string;
+  }> {
+    const apiKey = (await this.settings.get('OPENROUTER_API_KEY'))?.trim();
+    if (!apiKey) {
+      return {
+        ok: false,
+        balanceUsd: null,
+        totalCreditsUsd: null,
+        totalUsageUsd: null,
+        error: 'OPENROUTER_API_KEY is not configured',
+      };
+    }
+    const parseNum = (value: unknown): number | null => {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : null;
+    };
+    try {
+      const res = await fetch(OPENROUTER_CREDITS_URL, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': OPENROUTER_SITE_URL,
+          'X-Title': OPENROUTER_APP_TITLE,
+        },
+      });
+      if (!res.ok) {
+        const body = await res.text();
+        throw new Error(`HTTP ${res.status}: ${body.slice(0, 400)}`);
+      }
+      const json = (await res.json()) as {
+        data?: {
+          total_credits?: unknown;
+          total_usage?: unknown;
+        };
+      };
+      const totalCreditsUsd = parseNum(json?.data?.total_credits);
+      const totalUsageUsd = parseNum(json?.data?.total_usage);
+      const balanceUsd =
+        totalCreditsUsd != null && totalUsageUsd != null
+          ? Number((totalCreditsUsd - totalUsageUsd).toFixed(8))
+          : null;
+      return {
+        ok: true,
+        balanceUsd,
+        totalCreditsUsd,
+        totalUsageUsd,
+      };
+    } catch (e) {
+      return {
+        ok: false,
+        balanceUsd: null,
+        totalCreditsUsd: null,
+        totalUsageUsd: null,
+        error: this.formatOpenRouterError(e),
+      };
+    }
+  }
 
   private async resolveDefaultOrderUsdForParse(
     overrides?: TranscriptParseOverrides,
@@ -267,69 +338,189 @@ export class TranscriptService {
     apiKey: string,
     generationId: string | undefined,
     meta?: { operation?: string; logContext?: OpenRouterLogContext },
+    options?: { maxAttempts?: number; delayMs?: number },
   ): Promise<number | null> {
     const id = String(generationId ?? '').trim();
-    if (!id) {
-      await this.appLog.append('warn', 'openrouter', '↔ generation lookup skipped: missing id', {
-        operation: meta?.operation,
-        logContext: meta?.logContext,
-      });
-      return null;
-    }
-    await this.appLog.append('info', 'openrouter', '↔ generation lookup started', {
-      operation: meta?.operation,
-      generationId: id,
-      url: OPENROUTER_GENERATION_URL,
-      logContext: meta?.logContext,
-    });
-    try {
-      const res = await fetch(
-        `${OPENROUTER_GENERATION_URL}?id=${encodeURIComponent(id)}`,
-        {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
+    if (!id) return null;
+    const maxAttempts = Math.max(1, options?.maxAttempts ?? OPENROUTER_GENERATION_LOOKUP_MAX_ATTEMPTS);
+    const delayMs = Math.max(0, options?.delayMs ?? OPENROUTER_GENERATION_LOOKUP_DELAY_MS);
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        const res = await fetch(
+          `${OPENROUTER_GENERATION_URL}?id=${encodeURIComponent(id)}`,
+          {
+            method: 'GET',
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              'Content-Type': 'application/json',
+            },
           },
-        },
-      );
-      if (!res.ok) {
-        await this.appLog.append('warn', 'openrouter', '↔ generation lookup failed', {
-          operation: meta?.operation,
-          generationId: id,
-          httpStatus: res.status,
-          statusText: res.statusText,
-          logContext: meta?.logContext,
-        });
+        );
+        if (!res.ok) {
+          const shouldRetry =
+            (res.status === 404 || res.status === 429 || res.status >= 500) &&
+            attempt < maxAttempts;
+          if (!shouldRetry) {
+            await this.appLog.append('error', 'openrouter', '↔ generation lookup failed', {
+              operation: meta?.operation,
+              generationId: id,
+              attempt,
+              maxAttempts,
+              httpStatus: res.status,
+              statusText: res.statusText,
+              logContext: meta?.logContext,
+            });
+          }
+          if (shouldRetry) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, delayMs * attempt),
+            );
+            continue;
+          }
+          return null;
+        }
+        const json = (await res.json()) as {
+          data?: { total_cost?: unknown; usage?: unknown; cost?: unknown };
+        };
+        const data = json.data ?? {};
+        const cost =
+          this.parseNumberOrNull(data.total_cost) ??
+          this.parseNumberOrNull(data.cost) ??
+          this.parseNumberOrNull(data.usage);
+        if (cost != null) {
+          await this.appLog.append('info', 'openrouter', '↔ generation lookup completed', {
+            operation: meta?.operation,
+            generationId: id,
+            attempt,
+            maxAttempts,
+            httpStatus: res.status,
+            resolvedCostUsd: cost,
+            logContext: meta?.logContext,
+          });
+        }
+        return cost != null && cost >= 0 ? cost : null;
+      } catch (e) {
+        const shouldRetry = attempt < maxAttempts;
+        if (!shouldRetry) {
+          await this.appLog.append('error', 'openrouter', '↔ generation lookup exception', {
+            operation: meta?.operation,
+            generationId: id,
+            attempt,
+            maxAttempts,
+            error: this.formatOpenRouterError(e),
+            logContext: meta?.logContext,
+          });
+        }
+        if (shouldRetry) {
+          await new Promise((resolve) =>
+            setTimeout(resolve, delayMs * attempt),
+          );
+          continue;
+        }
         return null;
       }
-      const json = (await res.json()) as {
-        data?: { total_cost?: unknown; usage?: unknown; cost?: unknown };
-      };
-      const data = json.data ?? {};
-      const cost =
-        this.parseNumberOrNull(data.total_cost) ??
-        this.parseNumberOrNull(data.cost) ??
-        this.parseNumberOrNull(data.usage);
-      await this.appLog.append('info', 'openrouter', '↔ generation lookup completed', {
-        operation: meta?.operation,
+    }
+    return null;
+  }
+
+  private async upsertGenerationCostEntry(params: {
+    generationId: string;
+    operation?: string;
+    logContext?: OpenRouterLogContext;
+    costUsd?: number | null;
+    status?: 'pending' | 'resolved' | 'failed';
+    attemptsDelta?: number;
+    nextRetryAt?: Date | null;
+    lastError?: string | null;
+  }): Promise<void> {
+    const id = params.generationId.trim();
+    if (!id) return;
+    const existing = await this.prisma.openrouterGenerationCost.findUnique({
+      where: { generationId: id },
+      select: { attempts: true },
+    });
+    const nextAttempts =
+      (existing?.attempts ?? 0) + Math.max(0, params.attemptsDelta ?? 0);
+    await this.prisma.openrouterGenerationCost.upsert({
+      where: { generationId: id },
+      create: {
         generationId: id,
-        httpStatus: res.status,
-        totalCost: data.total_cost ?? null,
-        cost: data.cost ?? null,
-        usage: data.usage ?? null,
-        resolvedCostUsd: cost ?? null,
-        logContext: meta?.logContext,
+        operation: params.operation ?? null,
+        chatId: params.logContext?.chatId ?? null,
+        source: params.logContext?.source ?? null,
+        ingestId: params.logContext?.ingestId ?? null,
+        costUsd: params.costUsd ?? null,
+        status: params.status ?? (params.costUsd != null ? 'resolved' : 'pending'),
+        attempts: nextAttempts,
+        nextRetryAt: params.nextRetryAt ?? null,
+        lastError: params.lastError ?? null,
+      },
+      update: {
+        operation: params.operation ?? undefined,
+        chatId: params.logContext?.chatId ?? undefined,
+        source: params.logContext?.source ?? undefined,
+        ingestId: params.logContext?.ingestId ?? undefined,
+        costUsd: params.costUsd ?? undefined,
+        status: params.status ?? undefined,
+        attempts: nextAttempts,
+        nextRetryAt: params.nextRetryAt ?? undefined,
+        lastError: params.lastError ?? undefined,
+      },
+    });
+  }
+
+  @Cron(CronExpression.EVERY_MINUTE)
+  async backfillOpenrouterGenerationCosts(): Promise<void> {
+    const apiKey = (await this.settings.get('OPENROUTER_API_KEY'))?.trim();
+    if (!apiKey) return;
+    const now = new Date();
+    const pending = await this.prisma.openrouterGenerationCost.findMany({
+      where: {
+        status: 'pending',
+        OR: [{ nextRetryAt: null }, { nextRetryAt: { lte: now } }],
+      },
+      orderBy: { createdAt: 'asc' },
+      take: OPENROUTER_GENERATION_WORKER_BATCH,
+    });
+    for (const row of pending) {
+      const generationId = String(row.generationId ?? '').trim();
+      if (!generationId) {
+        continue;
+      }
+      const cost = await this.fetchGenerationCostUsd(
+        apiKey,
+        generationId,
+        {
+          operation: typeof row.operation === 'string' ? row.operation : undefined,
+          logContext: {
+            chatId: typeof row.chatId === 'string' ? row.chatId : undefined,
+            source: typeof row.source === 'string' ? row.source : undefined,
+            ingestId: typeof row.ingestId === 'string' ? row.ingestId : undefined,
+            stage: 'generation-worker',
+          },
+        },
+        { maxAttempts: 1, delayMs: 0 },
+      );
+      if (cost != null) {
+        await this.upsertGenerationCostEntry({
+          generationId,
+          costUsd: cost,
+          status: 'resolved',
+          attemptsDelta: 1,
+          nextRetryAt: null,
+          lastError: null,
+        });
+        continue;
+      }
+      const attempts = Number(row.attempts ?? 0) + 1;
+      const delay = Math.min(60 * 60_000, 15_000 * 2 ** Math.min(attempts, 8));
+      await this.upsertGenerationCostEntry({
+        generationId,
+        status: attempts >= 30 ? 'failed' : 'pending',
+        attemptsDelta: 1,
+        nextRetryAt: attempts >= 30 ? null : new Date(Date.now() + delay),
+        lastError: 'generation_cost_unavailable',
       });
-      return cost != null && cost >= 0 ? cost : null;
-    } catch (e) {
-      await this.appLog.append('error', 'openrouter', '↔ generation lookup exception', {
-        operation: meta?.operation,
-        generationId: id,
-        error: this.formatOpenRouterError(e),
-        logContext: meta?.logContext,
-      });
-      return null;
     }
   }
 
@@ -1040,12 +1231,18 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
         typedRes.usage && typeof typedRes.usage === 'object' && !Array.isArray(typedRes.usage)
           ? (typedRes.usage as Record<string, unknown>)
           : undefined;
-      // Источник истины по деньгам: Generation API по id ответа.
-      const generationCostUsd = await this.fetchGenerationCostUsd(apiKey, typedRes.id, {
-        operation: ctx.operation,
-        logContext: ctx.logContext,
-      });
-      const resolvedCostUsd = generationCostUsd;
+      const generationId = String(typedRes.id ?? '').trim();
+      if (generationId) {
+        await this.upsertGenerationCostEntry({
+          generationId,
+          operation: ctx.operation,
+          logContext: ctx.logContext,
+          status: 'pending',
+          attemptsDelta: 0,
+          nextRetryAt: new Date(),
+        });
+      }
+      const resolvedCostUsd = null;
 
       const rawContent = typedRes.choices?.[0]?.message?.content;
       const responseContent =
@@ -1064,8 +1261,8 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
           model: typedRes.model,
           usage: usageRecord,
           costUsd: resolvedCostUsd ?? undefined,
-          costSource: generationCostUsd != null ? 'generation' : undefined,
-          generationCostUsd: generationCostUsd ?? undefined,
+          costSource: undefined,
+          generationCostUsd: undefined,
           choicesCount: typedRes.choices?.length ?? 0,
         },
         logContext: ctx.logContext,

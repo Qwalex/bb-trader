@@ -92,6 +92,13 @@ export class TelegramUserbotController {
     return this.userbot.getOpenrouterSpendAnalytics(period ?? 'day');
   }
 
+  @ApiOperation({ summary: 'Текущий баланс OpenRouter' })
+  @ApiOkResponse({ description: 'Текущий баланс OpenRouter получен' })
+  @Get('openrouter-balance')
+  async openrouterBalance() {
+    return this.userbot.getOpenrouterBalance();
+  }
+
   /**
    * Сообщения из TgUserbotIngest для ручной привязки сделки (chat id + message id).
    */

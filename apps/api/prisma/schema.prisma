@@ -327,3 +327,23 @@ model DiagnosticLog {
   @@index([runId, createdAt])
   @@index([caseId, createdAt])
 }
+
+model OpenrouterGenerationCost {
+  id           String   @id @default(cuid())
+  generationId String   @unique
+  operation    String?
+  chatId       String?
+  source       String?
+  ingestId     String?
+  costUsd      Float?
+  status       String   @default("pending") // pending | resolved | failed
+  attempts     Int      @default(0)
+  nextRetryAt  DateTime?
+  lastError    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([status, nextRetryAt])
+  @@index([createdAt])
+  @@index([chatId, createdAt])
+}
