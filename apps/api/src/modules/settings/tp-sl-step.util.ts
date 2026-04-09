@@ -18,6 +18,41 @@ const VALID: ReadonlySet<string> = new Set([
   'tp5',
 ]);
 
+/**
+ * Элемент JSON `SOURCE_TP_SL_STEP_START`: строка (off | tp1–tp5 | легаси true|1…),
+ * или boolean / 0|1 как в типичном JSON без кавычек. Остальные числа и мусор → `null`.
+ */
+export function parseTpSlStepStartJsonValue(v: unknown): TpSlStepStartMode | null {
+  if (typeof v === 'boolean') {
+    return v ? 'tp2' : 'off';
+  }
+  if (typeof v === 'number') {
+    if (v === 1) {
+      return 'tp2';
+    }
+    if (v === 0) {
+      return 'off';
+    }
+    return null;
+  }
+  if (typeof v !== 'string') {
+    return null;
+  }
+  const s = v.trim();
+  if (s === '') {
+    return null;
+  }
+  const sl = s.toLowerCase();
+  const mode = parseTpSlStepStart(s);
+  if (mode === 'off') {
+    if (sl === 'off' || sl === 'false' || sl === '0') {
+      return 'off';
+    }
+    return null;
+  }
+  return mode;
+}
+
 export function parseTpSlStepStart(
   raw: string | undefined | null,
 ): TpSlStepStartMode {
@@ -181,13 +216,90 @@ export function resolveEffectiveTpSlRange(
   return startNum;
 }
 
+/**
+ * Сохранение скаляра `TP_SL_STEP_START`: пусто или каноническое off | tp1–tp5 (строка как в JSON-карте).
+ */
+export function normalizeTpSlStepStartForPersist(raw: string): string {
+  const s = String(raw ?? '').trim();
+  if (s === '') {
+    return '';
+  }
+  const mode = parseTpSlStepStartJsonValue(s);
+  if (mode === null) {
+    throw new Error(
+      `TP_SL_STEP_START: ожидается пусто или off | tp1–tp5 | true | false | 0 | 1, сейчас: ${JSON.stringify(s)}`,
+    );
+  }
+  return mode;
+}
+
+/** Вызывается при записи в карту с непустым ключом, но значение не распознано (лог снаружи). */
+export type SourceTpSlSkippedHandler = (
+  kind: 'start' | 'range',
+  key: string,
+  value: unknown,
+) => void;
+
 export type SourceTpSlStepMap = Record<string, TpSlStepStartMode>;
+
+export function getSourceTpSlStepStartJsonPersistError(raw: string): string | null {
+  const text = String(raw ?? '').trim();
+  if (text === '') {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return 'SOURCE_TP_SL_STEP_START: ожидается JSON-объект { "имя_чата": "off" | "tp1" | … }';
+    }
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      const key = String(k ?? '').trim().toLowerCase();
+      if (!key) {
+        continue;
+      }
+      if (parseTpSlStepStartJsonValue(v) === null) {
+        return `SOURCE_TP_SL_STEP_START: для ключа ${JSON.stringify(key)} ожидается строка off | tp1–tp5 | true | false | 0 | 1 или boolean / 0 | 1`;
+      }
+    }
+  } catch {
+    return 'SOURCE_TP_SL_STEP_START: невалидный JSON';
+  }
+  return null;
+}
+
+export function normalizeSourceTpSlStepStartJsonForPersist(raw: string): string {
+  const err = getSourceTpSlStepStartJsonPersistError(raw);
+  if (err) {
+    throw new Error(err);
+  }
+  const text = String(raw ?? '').trim();
+  if (text === '') {
+    return '{}';
+  }
+  const parsed = JSON.parse(text) as Record<string, unknown>;
+  const out: Record<string, TpSlStepStartMode> = {};
+  for (const [k, v] of Object.entries(parsed)) {
+    const key = String(k ?? '').trim().toLowerCase();
+    if (!key) {
+      continue;
+    }
+    const mode = parseTpSlStepStartJsonValue(v);
+    if (mode === null) {
+      throw new Error(
+        `SOURCE_TP_SL_STEP_START: для ключа ${JSON.stringify(key)} ожидается строка off | tp1–tp5 | true | false | 0 | 1 или boolean / 0 | 1`,
+      );
+    }
+    out[key] = mode;
+  }
+  return JSON.stringify(out);
+}
 
 /** Переопределение диапазона по источнику: ключ — имя чата lower, значение — 1..5. */
 export type SourceTpSlStepRangeMap = Record<string, number>;
 
 export function parseSourceTpSlStepRangeMap(
   raw: string | undefined | null,
+  onSkipped?: SourceTpSlSkippedHandler,
 ): SourceTpSlStepRangeMap {
   const out: SourceTpSlStepRangeMap = {};
   const text = String(raw ?? '').trim();
@@ -207,6 +319,8 @@ export function parseSourceTpSlStepRangeMap(
       const n = parseTpSlStepRangeJsonValue(v);
       if (n !== null) {
         out[key] = n;
+      } else {
+        onSkipped?.('range', key, v);
       }
     }
   } catch {
@@ -217,6 +331,7 @@ export function parseSourceTpSlStepRangeMap(
 
 export function parseSourceTpSlStepMap(
   raw: string | undefined | null,
+  onSkipped?: SourceTpSlSkippedHandler,
 ): SourceTpSlStepMap {
   const out: SourceTpSlStepMap = {};
   const text = String(raw ?? '').trim();
@@ -233,10 +348,12 @@ export function parseSourceTpSlStepMap(
       if (!key) {
         continue;
       }
-      const mode = parseTpSlStepStart(
-        typeof v === 'string' ? v : String(v ?? ''),
-      );
-      out[key] = mode;
+      const mode = parseTpSlStepStartJsonValue(v);
+      if (mode !== null) {
+        out[key] = mode;
+      } else {
+        onSkipped?.('start', key, v);
+      }
     }
   } catch {
     return {};

@@ -168,6 +168,15 @@ export interface SignalExecutionDebugSnapshot {
 @Injectable()
 export class BybitService {
   private readonly logger = new Logger(BybitService.name);
+  /**
+   * Последнее невалидное значение глобального TP_SL_STEP_RANGE (trim): warn при смене «плохой» строки,
+   * без спама; сброс когда значение пусто или валидно.
+   */
+  private lastWarnedInvalidGlobalTpSlRange: string | null = null;
+  private static readonly LADDER_SOURCE_FALLBACK_LOG_CAP = 200;
+  private static readonly SOURCE_MAP_SKIP_LOG_CAP = 400;
+  private readonly ladderSourceGlobalFallbackLogged = new Set<string>();
+  private readonly sourceTpMapSkipLogged = new Set<string>();
   private readonly staleFlatPollCounts = new Map<string, number>();
   private readonly staleReconcileSuspensions = new Map<string, { count: number; reason?: string }>();
   private static readonly STALE_RECONCILE_REQUIRED_CLEAN_POLLS = 3;
@@ -2710,6 +2719,23 @@ export class BybitService {
     );
   }
 
+  /** Один warn на пару (kind, key, value) за процесс; при переполнении множество сбрасывается. */
+  private takeSourceTpMapSkipLogSlot(
+    kind: 'start' | 'range',
+    entryKey: string,
+    val: unknown,
+  ): boolean {
+    const sig = `${kind}:${entryKey}:${JSON.stringify(val)}`;
+    if (this.sourceTpMapSkipLogged.has(sig)) {
+      return false;
+    }
+    if (this.sourceTpMapSkipLogged.size >= BybitService.SOURCE_MAP_SKIP_LOG_CAP) {
+      this.sourceTpMapSkipLogged.clear();
+    }
+    this.sourceTpMapSkipLogged.add(sig);
+    return true;
+  }
+
   /**
    * После исполнения TP подряд с TP1 подтягивает SL.
    *
@@ -2730,9 +2756,25 @@ export class BybitService {
     rangeNum: number;
   } | null> {
     const mapRaw = await this.settings.get('SOURCE_TP_SL_STEP_START');
-    const map = parseSourceTpSlStepMap(mapRaw);
+    const map = parseSourceTpSlStepMap(mapRaw, (kind, entryKey, val) => {
+      if (!this.takeSourceTpMapSkipLogSlot(kind, entryKey, val)) {
+        return;
+      }
+      const label = kind === 'start' ? 'START' : 'RANGE';
+      this.logger.warn(
+        `SOURCE_TP_SL_STEP_${label}: пропущена невалидная запись key=${JSON.stringify(entryKey)} value=${JSON.stringify(val)}`,
+      );
+    });
     const rangeMapRaw = await this.settings.get('SOURCE_TP_SL_STEP_RANGE');
-    const rangeMap = parseSourceTpSlStepRangeMap(rangeMapRaw);
+    const rangeMap = parseSourceTpSlStepRangeMap(rangeMapRaw, (kind, entryKey, val) => {
+      if (!this.takeSourceTpMapSkipLogSlot(kind, entryKey, val)) {
+        return;
+      }
+      const label = kind === 'start' ? 'START' : 'RANGE';
+      this.logger.warn(
+        `SOURCE_TP_SL_STEP_${label}: пропущена невалидная запись key=${JSON.stringify(entryKey)} value=${JSON.stringify(val)}`,
+      );
+    });
     const key = String(source ?? '').trim().toLowerCase();
     let mode: TpSlStepStartMode;
     if (key && map[key] !== undefined) {
@@ -2751,14 +2793,42 @@ export class BybitService {
       return null;
     }
     const startNum = tpSlStepStartToTpNumber(mode);
-    const globalRange = parseTpSlStepRangeOptional(
-      await this.settings.get('TP_SL_STEP_RANGE'),
-    );
+    const globalRangeRaw = await this.settings.get('TP_SL_STEP_RANGE');
+    const globalRangeTrim = String(globalRangeRaw ?? '').trim();
+    if (globalRangeTrim === '' || parseTpSlStepRangeOptional(globalRangeRaw) !== null) {
+      this.lastWarnedInvalidGlobalTpSlRange = null;
+    } else if (this.lastWarnedInvalidGlobalTpSlRange !== globalRangeTrim) {
+      this.lastWarnedInvalidGlobalTpSlRange = globalRangeTrim;
+      this.logger.warn(
+        `TP_SL_STEP_RANGE: значение не распознано ${JSON.stringify(globalRangeTrim)}, используется диапазон = номер старта (исправьте настройку)`,
+      );
+    }
+    const globalRange = parseTpSlStepRangeOptional(globalRangeRaw);
     const sourceRange = key ? rangeMap[key] : undefined;
     const rangeNum = resolveEffectiveTpSlRange(
       startNum,
       sourceRange !== undefined ? sourceRange : globalRange,
     );
+    const hasAnySourceOverride =
+      Object.keys(map).length > 0 || Object.keys(rangeMap).length > 0;
+    if (
+      key &&
+      hasAnySourceOverride &&
+      map[key] === undefined &&
+      rangeMap[key] === undefined &&
+      !this.ladderSourceGlobalFallbackLogged.has(key)
+    ) {
+      if (
+        this.ladderSourceGlobalFallbackLogged.size >=
+        BybitService.LADDER_SOURCE_FALLBACK_LOG_CAP
+      ) {
+        this.ladderSourceGlobalFallbackLogged.clear();
+      }
+      this.ladderSourceGlobalFallbackLogged.add(key);
+      this.logger.debug(
+        `TP_SL_LADDER: source=${JSON.stringify(key)} нет в SOURCE_TP_SL_STEP_START/RANGE — глобальные настройки (ключи карт = нормализованный title чата / Signal.source)`,
+      );
+    }
     return { mode, startNum, rangeNum };
   }
 

@@ -161,6 +161,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       }
     | undefined;
   private lastCriticalNotifyAtByKey = new Map<string, number>();
+  private readonly sourceTpMapSkipLogged = new Set<string>();
+  private static readonly SOURCE_MAP_SKIP_LOG_CAP = 400;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -788,14 +790,47 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     return this.parseSourceMartingaleMap(raw);
   }
 
+  private takeSourceTpMapSkipLogSlot(
+    kind: 'start' | 'range',
+    entryKey: string,
+    val: unknown,
+  ): boolean {
+    const sig = `${kind}:${entryKey}:${JSON.stringify(val)}`;
+    if (this.sourceTpMapSkipLogged.has(sig)) {
+      return false;
+    }
+    if (
+      this.sourceTpMapSkipLogged.size >=
+      TelegramUserbotService.SOURCE_MAP_SKIP_LOG_CAP
+    ) {
+      this.sourceTpMapSkipLogged.clear();
+    }
+    this.sourceTpMapSkipLogged.add(sig);
+    return true;
+  }
+
   private async getSourceTpSlStepMap(): Promise<SourceTpSlStepMap> {
     const raw = await this.settings.get('SOURCE_TP_SL_STEP_START');
-    return parseSourceTpSlStepMap(raw);
+    return parseSourceTpSlStepMap(raw, (kind, entryKey, val) => {
+      if (!this.takeSourceTpMapSkipLogSlot(kind, entryKey, val)) {
+        return;
+      }
+      this.logger.warn(
+        `Userbot SOURCE_TP_SL_STEP_START: пропущена невалидная запись key=${JSON.stringify(entryKey)} value=${JSON.stringify(val)}`,
+      );
+    });
   }
 
   private async getSourceTpSlStepRangeMap(): Promise<SourceTpSlStepRangeMap> {
     const raw = await this.settings.get('SOURCE_TP_SL_STEP_RANGE');
-    return parseSourceTpSlStepRangeMap(raw);
+    return parseSourceTpSlStepRangeMap(raw, (kind, entryKey, val) => {
+      if (!this.takeSourceTpMapSkipLogSlot(kind, entryKey, val)) {
+        return;
+      }
+      this.logger.warn(
+        `Userbot SOURCE_TP_SL_STEP_RANGE: пропущена невалидная запись key=${JSON.stringify(entryKey)} value=${JSON.stringify(val)}`,
+      );
+    });
   }
 
   private async setSourceTpSlStepStart(

@@ -1390,9 +1390,9 @@ export default function TelegramUserbotPage() {
                 <div className="userbotChatFieldCompact">
                   <span
                     className="userbotChatFieldCompactLabel"
-                    title="Диапазон лестницы SL (1–5); пусто — как в общих настройках"
+                    title="Глубина лестницы SL после BE: 1–5 или пусто — как в /settings (Авто = как номер старта)"
                   >
-                    SL диапазон
+                    SL глубина
                   </span>
                   <select
                     className="userbotCellInput userbotCellInputCompact userbotCellSelectCompact"
@@ -1401,7 +1401,7 @@ export default function TelegramUserbotPage() {
                         ? String(chat.tpSlStepRange)
                         : ''
                     }
-                    title="Пусто — глобальный TP_SL_STEP_RANGE или по умолчанию (= старт); иначе 1..5 для этого источника"
+                    title="Пусто — наследовать глобальный TP_SL_STEP_RANGE (Авто: глубина = номер старта). Иначе 1–5 только для этого чата"
                     aria-label="Диапазон подтягивания SL после TP"
                     onChange={(e) => {
                       const v = e.target.value;
@@ -1449,12 +1449,12 @@ export default function TelegramUserbotPage() {
                       });
                     }}
                   >
-                    <option value="">Как общие</option>
-                    <option value="1">1</option>
-                    <option value="2">2</option>
-                    <option value="3">3</option>
-                    <option value="4">4</option>
-                    <option value="5">5</option>
+                    <option value="">Как в общих (авто = номер старта)</option>
+                    <option value="1">Глубина 1</option>
+                    <option value="2">Глубина 2</option>
+                    <option value="3">Глубина 3</option>
+                    <option value="4">Глубина 4</option>
+                    <option value="5">Глубина 5</option>
                   </select>
                 </div>
               </div>

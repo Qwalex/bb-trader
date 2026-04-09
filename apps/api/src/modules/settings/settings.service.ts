@@ -9,7 +9,9 @@ import {
 } from './entry-sizing.util';
 import {
   normalizeSourceTpSlStepRangeJsonForPersist,
+  normalizeSourceTpSlStepStartJsonForPersist,
   normalizeTpSlStepRangeForPersist,
+  normalizeTpSlStepStartForPersist,
 } from './tp-sl-step.util';
 
 /** JSON-массив заметок на дашборде: `{ id, text }[]` */
@@ -111,8 +113,12 @@ export class SettingsService {
     try {
       if (key === 'TP_SL_STEP_RANGE') {
         normalized = normalizeTpSlStepRangeForPersist(value);
+      } else if (key === 'TP_SL_STEP_START') {
+        normalized = normalizeTpSlStepStartForPersist(value);
       } else if (key === 'SOURCE_TP_SL_STEP_RANGE') {
         normalized = normalizeSourceTpSlStepRangeJsonForPersist(value);
+      } else if (key === 'SOURCE_TP_SL_STEP_START') {
+        normalized = normalizeSourceTpSlStepStartJsonForPersist(value);
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

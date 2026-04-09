@@ -147,7 +147,7 @@ const KEYS = [
   {
     key: 'TP_SL_STEP_RANGE',
     label:
-      'Подтягивание SL: диапазон лестницы (1–5 TP «назад» по счёту исполненных TP; пусто = как номер старта). Переопределение по чату: SOURCE_TP_SL_STEP_RANGE',
+      'SL после TP: «глубина» лестницы (1–5). Пусто — как номер старта. JSON по чатам: SOURCE_TP_SL_STEP_RANGE',
   },
 ] as const;
 
@@ -177,7 +177,9 @@ const EXTRA_LABELS: Record<string, string> = {
   SOURCE_LIST: 'Список источников (source)',
   SOURCE_EXCLUDE_LIST: 'Исключённые источники (аналитика)',
   SOURCE_TP_SL_STEP_RANGE:
-    'Переопределение диапазона SL после TP по источнику (JSON: имя чата lower → 1..5)',
+    'Переопределение «глубины» лестницы SL (JSON: имя чата lower → цифра 1–5)',
+  SOURCE_TP_SL_STEP_START:
+    'Переопределение старта лестницы SL по источнику (JSON: имя чата lower → строка off | tp1–tp5 | true | false | 0 | 1)',
   DASHBOARD_TODOS: 'Заметки дашборда (удобнее редактировать на главной странице)',
   [DIAGNOSTIC_MODELS_KEY]: 'Модели для диагностики',
   [MODEL_HISTORY_KEY]: 'История моделей OpenRouter (автообновление)',
@@ -185,6 +187,31 @@ const EXTRA_LABELS: Record<string, string> = {
 
 function labelForKey(key: string): string {
   return LABEL_BY_KEY[key] ?? EXTRA_LABELS[key] ?? key;
+}
+
+/** Соответствие черновика TP_SL_STEP_START варианту селекта + флаг мусора в поле. */
+function tpSlStepStartSelectFromDraft(
+  draftRaw: string,
+  legacyTpSlStepEnabledTrue: boolean,
+): { value: string; invalidDraft: boolean } {
+  const raw = draftRaw.trim().toLowerCase();
+  const canonical = new Set(['off', 'tp1', 'tp2', 'tp3', 'tp4', 'tp5']);
+  if (raw === '' && legacyTpSlStepEnabledTrue) {
+    return { value: 'tp2', invalidDraft: false };
+  }
+  if (raw === '') {
+    return { value: 'off', invalidDraft: false };
+  }
+  if (canonical.has(raw)) {
+    return { value: raw, invalidDraft: false };
+  }
+  if (raw === 'true' || raw === '1') {
+    return { value: 'tp2', invalidDraft: false };
+  }
+  if (raw === 'false' || raw === '0') {
+    return { value: 'off', invalidDraft: false };
+  }
+  return { value: 'off', invalidDraft: true };
 }
 
 const SETTINGS_SECTIONS: { id: string; title: string; keys: string[] }[] = [
@@ -588,9 +615,12 @@ export default function SettingsPage() {
           throw new Error(detail);
         }
         let storedValue = value;
-        if (key === 'TP_SL_STEP_RANGE') {
+        if (key === 'TP_SL_STEP_RANGE' || key === 'TP_SL_STEP_START') {
           storedValue = value.trim();
-        } else if (key === 'SOURCE_TP_SL_STEP_RANGE' && value.trim() === '') {
+        } else if (
+          (key === 'SOURCE_TP_SL_STEP_RANGE' || key === 'SOURCE_TP_SL_STEP_START') &&
+          value.trim() === ''
+        ) {
           storedValue = '{}';
         }
         next = upsertRow(next, key, storedValue);
@@ -916,23 +946,36 @@ export default function SettingsPage() {
       );
     }
     if (key === 'TP_SL_STEP_START') {
-      const raw = valueForDraft(key).trim().toLowerCase();
       const legacyOn =
         valueForDraft('TP_SL_STEP_ENABLED').trim().toLowerCase() === 'true';
-      const effectiveRaw =
-        raw !== '' ? raw : legacyOn ? 'tp2' : 'off';
-      const v = ['off', 'tp1', 'tp2', 'tp3', 'tp4', 'tp5'].includes(effectiveRaw)
-        ? effectiveRaw
-        : 'off';
+      const { value: v, invalidDraft } = tpSlStepStartSelectFromDraft(
+        valueForDraft(key),
+        legacyOn,
+      );
       const label = LABEL_BY_KEY[key] ?? key;
       return (
         <label key={key} style={{ gridColumn: '1 / -1' }}>
           <span>{label}</span>
           <p style={{ color: 'var(--muted)', fontSize: '0.88rem', margin: '0.35rem 0 0.5rem' }}>
-            Старт: до выбранного TP лестница не двигает SL; на стартовом — безубыток, далее SL на уровни TP по полю
-            «диапазон» (см. TP_SL_STEP_RANGE). Пример при диапазоне = старту: tp1 — классика (TP1→BE, TP2→TP1…);
-            tp2 — как раньше по умолчанию (до TP2 не двигаем, затем BE→TP1→TP2…).
+            Считаем только тейки подряд с TP1. Пока исполнено меньше, чем выбранный старт — SL не трогаем. Когда
+            исполнен N‑й подряд (N = этот выбор: 1 — с TP1, 2 — с TP2…) — переводим SL в безубыток. Каждый следующий
+            исполненный тейк: куда подтянуть SL — поле ниже «глубина» (ключ TP_SL_STEP_RANGE).
           </p>
+          {invalidDraft ? (
+            <p
+              style={{
+                color: 'var(--foreground)',
+                fontSize: '0.82rem',
+                margin: '0.35rem 0 0.25rem',
+                padding: '0.35rem 0.5rem',
+                borderLeft: '3px solid #f59e0b',
+                background: 'color-mix(in srgb, #f59e0b 12%, transparent)',
+              }}
+            >
+              В черновике неподдерживаемое значение: <code>{valueForDraft(key).trim() || '∅'}</code>. Выберите режим
+              ниже и сохраните — иначе при сохранении API отклонит строку.
+            </p>
+          ) : null}
           <select
             value={v}
             disabled={saving}
@@ -965,9 +1008,18 @@ export default function SettingsPage() {
         <label key={key} style={{ gridColumn: '1 / -1' }}>
           <span>{label}</span>
           <p style={{ color: 'var(--muted)', fontSize: '0.88rem', margin: '0.35rem 0 0.5rem' }}>
-            После стартового шага (безубыток) цена SL берётся у TP с номером «текущее число исполненных TP подряд
-            минус диапазон минус 1» в списке TP. Пустое значение — диапазон совпадает с номером стартового TP
-            (поведение по умолчанию, как до этой настройки).
+            Пусть k — сколько тейков подряд с TP1 уже исполнено, N — номер старта из поля выше (1…5). При k = N SL
+            переведён в безубыток. При k &gt; N цену SL берём у тейка с порядковым номером k − глубина (TP1 — ближайший
+            к входу, TP2 — следующий и т.д. после сортировки для лонга/шорта).
+          </p>
+          <p style={{ color: 'var(--muted)', fontSize: '0.88rem', margin: '0.25rem 0 0.5rem' }}>
+            Первый пункт списка: глубина автоматически равна N — как раньше без отдельной настройки. Пример: старт с TP2
+            и Авто — после 2‑го тейка BE, после 3‑го SL на TP1, после 4‑го на TP2. Цифры 1…5 задают свою глубину
+            (пример: старт с TP2 и глубина 1 — после 3‑го тейка SL сразу на TP2).
+          </p>
+          <p style={{ color: 'var(--muted)', fontSize: '0.88rem', margin: '0.25rem 0 0.5rem' }}>
+            Если глубина большая, в первых шагах после безубытка число k − глубина может быть меньше 1 — тогда SL остаётся
+            на безубытке, пока k не вырастет (отдельные шаги лестницы на бирже могут не вызываться).
           </p>
           <select
             value={v}
@@ -982,12 +1034,14 @@ export default function SettingsPage() {
               color: 'var(--foreground)',
             }}
           >
-            <option value="">Как у стартового TP (по умолчанию)</option>
-            <option value="1">1</option>
-            <option value="2">2</option>
-            <option value="3">3</option>
-            <option value="4">4</option>
-            <option value="5">5</option>
+            <option value="">
+              Авто: глубина = номер старта (как раньше без этого поля)
+            </option>
+            <option value="1">Глубина 1</option>
+            <option value="2">Глубина 2</option>
+            <option value="3">Глубина 3</option>
+            <option value="4">Глубина 4</option>
+            <option value="5">Глубина 5</option>
           </select>
         </label>
       );
