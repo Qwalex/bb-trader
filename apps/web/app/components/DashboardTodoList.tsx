@@ -31,11 +31,11 @@ async function persistDashboardTodos(items: DashboardTodoItem[]): Promise<void> 
 
 type Props = {
   initialItems: DashboardTodoItem[];
-  /** В колонке рядом с метриками или отдельная широкая карточка */
-  layout?: 'sidebar' | 'full';
+  /** Под метриками, узкая карточка без метрик, или боковая колонка (легаси) */
+  layout?: 'below' | 'full' | 'sidebar';
 };
 
-export function DashboardTodoList({ initialItems, layout = 'sidebar' }: Props) {
+export function DashboardTodoList({ initialItems, layout = 'below' }: Props) {
   const [todos, setTodos] = useState<DashboardTodoItem[]>(initialItems);
   const [draft, setDraft] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -129,10 +129,15 @@ export function DashboardTodoList({ initialItems, layout = 'sidebar' }: Props) {
     }
   }, [editText, editingId, todos, persist, cancelEdit]);
 
+  const cardClass =
+    layout === 'full'
+      ? 'card dashboardTodoCard dashboardTodoCardFull'
+      : layout === 'below'
+        ? 'card dashboardTodoCard dashboardTodoCardBelow'
+        : 'card dashboardTodoCard';
+
   return (
-    <div
-      className={`card dashboardTodoCard ${layout === 'full' ? 'dashboardTodoCardFull' : ''}`}
-    >
+    <div className={cardClass}>
       <h3>Заметки / todo</h3>
       <p className="dashboardTodoHint">Сохраняются в базе (SQLite), общие для этой инсталляции API</p>
       {saveErr && (

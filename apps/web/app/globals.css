@@ -70,27 +70,18 @@ a:hover {
   margin-bottom: 2rem;
 }
 
-.dashboardMetricsWithTodo {
-  display: grid;
-  grid-template-columns: 1fr minmax(260px, 320px);
-  gap: 1rem;
-  align-items: start;
-  margin-bottom: 2rem;
-}
-
-.dashboardMetricsWithTodo .dashboardMetricsGrid {
-  margin-bottom: 0;
-}
-
-@media (max-width: 900px) {
-  .dashboardMetricsWithTodo {
-    grid-template-columns: 1fr;
-  }
-}
-
 .dashboardTodoCard {
   position: sticky;
   top: 1rem;
+}
+
+/** Под блоком метрик: на всю ширину, без sticky */
+.dashboardTodoCardBelow {
+  position: static;
+  width: 100%;
+  max-width: none;
+  margin-top: 0;
+  margin-bottom: 2rem;
 }
 
 .dashboardTodoCardFull {

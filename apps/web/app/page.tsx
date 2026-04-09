@@ -229,7 +229,7 @@ export default async function Home({
         )}
       </form>
       {stats && (
-        <div className="dashboardMetricsWithTodo">
+        <>
           <div className="grid dashboardMetricsGrid">
           <div className="card">
             <h3>Winrate{source ? ' (источник)' : ''}</h3>
@@ -347,8 +347,8 @@ export default async function Home({
             </p>
           </div>
           </div>
-          <DashboardTodoList initialItems={dashboardTodos} layout="sidebar" />
-        </div>
+          <DashboardTodoList initialItems={dashboardTodos} layout="below" />
+        </>
       )}
       {!stats && <DashboardTodoList initialItems={dashboardTodos} layout="full" />}
       <div>
