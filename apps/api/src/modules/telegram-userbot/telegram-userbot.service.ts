@@ -120,8 +120,6 @@ const USERBOT_MIN_BALANCE_USD_DEFAULT = 3;
 const USERBOT_BALANCE_CHECK_CACHE_MS = 30_000;
 const USERBOT_FILTER_MATCH_THRESHOLD = 0.34;
 const CLOSE_REOPEN_COOLDOWN_MS = 30_000;
-const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
-const OPENROUTER_PRICING_CACHE_MS = 10 * 60_000;
 
 @Injectable()
 export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
@@ -154,12 +152,6 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     | {
         checkedAtMs: number;
         maxAgeMs: number;
-      }
-    | undefined;
-  private openrouterPricingCache:
-    | {
-        fetchedAtMs: number;
-        byModel: Record<string, { inputPerToken: number; outputPerToken: number }>;
       }
     | undefined;
 
@@ -496,104 +488,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     return null;
   }
 
-  private parseOpenrouterTokenUsage(
-    usage: Record<string, unknown> | undefined,
-  ): { promptTokens: number; completionTokens: number } | null {
-    if (!usage) return null;
-    const promptTokens =
-      this.parseNumberOrNull(usage.promptTokens) ??
-      this.parseNumberOrNull(usage.prompt_tokens) ??
-      0;
-    const completionTokens =
-      this.parseNumberOrNull(usage.completionTokens) ??
-      this.parseNumberOrNull(usage.completion_tokens) ??
-      0;
-    if (promptTokens <= 0 && completionTokens <= 0) {
-      return null;
-    }
-    return { promptTokens, completionTokens };
-  }
-
-  private estimateOpenrouterCostUsdFromUsage(params: {
-    model: string | null;
-    usage: Record<string, unknown> | undefined;
-    pricingByModel: Record<string, { inputPerToken: number; outputPerToken: number }>;
-  }): number | null {
-    if (!params.model) return null;
-    const pricing = params.pricingByModel[params.model];
-    if (!pricing) return null;
-    const tokens = this.parseOpenrouterTokenUsage(params.usage);
-    if (!tokens) return null;
-    const estimated =
-      tokens.promptTokens * pricing.inputPerToken +
-      tokens.completionTokens * pricing.outputPerToken;
-    return Number.isFinite(estimated) && estimated >= 0 ? estimated : null;
-  }
-
-  private async getOpenrouterPricingMap(): Promise<
-    Record<string, { inputPerToken: number; outputPerToken: number }>
-  > {
-    const now = Date.now();
-    if (
-      this.openrouterPricingCache &&
-      now - this.openrouterPricingCache.fetchedAtMs < OPENROUTER_PRICING_CACHE_MS
-    ) {
-      return this.openrouterPricingCache.byModel;
-    }
-    const apiKey = await this.settings.get('OPENROUTER_API_KEY');
-    if (!apiKey) return {};
-    try {
-      const res = await fetch(OPENROUTER_MODELS_URL, {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-      });
-      if (!res.ok) {
-        return {};
-      }
-      const json = (await res.json()) as {
-        data?: Array<{
-          id?: unknown;
-          pricing?: {
-            prompt?: unknown;
-            completion?: unknown;
-            input?: unknown;
-            output?: unknown;
-          };
-        }>;
-      };
-      const byModel: Record<string, { inputPerToken: number; outputPerToken: number }> = {};
-      for (const model of json.data ?? []) {
-        const id = String(model?.id ?? '').trim();
-        if (!id) continue;
-        const inputPerToken =
-          this.parseNumberOrNull(model?.pricing?.prompt) ??
-          this.parseNumberOrNull(model?.pricing?.input);
-        const outputPerToken =
-          this.parseNumberOrNull(model?.pricing?.completion) ??
-          this.parseNumberOrNull(model?.pricing?.output);
-        if (
-          inputPerToken == null ||
-          outputPerToken == null ||
-          inputPerToken < 0 ||
-          outputPerToken < 0
-        ) {
-          continue;
-        }
-        byModel[id] = { inputPerToken, outputPerToken };
-      }
-      this.openrouterPricingCache = { fetchedAtMs: now, byModel };
-      return byModel;
-    } catch {
-      return {};
-    }
-  }
-
   private extractOpenrouterCostUsd(
     payloadRaw: string | null,
-    pricingByModel: Record<string, { inputPerToken: number; outputPerToken: number }>,
   ): { chatId: string; costUsd: number } | null {
     if (!payloadRaw) return null;
     try {
@@ -602,6 +498,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           model?: unknown;
           cost?: unknown;
           costUsd?: unknown;
+          generationCostUsd?: unknown;
           totalCost?: unknown;
           total_cost?: unknown;
           usage?: {
@@ -615,14 +512,29 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
             completion_tokens?: unknown;
           };
         };
+        openrouterResponse?: {
+          usage?: {
+            cost?: unknown;
+            totalCost?: unknown;
+            total_cost?: unknown;
+            promptTokens?: unknown;
+            completionTokens?: unknown;
+            prompt_tokens?: unknown;
+            completion_tokens?: unknown;
+          };
+          model?: unknown;
+        };
         logContext?: { chatId?: unknown };
       };
       const chatId = String(payload.logContext?.chatId ?? '').trim();
       if (!chatId) return null;
       const meta = payload.responseMeta ?? {};
       const usage = meta.usage ?? {};
+      const fullResponse = payload.openrouterResponse ?? {};
+      const fullUsage = fullResponse.usage ?? {};
       const candidate =
         this.parseNumberOrNull(meta.costUsd) ??
+        this.parseNumberOrNull(meta.generationCostUsd) ??
         this.parseNumberOrNull(meta.cost) ??
         this.parseNumberOrNull(meta.totalCost) ??
         this.parseNumberOrNull(meta.total_cost) ??
@@ -630,11 +542,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         this.parseNumberOrNull(usage.cost) ??
         this.parseNumberOrNull(usage.totalCost) ??
         this.parseNumberOrNull(usage.total_cost) ??
-        this.estimateOpenrouterCostUsdFromUsage({
-          model: String(meta.model ?? '').trim() || null,
-          usage: usage as Record<string, unknown>,
-          pricingByModel,
-        });
+        this.parseNumberOrNull(fullUsage.cost) ??
+        this.parseNumberOrNull(fullUsage.totalCost) ??
+        this.parseNumberOrNull(fullUsage.total_cost);
       if (candidate == null || candidate < 0) return null;
       return { chatId, costUsd: candidate };
     } catch {
@@ -644,9 +554,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
   private extractOpenrouterCostWithMeta(
     payloadRaw: string | null,
-    pricingByModel: Record<string, { inputPerToken: number; outputPerToken: number }>,
   ): { chatId: string; costUsd: number } | null {
-    return this.extractOpenrouterCostUsd(payloadRaw, pricingByModel);
+    return this.extractOpenrouterCostUsd(payloadRaw);
   }
 
   private async getTodayOpenRouterSpendByChatId(): Promise<Record<string, number>> {
@@ -660,10 +569,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       },
       select: { payload: true },
     });
-    const pricingByModel = await this.getOpenrouterPricingMap();
     const sums: Record<string, number> = {};
     for (const row of logs) {
-      const parsed = this.extractOpenrouterCostUsd(row.payload, pricingByModel);
+      const parsed = this.extractOpenrouterCostUsd(row.payload);
       if (!parsed) continue;
       sums[parsed.chatId] = (sums[parsed.chatId] ?? 0) + parsed.costUsd;
     }
@@ -734,7 +642,6 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         select: { chatId: true, title: true },
       }),
     ]);
-    const pricingByModel = await this.getOpenrouterPricingMap();
     const titleByChatId = new Map<string, string>();
     for (const c of chats) {
       titleByChatId.set(c.chatId, c.title);
@@ -746,7 +653,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     let requests = 0;
 
     for (const log of logs) {
-      const parsed = this.extractOpenrouterCostWithMeta(log.payload, pricingByModel);
+      const parsed = this.extractOpenrouterCostWithMeta(log.payload);
       if (!parsed) continue;
       const sourceName = titleByChatId.get(parsed.chatId) ?? parsed.chatId;
       const currentSource = sourceTotals.get(parsed.chatId) ?? {
@@ -4322,7 +4229,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     }
     const normalized = raw.replace(/\u00a0/g, ' ');
     const match = normalized.match(
-      /(?:^|[^\p{L}\p{N}_])signal\s*id\s*[:#\-]?\s*([A-Za-z0-9][A-Za-z0-9._/-]{0,127})/iu,
+      /(?:^|[^\p{L}\p{N}_])signal\s*id\s*[:#-]?\s*([A-Za-z0-9][A-Za-z0-9._/-]{0,127})/iu,
     );
     return match?.[1]?.trim();
   }

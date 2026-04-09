@@ -39,8 +39,7 @@ type OpenRouterLogContext = {
 };
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
-const OPENROUTER_PRICING_CACHE_MS = 10 * 60_000;
+const OPENROUTER_GENERATION_URL = 'https://openrouter.ai/api/v1/generation';
 const OPENROUTER_SITE_URL = 'https://signals-bot.local';
 const OPENROUTER_APP_TITLE = 'SignalsBot';
 const OPENROUTER_MAX_RETRIES = 5;
@@ -231,12 +230,6 @@ function normalizeOpenRouterAudioFormat(
 @Injectable()
 export class TranscriptService {
   private readonly logger = new Logger(TranscriptService.name);
-  private openrouterPricingCache:
-    | {
-        fetchedAtMs: number;
-        byModel: Record<string, { inputPerToken: number; outputPerToken: number }>;
-      }
-    | null = null;
 
   constructor(
     private readonly settings: SettingsService,
@@ -270,111 +263,36 @@ export class TranscriptService {
     return null;
   }
 
-  private parseOpenrouterTokenUsage(
-    usage: Record<string, unknown> | undefined,
-  ): { promptTokens: number; completionTokens: number } | null {
-    if (!usage) return null;
-    const promptTokens =
-      this.parseNumberOrNull(usage.promptTokens) ??
-      this.parseNumberOrNull(usage.prompt_tokens) ??
-      0;
-    const completionTokens =
-      this.parseNumberOrNull(usage.completionTokens) ??
-      this.parseNumberOrNull(usage.completion_tokens) ??
-      0;
-    if (promptTokens <= 0 && completionTokens <= 0) {
+  private async fetchGenerationCostUsd(
+    apiKey: string,
+    generationId: string | undefined,
+  ): Promise<number | null> {
+    const id = String(generationId ?? '').trim();
+    if (!id) return null;
+    try {
+      const res = await fetch(
+        `${OPENROUTER_GENERATION_URL}?id=${encodeURIComponent(id)}`,
+        {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+        },
+      );
+      if (!res.ok) return null;
+      const json = (await res.json()) as {
+        data?: { total_cost?: unknown; usage?: unknown; cost?: unknown };
+      };
+      const data = json.data ?? {};
+      const cost =
+        this.parseNumberOrNull(data.total_cost) ??
+        this.parseNumberOrNull(data.cost) ??
+        this.parseNumberOrNull(data.usage);
+      return cost != null && cost >= 0 ? cost : null;
+    } catch {
       return null;
     }
-    return { promptTokens, completionTokens };
-  }
-
-  private extractOpenrouterCostFromUsage(
-    usage: Record<string, unknown> | undefined,
-  ): number | null {
-    if (!usage) return null;
-    const candidate =
-      this.parseNumberOrNull(usage.cost) ??
-      this.parseNumberOrNull(usage.totalCost) ??
-      this.parseNumberOrNull(usage.total_cost);
-    if (candidate == null || candidate < 0) return null;
-    return candidate;
-  }
-
-  private async getOpenrouterPricingMap(): Promise<
-    Record<string, { inputPerToken: number; outputPerToken: number }>
-  > {
-    const now = Date.now();
-    if (
-      this.openrouterPricingCache &&
-      now - this.openrouterPricingCache.fetchedAtMs < OPENROUTER_PRICING_CACHE_MS
-    ) {
-      return this.openrouterPricingCache.byModel;
-    }
-    const apiKey = await this.settings.get('OPENROUTER_API_KEY');
-    if (!apiKey) return {};
-    try {
-      const res = await fetch(OPENROUTER_MODELS_URL, {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-      });
-      if (!res.ok) {
-        return {};
-      }
-      const json = (await res.json()) as {
-        data?: Array<{
-          id?: unknown;
-          pricing?: {
-            prompt?: unknown;
-            completion?: unknown;
-            input?: unknown;
-            output?: unknown;
-          };
-        }>;
-      };
-      const byModel: Record<string, { inputPerToken: number; outputPerToken: number }> = {};
-      for (const model of json.data ?? []) {
-        const id = String(model?.id ?? '').trim();
-        if (!id) continue;
-        const inputPerToken =
-          this.parseNumberOrNull(model?.pricing?.prompt) ??
-          this.parseNumberOrNull(model?.pricing?.input);
-        const outputPerToken =
-          this.parseNumberOrNull(model?.pricing?.completion) ??
-          this.parseNumberOrNull(model?.pricing?.output);
-        if (
-          inputPerToken == null ||
-          outputPerToken == null ||
-          inputPerToken < 0 ||
-          outputPerToken < 0
-        ) {
-          continue;
-        }
-        byModel[id] = { inputPerToken, outputPerToken };
-      }
-      this.openrouterPricingCache = { fetchedAtMs: now, byModel };
-      return byModel;
-    } catch {
-      return {};
-    }
-  }
-
-  private estimateOpenrouterCostUsdFromUsage(params: {
-    model: string | null;
-    usage: Record<string, unknown> | undefined;
-    pricingByModel: Record<string, { inputPerToken: number; outputPerToken: number }>;
-  }): number | null {
-    if (!params.model) return null;
-    const pricing = params.pricingByModel[params.model];
-    if (!pricing) return null;
-    const tokens = this.parseOpenrouterTokenUsage(params.usage);
-    if (!tokens) return null;
-    const estimated =
-      tokens.promptTokens * pricing.inputPerToken +
-      tokens.completionTokens * pricing.outputPerToken;
-    return Number.isFinite(estimated) && estimated >= 0 ? estimated : null;
   }
 
   async classifyTradingMessage(
@@ -1149,39 +1067,29 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
         typedRes.usage && typeof typedRes.usage === 'object' && !Array.isArray(typedRes.usage)
           ? (typedRes.usage as Record<string, unknown>)
           : undefined;
-      const usageCostUsd = this.extractOpenrouterCostFromUsage(usageRecord);
-      const pricingByModel = usageCostUsd == null ? await this.getOpenrouterPricingMap() : {};
-      const estimatedCostUsd =
-        usageCostUsd == null
-          ? this.estimateOpenrouterCostUsdFromUsage({
-              model: String(typedRes.model ?? '').trim() || null,
-              usage: usageRecord,
-              pricingByModel,
-            })
-          : null;
-      const resolvedCostUsd = usageCostUsd ?? estimatedCostUsd;
+      // Источник истины по деньгам: Generation API по id ответа.
+      const generationCostUsd = await this.fetchGenerationCostUsd(apiKey, typedRes.id);
+      const resolvedCostUsd = generationCostUsd;
 
       const rawContent = typedRes.choices?.[0]?.message?.content;
-      const responsePreview =
-        typeof rawContent === 'string'
-          ? rawContent.length > 24_000
-            ? `${rawContent.slice(0, 24_000)}... [truncated ${rawContent.length - 24_000} chars]`
-            : rawContent
-          : JSON.stringify(rawContent).slice(0, 24_000);
+      const responseContent =
+        typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent);
 
       await this.appLog.append('info', 'openrouter', `← ${ctx.operation}`, {
         operation: ctx.operation,
         httpStatus: 200,
-        /** Текст ответа ассистента (модель) */
-        assistantContent: responsePreview,
+        /** Полный текст ответа ассистента (без обрезки) */
+        assistantContent: responseContent,
+        /** Полный объект ответа OpenRouter после sanitize (без секретов) */
+        openrouterResponse: sanitizeForOpenRouterLog(res),
         /** Метаданные ответа OpenRouter (без дублирования полного текста) */
         responseMeta: {
           id: typedRes.id,
           model: typedRes.model,
           usage: usageRecord,
           costUsd: resolvedCostUsd ?? undefined,
-          costSource:
-            usageCostUsd != null ? 'usage' : estimatedCostUsd != null ? 'estimated' : undefined,
+          costSource: generationCostUsd != null ? 'generation' : undefined,
+          generationCostUsd: generationCostUsd ?? undefined,
           choicesCount: typedRes.choices?.length ?? 0,
         },
         logContext: ctx.logContext,
