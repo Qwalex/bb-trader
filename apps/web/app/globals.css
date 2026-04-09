@@ -70,6 +70,146 @@ a:hover {
   margin-bottom: 2rem;
 }
 
+.dashboardMetricsWithTodo {
+  display: grid;
+  grid-template-columns: 1fr minmax(260px, 320px);
+  gap: 1rem;
+  align-items: start;
+  margin-bottom: 2rem;
+}
+
+.dashboardMetricsWithTodo .dashboardMetricsGrid {
+  margin-bottom: 0;
+}
+
+@media (max-width: 900px) {
+  .dashboardMetricsWithTodo {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dashboardTodoCard {
+  position: sticky;
+  top: 1rem;
+}
+
+.dashboardTodoCardFull {
+  position: static;
+  max-width: 560px;
+}
+
+.dashboardTodoCard h3 {
+  margin-bottom: 0.35rem;
+}
+
+.dashboardTodoHint {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-bottom: 0.75rem;
+  line-height: 1.35;
+}
+
+.dashboardTodoAddRow {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.85rem;
+}
+
+.dashboardTodoInput {
+  flex: 1;
+  min-width: 0;
+  padding: 0.45rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 0.875rem;
+}
+
+.dashboardTodoInput:focus {
+  outline: 2px solid rgba(59, 130, 246, 0.45);
+  outline-offset: 1px;
+}
+
+.dashboardTodoList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
+}
+
+.dashboardTodoEmpty {
+  font-size: 0.85rem;
+  color: var(--muted);
+  padding: 0.35rem 0;
+}
+
+.dashboardTodoItem {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.55rem 0.65rem;
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.dashboardTodoRow {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.dashboardTodoText {
+  font-size: 0.875rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.dashboardTodoActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.dashboardTodoEdit {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.dashboardTodoTextarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 4rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 0.875rem;
+  font-family: inherit;
+  line-height: 1.4;
+}
+
+.dashboardTodoTextarea:focus {
+  outline: 2px solid rgba(59, 130, 246, 0.45);
+  outline-offset: 1px;
+}
+
+.dashboardTodoEditActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.dashboardTodoKeyHint {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
 .card {
   background: var(--card);
   border: 1px solid var(--border);

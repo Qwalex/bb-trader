@@ -171,6 +171,7 @@ const LABEL_BY_KEY = Object.fromEntries(KEYS.map(({ key, label }) => [key, label
 const EXTRA_LABELS: Record<string, string> = {
   SOURCE_LIST: 'Список источников (source)',
   SOURCE_EXCLUDE_LIST: 'Исключённые источники (аналитика)',
+  DASHBOARD_TODOS: 'Заметки дашборда (удобнее редактировать на главной странице)',
   [DIAGNOSTIC_MODELS_KEY]: 'Модели для диагностики',
   [MODEL_HISTORY_KEY]: 'История моделей OpenRouter (автообновление)',
 };

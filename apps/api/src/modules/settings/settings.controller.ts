@@ -43,6 +43,41 @@ export class SettingsController {
     return { settings: await this.settings.list() };
   }
 
+  @ApiOperation({ summary: 'Заметки / todo дашборда (из БД)' })
+  @ApiOkResponse({ description: 'Список пунктов' })
+  @Get('dashboard-todos')
+  async dashboardTodosGet() {
+    return { items: await this.settings.getDashboardTodos() };
+  }
+
+  @ApiOperation({ summary: 'Сохранить заметки дашборда' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['items'],
+      properties: {
+        items: {
+          type: 'array',
+          items: {
+            type: 'object',
+            required: ['id', 'text'],
+            properties: {
+              id: { type: 'string' },
+              text: { type: 'string' },
+            },
+          },
+        },
+      },
+    },
+  })
+  @ApiOkResponse({ description: 'Сохранено' })
+  @Put('dashboard-todos')
+  async dashboardTodosPut(@Body() body: { items?: unknown }) {
+    const items = this.settings.normalizeDashboardTodosPayload(body?.items);
+    await this.settings.setDashboardTodos(items);
+    return { ok: true };
+  }
+
   @ApiOperation({ summary: 'Создать/обновить одну настройку' })
   @ApiBody({
     schema: {

@@ -1,4 +1,5 @@
 import { BalanceChart, type BalancePoint } from './components/BalanceChart';
+import { DashboardTodoList, type DashboardTodoItem } from './components/DashboardTodoList';
 import { PnlChart } from './components/PnlChart';
 import { LiveExposurePanel } from './components/LiveExposurePanel';
 
@@ -161,6 +162,14 @@ export default async function Home({
   const balanceMonth = compoundBalanceForecast(30);
   const balanceYear = compoundBalanceForecast(365);
 
+  let dashboardTodos: DashboardTodoItem[] = [];
+  try {
+    const d = await fetchJson<{ items: DashboardTodoItem[] }>('/settings/dashboard-todos');
+    dashboardTodos = Array.isArray(d.items) ? d.items : [];
+  } catch {
+    dashboardTodos = [];
+  }
+
   return (
     <>
       <h1 className="pageTitle">Дашборд Test 1</h1>
@@ -220,7 +229,8 @@ export default async function Home({
         )}
       </form>
       {stats && (
-        <div className="grid">
+        <div className="dashboardMetricsWithTodo">
+          <div className="grid dashboardMetricsGrid">
           <div className="card">
             <h3>Winrate{source ? ' (источник)' : ''}</h3>
             <div className="value">{stats.winrate.toFixed(1)}%</div>
@@ -336,8 +346,11 @@ export default async function Home({
               Порог автоторговли: {(guard?.minBalanceUsd ?? 3).toFixed(2)}$
             </p>
           </div>
+          </div>
+          <DashboardTodoList initialItems={dashboardTodos} layout="sidebar" />
         </div>
       )}
+      {!stats && <DashboardTodoList initialItems={dashboardTodos} layout="full" />}
       <div>
         <h2 className="pageTitle" style={{ fontSize: '1.1rem', marginTop: '1.25rem' }}>
           Суммарный баланс USDT

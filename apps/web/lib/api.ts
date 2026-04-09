@@ -13,16 +13,22 @@ export function getApiBase(): string {
   );
 }
 
-export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+/** Заголовки для запросов к API (Bearer из env). */
+export function getApiAuthHeaders(init?: HeadersInit): Headers {
+  const headers = new Headers(init ?? undefined);
   const isServer = typeof window === 'undefined';
   const token = isServer
     ? (process.env.API_ACCESS_TOKEN?.trim() ??
       process.env.NEXT_PUBLIC_API_ACCESS_TOKEN?.trim())
     : process.env.NEXT_PUBLIC_API_ACCESS_TOKEN?.trim();
-  const headers = new Headers(init?.headers ?? {});
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
   }
+  return headers;
+}
+
+export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = getApiAuthHeaders(init?.headers ?? undefined);
   const res = await fetch(`${getApiBase()}${path}`, {
     ...init,
     headers,

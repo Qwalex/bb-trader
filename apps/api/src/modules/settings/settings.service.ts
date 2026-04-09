@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import { PrismaService } from '../../prisma/prisma.service';
@@ -7,6 +7,15 @@ import {
   parseDefaultEntryRaw,
   resolveDefaultEntryToUsd,
 } from './entry-sizing.util';
+
+/** JSON-массив заметок на дашборде: `{ id, text }[]` */
+export const DASHBOARD_TODOS_SETTING_KEY = 'DASHBOARD_TODOS';
+
+export type DashboardTodoItemDto = { id: string; text: string };
+
+const DASHBOARD_TODOS_MAX_ITEMS = 200;
+const DASHBOARD_TODOS_MAX_ID_LEN = 80;
+const DASHBOARD_TODOS_MAX_TEXT_LEN = 4000;
 
 const ENV_FALLBACK: Record<string, string> = {
   /** Номинал по умолчанию, если в БД и .env ключ не задан */
@@ -107,6 +116,82 @@ export class SettingsService {
 
   async list(): Promise<{ key: string; value: string }[]> {
     return this.prisma.setting.findMany({ orderBy: { key: 'asc' } });
+  }
+
+  /** Чтение только из БД (без подмешивания .env). */
+  async getDashboardTodos(): Promise<DashboardTodoItemDto[]> {
+    const row = await this.prisma.setting.findUnique({
+      where: { key: DASHBOARD_TODOS_SETTING_KEY },
+    });
+    return this.parseDashboardTodosLoose(row?.value);
+  }
+
+  parseDashboardTodosLoose(raw: string | undefined | null): DashboardTodoItemDto[] {
+    if (!raw?.trim()) return [];
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) return [];
+      const out: DashboardTodoItemDto[] = [];
+      const seen = new Set<string>();
+      for (const row of parsed) {
+        if (!row || typeof row !== 'object') continue;
+        const o = row as Record<string, unknown>;
+        const id = typeof o.id === 'string' ? o.id.trim() : '';
+        const text = typeof o.text === 'string' ? o.text.trim() : '';
+        if (!id || !text) continue;
+        if (id.length > DASHBOARD_TODOS_MAX_ID_LEN || text.length > DASHBOARD_TODOS_MAX_TEXT_LEN) {
+          continue;
+        }
+        if (seen.has(id)) continue;
+        seen.add(id);
+        out.push({ id, text });
+      }
+      return out;
+    } catch {
+      return [];
+    }
+  }
+
+  normalizeDashboardTodosPayload(input: unknown): DashboardTodoItemDto[] {
+    if (!Array.isArray(input)) {
+      throw new BadRequestException('items должен быть массивом');
+    }
+    if (input.length > DASHBOARD_TODOS_MAX_ITEMS) {
+      throw new BadRequestException(`Не более ${DASHBOARD_TODOS_MAX_ITEMS} пунктов`);
+    }
+    const seen = new Set<string>();
+    const out: DashboardTodoItemDto[] = [];
+    let i = 0;
+    for (const raw of input) {
+      i += 1;
+      if (!raw || typeof raw !== 'object') {
+        throw new BadRequestException(`Пункт ${i}: ожидается объект { id, text }`);
+      }
+      const o = raw as Record<string, unknown>;
+      const id = typeof o.id === 'string' ? o.id.trim() : '';
+      const text = typeof o.text === 'string' ? o.text.trim() : '';
+      if (!id || id.length > DASHBOARD_TODOS_MAX_ID_LEN) {
+        throw new BadRequestException(`Пункт ${i}: некорректный id`);
+      }
+      if (!text) {
+        throw new BadRequestException(`Пункт ${i}: текст не может быть пустым`);
+      }
+      if (text.length > DASHBOARD_TODOS_MAX_TEXT_LEN) {
+        throw new BadRequestException(
+          `Пункт ${i}: текст длиннее ${DASHBOARD_TODOS_MAX_TEXT_LEN} символов`,
+        );
+      }
+      if (seen.has(id)) {
+        throw new BadRequestException(`Пункт ${i}: повторяющийся id`);
+      }
+      seen.add(id);
+      out.push({ id, text });
+    }
+    return out;
+  }
+
+  async setDashboardTodos(items: DashboardTodoItemDto[]): Promise<void> {
+    await this.set(DASHBOARD_TODOS_SETTING_KEY, JSON.stringify(items));
   }
 
   /**
