@@ -486,7 +486,7 @@ export default function SettingsPage() {
   useEffect(() => {
     void (async () => {
       try {
-        const res = await fetch(`${getApiBase()}/settings-auth`);
+        const res = await fetch(withAppBasePath('/api/settings-auth'));
         if (!res.ok) throw new Error(String(res.status));
         const j = (await res.json()) as {
           authenticated: boolean;
@@ -753,7 +753,7 @@ export default function SettingsPage() {
     setAuthSubmitting(true);
     setAuthError(null);
     try {
-      const res = await fetch(`${getApiBase()}/settings-auth`, {
+      const res = await fetch(withAppBasePath('/api/settings-auth'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: authPassword }),
@@ -774,7 +774,7 @@ export default function SettingsPage() {
   }
 
   async function logout() {
-    await fetch(`${getApiBase()}/settings-auth`, { method: 'DELETE' }).catch(
+    await fetch(withAppBasePath('/api/settings-auth'), { method: 'DELETE' }).catch(
       () => undefined,
     );
     setAuthenticated(false);
