@@ -14,7 +14,7 @@
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
     "db:migrate:deploy": "prisma migrate deploy",
-    "start:railway": "prisma migrate deploy && node dist/main.js"
+    "start:railway": "prisma generate && prisma migrate deploy && node dist/main.js"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.11",
