@@ -31,10 +31,9 @@ async function bootstrap() {
       allowedOrigins.length > 0 ? allowedOrigins : allowAnyOrigin ? true : false,
   });
 
-  const swaggerServer = process.env.API_SWAGGER_SERVER?.trim();
-  if (!swaggerServer) {
-    throw new Error('API_SWAGGER_SERVER is required (e.g. "/trade-api")');
-  }
+  // Без reverse-proxy (Railway напрямую): обычно "/". За nginx с префиксом — тот же префикс, напр. "/trade-api".
+  const swaggerServer =
+    process.env.API_SWAGGER_SERVER?.trim() || '/';
   const swaggerConfig = new DocumentBuilder()
     .setTitle('SignalsBot API')
     .setDescription('REST API для SignalsBot (NestJS)')

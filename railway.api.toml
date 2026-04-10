@@ -1,8 +1,10 @@
 # Config-as-code для сервиса API на Railway.
 # В настройках сервиса: путь к файлу → /railway.api.toml (от корня репозитория).
 #
-# Порт: Railway задаёт переменную PORT; API слушает PORT (см. apps/api/src/main.ts).
-# Healthcheck бьёт в тот же порт + healthcheckPath.
+# Порт: Railway сам задаёт PORT; приложение должно слушать его (см. main.ts).
+# Не задавайте PORT/API_PORT=3001 в Variables — публичный URL без :3001, прокси ведёт на внутренний PORT.
+# Healthcheck: тот же порт внутри контейнера + healthcheckPath.
+# API_SWAGGER_SERVER: для домена вида https://xxx.up.railway.app/ оставьте пустым или укажите "/".
 #
 # Railpack по умолчанию кладёт в install-слой только package.json workspace-пакетов;
 # исходники для tsc/nest подтягиваются через railpack.json (доп. local include).
