@@ -20,10 +20,12 @@ async function bootstrap() {
   app.useGlobalGuards(
     new ApiAuthGuard(app.get(Reflector), app.get(ConfigService)),
   );
+  // Список через запятую: полный origin как шлёт браузер — «https://хост[:порт]» без пути.
+  // Завершающий / в переменной не обязателен (ниже срезаем для совпадения с Origin).
   const allowedOriginsRaw = process.env.API_CORS_ORIGINS ?? '';
   const allowedOrigins = allowedOriginsRaw
     .split(',')
-    .map((value) => value.trim())
+    .map((value) => value.trim().replace(/\/+$/, ''))
     .filter((value) => value.length > 0);
   const allowAnyOrigin = process.env.NODE_ENV !== 'production';
   app.enableCors({
