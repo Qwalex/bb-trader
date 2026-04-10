@@ -8,6 +8,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import {
   ApiBody,
   ApiForbiddenResponse,
@@ -18,6 +19,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 
+import { parseCorsOrigins } from '../../common/cors-origins.util';
 import { DiagnosticsService } from './diagnostics.service';
 import { TradingAiAdvisorService } from './trading-ai-advisor.service';
 
@@ -27,6 +29,7 @@ export class DiagnosticsController {
   constructor(
     private readonly diagnostics: DiagnosticsService,
     private readonly tradingAdvisor: TradingAiAdvisorService,
+    private readonly config: ConfigService,
   ) {}
 
   private assertSameOriginBrowserRequest(
@@ -42,6 +45,17 @@ export class DiagnosticsController {
       secFetchSite === 'none'
     ) {
       return;
+    }
+
+    const allowedOrigins = parseCorsOrigins(
+      this.config.get<string>('API_CORS_ORIGINS'),
+    );
+    const originRaw = String(originHeader ?? '').trim();
+    if (originRaw) {
+      const normalizedOrigin = originRaw.replace(/\/+$/, '');
+      if (allowedOrigins.includes(normalizedOrigin)) {
+        return;
+      }
     }
 
     const host = String(hostHeader ?? '').trim().toLowerCase();
@@ -68,7 +82,7 @@ export class DiagnosticsController {
 
     if (!sameOrigin) {
       throw new ForbiddenException(
-        'Diagnostics API доступен только из встроенного web-интерфейса того же origin',
+        'Diagnostics API доступен только из web-интерфейса (тот же host, origin из API_CORS_ORIGINS или встроенный UI)',
       );
     }
   }

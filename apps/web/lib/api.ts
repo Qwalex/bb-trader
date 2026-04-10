@@ -1,3 +1,17 @@
+/**
+ * Публичный origin веб-приложения (`WEB_APP_ORIGIN`), совпадает с одним из API_CORS_ORIGINS на API.
+ * Нужен для SSR: серверный fetch не шлёт браузерный Origin, без него ApiAuthGuard отвечает 403.
+ */
+function getWebAppOriginForSsr(): string | undefined {
+  const raw = process.env.WEB_APP_ORIGIN?.trim();
+  if (!raw) return undefined;
+  try {
+    return new URL(raw).origin.replace(/\/+$/, '');
+  } catch {
+    return raw.replace(/\/+$/, '');
+  }
+}
+
 export function getApiBase(): string {
   const isServer = typeof window === 'undefined';
   if (isServer) {
@@ -17,6 +31,12 @@ export function getApiBase(): string {
 export function getApiAuthHeaders(init?: HeadersInit): Headers {
   const headers = new Headers(init ?? undefined);
   const isServer = typeof window === 'undefined';
+  if (isServer && !headers.has('Origin')) {
+    const origin = getWebAppOriginForSsr();
+    if (origin) {
+      headers.set('Origin', origin);
+    }
+  }
   const token = isServer
     ? (process.env.API_ACCESS_TOKEN?.trim() ??
       process.env.NEXT_PUBLIC_API_ACCESS_TOKEN?.trim())
