@@ -11,8 +11,9 @@ WORKDIR /app/packages/shared
 RUN npm run build
 
 WORKDIR /app/apps/api
-ENV DATABASE_URL=file:/app/data/dev.db
+# Только для prisma generate на этапе сборки (реальная БД задаётся в runtime).
+ENV DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/_build?schema=public
 RUN npx prisma generate && npm run build
 
 EXPOSE 3001
-CMD ["sh", "-c", "npx prisma db push && node dist/main.js"]
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/main.js"]

@@ -1,6 +1,6 @@
 # SignalsBot
 
-Полуавтоматизированная торговая система: Telegram-сигналы → OpenRouter (распознавание) → Bybit (ордера) → SQLite (история, winrate, PnL). Веб-дашборд на Next.js 16.
+Полуавтоматизированная торговая система: Telegram-сигналы → OpenRouter (распознавание) → Bybit (ордера) → PostgreSQL через Prisma (история, winrate, PnL). Веб-дашборд на Next.js 16.
 
 ## Структура
 
@@ -12,12 +12,12 @@
 
 1. Скопируйте `.env.example` в `apps/api/.env` и заполните ключи (или задайте их позже в UI `/settings`).
 
-2. Установка и БД:
+2. Установка и БД: поднимите PostgreSQL и задайте `DATABASE_URL` (например `postgresql://user:pass@localhost:5432/signals?schema=public` в `apps/api/.env` или в корневом `.env`).
 
 ```bash
 npm install
 cd packages/shared && npm run build && cd ../..
-cd apps/api && npx prisma db push && cd ../..
+cd apps/api && npx prisma migrate deploy && cd ../..
 ```
 
 1. Добавьте защиту API (обязательно для dev/test/prod):
@@ -47,17 +47,13 @@ docker compose up --build
 
 - API: `http://localhost:3001` (health: `/health`)
 - Web: `http://localhost:3000`
-- DB Viewer (SQLite): `http://localhost:8081`
-
-База SQLite в volume `sqlite-data` (`/app/data/dev.db` в контейнере API).
-
-Визуальный просмотр БД доступен через сервис `db-viewer` (sqlite-web).
+- PostgreSQL: сервис `postgres` в compose, данные в volume `postgres-data`. Просмотр — `npx prisma studio` из `apps/api` (при необходимости пробросьте порт к БД с хоста).
 
 ## Логи приложения (UI)
 
 - Веб: **`/logs`** — список записей из БД (`GET /logs` API), фильтр по категории и лимит строк.
 - Категории: **`openrouter`** (запрос/ответ к LLM, без секрета в теле), **`telegram`**, **`bybit`**, **`orders`**, **`system`**.
-- После изменений схемы Prisma: `cd apps/api && npx prisma db push` (или migrate).
+- После изменений схемы Prisma: `cd apps/api && npx prisma migrate dev` (локально) или `npx prisma migrate deploy` (CI/прод).
 
 ## Логи и отладка Telegram
 
@@ -75,14 +71,14 @@ docker compose up --build
 2. Если в сообщении **не хватает полей**, бот переходит в режим **допроса**: задаёт вопрос на русском, сохраняет **все ваши сообщения** в сессии до успешного разбора. Кнопка **«Подтвердить»** активна только когда сигнал полностью собран (до этого — только **«Отмена»**).
 3. Можно отправить **текст с правками** (когда таблица уже готова) — вызывается OpenRouter (`applyCorrection`) с текущим JSON и комментарием; бот снова показывает результат и те же кнопки.
 4. **«Подтвердить»** — проверка дубликата по паре и выставление ордеров. После **успешной** постановки черновик и контекст диалога сбрасываются. **«Отмена»** или `/cancel` — сброс черновика.
-5. **Размер позиции:** в сигнале задаётся **сумма в USDT** (номинал по всем входам). Если в тексте не указано иначе, подставляется значение настройки **`DEFAULT_ORDER_USD`** (SQLite/`/settings` или переменная окружения; при отсутствии — 10 USDT). Старый вариант «процент от депозита» поддерживается, если в JSON задан только `capitalPercent` (без суммы в USDT).
-6. **Дубликат пары:** при настроенных ключах Bybit решение принимается по **API биржи** (учитываются только ордера со статусами «живых» — New, Untriggered и т.д., не Filled/Cancelled/Deactivated). Пара нормализуется (`BTC-USDT` → `BTCUSDT`), чтобы совпадали БД и биржа. Если биржа «чистая», а в SQLite остался `ORDERS_PLACED`, запись **автоматически переводится** в `CLOSED_MIXED`. Без ключей Bybit возможна только проверка по БД.
+5. **Размер позиции:** в сигнале задаётся **сумма в USDT** (номинал по всем входам). Если в тексте не указано иначе, подставляется значение настройки **`DEFAULT_ORDER_USD`** (БД/`/settings` или переменная окружения; при отсутствии — 10 USDT). Старый вариант «процент от депозита» поддерживается, если в JSON задан только `capitalPercent` (без суммы в USDT).
+6. **Дубликат пары:** при настроенных ключах Bybit решение принимается по **API биржи** (учитываются только ордера со статусами «живых» — New, Untriggered и т.д., не Filled/Cancelled/Deactivated). Пара нормализуется (`BTC-USDT` → `BTCUSDT`), чтобы совпадали БД и биржа. Если биржа «чистая», а в БД остался `ORDERS_PLACED`, запись **автоматически переводится** в `CLOSED_MIXED`. Без ключей Bybit возможна только проверка по БД.
 
 ## Security incident checklist
 
 Если секреты когда-либо были доступны через `GET /settings/raw`, выполните:
 
-1. `POST /settings/incident/purge-secrets` с телом `{ "confirm": true }` (очистка в SQLite).
+1. `POST /settings/incident/purge-secrets` с телом `{ "confirm": true }` (очистка секретов в БД).
 2. Ротацию во внешних системах: Bybit API keys, OpenRouter key, Telegram bot token, Telegram userbot session/API hash/2FA.
 3. Перезапуск `api` и `web` с новыми значениями env.
 4. Проверку, что `GET /settings/raw` без авторизации недоступен.

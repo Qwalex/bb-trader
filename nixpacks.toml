@@ -1,0 +1,16 @@
+# Nixpacks (Railway по умолчанию читает этот файл). Конфиг для сервиса API.
+# Для сервиса Web используйте nixpacks.web.toml и переменную окружения:
+#   NIXPACKS_CONFIG_FILE = nixpacks.web.toml
+# (см. https://nixpacks.com/docs/configuration/file — NIXPACKS_CONFIG_FILE)
+
+[phases.setup]
+nixPkgs = ["...", "nodejs_22"]
+
+[phases.install]
+cmds = ["npm ci"]
+
+[phases.build]
+cmds = ["npx turbo run build --filter=api"]
+
+[start]
+cmd = "npm run start:railway --workspace=api"

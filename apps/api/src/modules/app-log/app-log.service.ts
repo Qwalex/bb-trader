@@ -116,7 +116,9 @@ export class AppLogService {
     const msg = String(e ?? '').toLowerCase();
     return (
       msg.includes('database or disk is full') ||
-      msg.includes('sqliteerror') && msg.includes('extended_code: 13')
+      msg.includes('no space left on device') ||
+      msg.includes('could not extend file') ||
+      (msg.includes('sqliteerror') && msg.includes('extended_code: 13'))
     );
   }
 
@@ -132,7 +134,7 @@ export class AppLogService {
     if (now - this.dbFullLastErrorTs > 60_000) {
       this.dbFullLastErrorTs = now;
       this.logger.error(
-        `AppLog write muted for 5m (SQLite full): ${errText}`,
+        `AppLog write muted for 5m (disk/DB full): ${errText}`,
       );
     }
   }

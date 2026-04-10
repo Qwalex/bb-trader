@@ -1,0 +1,14 @@
+# Конфиг Nixpacks для сервиса Web (Next.js). Подключение в Railway:
+# Variables → NIXPACKS_CONFIG_FILE = nixpacks.web.toml
+
+[phases.setup]
+nixPkgs = ["...", "nodejs_22"]
+
+[phases.install]
+cmds = ["npm ci"]
+
+[phases.build]
+cmds = ["npx turbo run build --filter=web"]
+
+[start]
+cmd = "npm run start --workspace=web"

@@ -1,9 +1,24 @@
 # Стек test: отдельная БД; префикс URL как у dev — trade-test (иначе на одном vhost конфликт с /trade).
-# Порты на хосте: 3021 api, 3023 web, 8084 sqlite-web. Nginx: /trade-test, /trade-test-api, /trade-test-db.
+# Порты на хосте: 3021 api, 3023 web. Nginx: /trade-test, /trade-test-api.
 # Каталог на сервере: например /root/bb-trader-test, ветка test, ./restart-test.sh
 name: bb-trader-test
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: signals
+      POSTGRES_PASSWORD: signals
+      POSTGRES_DB: signals_test
+    volumes:
+      - postgres-data-test:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U signals -d signals_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   api:
     image: ${API_IMAGE:-bb-trade-api:local}
     build:
@@ -11,16 +26,17 @@ services:
       dockerfile: Dockerfile.api
     restart: unless-stopped
     environment:
-      DATABASE_URL: file:/app/data/dev.db
+      DATABASE_URL: postgresql://signals:signals@postgres:5432/signals_test?schema=public
       API_PORT: "3001"
       API_HOST: 0.0.0.0
       STACK_SLUG: ${STACK_SLUG:-trade-test}
       API_SWAGGER_SERVER: "/${STACK_SLUG:-trade-test}-api"
       API_ACCESS_TOKEN: ${API_ACCESS_TOKEN:-}
-    volumes:
-      - sqlite-data-test:/app/data
     ports:
       - "127.0.0.1:3021:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3001/health || exit 1"]
       interval: 10s
@@ -57,19 +73,5 @@ services:
       retries: 10
       start_period: 20s
 
-  db-viewer:
-    image: coleifer/sqlite-web:latest
-    restart: unless-stopped
-    environment:
-      STACK_SLUG: ${STACK_SLUG:-trade-test}
-    command: ["sqlite_web", "/data/dev.db", "--host", "0.0.0.0", "--port", "8080", "--url-prefix", "/${STACK_SLUG:-trade-test}-db"]
-    ports:
-      - "127.0.0.1:8084:8080"
-    volumes:
-      - sqlite-data-test:/data:ro
-    depends_on:
-      api:
-        condition: service_healthy
-
 volumes:
-  sqlite-data-test:
+  postgres-data-test:

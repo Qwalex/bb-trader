@@ -11,13 +11,21 @@
 
 ## Learned Workspace Facts
 
-- Монорепо: API в `apps/api` (NestJS), web в `apps/web` (Next.js 16), общие типы в `packages/shared`, БД через Prisma и SQLite.
+- Монорепо: API в `apps/api` (NestJS), web в `apps/web` (Next.js 16), общие типы в `packages/shared`, БД через Prisma и **PostgreSQL** (`DATABASE_URL`). Локально и в Docker — сервис `postgres` в compose; на Railway — плагин PostgreSQL и переменная `DATABASE_URL` на сервисе API.
 - Расшифровка сигналов — OpenRouter; бот — Telegraf; запросы к LLM могут быть долгими — таймауты обработчика и HTTP выставлены с большим запасом (порядка 180 с).
-- Загрузка переменных: корень монорепозитория и `apps/api` (поздний файл перекрывает ранний). Значения в SQLite со страницы `/settings` для того же ключа перекрывают переменные окружения.
+- Загрузка переменных: корень монорепозитория и `apps/api` (поздний файл перекрывает ранний). Значения в БД со страницы `/settings` для того же ключа перекрывают переменные окружения.
 - Bybit: отдельные ключи для testnet (`BYBIT_API_KEY_TESTNET` / `BYBIT_API_SECRET_TESTNET`) и mainnet (`BYBIT_API_KEY_MAINNET` / `BYBIT_API_SECRET_MAINNET`); переключение `BYBIT_TESTNET`; общих legacy-ключей `BYBIT_API_KEY` / `BYBIT_API_SECRET` в логике нет.
 - Клиент Bybit (`bybit-api`) может отдавать ошибки не как `Error`; перед логом и сообщением в чат нормализовать в строку (например общим `formatError`).
 - Массовое приветствие в Telegram при старте API: доставка возможна только пользователям, которые уже открыли чат с ботом (ограничение Telegram).
 - Сигналы: подтверждение в Telegram перед выставлением ордеров; при неполных данных — многоходовый сбор с сохранением контекста до готовности.
-- Проверка дубликата пары: при наличии ключей Bybit приоритет у состояния биржи по API; торговая пара нормализуется для БД и запросов; зависшие записи `ORDERS_PLACED` в SQLite снимаются при «чистой» бирже.
+- Проверка дубликата пары: при наличии ключей Bybit приоритет у состояния биржи по API; торговая пара нормализуется для БД и запросов; зависшие записи `ORDERS_PLACED` в БД снимаются при «чистой» бирже.
 - TP: только отдельные reduce-only лимитки после исполнения всех входов — **по одному ордеру на каждый уровень TP**, объём позиции делится поровну между уровнями; SL на позицию через `setTradingStop` Full; при слишком малом лоте число уровней уменьшается или один ордер на первый TP.
 - Логи ключевых этапов и обмена с OpenRouter (без утечки секретов) хранятся в БД и доступны на странице `/logs`.
+
+### Railway (деплой)
+
+- Два сервиса из одного репозитория: **API** и **Web**; отдельно **PostgreSQL** (New → Database → PostgreSQL, привязать к API).
+- **Nixpacks:** в корне `nixpacks.toml` (API: install/build/start). Для Web-сервиса задать **`NIXPACKS_CONFIG_FILE=nixpacks.web.toml`** и использовать тот же root репозитория.
+- **API (если команды не из файла):** Build: `npm ci && npx turbo run build --filter=api`; Start: `npm run start:railway --workspace=api`. Переменные: как локально плюс `DATABASE_URL` от Railway; `API_SWAGGER_SERVER` для публичного URL без префикса nginx — часто `/` или полный origin сервиса API.
+- **Web:** `NEXT_PUBLIC_API_URL=https://<api>.up.railway.app`, `API_INTERNAL_URL` — тот же или internal URL; в корень домена — `NEXT_BASE_PATH` не задавать.
+- Альтернатива Nixpacks — `Dockerfile.api` / `Dockerfile.web`, контекст сборки — корень репозитория.

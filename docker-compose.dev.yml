@@ -1,8 +1,23 @@
-# Стек development: отдельный project name, порты, volume SQLite — не пересекается с production.
+# Стек development: отдельный project name, порты, volume PostgreSQL — не пересекается с production.
 # На VPS: отдельный каталог (напр. /root/bb-trader-dev), ветка development, ./restart-dev.sh
 name: bb-trader-dev
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: signals
+      POSTGRES_PASSWORD: signals
+      POSTGRES_DB: signals_dev
+    volumes:
+      - postgres-data-dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U signals -d signals_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   api:
     image: ${API_IMAGE:-bb-trade-api:local}
     build:
@@ -10,16 +25,17 @@ services:
       dockerfile: Dockerfile.api
     restart: unless-stopped
     environment:
-      DATABASE_URL: file:/app/data/dev.db
+      DATABASE_URL: postgresql://signals:signals@postgres:5432/signals_dev?schema=public
       API_PORT: "3001"
       API_HOST: 0.0.0.0
       STACK_SLUG: ${STACK_SLUG:-trade-dev}
       API_SWAGGER_SERVER: "/${STACK_SLUG:-trade-dev}-api"
       API_ACCESS_TOKEN: ${API_ACCESS_TOKEN:-}
-    volumes:
-      - sqlite-data-dev:/app/data
     ports:
       - "127.0.0.1:3011:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3001/health || exit 1"]
       interval: 10s
@@ -56,27 +72,5 @@ services:
       retries: 10
       start_period: 20s
 
-  db-viewer:
-    image: coleifer/sqlite-web:latest
-    restart: unless-stopped
-    command:
-      [
-        "sqlite_web",
-        "/data/dev.db",
-        "--host",
-        "0.0.0.0",
-        "--port",
-        "8080",
-        "--url-prefix",
-        "/${STACK_SLUG:-trade-dev}-db",
-      ]
-    ports:
-      - "127.0.0.1:8082:8080"
-    volumes:
-      - sqlite-data-dev:/data:ro
-    depends_on:
-      api:
-        condition: service_healthy
-
 volumes:
-  sqlite-data-dev:
+  postgres-data-dev:
