@@ -5,6 +5,7 @@ import { Reflector } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 import { ApiAuthGuard } from './common/api-auth.guard';
+import { parseCorsOrigins } from './common/cors-origins.util';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -20,13 +21,8 @@ async function bootstrap() {
   app.useGlobalGuards(
     new ApiAuthGuard(app.get(Reflector), app.get(ConfigService)),
   );
-  // Список через запятую: полный origin как шлёт браузер — «https://хост[:порт]» без пути.
-  // Завершающий / в переменной не обязателен (ниже срезаем для совпадения с Origin).
-  const allowedOriginsRaw = process.env.API_CORS_ORIGINS ?? '';
-  const allowedOrigins = allowedOriginsRaw
-    .split(',')
-    .map((value) => value.trim().replace(/\/+$/, ''))
-    .filter((value) => value.length > 0);
+  // API_CORS_ORIGINS: через запятую, полный origin (https://…), как у браузера в заголовке Origin.
+  const allowedOrigins = parseCorsOrigins(process.env.API_CORS_ORIGINS);
   const allowAnyOrigin = process.env.NODE_ENV !== 'production';
   app.enableCors({
     origin:

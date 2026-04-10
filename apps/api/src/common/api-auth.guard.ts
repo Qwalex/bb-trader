@@ -8,6 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
 
+import { parseCorsOrigins } from './cors-origins.util';
 import { IS_PUBLIC_ENDPOINT_KEY } from './public.decorator';
 
 @Injectable()
@@ -78,6 +79,17 @@ export class ApiAuthGuard implements CanActivate {
       return;
     }
 
+    const originHeader = pick('origin');
+    if (originHeader) {
+      const normalizedOrigin = originHeader.trim().replace(/\/+$/, '');
+      const allowed = parseCorsOrigins(
+        this.config.get<string>('API_CORS_ORIGINS'),
+      );
+      if (allowed.includes(normalizedOrigin)) {
+        return;
+      }
+    }
+
     const host = pick('host').toLowerCase();
     if (!host) {
       throw new ForbiddenException('API access denied: missing host header');
@@ -98,7 +110,7 @@ export class ApiAuthGuard implements CanActivate {
       (refererHost != null && refererHost === expectedHost);
     if (!sameOrigin) {
       throw new ForbiddenException(
-        'API доступен только с того же origin или с валидным API токеном',
+        'API доступен только с того же host, с origin из API_CORS_ORIGINS или с валидным API токеном',
       );
     }
   }
