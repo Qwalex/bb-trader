@@ -1770,6 +1770,24 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         }
       }
 
+      const lockEmojiCount = this.countLockEmojiInText(text);
+      if (lockEmojiCount > 5) {
+        const reason =
+          'Сообщение содержит 🔐 более 5 раз — не обрабатывается как сигнал, результат, перезаход или закрытие';
+        this.appendIngestStageLog('info', 'Userbot: skipped — lock emoji spam', ingest, {
+          lockEmojiCount,
+          textPreview: this.makeTextPreview(text),
+        });
+        await this.updateIngest(ingest.id, {
+          classification: 'other',
+          status: 'ignored',
+          error: reason,
+          aiRequest: null,
+          aiResponse: null,
+        });
+        return;
+      }
+
       const chatMetaRaw = await (this.prisma as any).tgUserbotChat.findUnique({
         where: { chatId: ingest.chatId },
         select: { title: true, sourcePriority: true },
@@ -3586,6 +3604,12 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       messageId: ingest.messageId,
       ...payload,
     });
+  }
+
+  /** U+1F510 — если в тексте больше 5 раз, не считаем сообщение торговым. */
+  private countLockEmojiInText(text: string): number {
+    const m = text.match(/\u{1F510}/gu);
+    return m ? m.length : 0;
   }
 
   private makeTextPreview(text: string, max = 180): string {
