@@ -3,6 +3,11 @@
 #
 # Порт: Railway задаёт переменную PORT; API слушает PORT (см. apps/api/src/main.ts).
 # Healthcheck бьёт в тот же порт + healthcheckPath.
+#
+# Railpack по умолчанию кладёт в install-слой только package.json workspace-пакетов;
+# исходники для tsc/nest подтягиваются через railpack.json (доп. local include).
+# Запасной вариант в Variables: RAILPACK_NODE_INSTALL_PATTERNS с путями через пробел
+# (см. https://railpack.com/languages/node/ ).
 
 [build]
 builder = "RAILPACK"

@@ -4,6 +4,12 @@
     "node": "22"
   },
   "steps": {
+    "install": {
+      "inputs": [
+        "...",
+        { "local": true, "include": ["packages", "apps"] }
+      ]
+    },
     "build": {
       "inputs": [{ "step": "install" }],
       "commands": [
