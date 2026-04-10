@@ -1,0 +1,12 @@
+# Config-as-code для сервиса API на Railway.
+# В настройках сервиса: путь к файлу → /railway.api.toml (от корня репозитория).
+#
+# Порт: Railway задаёт переменную PORT; API слушает PORT (см. apps/api/src/main.ts).
+# Healthcheck бьёт в тот же порт + healthcheckPath.
+
+[build]
+builder = "RAILPACK"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 120

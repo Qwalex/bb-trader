@@ -8,7 +8,7 @@ nixPkgs = ["...", "nodejs_22"]
 cmds = ["npm ci"]
 
 [phases.build]
-cmds = ["npx turbo run build --filter=api"]
+cmds = ["npm run build -w @repo/shared && npm run build -w api"]
 
 [start]
 cmd = "npm run start:railway --workspace=api"

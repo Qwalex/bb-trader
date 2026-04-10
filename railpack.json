@@ -6,7 +6,9 @@
   "steps": {
     "build": {
       "inputs": [{ "step": "install" }],
-      "commands": ["npx turbo run build --filter=api"]
+      "commands": [
+        "npm run build -w @repo/shared && npm run build -w api"
+      ]
     }
   },
   "deploy": {

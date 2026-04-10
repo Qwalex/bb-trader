@@ -48,9 +48,10 @@ async function bootstrap() {
     },
   });
 
-  const port = process.env.API_PORT ?? '3001';
+  const portRaw = process.env.PORT ?? process.env.API_PORT ?? '3001';
+  const port = parseInt(portRaw, 10);
   const host = process.env.API_HOST ?? '0.0.0.0';
-  await app.listen(parseInt(port, 10), host);
+  await app.listen(port, host);
 }
 
 void bootstrap();

@@ -7,7 +7,9 @@ nixPkgs = ["...", "nodejs_22"]
 cmds = ["npm ci"]
 
 [phases.build]
-cmds = ["npx turbo run build --filter=web"]
+cmds = [
+  "npm run build -w @repo/shared && npm run build -w @repo/api && npm run build -w web",
+]
 
 [start]
 cmd = "npm run start --workspace=web"
