@@ -25,7 +25,8 @@
 ### Railway (деплой)
 
 - Два сервиса из одного репозитория: **API** и **Web**; отдельно **PostgreSQL** (New → Database → PostgreSQL, привязать к API).
-- **Nixpacks:** в корне `nixpacks.toml` (API: install/build/start). Для Web-сервиса задать **`NIXPACKS_CONFIG_FILE=nixpacks.web.toml`** и использовать тот же root репозитория.
-- **API (если команды не из файла):** Build: `npm ci && npx turbo run build --filter=api`; Start: `npm run start:railway --workspace=api`. Переменные: как локально плюс `DATABASE_URL` от Railway; `API_SWAGGER_SERVER` для публичного URL без префикса nginx — часто `/` или полный origin сервиса API.
-- **Web:** `NEXT_PUBLIC_API_URL=https://<api>.up.railway.app`, `API_INTERNAL_URL` — тот же или internal URL; в корень домена — `NEXT_BASE_PATH` не задавать.
-- Альтернатива Nixpacks — `Dockerfile.api` / `Dockerfile.web`, контекст сборки — корень репозитория.
+- **Railpack** (билдер по умолчанию на Railway): в корне **`railpack.json`** — Node 22, сборка `turbo` только для **api**, старт `start:railway`. Для сервиса **Web** в Variables задать **`RAILPACK_CONFIG_FILE=railpack.web.json`** (путь относительно корня репо). Файлы **`nixpacks.toml`** при Railpack **не используются**.
+- Если удобнее без JSON: переменные **`RAILPACK_INSTALL_CMD`** (`npm ci`), **`RAILPACK_BUILD_CMD`**, **`RAILPACK_START_CMD`** (см. [Railpack env](https://railpack.com/config/environment-variables)).
+- **Переменные API:** как локально + `DATABASE_URL`; `API_SWAGGER_SERVER` без nginx-прокси — часто `/` или полный публичный URL API.
+- **Web:** `NEXT_PUBLIC_API_URL=https://<api>.up.railway.app`, `API_INTERNAL_URL` — тот же или internal URL; корень домена — `NEXT_BASE_PATH` не задавать.
+- **Docker:** `Dockerfile.api` / `Dockerfile.web`, контекст — корень репозитория.

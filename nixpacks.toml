@@ -1,7 +1,5 @@
-# Nixpacks (Railway по умолчанию читает этот файл). Конфиг для сервиса API.
-# Для сервиса Web используйте nixpacks.web.toml и переменную окружения:
-#   NIXPACKS_CONFIG_FILE = nixpacks.web.toml
-# (см. https://nixpacks.com/docs/configuration/file — NIXPACKS_CONFIG_FILE)
+# Только если билдер — Nixpacks (не Railpack). Сейчас Railway по умолчанию — Railpack → см. railpack.json
+# Для Web при Nixpacks: NIXPACKS_CONFIG_FILE = nixpacks.web.toml
 
 [phases.setup]
 nixPkgs = ["...", "nodejs_22"]

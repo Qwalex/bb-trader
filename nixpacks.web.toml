@@ -1,5 +1,4 @@
-# Конфиг Nixpacks для сервиса Web (Next.js). Подключение в Railway:
-# Variables → NIXPACKS_CONFIG_FILE = nixpacks.web.toml
+# Только для билдера Nixpacks. На Railway с Railpack используйте railpack.web.json и RAILPACK_CONFIG_FILE.
 
 [phases.setup]
 nixPkgs = ["...", "nodejs_22"]

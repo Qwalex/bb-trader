@@ -1,0 +1,15 @@
+{
+  "$schema": "https://schema.railpack.com",
+  "packages": {
+    "node": "22"
+  },
+  "steps": {
+    "build": {
+      "inputs": [{ "step": "install" }],
+      "commands": ["npx turbo run build --filter=web"]
+    }
+  },
+  "deploy": {
+    "startCommand": "npm run start --workspace=web"
+  }
+}
