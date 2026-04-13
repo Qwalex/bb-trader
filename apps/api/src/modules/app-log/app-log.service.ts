@@ -75,6 +75,24 @@ function parseLogNoisySetting(raw: string | undefined): boolean {
   return s === 'true' || s === '1' || s === 'yes';
 }
 
+/** Писать ли в AppLog; по умолчанию true (ключ не задан / пусто / мусор). */
+function parseAppLogEnabled(raw: string | undefined): boolean {
+  if (raw === undefined || raw === null || String(raw).trim() === '') {
+    return true;
+  }
+  const s = String(raw).trim().toLowerCase();
+  if (
+    s === 'false' ||
+    s === '0' ||
+    s === 'no' ||
+    s === 'off' ||
+    s === 'disabled'
+  ) {
+    return false;
+  }
+  return true;
+}
+
 @Injectable()
 export class AppLogService {
   private static readonly LOG_NOISY_POLICY_TTL_MS = 10_000;
@@ -83,6 +101,8 @@ export class AppLogService {
   private dbFullMuteUntilTs = 0;
   private dbFullLastErrorTs = 0;
   private logNoisyPolicyCache: { expiresAt: number; value: boolean } | null =
+    null;
+  private logEnabledPolicyCache: { expiresAt: number; value: boolean } | null =
     null;
 
   constructor(
@@ -106,6 +126,28 @@ export class AppLogService {
     }
     const value = parseLogNoisySetting(raw);
     this.logNoisyPolicyCache = {
+      value,
+      expiresAt: now + AppLogService.LOG_NOISY_POLICY_TTL_MS,
+    };
+    return value;
+  }
+
+  private async resolveAppLogWritesEnabled(): Promise<boolean> {
+    const now = Date.now();
+    if (
+      this.logEnabledPolicyCache &&
+      now < this.logEnabledPolicyCache.expiresAt
+    ) {
+      return this.logEnabledPolicyCache.value;
+    }
+    let raw: string | undefined;
+    try {
+      raw = await this.settings.get('APPLOG_ENABLED');
+    } catch {
+      raw = undefined;
+    }
+    const value = parseAppLogEnabled(raw);
+    this.logEnabledPolicyCache = {
       value,
       expiresAt: now + AppLogService.LOG_NOISY_POLICY_TTL_MS,
     };
@@ -145,6 +187,9 @@ export class AppLogService {
     message: string,
     payload?: unknown,
   ): Promise<void> {
+    if (!(await this.resolveAppLogWritesEnabled())) {
+      return;
+    }
     const logNoisyEvents = await this.resolveLogNoisyEventsEnabled();
     if (shouldSkipDbAppend(level, message, { logNoisyEvents })) {
       return;
@@ -206,6 +251,9 @@ export class AppLogService {
 
   @Cron(CronExpression.EVERY_30_MINUTES)
   async deleteOldNoiseLogs(): Promise<void> {
+    if (!(await this.resolveAppLogWritesEnabled())) {
+      return;
+    }
     if (this.shouldMuteDbWrites()) {
       return;
     }
@@ -231,6 +279,9 @@ export class AppLogService {
 
   @Cron('0 0 0 */3 * *')
   async deleteOldRegularLogs(): Promise<void> {
+    if (!(await this.resolveAppLogWritesEnabled())) {
+      return;
+    }
     if (this.shouldMuteDbWrites()) {
       return;
     }

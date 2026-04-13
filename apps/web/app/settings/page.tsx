@@ -41,6 +41,11 @@ const KEYS = [
     label: 'Диагностика: лимит логов AppLog на один кейс',
   },
   {
+    key: 'APPLOG_ENABLED',
+    label:
+      'Запись логов в БД (AppLog, страница /logs). Выключите для полного отключения; включите снова при необходимости',
+  },
+  {
     key: 'APPLOG_LOG_NOISY_EVENTS',
     label:
       'Логи AppLog: писать в БД шумные события (poll, userbot debug и т.п.; по умолчанию выкл)',
@@ -152,6 +157,7 @@ const KEYS = [
 ] as const;
 
 const BOOLEAN_KEYS = new Set<string>([
+  'APPLOG_ENABLED',
   'APPLOG_LOG_NOISY_EVENTS',
   'BYBIT_TESTNET',
   'BUMP_TO_MIN_EXCHANGE_LOT',
@@ -251,6 +257,7 @@ const SETTINGS_SECTIONS: { id: string; title: string; keys: string[] }[] = [
     keys: [
       'DIAGNOSTIC_BATCH_SIZE',
       'DIAGNOSTIC_MAX_LOG_LINES',
+      'APPLOG_ENABLED',
       'APPLOG_LOG_NOISY_EVENTS',
     ],
   },
@@ -520,8 +527,14 @@ export default function SettingsPage() {
   const hasPendingChanges = pendingChanges.length > 0;
 
   const valueForDraft = (key: string) => valueFor(draftRows, key);
-  const boolValueFor = (key: string) =>
-    valueForDraft(key).trim().toLowerCase() === 'true';
+  const boolValueFor = (key: string) => {
+    const raw = valueForDraft(key).trim().toLowerCase();
+    if (key === 'APPLOG_ENABLED') {
+      if (raw === '') return true;
+      return raw === 'true';
+    }
+    return raw === 'true';
+  };
   const modelHistory = useMemo(
     () => parseModelHistory(valueFor(draftRows, MODEL_HISTORY_KEY)),
     [draftRows],
