@@ -146,7 +146,8 @@ export function fieldLabelRu(key: string): string {
     leverage: 'плечо (число, например 10)',
     orderUsd:
       'сумма позиции в USDT (номинал); если не задана — значение из настроек DEFAULT_ORDER_USD',
-    capitalPercent: 'доля депозита в % (только если не задаёте сумму в USDT)',
+    capitalPercent:
+      'доля баланса в %: 1–100 — маржа, номинал × плечо; выше 100 — номинал как % от баланса (напр. 500 → 5× баланс в USDT)',
     entryIsRange: 'одна зона входа (две границы), не DCA',
   };
   return map[key] ?? key;

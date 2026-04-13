@@ -6,6 +6,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Max,
   Min,
 } from 'class-validator';
 
@@ -46,10 +47,11 @@ export class SignalParseDto {
   @Type(() => Number)
   orderUsd?: number;
 
-  /** Режим «доля депозита»; если не используется — 0 */
+  /** Режим «доля депозита»; если не используется — 0; см. BybitService при >100 */
   @IsOptional()
   @IsNumber()
   @Min(0)
+  @Max(1_000_000)
   @Type(() => Number)
   capitalPercent?: number;
 
