@@ -315,6 +315,12 @@ export class TelegramUserbotController {
       properties: {
         enabled: { type: 'boolean' },
         defaultLeverage: { type: 'number', nullable: true },
+        forcedLeverage: {
+          type: 'number',
+          nullable: true,
+          description:
+            'Принудительное плечо для сигналов из чата; null — выкл.; перекрывает плечо из сигнала и глобальные FORCED_*',
+        },
         defaultEntryUsd: { type: 'string', nullable: true },
         martingaleMultiplier: { type: 'number', nullable: true },
         sourcePriority: { type: 'number', nullable: true },
@@ -346,6 +352,7 @@ export class TelegramUserbotController {
     body: {
       enabled?: boolean;
       defaultLeverage?: number | null;
+      forcedLeverage?: number | null;
       defaultEntryUsd?: string | null;
       martingaleMultiplier?: number | null;
       sourcePriority?: number | null;

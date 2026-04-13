@@ -89,6 +89,8 @@ export type LeverageFieldOptions = {
   requireLeverage: boolean;
   /** Используется при requireLeverage === false, если в partial нет валидного плеча (>= 1) */
   defaultLeverage?: number;
+  /** Принудительное плечо (карточка userbot «Прин.» или FORCED_LEVERAGE) — перекрывает сигнал и дефолт */
+  forcedLeverage?: number;
 };
 
 /** Какие поля ещё нужны для полного SignalDto. */
@@ -104,15 +106,20 @@ export function listMissingRequiredFields(
   }
   if (!p.takeProfits?.length) missing.push('takeProfits');
 
-  const requireLev = leverageOpts?.requireLeverage ?? true;
-  if (requireLev) {
-    if (p.leverage === undefined || p.leverage < 1) missing.push('leverage');
+  const forced = leverageOpts?.forcedLeverage;
+  if (forced != null && forced >= 1) {
+    /* плечо задаётся политикой принудительной настройки */
   } else {
-    const def = leverageOpts?.defaultLeverage;
-    const hasValidLeverage =
-      p.leverage !== undefined && !Number.isNaN(Number(p.leverage)) && p.leverage >= 1;
-    if (!hasValidLeverage && (def === undefined || def < 1)) {
-      missing.push('leverage');
+    const requireLev = leverageOpts?.requireLeverage ?? true;
+    if (requireLev) {
+      if (p.leverage === undefined || p.leverage < 1) missing.push('leverage');
+    } else {
+      const def = leverageOpts?.defaultLeverage;
+      const hasValidLeverage =
+        p.leverage !== undefined && !Number.isNaN(Number(p.leverage)) && p.leverage >= 1;
+      if (!hasValidLeverage && (def === undefined || def < 1)) {
+        missing.push('leverage');
+      }
     }
   }
   return missing;

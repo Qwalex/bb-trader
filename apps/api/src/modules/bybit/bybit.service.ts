@@ -7,6 +7,7 @@ import { formatError } from '../../common/format-error';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppLogService } from '../app-log/app-log.service';
 import { OrdersService } from '../orders/orders.service';
+import { resolveForcedLeverageWithChatOverride } from '../settings/forced-leverage.util';
 import {
   parseSourceTpSlStepMap,
   parseSourceTpSlStepRangeMap,
@@ -1901,6 +1902,7 @@ export class BybitService {
     origin?: { chatId?: string; messageId?: string; signalExternalId?: string },
   ): Promise<PlaceOrdersResult> {
     signal = await this.applySourceMartingaleSizing(signal);
+    signal = await this.applyForcedLeverage(signal, origin);
     const symbol = normalizeTradingPair(signal.pair);
 
     const testnetMode =
@@ -4106,6 +4108,38 @@ export class BybitService {
         error: formatError(e),
       };
     }
+  }
+
+  private async applyForcedLeverage(
+    signal: SignalDto,
+    origin?: { chatId?: string },
+  ): Promise<SignalDto> {
+    let chatForced: number | null | undefined;
+    const cid = origin?.chatId?.trim();
+    if (cid) {
+      const row = await this.prisma.tgUserbotChat.findUnique({
+        where: { chatId: cid },
+        select: { forcedLeverage: true },
+      });
+      chatForced = row?.forcedLeverage ?? undefined;
+    }
+    const rawGlobal = await this.settings.get('FORCED_LEVERAGE');
+    const src = String(signal.source ?? '').trim();
+    const resolved = resolveForcedLeverageWithChatOverride(chatForced, rawGlobal);
+    if (resolved == null) {
+      return signal;
+    }
+    if (resolved === signal.leverage) {
+      return signal;
+    }
+    void this.appLog.append('info', 'bybit', 'принудительное плечо', {
+      pair: signal.pair,
+      source: src || null,
+      sourceChatId: cid ?? null,
+      leverageBefore: signal.leverage,
+      leverageAfter: resolved,
+    });
+    return { ...signal, leverage: resolved };
   }
 
   private parseSourceMartingaleMap(raw: string | undefined): Map<string, number> {

@@ -47,6 +47,8 @@ type UserbotChat = {
   enabled: boolean;
   sourcePriority: number;
   defaultLeverage: number | null;
+  /** Принудительное плечо (всегда); null / отсутствует — выкл. */
+  forcedLeverage?: number | null;
   defaultEntryUsd: string | null;
   martingaleMultiplier: number | null;
   /** null — наследовать глобальный BUMP_TO_MIN_EXCHANGE_LOT */
@@ -1189,7 +1191,7 @@ export default function TelegramUserbotPage() {
                 />
                 </div>
                 <div className="userbotChatFieldCompact">
-                  <span className="userbotChatFieldCompactLabel" title="Кредитное плечо">
+                  <span className="userbotChatFieldCompactLabel" title="Плечо по умолчанию, если в сигнале не указано">
                     Плечо
                   </span>
                   <input
@@ -1200,7 +1202,7 @@ export default function TelegramUserbotPage() {
                     key={`lev-${chat.chatId}-${chat.defaultLeverage ?? 'x'}`}
                     defaultValue={chat.defaultLeverage ?? ''}
                     placeholder="авто"
-                    title="Пусто — общий DEFAULT_LEVERAGE"
+                    title="Дефолт при отсутствии плеча в тексте; пусто — DEFAULT_LEVERAGE"
                     onBlur={(e) => {
                     const v = e.target.value.trim();
                     const num = v === '' ? null : Number.parseInt(v, 10);
@@ -1239,6 +1241,64 @@ export default function TelegramUserbotPage() {
                     });
                   }}
                 />
+                </div>
+                <div className="userbotChatFieldCompact">
+                  <span
+                    className="userbotChatFieldCompactLabel"
+                    title="Принудительное плечо: всегда это значение на бирже (выше глобального FORCED_LEVERAGE в /settings)"
+                  >
+                    Прин.
+                  </span>
+                  <input
+                    className="userbotCellInput userbotCellInputCompact"
+                    type="number"
+                    min={1}
+                    step={1}
+                    key={`flev-${chat.chatId}-${chat.forcedLeverage ?? 'x'}`}
+                    defaultValue={chat.forcedLeverage ?? ''}
+                    placeholder="—"
+                    title="Пусто — не принуждать (могут сработать настройки /settings)"
+                    onBlur={(e) => {
+                      const v = e.target.value.trim();
+                      const num = v === '' ? null : Number.parseInt(v, 10);
+                      if (
+                        v !== '' &&
+                        (!Number.isFinite(num) || num === null || num < 1)
+                      ) {
+                        setMsg({
+                          type: 'err',
+                          text: 'Принудительное плечо: целое ≥ 1 или пусто',
+                        });
+                        return;
+                      }
+                      const curForced = chat.forcedLeverage ?? null;
+                      const same =
+                        (num === null && curForced === null) || num === curForced;
+                      if (same) return;
+                      void runAction(`flev-${chat.chatId}`, async () => {
+                        const res = await fetch(
+                          `${getApiBase()}/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
+                          {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ forcedLeverage: num }),
+                          },
+                        );
+                        if (!res.ok) {
+                          throw new Error(`Ошибка сохранения (${res.status})`);
+                        }
+                        setChats((prev) =>
+                          prev.map((row) =>
+                            row.id === chat.id ? { ...row, forcedLeverage: num } : row,
+                          ),
+                        );
+                        setMsg({
+                          type: 'ok',
+                          text: 'Принудительное плечо для источника сохранено',
+                        });
+                      });
+                    }}
+                  />
                 </div>
                 <div className="userbotChatFieldCompact">
                   <span className="userbotChatFieldCompactLabel" title="Мартингейл после убытка">

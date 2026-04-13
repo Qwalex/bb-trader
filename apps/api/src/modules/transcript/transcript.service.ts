@@ -16,6 +16,7 @@ import { AppLogService } from '../app-log/app-log.service';
 import { sanitizeForOpenRouterLog } from '../app-log/log-sanitize';
 import { BybitService } from '../bybit/bybit.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { resolveForcedLeverageWithChatOverride } from '../settings/forced-leverage.util';
 import { SettingsService } from '../settings/settings.service';
 import { SignalParseDto } from './dto/signal-parse.dto';
 import {
@@ -31,6 +32,8 @@ import {
 export type TranscriptParseOverrides = {
   defaultOrderUsd?: number;
   leverageDefault?: number;
+  /** Принудительное плечо из карточки TgUserbotChat (выше глобального FORCED_LEVERAGE) */
+  chatForcedLeverage?: number;
 };
 
 type OpenRouterLogContext = {
@@ -815,11 +818,9 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       });
       const ms = Date.now() - t0;
       this.logger.log(`applyCorrection: OpenRouter ok in ${ms}ms`);
-      const levOpts = await this.getLeverageFieldOptions(
-        overrides?.leverageDefault,
-      );
-      const result = this.finishTranscriptResult(
-        this.parseModelContent(content, levOpts, defaultOrderUsd),
+      const levOpts = await this.getLeverageFieldOptions(overrides);
+      const result = await this.finishTranscriptResult(
+        await this.parseModelContent(content, levOpts, defaultOrderUsd),
         levOpts,
         defaultOrderUsd,
       );
@@ -889,11 +890,9 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       });
       const ms = Date.now() - t0;
       this.logger.log(`continueSignalDraft: OpenRouter ok in ${ms}ms`);
-      const levOpts = await this.getLeverageFieldOptions(
-        overrides?.leverageDefault,
-      );
-      const result = this.finishTranscriptResult(
-        this.parseModelContent(content, levOpts, defaultOrderUsd),
+      const levOpts = await this.getLeverageFieldOptions(overrides);
+      const result = await this.finishTranscriptResult(
+        await this.parseModelContent(content, levOpts, defaultOrderUsd),
         levOpts,
         defaultOrderUsd,
       );
@@ -975,11 +974,9 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       this.logger.log(
         `parse: OpenRouter ok in ${ms}ms (primary=${model}${fallbackModels[0] ? `, fallback=${fallbackModels[0]}` : ''})`,
       );
-      const levOpts = await this.getLeverageFieldOptions(
-        overrides?.leverageDefault,
-      );
-      const parsed = this.finishTranscriptResult(
-        this.parseModelContent(content, levOpts, defaultOrderUsd),
+      const levOpts = await this.getLeverageFieldOptions(overrides);
+      const parsed = await this.finishTranscriptResult(
+        await this.parseModelContent(content, levOpts, defaultOrderUsd),
         levOpts,
         defaultOrderUsd,
       );
@@ -1313,8 +1310,9 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
 
   /** Настройки плеча из SQLite / env: опциональная подстановка или обязательное поле в сигнале. */
   private async getLeverageFieldOptions(
-    overrideDefaultLeverage?: number | null,
+    overrides?: TranscriptParseOverrides | null,
   ): Promise<LeverageFieldOptions> {
+    const overrideDefaultLeverage = overrides?.leverageDefault;
     const defRaw = await this.settings.get('DEFAULT_LEVERAGE');
     const parsed =
       defRaw != null && String(defRaw).trim() !== ''
@@ -1335,9 +1333,16 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       );
     }
 
+    const rawForcedGlobal = await this.settings.get('FORCED_LEVERAGE');
+    const forcedLeverage = resolveForcedLeverageWithChatOverride(
+      overrides?.chatForcedLeverage,
+      rawForcedGlobal,
+    );
+
     return {
       requireLeverage: false,
       defaultLeverage,
+      forcedLeverage,
     };
   }
 
@@ -1357,31 +1362,37 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       return signalRaw;
     }
     const def = leverageOpts.defaultLeverage;
-    if (def === undefined || def < 1) {
+    const ff = leverageOpts.forcedLeverage;
+    if ((def === undefined || def < 1) && (ff == null || ff < 1)) {
       return signalRaw;
     }
     const o = { ...(signalRaw as Record<string, unknown>) };
-    const lev = o.leverage;
-    const n =
-      typeof lev === 'number'
-        ? lev
-        : lev != null
-          ? parseFloat(String(lev))
-          : NaN;
-    if (!Number.isFinite(n) || n < 1) {
-      o.leverage = def;
+    if (def != null && def >= 1) {
+      const lev = o.leverage;
+      const n =
+        typeof lev === 'number'
+          ? lev
+          : lev != null
+            ? parseFloat(String(lev))
+            : NaN;
+      if (!Number.isFinite(n) || n < 1) {
+        o.leverage = def;
+      }
+    }
+    if (ff != null && ff >= 1) {
+      o.leverage = ff;
     }
     return o;
   }
 
   /** Если partial уже полный — завершаем без повторного запроса. */
-  private finishTranscriptResult(
+  private async finishTranscriptResult(
     result: TranscriptResult,
     leverageOpts: LeverageFieldOptions,
     defaultOrderUsd: number,
-  ): TranscriptResult {
+  ): Promise<TranscriptResult> {
     if (result.ok === 'incomplete' && isCompletePartial(result.partial, leverageOpts)) {
-      const full = this.tryCompleteSignal(result.partial, leverageOpts, defaultOrderUsd);
+      const full = await this.tryCompleteSignal(result.partial, leverageOpts, defaultOrderUsd);
       if (full.ok === true) {
         return full;
       }
@@ -1389,11 +1400,11 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     return result;
   }
 
-  private tryCompleteSignal(
+  private async tryCompleteSignal(
     signalRaw: unknown,
     leverageOpts: LeverageFieldOptions,
     defaultOrderUsd: number,
-  ): TranscriptResult {
+  ): Promise<TranscriptResult> {
     const prepared = this.applyDefaultLeverageToSignalRaw(signalRaw, leverageOpts);
     const dto = plainToInstance(SignalParseDto, prepared);
     const errors = validateSync(dto);
@@ -1443,11 +1454,11 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     };
   }
 
-  private parseModelContent(
+  private async parseModelContent(
     content: unknown,
     leverageOpts: LeverageFieldOptions,
     defaultOrderUsd: number,
-  ): TranscriptResult {
+  ): Promise<TranscriptResult> {
     const parsed = this.tryParseModelContent(content);
     if (!parsed.ok) {
       return parsed.result;
@@ -1487,7 +1498,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     }
 
     if (root.status === 'complete') {
-      const full = this.tryCompleteSignal(root.signal, leverageOpts, defaultOrderUsd);
+      const full = await this.tryCompleteSignal(root.signal, leverageOpts, defaultOrderUsd);
       if (full.ok === true) {
         return full;
       }
@@ -1496,7 +1507,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     }
 
     // Legacy / без поля status: сначала полный валидный сигнал, иначе — черновик
-    const full = this.tryCompleteSignal(root.signal, leverageOpts, defaultOrderUsd);
+    const full = await this.tryCompleteSignal(root.signal, leverageOpts, defaultOrderUsd);
     if (full.ok === true) {
       return full;
     }

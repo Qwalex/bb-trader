@@ -73,6 +73,11 @@ const KEYS = [
     label: 'Кредитное плечо по умолчанию (целое число, например 10)',
   },
   {
+    key: 'FORCED_LEVERAGE',
+    label:
+      'Принудительное плечо глобально: целое ≥ 1; пусто — выкл. Перекрывается полем «Прин.» в карточке чата на странице Userbot',
+  },
+  {
     key: 'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',
     label: 'Мартингейл: дефолтный множитель после убыточной сделки (например 1.2)',
   },
@@ -239,6 +244,7 @@ const SETTINGS_SECTIONS: { id: string; title: string; keys: string[] }[] = [
       'BUMP_TO_MIN_EXCHANGE_LOT',
       'DEFAULT_LEVERAGE_ENABLED',
       'DEFAULT_LEVERAGE',
+      'FORCED_LEVERAGE',
       'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',
       'POLLING_INTERVAL_MS',
       'TP_SL_STEP_START',

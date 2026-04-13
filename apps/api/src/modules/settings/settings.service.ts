@@ -119,6 +119,19 @@ export class SettingsService {
         normalized = normalizeSourceTpSlStepRangeJsonForPersist(value);
       } else if (key === 'SOURCE_TP_SL_STEP_START') {
         normalized = normalizeSourceTpSlStepStartJsonForPersist(value);
+      } else if (key === 'FORCED_LEVERAGE') {
+        const t = value.trim();
+        if (t === '') {
+          normalized = '';
+        } else {
+          const n = Number(t.replace(',', '.'));
+          if (!Number.isFinite(n) || n < 1) {
+            throw new BadRequestException(
+              'FORCED_LEVERAGE: ожидается целое число ≥ 1 или пустая строка (выкл.)',
+            );
+          }
+          normalized = String(Math.round(n));
+        }
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

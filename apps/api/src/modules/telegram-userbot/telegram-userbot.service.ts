@@ -1374,6 +1374,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     body: {
       enabled?: boolean;
       defaultLeverage?: number | null;
+      /** Принудительное плечо (всегда); null = выкл. */
+      forcedLeverage?: number | null;
       defaultEntryUsd?: string | null;
       martingaleMultiplier?: number | null;
       sourcePriority?: number | null;
@@ -1398,6 +1400,14 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           ? null
           : body.defaultLeverage >= 1
             ? Math.floor(body.defaultLeverage)
+            : null;
+    const forcedLevNorm =
+      body.forcedLeverage === undefined
+        ? undefined
+        : body.forcedLeverage === null
+          ? null
+          : body.forcedLeverage >= 1
+            ? Math.floor(body.forcedLeverage)
             : null;
     const martingaleNorm =
       body.martingaleMultiplier === undefined
@@ -1432,6 +1442,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         enabled: body.enabled === true,
         sourcePriority: sourcePriorityNorm ?? 0,
         defaultLeverage: levNorm ?? null,
+        forcedLeverage: forcedLevNorm ?? null,
         defaultEntryUsd: entryNorm ?? null,
         minLotBump: minLotBumpNorm ?? null,
       },
@@ -1439,6 +1450,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         ...(body.enabled !== undefined ? { enabled: body.enabled } : {}),
         ...(sourcePriorityNorm !== undefined ? { sourcePriority: sourcePriorityNorm } : {}),
         ...(levNorm !== undefined ? { defaultLeverage: levNorm } : {}),
+        ...(forcedLevNorm !== undefined ? { forcedLeverage: forcedLevNorm } : {}),
         ...(entryNorm !== undefined ? { defaultEntryUsd: entryNorm } : {}),
         ...(minLotBumpNorm !== undefined ? { minLotBump: minLotBumpNorm } : {}),
       },
@@ -1492,7 +1504,12 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     const [chat, details] = await Promise.all([
       this.prisma.tgUserbotChat.findUnique({
         where: { chatId },
-        select: { defaultLeverage: true, defaultEntryUsd: true },
+        select: {
+          defaultLeverage: true,
+          forcedLeverage: true,
+          defaultEntryUsd: true,
+          title: true,
+        },
       }),
       this.bybit.getUnifiedUsdtBalanceDetails(),
     ]);
@@ -1507,6 +1524,10 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     return {
       defaultOrderUsd,
       leverageDefault,
+      chatForcedLeverage:
+        chat?.forcedLeverage != null && chat.forcedLeverage >= 1
+          ? chat.forcedLeverage
+          : undefined,
     };
   }
 
