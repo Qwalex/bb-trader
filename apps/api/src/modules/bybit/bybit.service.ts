@@ -2038,34 +2038,38 @@ export class BybitService {
       if (signal.orderUsd > 0) {
         leveragedNotional = signal.orderUsd;
       } else if (signal.capitalPercent > 0) {
-        const pct = signal.capitalPercent;
-        /**
-         * ≤100% — доля баланса как маржа: номинал = маржа × плечо (как раньше).
-         * >100% — «процент от баланса» трактуем как целевой номинал: balance×(pct/100);
-         * плечо на бирже задаётся отдельно (маржа ≈ номинал/плечо), без второго умножения.
-         * Пример: баланс 10$, плечо 5×, 500% → номинал 50 USDT.
-         */
-        if (pct <= 100) {
-          const margin = balance * (pct / 100);
-          leveragedNotional = margin * signal.leverage;
+        const pct = Number(signal.capitalPercent);
+        if (!Number.isFinite(pct) || pct <= 0) {
+          leveragedNotional = defaultOrderUsd;
         } else {
-          leveragedNotional = balance * (pct / 100);
-        }
-        if (leveragedNotional < MIN_PERCENT_NOTIONAL_USD) {
-          void this.appLog.append(
-            'warn',
-            'bybit',
-            'placeSignalOrders: percent sizing поднят до минимального номинала',
-            {
-              symbol,
-              balance,
-              capitalPercent: signal.capitalPercent,
-              leverage: signal.leverage,
-              calculatedNotional: leveragedNotional,
-              minNotionalApplied: MIN_PERCENT_NOTIONAL_USD,
-            },
-          );
-          leveragedNotional = MIN_PERCENT_NOTIONAL_USD;
+          /**
+           * ≤100% — доля баланса как маржа: номинал = маржа × плечо (как раньше).
+           * >100% — «процент от баланса» трактуем как целевой номинал: balance×(pct/100);
+           * плечо на бирже задаётся отдельно (маржа ≈ номинал/плечо), без второго умножения.
+           * Пример: баланс 10$, плечо 5×, 500% → номинал 50 USDT.
+           */
+          if (pct <= 100) {
+            const margin = balance * (pct / 100);
+            leveragedNotional = margin * signal.leverage;
+          } else {
+            leveragedNotional = balance * (pct / 100);
+          }
+          if (leveragedNotional < MIN_PERCENT_NOTIONAL_USD) {
+            void this.appLog.append(
+              'warn',
+              'bybit',
+              'placeSignalOrders: percent sizing поднят до минимального номинала',
+              {
+                symbol,
+                balance,
+                capitalPercent: signal.capitalPercent,
+                leverage: signal.leverage,
+                calculatedNotional: leveragedNotional,
+                minNotionalApplied: MIN_PERCENT_NOTIONAL_USD,
+              },
+            );
+            leveragedNotional = MIN_PERCENT_NOTIONAL_USD;
+          }
         }
       } else {
         leveragedNotional = defaultOrderUsd;

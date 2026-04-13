@@ -1301,13 +1301,17 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
    * orderUsd от LLM (часто 100 из примеров в промпте) перекрывает 200%+.
    */
   private resolveOrderUsd(dto: SignalParseDto, defaultOrderUsd: number): number {
-    if ((dto.capitalPercent ?? 0) > 100) {
+    const capPct = Number(dto.capitalPercent);
+    const cap = Number.isFinite(capPct) ? capPct : 0;
+    const ouRaw = Number(dto.orderUsd);
+    const ou = Number.isFinite(ouRaw) ? ouRaw : 0;
+    if (cap > 100) {
       return 0;
     }
-    if (dto.orderUsd != null && dto.orderUsd > 0) {
-      return dto.orderUsd;
+    if (ou > 0) {
+      return ou;
     }
-    if ((dto.capitalPercent ?? 0) > 0) {
+    if (cap > 0) {
       return 0;
     }
     return defaultOrderUsd;
@@ -1411,7 +1415,9 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     defaultOrderUsd: number,
   ): Promise<TranscriptResult> {
     const prepared = this.applyDefaultLeverageToSignalRaw(signalRaw, leverageOpts);
-    const dto = plainToInstance(SignalParseDto, prepared);
+    const dto = plainToInstance(SignalParseDto, prepared, {
+      enableImplicitConversion: true,
+    });
     const errors = validateSync(dto);
     if (errors.length > 0) {
       return {
@@ -1422,6 +1428,9 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     }
 
     const orderUsd = this.resolveOrderUsd(dto, defaultOrderUsd);
+    const capNorm = Number(dto.capitalPercent);
+    const capitalPercent =
+      Number.isFinite(capNorm) && capNorm >= 0 ? capNorm : 0;
     const signal: SignalDto = {
       pair: normalizeTradingPair(dto.pair),
       direction: dto.direction,
@@ -1431,7 +1440,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       takeProfits: dto.takeProfits,
       leverage: dto.leverage,
       orderUsd,
-      capitalPercent: dto.capitalPercent ?? 0,
+      capitalPercent,
       source: sanitizeSignalSource(dto.source),
     };
 
