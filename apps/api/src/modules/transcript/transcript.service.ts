@@ -198,7 +198,7 @@ Field rules:
 - Extract prices only from explicit labels (Entry, Stop loss, SL, Targets/TP, etc.). Do not blend, infer, or average numbers from different fields.
 - Field labels without actual values (e.g. "Entry:", "SL:", "TP1:" with no number after them) do NOT count as known values.
 - takeProfits: one or more take-profit prices; several TPs mean equal split across levels.
-- orderUsd: total position notional in USDT (e.g. 10, 50, 100). If the user gives percent of balance instead, set orderUsd to 0 and set capitalPercent to that percent.
+- orderUsd: total position notional in USDT (e.g. 10, 50, 100). If the user gives percent of balance instead, set orderUsd to 0 and set capitalPercent to that percent. If capitalPercent is above 100, orderUsd MUST be 0 — never output a positive orderUsd together with capitalPercent > 100 (no "100" placeholder).
 - capitalPercent: percent for sizing when orderUsd is 0. If 1–100: margin share of available balance; notional = margin × leverage. If above 100 (e.g. 500): notional = balance × (capitalPercent/100); leverage applies on exchange only (e.g. 500 with balance 10 → 50 USDT notional). Otherwise 0.
 - Default sizing: if size is not specified, set orderUsd to ${defaultOrderUsd} and capitalPercent to 0.
 - source: ONLY if the user explicitly names the signal provider (Telegram channel, app, or group), e.g. "Binance Killers", "Crypto Signals". Otherwise set source to null. NEVER use "text", "image", "audio", or any input-format word as source.
@@ -1297,8 +1297,13 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
 
   /**
    * Размер позиции: явный USDT, иначе (legacy) только % от депозита, иначе номинал из настроек DEFAULT_ORDER_USD.
+   * При capitalPercent > 100 всегда режим «только процент» (orderUsd в сигнале 0), иначе ложный
+   * orderUsd от LLM (часто 100 из примеров в промпте) перекрывает 200%+.
    */
   private resolveOrderUsd(dto: SignalParseDto, defaultOrderUsd: number): number {
+    if ((dto.capitalPercent ?? 0) > 100) {
+      return 0;
+    }
     if (dto.orderUsd != null && dto.orderUsd > 0) {
       return dto.orderUsd;
     }
