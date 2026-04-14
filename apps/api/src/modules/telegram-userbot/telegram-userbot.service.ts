@@ -39,7 +39,7 @@ import { UserbotSignalHashService } from './userbot-signal-hash.service';
 import { parseSignalPriceArrayJson } from './userbot-signal-hash.util';
 
 type MessageKind = 'signal' | 'close' | 'reentry' | 'result' | 'other';
-type UserbotFilterKind = 'signal' | 'close' | 'result' | 'reentry';
+type UserbotFilterKind = 'signal' | 'close' | 'result' | 'reentry' | 'ignore';
 type UserbotFilterExampleMatch = {
   kind: UserbotFilterKind;
   score: number;
@@ -1050,7 +1050,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
   async createFilterExample(body: {
     groupName?: string;
-    kind?: 'signal' | 'close' | 'result' | 'reentry';
+    kind?: 'signal' | 'close' | 'result' | 'reentry' | 'ignore';
     example?: string;
     requiresQuote?: boolean;
   }) {
@@ -1061,8 +1061,14 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     if (!groupName) {
       return { ok: false, error: 'groupName обязателен' };
     }
-    if (kind !== 'signal' && kind !== 'close' && kind !== 'result' && kind !== 'reentry') {
-      return { ok: false, error: 'kind должен быть signal | close | result | reentry' };
+    if (
+      kind !== 'signal' &&
+      kind !== 'close' &&
+      kind !== 'result' &&
+      kind !== 'reentry' &&
+      kind !== 'ignore'
+    ) {
+      return { ok: false, error: 'kind должен быть signal | close | result | reentry | ignore' };
     }
     if (example.length < 6) {
       return { ok: false, error: 'example слишком короткий (минимум 6 символов)' };
@@ -1091,7 +1097,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
   async createFilterPattern(body: {
     groupName?: string;
-    kind?: 'signal' | 'close' | 'result' | 'reentry';
+    kind?: 'signal' | 'close' | 'result' | 'reentry' | 'ignore';
     pattern?: string;
     requiresQuote?: boolean;
   }) {
@@ -1102,8 +1108,14 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     if (!groupName) {
       return { ok: false, error: 'groupName обязателен' };
     }
-    if (kind !== 'signal' && kind !== 'close' && kind !== 'result' && kind !== 'reentry') {
-      return { ok: false, error: 'kind должен быть signal | close | result | reentry' };
+    if (
+      kind !== 'signal' &&
+      kind !== 'close' &&
+      kind !== 'result' &&
+      kind !== 'reentry' &&
+      kind !== 'ignore'
+    ) {
+      return { ok: false, error: 'kind должен быть signal | close | result | reentry | ignore' };
     }
     if (pattern.length < 2) {
       return { ok: false, error: 'pattern слишком короткий (минимум 2 символа)' };
@@ -1131,13 +1143,19 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   }
 
   async generateFilterPatterns(body: {
-    kind?: 'signal' | 'close' | 'result' | 'reentry';
+    kind?: 'signal' | 'close' | 'result' | 'reentry' | 'ignore';
     example?: string;
   }) {
     const kind = body.kind;
     const example = body.example?.trim() ?? '';
-    if (kind !== 'signal' && kind !== 'close' && kind !== 'result' && kind !== 'reentry') {
-      return { ok: false, error: 'kind должен быть signal | close | result | reentry' };
+    if (
+      kind !== 'signal' &&
+      kind !== 'close' &&
+      kind !== 'result' &&
+      kind !== 'reentry' &&
+      kind !== 'ignore'
+    ) {
+      return { ok: false, error: 'kind должен быть signal | close | result | reentry | ignore' };
     }
     if (example.length < 6) {
       return { ok: false, error: 'example слишком короткий (минимум 6 символов)' };
@@ -1831,6 +1849,42 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           textPreview: this.makeTextPreview(text),
         });
       }
+      if (filterKind === 'ignore' || exampleKind === 'ignore') {
+        const ignoreSource = filterKind === 'ignore' ? 'pattern' : 'example';
+        this.appendIngestStageLog('info', 'Userbot: ignored by user filter', ingest, {
+          groupName,
+          ignoreSource,
+          matchedPattern: patternMatch?.pattern ?? null,
+          matchedExampleScore: exampleMatch ? Number(exampleMatch.score.toFixed(4)) : null,
+          hasQuotedSource,
+        });
+        await this.updateIngest(ingest.id, {
+          classification: 'other',
+          status: 'ignored',
+          error:
+            ignoreSource === 'pattern'
+              ? 'Игнор по пользовательскому фильтр-паттерну'
+              : 'Игнор по пользовательскому фильтр-примеру',
+          aiRequest: this.limitTrace(
+            JSON.stringify({
+              operation: 'classifyMessage',
+              source: ignoreSource === 'pattern' ? 'group_filter_pattern' : 'group_filter_example',
+              groupName,
+              preferredKind: 'ignore',
+            }),
+          ),
+          aiResponse: this.limitTrace(
+            JSON.stringify({
+              forcedKind: 'ignore',
+              reason:
+                ignoreSource === 'pattern'
+                  ? 'matched by user ignore pattern for group'
+                  : 'matched by user ignore examples for group',
+            }),
+          ),
+        });
+        return;
+      }
 
       const useAiClassifier = await this.getBoolSetting(
         'TELEGRAM_USERBOT_USE_AI_CLASSIFIER',
@@ -2501,7 +2555,13 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       const kind = row.kind as UserbotFilterKind;
       const exampleText = typeof row.example === 'string' ? row.example : '';
       const requiresQuote = row.requiresQuote === true;
-      if (kind !== 'signal' && kind !== 'close' && kind !== 'result' && kind !== 'reentry') {
+      if (
+        kind !== 'signal' &&
+        kind !== 'close' &&
+        kind !== 'result' &&
+        kind !== 'reentry' &&
+        kind !== 'ignore'
+      ) {
         continue;
       }
       if ((kind === 'close' || kind === 'reentry') && !hasQuotedSource) {
@@ -2557,7 +2617,13 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       if (name !== target || !pattern) {
         continue;
       }
-      if (kind !== 'signal' && kind !== 'close' && kind !== 'result' && kind !== 'reentry') {
+      if (
+        kind !== 'signal' &&
+        kind !== 'close' &&
+        kind !== 'result' &&
+        kind !== 'reentry' &&
+        kind !== 'ignore'
+      ) {
         continue;
       }
       if ((kind === 'close' || kind === 'reentry') && !hasQuotedSource) {

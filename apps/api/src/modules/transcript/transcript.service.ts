@@ -652,7 +652,7 @@ Be conservative: if unsure, return "other".`;
   }
 
   async generateFilterPatterns(params: {
-    kind: 'signal' | 'close' | 'result' | 'reentry';
+    kind: 'signal' | 'close' | 'result' | 'reentry' | 'ignore';
     example: string;
   }): Promise<{
     ok: boolean;
