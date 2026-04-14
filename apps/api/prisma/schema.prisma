@@ -159,7 +159,7 @@ model TgUserbotSignalHash {
 model TgUserbotFilterExample {
   id         String   @id @default(cuid())
   groupName  String
-  kind       String // signal | close | result | reentry
+  kind       String // signal | close | result | reentry | ignore
   example    String
   requiresQuote Boolean @default(false)
   enabled    Boolean  @default(true)
@@ -173,7 +173,7 @@ model TgUserbotFilterExample {
 model TgUserbotFilterPattern {
   id         String   @id @default(cuid())
   groupName  String
-  kind       String // signal | close | result | reentry
+  kind       String // signal | close | result | reentry | ignore
   pattern    String
   requiresQuote Boolean @default(false)
   enabled    Boolean  @default(true)

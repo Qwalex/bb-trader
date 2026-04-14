@@ -24,6 +24,8 @@ const DASHBOARD_TODOS_MAX_ID_LEN = 80;
 const DASHBOARD_TODOS_MAX_TEXT_LEN = 4000;
 
 const ENV_FALLBACK: Record<string, string> = {
+  /** Запись логов в таблицу AppLog (false — полностью отключить) */
+  APPLOG_ENABLED: 'true',
   /** Номинал по умолчанию, если в БД и .env ключ не задан */
   DEFAULT_ORDER_USD: '10',
   /** Если true — при номинале ниже minQty биржи поднимать qty до минимума (старое поведение); иначе ошибка */
