@@ -3895,12 +3895,12 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     ingestId?: string,
   ): Promise<{ kind: MessageKind; aiRequest?: string; aiResponse?: string }> {
     const replyId = String(replyToMessageId ?? '').trim();
-    const forcedKind =
-      preferredKind &&
-      (preferredKind === 'close' || preferredKind === 'reentry') &&
-      !replyId
+    const forcedKind: MessageKind | undefined =
+      preferredKind == null || preferredKind === 'ignore'
         ? undefined
-        : preferredKind;
+        : (preferredKind === 'close' || preferredKind === 'reentry') && !replyId
+          ? undefined
+          : preferredKind;
     if (forcedKind) {
       return {
         kind: forcedKind,
