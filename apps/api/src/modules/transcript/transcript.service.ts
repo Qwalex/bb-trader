@@ -1431,11 +1431,17 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     const capNorm = Number(dto.capitalPercent);
     const capitalPercent =
       Number.isFinite(capNorm) && capNorm >= 0 ? capNorm : 0;
+    const canonicalEntries = dto.entries ?? [];
+    const canonicalEntryIsRange = dto.entryIsRange === true;
+    const entryNormalized = this.normalizeEqualBoundRangeEntry({
+      entries: canonicalEntries,
+      entryIsRange: canonicalEntryIsRange,
+    });
     const signal: SignalDto = {
       pair: normalizeTradingPair(dto.pair),
       direction: dto.direction,
-      entries: dto.entries ?? [],
-      entryIsRange: dto.entryIsRange === true,
+      entries: entryNormalized.entries,
+      entryIsRange: entryNormalized.entryIsRange,
       stopLoss: dto.stopLoss,
       takeProfits: dto.takeProfits,
       leverage: dto.leverage,
@@ -1445,6 +1451,26 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     };
 
     return { ok: true, signal };
+  }
+
+  /**
+   * Канонизирует "нулевой" диапазон входа A-A в обычный одиночный вход A.
+   * Применяется единообразно для новых сигналов и update-режима.
+   */
+  private normalizeEqualBoundRangeEntry(params: {
+    entries: number[];
+    entryIsRange: boolean;
+  }): { entries: number[]; entryIsRange: boolean } {
+    const { entries, entryIsRange } = params;
+    if (!entryIsRange || entries.length !== 2) {
+      return { entries, entryIsRange };
+    }
+    const a = entries[0]!;
+    const b = entries[1]!;
+    if (a !== b) {
+      return { entries, entryIsRange };
+    }
+    return { entries: [a], entryIsRange: false };
   }
 
   private defaultPromptForMissing(missing: string[]): string {

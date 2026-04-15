@@ -684,11 +684,25 @@ export class BybitService {
     const low = Math.min(a, b);
     const high = Math.max(a, b);
     const W = high - low;
-    if (!Number.isFinite(W) || W <= 0) {
+    if (!Number.isFinite(W) || W < 0) {
       return {
         ok: false,
         error: 'Некорректный диапазон входа: границы совпадают или невалидны.',
       };
+    }
+    if (W === 0) {
+      void this.appLog.append(
+        'info',
+        'bybit',
+        'placeSignalOrders: диапазон входа с равными границами преобразован в один вход',
+        {
+          pair: signal.pair,
+          low,
+          high,
+          effectiveEntry: low,
+        },
+      );
+      return { ok: true, effectiveEntries: [low], weights: [1] };
     }
     const inset = 0.1 * W;
     if (lastPrice === undefined || !Number.isFinite(lastPrice) || lastPrice <= 0) {
