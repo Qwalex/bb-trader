@@ -1860,6 +1860,35 @@ export class BybitService {
     }
   }
 
+  private async notifyApiTradeLiquidation(params: {
+    signalId: string;
+    pair: string;
+    direction: string;
+    leverage: number;
+    source: string | null;
+    realizedPnl?: number | null;
+  }): Promise<void> {
+    try {
+      const res = await this.telegram.notifyApiTradeLiquidation({
+        signalId: params.signalId,
+        pair: params.pair,
+        direction: params.direction,
+        leverage: params.leverage,
+        source: params.source,
+        realizedPnl: params.realizedPnl,
+      });
+      if (!res.ok) {
+        this.logger.warn(
+          `notifyApiTradeLiquidation failed signalId=${params.signalId}: ${res.error ?? 'unknown'}`,
+        );
+      }
+    } catch (e) {
+      this.logger.warn(
+        `notifyApiTradeLiquidation exception signalId=${params.signalId}: ${formatError(e)}`,
+      );
+    }
+  }
+
   /** Уведомление при авто‑закрытии ORDERS_PLACED после синхронизации с «чистой» биржей (без ручного closeSignalManually). */
   private async notifyStaleReconcileTradeCancelled(
     signalIds: string[],
@@ -4010,6 +4039,101 @@ export class BybitService {
     };
   }
 
+  private static isLiquidationExecutionRow(
+    row: Record<string, unknown>,
+  ): boolean {
+    const execType = String(row.execType ?? '')
+      .trim()
+      .toLowerCase();
+    const createType = String(row.createType ?? '')
+      .trim()
+      .toLowerCase();
+    // Используем точечные маркеры liquidation/ADL, а не широкий contains по всем полям.
+    if (execType === 'busttrade' || execType === 'adltrade') {
+      return true;
+    }
+    if (
+      createType === 'createbyliq' ||
+      createType === 'creatbyliq' ||
+      createType === 'createbyadl'
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  private static isClosedPnlLiquidationRow(row: unknown): boolean {
+    if (!row || typeof row !== 'object') {
+      return false;
+    }
+    const rec = row as Record<string, unknown>;
+    const execType = String(rec.execType ?? '')
+      .trim()
+      .toLowerCase();
+    return execType === 'busttrade';
+  }
+
+  private async detectLiquidationByExecutions(params: {
+    client: RestClientV5;
+    symbol: string;
+    direction: 'long' | 'short';
+    createdAt: Date;
+    closedAt?: Date | null;
+    trackedOrderIds: Set<string>;
+  }): Promise<boolean> {
+    const createdFloorMs = params.createdAt.getTime() - 60_000;
+    const closedCeilMs =
+      params.closedAt && Number.isFinite(params.closedAt.getTime())
+        ? params.closedAt.getTime() + 5 * 60_000
+        : undefined;
+    const expectedCloseSide = params.direction === 'long' ? 'sell' : 'buy';
+    let cursor: string | undefined;
+    const MAX_PAGES = 8;
+    let hasMarkerWithExpectedCloseSide = false;
+    for (let page = 0; page < MAX_PAGES; page += 1) {
+      const res = await params.client.getExecutionList({
+        category: 'linear',
+        symbol: params.symbol,
+        limit: 50,
+        cursor,
+      });
+      if (res.retCode !== 0) {
+        break;
+      }
+      const list = res.result?.list ?? [];
+      for (const ex of list) {
+        const row = ex as unknown as Record<string, unknown>;
+        const ts = Number(row.execTime ?? 0);
+        if (!Number.isFinite(ts) || ts < createdFloorMs) {
+          continue;
+        }
+        if (closedCeilMs !== undefined && ts > closedCeilMs) {
+          continue;
+        }
+        if (!BybitService.isLiquidationExecutionRow(row)) {
+          continue;
+        }
+        const rowOrderId = String(row.orderId ?? '').trim();
+        if (rowOrderId && params.trackedOrderIds.has(rowOrderId)) {
+          return true;
+        }
+        const side = String(row.side ?? '')
+          .trim()
+          .toLowerCase();
+        if (side === expectedCloseSide) {
+          hasMarkerWithExpectedCloseSide = true;
+        }
+      }
+      cursor = res.result?.nextPageCursor || undefined;
+      if (!cursor || list.length === 0) {
+        break;
+      }
+    }
+    // Fallback: на ликвидации Bybit может вернуть системный orderId.
+    // Чтобы не пропустить событие, учитываем маркер liquidation/ADL + сторону закрытия.
+    return hasMarkerWithExpectedCloseSide;
+  }
+
   async getTradePnlBreakdown(signalId: string): Promise<TradePnlBreakdownResult> {
     const signal = await this.orders.getSignalWithOrders(signalId);
     if (!signal) {
@@ -4732,6 +4856,9 @@ export class BybitService {
               .map((o) => (o.bybitOrderId ? String(o.bybitOrderId) : ''))
               .filter((id): id is string => id.length > 0),
           );
+          const liquidationLeverage = Number.isFinite(fresh.leverage)
+            ? Math.max(1, Math.round(fresh.leverage))
+            : null;
           const requestWindow = this.buildClosedPnlWindow(fresh.createdAt, new Date());
           const rows = await this.fetchClosedPnlRowsForSymbol(
             client,
@@ -4739,6 +4866,18 @@ export class BybitService {
             requestWindow.startTime,
             requestWindow.endTime,
           );
+          const isLiquidationByClosedPnl = rows.some((row) =>
+            BybitService.isClosedPnlLiquidationRow(row),
+          );
+          const isLiquidationByExecutions = await this.detectLiquidationByExecutions({
+            client,
+            symbol: symNorm,
+            direction: fresh.direction as 'long' | 'short',
+            createdAt: fresh.createdAt,
+            closedAt: new Date(),
+            trackedOrderIds: ourIds,
+          }).catch(() => false);
+          const isLiquidation = isLiquidationByClosedPnl || isLiquidationByExecutions;
           const { totalPnl, hadParsedPnl } = this.sumClosedPnlForSignal(
             rows,
             ourIds,
@@ -4746,11 +4885,33 @@ export class BybitService {
             fresh.createdAt,
           );
           if (hadParsedPnl) {
+            const nextStatus = totalPnl >= 0 ? 'CLOSED_WIN' : 'CLOSED_LOSS';
+            const liquidationData =
+              isLiquidation && nextStatus === 'CLOSED_LOSS'
+                ? {
+                    liquidation: true,
+                    liquidationLeverage,
+                  }
+                : {
+                    liquidation: false,
+                    liquidationLeverage: null,
+                  };
             await this.orders.updateSignalStatus(fresh.id, {
-              status: totalPnl >= 0 ? 'CLOSED_WIN' : 'CLOSED_LOSS',
+              status: nextStatus,
               realizedPnl: totalPnl,
               closedAt: new Date(),
+              ...liquidationData,
             });
+            if (liquidationData.liquidation) {
+              await this.notifyApiTradeLiquidation({
+                signalId: fresh.id,
+                pair: symNorm,
+                direction: fresh.direction,
+                leverage: liquidationLeverage ?? fresh.leverage,
+                source: fresh.source ?? null,
+                realizedPnl: totalPnl,
+              });
+            }
           } else if (ourIds.size > 0) {
             const sibling =
               await this.orders.findOlderClosedSiblingAfterNewerCreated(
@@ -4764,6 +4925,8 @@ export class BybitService {
                 status: 'CLOSED_MIXED',
                 realizedPnl: null,
                 closedAt: new Date(),
+                liquidation: false,
+                liquidationLeverage: null,
               });
               void this.appLog.append(
                 'info',
@@ -4784,11 +4947,38 @@ export class BybitService {
                 closedAt: new Date(),
               });
               if (estimated !== undefined) {
+                const nextStatus =
+                  estimated.netPnl > 0
+                    ? 'CLOSED_WIN'
+                    : estimated.netPnl < 0
+                      ? 'CLOSED_LOSS'
+                      : 'CLOSED_MIXED';
+                const liquidationData =
+                  isLiquidation && nextStatus === 'CLOSED_LOSS'
+                    ? {
+                        liquidation: true,
+                        liquidationLeverage,
+                      }
+                    : {
+                        liquidation: false,
+                        liquidationLeverage: null,
+                      };
                 await this.orders.updateSignalStatus(fresh.id, {
-                  status: estimated.netPnl > 0 ? 'CLOSED_WIN' : estimated.netPnl < 0 ? 'CLOSED_LOSS' : 'CLOSED_MIXED',
+                  status: nextStatus,
                   realizedPnl: estimated.netPnl,
                   closedAt: new Date(),
+                  ...liquidationData,
                 });
+                if (liquidationData.liquidation) {
+                  await this.notifyApiTradeLiquidation({
+                    signalId: fresh.id,
+                    pair: symNorm,
+                    direction: fresh.direction,
+                    leverage: liquidationLeverage ?? fresh.leverage,
+                    source: fresh.source ?? null,
+                    realizedPnl: estimated.netPnl,
+                  });
+                }
                 void this.appLog.append(
                   'warn',
                   'bybit',
@@ -4806,6 +4996,8 @@ export class BybitService {
                   status: 'CLOSED_MIXED',
                   realizedPnl: null,
                   closedAt: new Date(),
+                  liquidation: false,
+                  liquidationLeverage: null,
                 });
                 void this.appLog.append(
                   'info',

@@ -739,6 +739,69 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     return { ok: true, deliveredTo };
   }
 
+  async notifyApiTradeLiquidation(params: {
+    signalId: string;
+    pair: string;
+    direction: string;
+    leverage: number;
+    source?: string | null;
+    realizedPnl?: number | null;
+  }): Promise<{ ok: boolean; deliveredTo: number; error?: string }> {
+    const raw = (await this.settings.get('TELEGRAM_NOTIFY_API_TRADE_LIQUIDATION'))
+      ?.trim()
+      .toLowerCase();
+    const explicitlyOff =
+      raw === 'false' || raw === '0' || raw === 'no' || raw === 'off';
+    if (explicitlyOff) {
+      return { ok: true, deliveredTo: 0 };
+    }
+    if (!this.bot) {
+      return { ok: false, deliveredTo: 0, error: 'Telegram bot не запущен' };
+    }
+    const ids = await this.getWhitelistUserIds();
+    if (ids.length === 0) {
+      return { ok: false, deliveredTo: 0, error: 'TELEGRAM_WHITELIST пуст' };
+    }
+
+    const escHtml = (value: string) =>
+      value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const pair = escHtml((params.pair ?? '').trim().toUpperCase());
+    const signalId = escHtml((params.signalId ?? '').trim());
+    const direction = escHtml((params.direction ?? '').trim().toUpperCase());
+    const leverage = escHtml(`${Math.max(1, Math.round(params.leverage || 1))}x`);
+    const source = params.source ? escHtml(params.source) : '—';
+    const pnlLine =
+      typeof params.realizedPnl === 'number' && Number.isFinite(params.realizedPnl)
+        ? `\nRealized PnL: <code>${escHtml(String(params.realizedPnl))}</code>`
+        : '';
+    const msg =
+      `<b>Ликвидация позиции</b>\n` +
+      `Пара: <code>${pair}</code>\n` +
+      `ID сделки: <code>${signalId}</code>\n` +
+      `Направление: <code>${direction}</code>\n` +
+      `Плечо: <code>${leverage}</code>\n` +
+      `Источник: <code>${source}</code>${pnlLine}`;
+
+    let deliveredTo = 0;
+    for (const uid of ids) {
+      try {
+        await this.bot.telegram.sendMessage(uid, msg, { parse_mode: 'HTML' });
+        deliveredTo += 1;
+      } catch (e) {
+        this.logger.warn(`notifyApiTradeLiquidation -> ${uid}: ${formatError(e)}`);
+      }
+    }
+
+    if (deliveredTo === 0) {
+      return {
+        ok: false,
+        deliveredTo: 0,
+        error: 'Не удалось доставить уведомление о ликвидации',
+      };
+    }
+    return { ok: true, deliveredTo };
+  }
+
   /**
    * Уведомление в бота о записи в журнале событий сделки (SignalEvent).
    * По умолчанию включено (TELEGRAM_NOTIFY_TRADE_EVENTS не false/0/off).

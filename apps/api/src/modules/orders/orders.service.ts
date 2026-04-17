@@ -689,6 +689,38 @@ export class OrdersService {
       (acc, s) => acc + (s.realizedPnl ?? 0),
       0,
     );
+    const liquidationRows = closedFiltered.filter((s) => s.liquidation === true);
+    const liquidationTotal = liquidationRows.length;
+    const liquidationBySourceMap = new Map<string, number>();
+    const liquidationByLeverageMap = new Map<string, number>();
+    for (const row of liquidationRows) {
+      const sourceKey = (row.source ?? '—').trim() || '—';
+      liquidationBySourceMap.set(
+        sourceKey,
+        (liquidationBySourceMap.get(sourceKey) ?? 0) + 1,
+      );
+      const lev =
+        row.liquidationLeverage != null &&
+        Number.isFinite(row.liquidationLeverage)
+          ? String(Math.max(1, Math.round(row.liquidationLeverage)))
+          : '—';
+      liquidationByLeverageMap.set(
+        lev,
+        (liquidationByLeverageMap.get(lev) ?? 0) + 1,
+      );
+    }
+    const liquidationBySource = Array.from(liquidationBySourceMap.entries())
+      .map(([sourceName, count]) => ({
+        source: sourceName === '—' ? null : sourceName,
+        count,
+      }))
+      .sort((a, b) => b.count - a.count || (a.source ?? '—').localeCompare(b.source ?? '—', 'ru'));
+    const liquidationByLeverage = Array.from(liquidationByLeverageMap.entries())
+      .map(([leverage, count]) => ({
+        leverage: leverage === '—' ? null : Number(leverage),
+        count,
+      }))
+      .sort((a, b) => b.count - a.count || (b.leverage ?? -1) - (a.leverage ?? -1));
 
     const pnls = closedFiltered
       .map((s) => s.realizedPnl)
@@ -739,6 +771,9 @@ export class OrdersService {
       avgProfitPnl,
       avgLossPnl,
       closedPerDayAvg,
+      liquidationTotal,
+      liquidationBySource,
+      liquidationByLeverage,
     };
   }
 

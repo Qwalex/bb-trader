@@ -18,6 +18,9 @@ type Stats = {
   avgProfitPnl: number;
   avgLossPnl: number;
   closedPerDayAvg: number;
+  liquidationTotal: number;
+  liquidationBySource: Array<{ source: string | null; count: number }>;
+  liquidationByLeverage: Array<{ leverage: number | null; count: number }>;
 };
 
 type PnlPoint = { date: string; pnl: number };
@@ -481,6 +484,70 @@ export default async function Home({
                       <td>{r.openSignals}</td>
                     </tr>
                   ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+      {stats && (
+        <div className="grid topSources" style={{ marginTop: '1rem' }}>
+          <div className="card" style={{ gridColumn: 'span 5' }}>
+            <h3>
+              Ликвидации{source ? ` — ${source}` : ''} (всего: {stats.liquidationTotal})
+            </h3>
+            <div className="tableWrap" style={{ marginTop: '0.5rem' }}>
+              <table className="topSourcesTable">
+                <thead>
+                  <tr>
+                    <th className="sourceNameCell">Источник</th>
+                    <th>Ликвидации</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats.liquidationBySource.length === 0 ? (
+                    <tr>
+                      <td className="sourceNameCell">—</td>
+                      <td>0</td>
+                    </tr>
+                  ) : (
+                    stats.liquidationBySource.map((r) => (
+                      <tr key={`liq-source-${r.source ?? '—'}`}>
+                        <td className="sourceNameCell">
+                          <span className="sourceNameText">{r.source ?? '—'}</span>
+                        </td>
+                        <td>{r.count}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div className="card" style={{ gridColumn: 'span 5' }}>
+            <h3>Ликвидации по плечу</h3>
+            <div className="tableWrap" style={{ marginTop: '0.5rem' }}>
+              <table className="topSourcesTable">
+                <thead>
+                  <tr>
+                    <th>Плечо</th>
+                    <th>Ликвидации</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats.liquidationByLeverage.length === 0 ? (
+                    <tr>
+                      <td>—</td>
+                      <td>0</td>
+                    </tr>
+                  ) : (
+                    stats.liquidationByLeverage.map((r) => (
+                      <tr key={`liq-lev-${r.leverage ?? '—'}`}>
+                        <td>{r.leverage != null ? `${r.leverage}x` : '—'}</td>
+                        <td>{r.count}</td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
