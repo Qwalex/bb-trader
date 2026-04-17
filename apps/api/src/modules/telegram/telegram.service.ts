@@ -30,6 +30,8 @@ type DraftPhase = 'collecting' | 'ready' | 'awaiting_source';
 
 type DraftSession = {
   phase: DraftPhase;
+  /** Последняя активность по черновику (ms). */
+  updatedAtMs: number;
   /** Сообщения пользователя с начала сессии (контекст до подтверждения). */
   userTurns: string[];
   /** Готовый сигнал после полного разбора. */
@@ -57,8 +59,10 @@ type ExternalConfirmationRequest = {
   onResult?: (result: ExternalConfirmationResult) => Promise<void> | void;
 };
 
-const DRAFT_TTL_MS = 45 * 60_000;
+const DRAFT_TTL_MS = 30 * 60_000;
 const EXTERNAL_CONFIRM_TTL_MS = 20 * 60_000;
+const MAX_DRAFT_USER_TURNS = 30;
+const MAX_DRAFT_TURN_CHARS = 1500;
 
 @Injectable()
 export class TelegramService implements OnModuleInit, OnModuleDestroy {
@@ -219,9 +223,14 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     this.cleanupTimer = setInterval(() => {
       try {
         const now = Date.now();
-        // Черновики: удаляем самые старые по эвристике "нет активности" — ориентируемся на последний userTurn.
-        // DraftSession не хранит явный timestamp, поэтому очищаем только по лимиту размера,
-        // а также "подтверждения" чистим по createdAt.
+        // Черновики: удаляем по TTL неактивности и по лимиту количества.
+        let expiredDrafts = 0;
+        for (const [uid, draft] of this.drafts.entries()) {
+          if (now - (draft.updatedAtMs ?? 0) > DRAFT_TTL_MS) {
+            this.drafts.delete(uid);
+            expiredDrafts += 1;
+          }
+        }
         const maxDrafts = 500;
         if (this.drafts.size > maxDrafts) {
           const excess = this.drafts.size - maxDrafts;
@@ -241,8 +250,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
             removed += 1;
           }
         }
-        if (removed > 0) {
-          this.logger.log(`TelegramService: cleaned externalConfirmations=${removed}`);
+        if (expiredDrafts > 0 || removed > 0) {
+          this.logger.log(
+            `TelegramService: cleaned draftsExpired=${expiredDrafts} externalConfirmations=${removed}`,
+          );
         }
       } catch (e) {
         this.logger.warn(`TelegramService cleanup loop failed: ${formatError(e)}`);
@@ -893,6 +904,33 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     return parts;
   }
 
+  private normalizeDraftTurns(turns: string[]): string[] {
+    const clipped = turns
+      .map((v) => v.trim())
+      .filter((v) => v.length > 0)
+      .map((v) =>
+        v.length > MAX_DRAFT_TURN_CHARS
+          ? `${v.slice(0, MAX_DRAFT_TURN_CHARS)}…`
+          : v,
+      );
+    if (clipped.length <= MAX_DRAFT_USER_TURNS) {
+      return clipped;
+    }
+    return clipped.slice(clipped.length - MAX_DRAFT_USER_TURNS);
+  }
+
+  private getActiveDraft(userId: number): DraftSession | undefined {
+    const draft = this.drafts.get(userId);
+    if (!draft) {
+      return undefined;
+    }
+    if (Date.now() - (draft.updatedAtMs ?? 0) > DRAFT_TTL_MS) {
+      this.drafts.delete(userId);
+      return undefined;
+    }
+    return draft;
+  }
+
   private formatRuDate(d: Date): string {
     return new Date(d).toLocaleString('ru-RU', {
       day: '2-digit',
@@ -1400,7 +1438,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         await ctx.answerCbQuery();
         return;
       }
-      const draft = this.drafts.get(uid);
+      const draft = this.getActiveDraft(uid);
       if (!draft) {
         await ctx.answerCbQuery('Нет черновика сигнала', { show_alert: true });
         return;
@@ -1462,7 +1500,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     this.bot.action(/^src_pick:(\d+)$/, async (ctx) => {
       const uid = ctx.from?.id;
       if (!uid) { await ctx.answerCbQuery(); return; }
-      const draft = this.drafts.get(uid);
+      const draft = this.getActiveDraft(uid);
       if (draft?.phase !== 'awaiting_source' || !draft.signal) {
         await ctx.answerCbQuery('Нет активного черновика', { show_alert: true });
         return;
@@ -1474,7 +1512,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         return;
       }
       draft.signal.source = chosen;
-      this.drafts.set(uid, { phase: 'ready', signal: draft.signal, userTurns: draft.userTurns });
+      this.drafts.set(uid, {
+        phase: 'ready',
+        signal: draft.signal,
+        userTurns: draft.userTurns,
+        updatedAtMs: Date.now(),
+      });
       await ctx.answerCbQuery(`Источник: ${chosen}`);
       await clearInlineKeyboard(ctx);
       const defaultOrderUsd = await this.getResolvedDefaultOrderUsd();
@@ -1486,13 +1529,18 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     this.bot.action('src_none', async (ctx) => {
       const uid = ctx.from?.id;
       if (!uid) { await ctx.answerCbQuery(); return; }
-      const draft = this.drafts.get(uid);
+      const draft = this.getActiveDraft(uid);
       if (draft?.phase !== 'awaiting_source' || !draft.signal) {
         await ctx.answerCbQuery('Нет активного черновика', { show_alert: true });
         return;
       }
       delete draft.signal.source;
-      this.drafts.set(uid, { phase: 'ready', signal: draft.signal, userTurns: draft.userTurns });
+      this.drafts.set(uid, {
+        phase: 'ready',
+        signal: draft.signal,
+        userTurns: draft.userTurns,
+        updatedAtMs: Date.now(),
+      });
       await ctx.answerCbQuery('Без источника');
       await clearInlineKeyboard(ctx);
       const defaultOrderUsd = await this.getResolvedDefaultOrderUsd();
@@ -1704,7 +1752,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         }
 
         if (this.drafts.has(uid)) {
-          const draft = this.drafts.get(uid)!;
+          const draft = this.getActiveDraft(uid)!;
           if (draft.phase === 'collecting') {
             this.logger.log(`TG text: continue draft userId=${uid}`);
             const res = await this.transcript.continueSignalDraft(
@@ -1756,7 +1804,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       const buf = await fetch(link.href).then((r) => r.arrayBuffer());
       const base64 = Buffer.from(buf).toString('base64');
       this.logger.log(`TG photo: parse userId=${uid}`);
-      const draft = this.drafts.get(uid);
+      const draft = this.getActiveDraft(uid);
       const continuation =
         draft?.phase === 'collecting' || draft?.phase === 'ready'
           ? {
@@ -1799,7 +1847,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       const buf = await fetch(link.href).then((r) => r.arrayBuffer());
       const base64 = Buffer.from(buf).toString('base64');
       this.logger.log(`TG voice: parse userId=${uid}`);
-      const draft = this.drafts.get(uid);
+      const draft = this.getActiveDraft(uid);
       const continuation =
         draft?.phase === 'collecting' || draft?.phase === 'ready'
           ? {
@@ -1853,8 +1901,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    const prev = this.drafts.get(uid);
-    const nextTurns = raw ? [...(prev?.userTurns ?? []), raw] : (prev?.userTurns ?? []);
+    const prev = this.getActiveDraft(uid);
+    const nextTurns = this.normalizeDraftTurns(
+      raw ? [...(prev?.userTurns ?? []), raw] : (prev?.userTurns ?? []),
+    );
 
     if (res.ok === 'incomplete') {
       const merged =
@@ -1866,6 +1916,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         phase: 'collecting',
         partial: merged,
         userTurns: nextTurns,
+        updatedAtMs: Date.now(),
       });
       this.logger.log(
         `handleParseResult: incomplete draft userId=${uid} missing=${res.missing.join(',')}`,
@@ -1913,6 +1964,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           signal: res.signal,
           userTurns: nextTurns,
           pendingSources: existingSources,
+          updatedAtMs: Date.now(),
         });
         this.logger.log(
           `handleParseResult: awaiting_source userId=${uid} pair=${res.signal.pair} sources=${existingSources.length}`,
@@ -1936,6 +1988,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       phase: 'ready',
       signal: res.signal,
       userTurns: nextTurns,
+      updatedAtMs: Date.now(),
     });
     this.logger.log(
       `handleParseResult: draft ready userId=${uid} pair=${res.signal.pair}`,

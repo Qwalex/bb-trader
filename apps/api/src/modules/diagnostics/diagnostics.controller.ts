@@ -21,6 +21,7 @@ import {
 
 import { parseCorsOrigins } from '../../common/cors-origins.util';
 import { DiagnosticsService } from './diagnostics.service';
+import { MemoryDiagnosticsService } from './memory-diagnostics.service';
 import { TradingAiAdvisorService } from './trading-ai-advisor.service';
 
 @ApiTags('Diagnostics')
@@ -29,6 +30,7 @@ export class DiagnosticsController {
   constructor(
     private readonly diagnostics: DiagnosticsService,
     private readonly tradingAdvisor: TradingAiAdvisorService,
+    private readonly memoryDiagnostics: MemoryDiagnosticsService,
     private readonly config: ConfigService,
   ) {}
 
@@ -162,5 +164,26 @@ export class DiagnosticsController {
     return this.tradingAdvisor.generateAdvice({
       closedLimit: body?.closedLimit,
     });
+  }
+
+  @ApiOperation({ summary: 'Снимок и история потребления памяти API' })
+  @ApiQuery({ name: 'historyLimit', required: false })
+  @ApiForbiddenResponse({ description: 'Запрос не того origin' })
+  @ApiOkResponse({ description: 'Диагностика памяти получена' })
+  @Get('memory')
+  memory(
+    @Query('historyLimit') historyLimit?: string,
+    @Headers('host') host?: string,
+    @Headers('origin') origin?: string,
+    @Headers('referer') referer?: string,
+    @Headers('sec-fetch-site') secFetchSite?: string,
+  ) {
+    this.assertSameOriginBrowserRequest(host, origin, referer, secFetchSite);
+    const parsed = historyLimit ? Number(historyLimit) : undefined;
+    const limit = Number.isFinite(parsed) ? Number(parsed) : 30;
+    return {
+      snapshot: this.memoryDiagnostics.getSnapshot(),
+      history: this.memoryDiagnostics.getHistory(limit),
+    };
   }
 }

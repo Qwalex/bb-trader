@@ -1354,7 +1354,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     if (!this.pollTimer) {
       return;
     }
-    clearInterval(this.pollTimer);
+    clearTimeout(this.pollTimer);
     this.pollTimer = null;
   }
 

@@ -10,6 +10,7 @@ import { DiagnosticsController } from './diagnostics.controller';
 import { DiagnosticsMetricsVerifier } from './diagnostics.metrics-verifier';
 import { DiagnosticsService } from './diagnostics.service';
 import { DiagnosticsTraceBuilder } from './diagnostics.trace-builder';
+import { MemoryDiagnosticsService } from './memory-diagnostics.service';
 import { TradingAiAdvisorService } from './trading-ai-advisor.service';
 
 @Module({
@@ -20,6 +21,7 @@ import { TradingAiAdvisorService } from './trading-ai-advisor.service';
     DiagnosticsTraceBuilder,
     DiagnosticsAiService,
     DiagnosticsMetricsVerifier,
+    MemoryDiagnosticsService,
     TradingAiAdvisorService,
   ],
 })
