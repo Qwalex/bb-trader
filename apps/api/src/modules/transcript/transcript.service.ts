@@ -17,6 +17,11 @@ import { sanitizeForOpenRouterLog } from '../app-log/log-sanitize';
 import { BybitService } from '../bybit/bybit.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { resolveForcedLeverageWithChatOverride } from '../settings/forced-leverage.util';
+import {
+  parseLeverageRangeMode,
+  parseOptionalLeverageInt,
+  resolveEffectiveLeverage,
+} from '../settings/leverage-policy.util';
 import { SettingsService } from '../settings/settings.service';
 import { SignalParseDto } from './dto/signal-parse.dto';
 import {
@@ -34,6 +39,12 @@ export type TranscriptParseOverrides = {
   leverageDefault?: number;
   /** Принудительное плечо из карточки TgUserbotChat (выше глобального FORCED_LEVERAGE) */
   chatForcedLeverage?: number;
+  /** Режим выбора плеча из диапазона (min|max|mid). */
+  leverageRangeMode?: 'min' | 'max' | 'mid';
+  /** Минимально допустимое плечо (кроме forced). */
+  minAllowedLeverage?: number;
+  /** Максимально допустимое плечо (кроме forced). */
+  maxAllowedLeverage?: number;
 };
 
 type OpenRouterLogContext = {
@@ -80,6 +91,14 @@ const TRANSCRIPT_RESPONSE_JSON_SCHEMA = {
           minItems: 1,
         },
         leverage: { type: ['number', 'null'], minimum: 1 },
+        leverageRange: {
+          type: ['array', 'null'],
+          items: { type: 'number' },
+          minItems: 2,
+          maxItems: 2,
+          description:
+            'Optional leverage range [min, max] if message contains interval like 5-15',
+        },
         orderUsd: { type: 'number', minimum: 0 },
         capitalPercent: { type: 'number', minimum: 0, maximum: 1000000 },
         source: { type: ['string', 'null'] },
@@ -92,6 +111,7 @@ const TRANSCRIPT_RESPONSE_JSON_SCHEMA = {
         'stopLoss',
         'takeProfits',
         'leverage',
+        'leverageRange',
         'orderUsd',
         'capitalPercent',
         'source',
@@ -148,6 +168,7 @@ Return ONLY valid JSON (no markdown, no commentary) with this exact shape:
     "stopLoss": number | null,
     "takeProfits": [number, ...] | null,
     "leverage": number | null,
+    "leverageRange": [number, number] | null,
     "orderUsd": number,
     "capitalPercent": number,
     "source": "string | null"
@@ -194,7 +215,7 @@ Field rules:
 - If the user gives no entry price, treat it as market entry: set entries to null and do NOT ask for clarification only because entries are missing. The order will be placed at market at the execution stage.
 - If the message gives BOTH a market entry option and a limit entry (labels such as Entry market / Entry limit, маркет и лимит, market vs limit, two entry lines where one is market and the other has a price), ALWAYS prefer the limit: set entries to the limit price(s) only. Do NOT set entries to null because "market" is also mentioned alongside an explicit limit price.
 - takeProfits: use only target/TP/цели/закрыть по prices — never put TP prices into entries.
-- If leverage is given as a range (e.g. "2 - 5"), use the midpoint and round up (2-5 => 4).
+- If leverage is given as a range (e.g. "2 - 5"), set "leverageRange" to [2,5] and keep "leverage" null unless one exact leverage value is explicitly given.
 - Extract prices only from explicit labels (Entry, Stop loss, SL, Targets/TP, etc.). Do not blend, infer, or average numbers from different fields.
 - Field labels without actual values (e.g. "Entry:", "SL:", "TP1:" with no number after them) do NOT count as known values.
 - takeProfits: one or more take-profit prices; several TPs mean equal split across levels.
@@ -1347,11 +1368,44 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       overrides?.chatForcedLeverage,
       rawForcedGlobal,
     );
+    const rangeModeRaw = await this.settings.get('LEVERAGE_RANGE_MODE');
+    const rangeMode =
+      overrides?.leverageRangeMode ?? parseLeverageRangeMode(rangeModeRaw);
+    const minRaw = await this.settings.get('MIN_ALLOWED_LEVERAGE');
+    const maxRaw = await this.settings.get('MAX_ALLOWED_LEVERAGE');
+    const minAllowed =
+      overrides?.minAllowedLeverage ?? parseOptionalLeverageInt(minRaw);
+    const maxAllowed =
+      overrides?.maxAllowedLeverage ?? parseOptionalLeverageInt(maxRaw);
+    if (
+      minAllowed != null &&
+      maxAllowed != null &&
+      Number.isFinite(minAllowed) &&
+      Number.isFinite(maxAllowed) &&
+      minAllowed > maxAllowed
+    ) {
+      this.logger.warn(
+        `Leverage limits invalid (min=${minAllowed}, max=${maxAllowed}); limits are ignored`,
+      );
+    }
 
     return {
       requireLeverage: false,
       defaultLeverage,
       forcedLeverage,
+      leverageRangeMode: rangeMode,
+      minAllowedLeverage:
+        minAllowed != null &&
+        maxAllowed != null &&
+        minAllowed > maxAllowed
+          ? undefined
+          : minAllowed,
+      maxAllowedLeverage:
+        minAllowed != null &&
+        maxAllowed != null &&
+        minAllowed > maxAllowed
+          ? undefined
+          : maxAllowed,
     };
   }
 
@@ -1376,20 +1430,50 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       return signalRaw;
     }
     const o = { ...(signalRaw as Record<string, unknown>) };
-    if (def != null && def >= 1) {
-      const lev = o.leverage;
-      const n =
-        typeof lev === 'number'
-          ? lev
-          : lev != null
-            ? parseFloat(String(lev))
-            : NaN;
-      if (!Number.isFinite(n) || n < 1) {
-        o.leverage = def;
+    const lev = o.leverage;
+    const rawLeverage =
+      typeof lev === 'number'
+        ? lev
+        : lev != null
+          ? parseFloat(String(lev))
+          : NaN;
+    const rangeRaw = o.leverageRange;
+    let leverageRange: [number, number] | undefined;
+    if (Array.isArray(rangeRaw) && rangeRaw.length >= 2) {
+      const a = Number(rangeRaw[0]);
+      const b = Number(rangeRaw[1]);
+      if (Number.isFinite(a) && Number.isFinite(b) && a >= 1 && b >= 1) {
+        leverageRange = [a, b];
       }
     }
-    if (ff != null && ff >= 1) {
-      o.leverage = ff;
+    const hasExplicitLeverage =
+      Number.isFinite(rawLeverage) && rawLeverage >= 1;
+    if (hasExplicitLeverage) {
+      // Явное плечо в сигнале важнее диапазона.
+      leverageRange = undefined;
+    }
+    const policy = {
+      rangeMode: leverageOpts.leverageRangeMode ?? 'mid',
+      minAllowed: leverageOpts.minAllowedLeverage,
+      maxAllowed: leverageOpts.maxAllowedLeverage,
+    } as const;
+    const base =
+      hasExplicitLeverage
+        ? rawLeverage
+        : def != null && def >= 1
+          ? def
+          : 1;
+    const effective = resolveEffectiveLeverage({
+      baseLeverage: base,
+      leverageRange,
+      forcedLeverage: ff,
+      policy,
+    });
+    o.leverage = effective;
+    if (leverageRange) {
+      o.leverageRange = leverageRange;
+    } else {
+      delete o.leverageRange;
     }
     return o;
   }
@@ -1445,6 +1529,10 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       stopLoss: dto.stopLoss,
       takeProfits: dto.takeProfits,
       leverage: dto.leverage,
+      leverageRange:
+        Array.isArray(dto.leverageRange) && dto.leverageRange.length >= 2
+          ? [dto.leverageRange[0]!, dto.leverageRange[1]!]
+          : undefined,
       orderUsd,
       capitalPercent,
       source: sanitizeSignalSource(dto.source),

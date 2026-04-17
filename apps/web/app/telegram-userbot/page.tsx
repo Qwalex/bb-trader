@@ -49,6 +49,12 @@ type UserbotChat = {
   defaultLeverage: number | null;
   /** Принудительное плечо (всегда); null / отсутствует — выкл. */
   forcedLeverage?: number | null;
+  /** Режим выбора плеча из диапазона; null — глобальный режим. */
+  leverageRangeMode?: 'min' | 'max' | 'mid' | null;
+  /** Минимально допустимое плечо; null — глобальный лимит. */
+  minLeverage?: number | null;
+  /** Максимально допустимое плечо; null — глобальный лимит. */
+  maxLeverage?: number | null;
   defaultEntryUsd: string | null;
   martingaleMultiplier: number | null;
   /** null — наследовать глобальный BUMP_TO_MIN_EXCHANGE_LOT */
@@ -1241,6 +1247,158 @@ export default function TelegramUserbotPage() {
                     });
                   }}
                 />
+                </div>
+                <div className="userbotChatFieldCompact">
+                  <span
+                    className="userbotChatFieldCompactLabel"
+                    title="Как выбирать плечо, если в сообщении пришел диапазон (например 5-15)"
+                  >
+                    Диап.
+                  </span>
+                  <select
+                    className="userbotCellInput userbotCellInputCompact userbotCellSelectCompact"
+                    value={chat.leverageRangeMode ?? ''}
+                    onChange={(e) => {
+                      const raw = e.target.value.trim();
+                      const next = raw === '' ? null : (raw as 'min' | 'max' | 'mid');
+                      const same = (chat.leverageRangeMode ?? null) === next;
+                      if (same) return;
+                      void runAction(`lrm-${chat.chatId}`, async () => {
+                        const res = await fetch(
+                          `${getApiBase()}/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
+                          {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ leverageRangeMode: next }),
+                          },
+                        );
+                        if (!res.ok) {
+                          throw new Error(`Ошибка сохранения (${res.status})`);
+                        }
+                        setChats((prev) =>
+                          prev.map((row) =>
+                            row.id === chat.id ? { ...row, leverageRangeMode: next } : row,
+                          ),
+                        );
+                        setMsg({ type: 'ok', text: 'Режим диапазона плеча сохранен' });
+                      });
+                    }}
+                  >
+                    <option value="">глоб.</option>
+                    <option value="min">min</option>
+                    <option value="mid">mid</option>
+                    <option value="max">max</option>
+                  </select>
+                </div>
+                <div className="userbotChatFieldCompact">
+                  <span
+                    className="userbotChatFieldCompactLabel"
+                    title="Минимально допустимое плечо для чата; пусто — глобальное значение"
+                  >
+                    Мин
+                  </span>
+                  <input
+                    className="userbotCellInput userbotCellInputCompact"
+                    type="number"
+                    min={1}
+                    step={1}
+                    key={`minlev-${chat.chatId}-${chat.minLeverage ?? 'x'}`}
+                    defaultValue={chat.minLeverage ?? ''}
+                    placeholder="глоб."
+                    onBlur={(e) => {
+                      const v = e.target.value.trim();
+                      const num = v === '' ? null : Number.parseInt(v, 10);
+                      if (v !== '' && (!Number.isFinite(num) || num === null || num < 1)) {
+                        setMsg({ type: 'err', text: 'Мин. плечо: целое число ≥ 1 или пусто' });
+                        return;
+                      }
+                      const cur = chat.minLeverage ?? null;
+                      const next = num === null ? null : num;
+                      if ((cur === null && next === null) || cur === next) return;
+                      const max = chat.maxLeverage ?? null;
+                      if (next !== null && max !== null && next > max) {
+                        setMsg({
+                          type: 'err',
+                          text: `Мин. плечо (${next}) не может быть больше макс. (${max})`,
+                        });
+                        return;
+                      }
+                      void runAction(`minlev-${chat.chatId}`, async () => {
+                        const res = await fetch(
+                          `${getApiBase()}/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
+                          {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ minLeverage: next }),
+                          },
+                        );
+                        if (!res.ok) {
+                          throw new Error(`Ошибка сохранения (${res.status})`);
+                        }
+                        setChats((prev) =>
+                          prev.map((row) =>
+                            row.id === chat.id ? { ...row, minLeverage: next } : row,
+                          ),
+                        );
+                        setMsg({ type: 'ok', text: 'Минимальное плечо сохранено' });
+                      });
+                    }}
+                  />
+                </div>
+                <div className="userbotChatFieldCompact">
+                  <span
+                    className="userbotChatFieldCompactLabel"
+                    title="Максимально допустимое плечо для чата; пусто — глобальное значение"
+                  >
+                    Макс
+                  </span>
+                  <input
+                    className="userbotCellInput userbotCellInputCompact"
+                    type="number"
+                    min={1}
+                    step={1}
+                    key={`maxlev-${chat.chatId}-${chat.maxLeverage ?? 'x'}`}
+                    defaultValue={chat.maxLeverage ?? ''}
+                    placeholder="глоб."
+                    onBlur={(e) => {
+                      const v = e.target.value.trim();
+                      const num = v === '' ? null : Number.parseInt(v, 10);
+                      if (v !== '' && (!Number.isFinite(num) || num === null || num < 1)) {
+                        setMsg({ type: 'err', text: 'Макс. плечо: целое число ≥ 1 или пусто' });
+                        return;
+                      }
+                      const cur = chat.maxLeverage ?? null;
+                      const next = num === null ? null : num;
+                      if ((cur === null && next === null) || cur === next) return;
+                      const min = chat.minLeverage ?? null;
+                      if (next !== null && min !== null && min > next) {
+                        setMsg({
+                          type: 'err',
+                          text: `Макс. плечо (${next}) не может быть меньше мин. (${min})`,
+                        });
+                        return;
+                      }
+                      void runAction(`maxlev-${chat.chatId}`, async () => {
+                        const res = await fetch(
+                          `${getApiBase()}/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
+                          {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ maxLeverage: next }),
+                          },
+                        );
+                        if (!res.ok) {
+                          throw new Error(`Ошибка сохранения (${res.status})`);
+                        }
+                        setChats((prev) =>
+                          prev.map((row) =>
+                            row.id === chat.id ? { ...row, maxLeverage: next } : row,
+                          ),
+                        );
+                        setMsg({ type: 'ok', text: 'Максимальное плечо сохранено' });
+                      });
+                    }}
+                  />
                 </div>
                 <div className="userbotChatFieldCompact">
                   <span

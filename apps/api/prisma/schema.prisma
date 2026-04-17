@@ -124,6 +124,12 @@ model TgUserbotChat {
   defaultLeverage Int?
   /// Принудительное плечо (всегда подменяет плечо из сигнала); приоритет над глобальным FORCED_LEVERAGE; null = выкл.
   forcedLeverage Int?
+  /// Режим выбора плеча из диапазона: min | max | mid; null = наследовать глобальный LEVERAGE_RANGE_MODE
+  leverageRangeMode String?
+  /// Минимально допустимое плечо; null = наследовать глобальный MIN_ALLOWED_LEVERAGE
+  minLeverage Int?
+  /// Максимально допустимое плечо; null = наследовать глобальный MAX_ALLOWED_LEVERAGE
+  maxLeverage Int?
   /// Дефолт суммы входа: USDT или процент от equity, как DEFAULT_ORDER_USD (например "10" или "10%"); null = только глобальная настройка
   defaultEntryUsd String?
   /// Увеличивать номинал до minQty биржи; null = брать глобальную настройку BUMP_TO_MIN_EXCHANGE_LOT

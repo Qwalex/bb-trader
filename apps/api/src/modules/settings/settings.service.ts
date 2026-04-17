@@ -134,10 +134,56 @@ export class SettingsService {
           }
           normalized = String(Math.round(n));
         }
+      } else if (key === 'LEVERAGE_RANGE_MODE') {
+        const t = value.trim().toLowerCase();
+        if (t === '') {
+          normalized = 'mid';
+        } else if (t === 'min' || t === 'max' || t === 'mid') {
+          normalized = t;
+        } else {
+          throw new BadRequestException(
+            'LEVERAGE_RANGE_MODE: ожидается min, max или mid',
+          );
+        }
+      } else if (key === 'MIN_ALLOWED_LEVERAGE' || key === 'MAX_ALLOWED_LEVERAGE') {
+        const t = value.trim();
+        if (t === '') {
+          normalized = '';
+        } else {
+          const n = Number(t.replace(',', '.'));
+          if (!Number.isFinite(n) || n < 1) {
+            throw new BadRequestException(
+              `${key}: ожидается целое число ≥ 1 или пустая строка (выкл.)`,
+            );
+          }
+          normalized = String(Math.round(n));
+        }
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       throw new BadRequestException(msg);
+    }
+
+    if (key === 'MIN_ALLOWED_LEVERAGE' || key === 'MAX_ALLOWED_LEVERAGE') {
+      const otherKey =
+        key === 'MIN_ALLOWED_LEVERAGE'
+          ? 'MAX_ALLOWED_LEVERAGE'
+          : 'MIN_ALLOWED_LEVERAGE';
+      const parse = (raw: string | undefined): number | undefined => {
+        const t = String(raw ?? '').trim();
+        if (!t) return undefined;
+        const n = Number(t.replace(',', '.'));
+        return Number.isFinite(n) && n >= 1 ? Math.round(n) : undefined;
+      };
+      const thisVal = parse(normalized);
+      const otherVal = parse(await this.get(otherKey));
+      const min = key === 'MIN_ALLOWED_LEVERAGE' ? thisVal : otherVal;
+      const max = key === 'MAX_ALLOWED_LEVERAGE' ? thisVal : otherVal;
+      if (min != null && max != null && min > max) {
+        throw new BadRequestException(
+          `Ограничения плеча некорректны: MIN_ALLOWED_LEVERAGE (${min}) не может быть больше MAX_ALLOWED_LEVERAGE (${max})`,
+        );
+      }
     }
     await this.prisma.setting.upsert({
       where: { key },

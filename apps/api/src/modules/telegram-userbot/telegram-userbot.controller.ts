@@ -321,6 +321,25 @@ export class TelegramUserbotController {
           description:
             'Принудительное плечо для сигналов из чата; null — выкл.; перекрывает плечо из сигнала и глобальные FORCED_*',
         },
+        leverageRangeMode: {
+          type: 'string',
+          nullable: true,
+          enum: ['min', 'max', 'mid'],
+          description:
+            'Режим выбора плеча из диапазона; null — наследовать глобальный LEVERAGE_RANGE_MODE',
+        },
+        minLeverage: {
+          type: 'number',
+          nullable: true,
+          description:
+            'Минимально допустимое плечо для чата; null — наследовать глобальный MIN_ALLOWED_LEVERAGE',
+        },
+        maxLeverage: {
+          type: 'number',
+          nullable: true,
+          description:
+            'Максимально допустимое плечо для чата; null — наследовать глобальный MAX_ALLOWED_LEVERAGE',
+        },
         defaultEntryUsd: { type: 'string', nullable: true },
         martingaleMultiplier: { type: 'number', nullable: true },
         sourcePriority: { type: 'number', nullable: true },
@@ -353,6 +372,9 @@ export class TelegramUserbotController {
       enabled?: boolean;
       defaultLeverage?: number | null;
       forcedLeverage?: number | null;
+      leverageRangeMode?: 'min' | 'max' | 'mid' | null;
+      minLeverage?: number | null;
+      maxLeverage?: number | null;
       defaultEntryUsd?: string | null;
       martingaleMultiplier?: number | null;
       sourcePriority?: number | null;

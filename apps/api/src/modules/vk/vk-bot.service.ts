@@ -18,6 +18,10 @@ import type { Order, Signal } from '@prisma/client';
 import { formatError } from '../../common/format-error';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppLogService } from '../app-log/app-log.service';
+import {
+  parseLeverageRangeMode,
+  parseOptionalLeverageInt,
+} from '../settings/leverage-policy.util';
 import { SettingsService } from '../settings/settings.service';
 import {
   mergePartialSignals,
@@ -1098,6 +1102,9 @@ export class VkBotService implements OnModuleInit, OnModuleDestroy {
               title: true,
               defaultLeverage: true,
               forcedLeverage: true,
+              leverageRangeMode: true,
+              minLeverage: true,
+              maxLeverage: true,
               defaultEntryUsd: true,
             },
           })
@@ -1116,10 +1123,25 @@ export class VkBotService implements OnModuleInit, OnModuleDestroy {
       chat?.forcedLeverage != null && chat.forcedLeverage >= 1
         ? chat.forcedLeverage
         : undefined;
+    const chatRangeMode =
+      chat?.leverageRangeMode != null
+        ? parseLeverageRangeMode(chat.leverageRangeMode)
+        : undefined;
+    const chatMinAllowed =
+      chat?.minLeverage != null ? parseOptionalLeverageInt(chat.minLeverage) : undefined;
+    const chatMaxAllowed =
+      chat?.maxLeverage != null ? parseOptionalLeverageInt(chat.maxLeverage) : undefined;
     const parsed = await this.transcript.parse(
       'text',
       { text },
-      { defaultOrderUsd, leverageDefault, chatForcedLeverage },
+      {
+        defaultOrderUsd,
+        leverageDefault,
+        chatForcedLeverage,
+        leverageRangeMode: chatRangeMode,
+        minAllowedLeverage: chatMinAllowed,
+        maxAllowedLeverage: chatMaxAllowed,
+      },
     );
     if (parsed.ok !== true) {
       return {

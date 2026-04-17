@@ -56,6 +56,14 @@ export function normalizePartialSignal(raw: unknown): Partial<SignalDto> {
     const n = parseFloat(String(o.leverage));
     if (!Number.isNaN(n)) out.leverage = n;
   }
+  if (Array.isArray(o.leverageRange)) {
+    const nums = o.leverageRange
+      .map((x) => (typeof x === 'number' ? x : parseFloat(String(x))))
+      .filter((n) => !Number.isNaN(n));
+    if (nums.length >= 2) {
+      out.leverageRange = [nums[0]!, nums[1]!];
+    }
+  }
   if (typeof o.capitalPercent === 'number' && !Number.isNaN(o.capitalPercent)) {
     out.capitalPercent = o.capitalPercent;
   } else if (o.capitalPercent != null) {
@@ -91,6 +99,12 @@ export type LeverageFieldOptions = {
   defaultLeverage?: number;
   /** Принудительное плечо (карточка userbot «Прин.» или FORCED_LEVERAGE) — перекрывает сигнал и дефолт */
   forcedLeverage?: number;
+  /** Режим выбора плеча из диапазона. */
+  leverageRangeMode?: 'min' | 'max' | 'mid';
+  /** Минимально допустимое плечо (кроме forced). */
+  minAllowedLeverage?: number;
+  /** Максимально допустимое плечо (кроме forced). */
+  maxAllowedLeverage?: number;
 };
 
 /** Какие поля ещё нужны для полного SignalDto. */
@@ -144,6 +158,7 @@ export function fieldLabelRu(key: string): string {
     stopLoss: 'стоп-лосс (цена)',
     takeProfits: 'тейк-профиты (одна или несколько цен)',
     leverage: 'плечо (число, например 10)',
+    leverageRange: 'диапазон плеча [min, max], например [5, 15]',
     orderUsd:
       'сумма позиции в USDT (номинал); если не задана — значение из настроек DEFAULT_ORDER_USD',
     capitalPercent:

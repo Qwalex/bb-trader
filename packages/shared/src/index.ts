@@ -24,6 +24,8 @@ export interface SignalDto {
   /** TP levels; position split equally */
   takeProfits: number[];
   leverage: number;
+  /** Диапазон плеча из сигнала [min, max]; итоговое значение выбирается серверной политикой. */
+  leverageRange?: [number, number];
   /**
    * Номинал позиции в USDT (совокупно по всем входам).
    * Если 0 — используется capitalPercent от баланса (legacy).

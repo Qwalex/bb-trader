@@ -83,6 +83,21 @@ const KEYS = [
       'Принудительное плечо глобально: целое ≥ 1; пусто — выкл. Перекрывается полем «Прин.» в карточке чата на странице Userbot',
   },
   {
+    key: 'LEVERAGE_RANGE_MODE',
+    label:
+      'Режим выбора плеча из диапазона (min|max|mid). Пример для 5-15: min=5, mid=10, max=15',
+  },
+  {
+    key: 'MIN_ALLOWED_LEVERAGE',
+    label:
+      'Минимально допустимое плечо (кроме forced). Пусто — без нижнего ограничения',
+  },
+  {
+    key: 'MAX_ALLOWED_LEVERAGE',
+    label:
+      'Максимально допустимое плечо (кроме forced). Пусто — без верхнего ограничения',
+  },
+  {
     key: 'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',
     label: 'Мартингейл: дефолтный множитель после убыточной сделки (например 1.2)',
   },
@@ -251,6 +266,9 @@ const SETTINGS_SECTIONS: { id: string; title: string; keys: string[] }[] = [
       'DEFAULT_LEVERAGE_ENABLED',
       'DEFAULT_LEVERAGE',
       'FORCED_LEVERAGE',
+      'LEVERAGE_RANGE_MODE',
+      'MIN_ALLOWED_LEVERAGE',
+      'MAX_ALLOWED_LEVERAGE',
       'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',
       'POLLING_INTERVAL_MS',
       'TP_SL_STEP_START',

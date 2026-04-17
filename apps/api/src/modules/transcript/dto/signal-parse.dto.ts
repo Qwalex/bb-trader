@@ -47,6 +47,13 @@ export class SignalParseDto {
   @Min(1)
   leverage!: number;
 
+  /** Диапазон плеча [min, max], если источник дал интервал вместо одного значения. */
+  @IsOptional()
+  @IsArray()
+  @IsNumber({}, { each: true })
+  @Type(() => Number)
+  leverageRange?: number[];
+
   /** Номинал в USDT; 0 = не задано в USDT (тогда % или дефолт из DEFAULT_ORDER_USD) */
   @IsOptional()
   @Transform(({ value }) => coerceOptionalNonNegNumber(value))

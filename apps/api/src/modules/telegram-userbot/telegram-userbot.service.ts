@@ -19,6 +19,9 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AppLogService } from '../app-log/app-log.service';
 import { SettingsService } from '../settings/settings.service';
 import {
+  parseLeverageRangeMode,
+} from '../settings/leverage-policy.util';
+import {
   parseSourceTpSlStepMap,
   parseSourceTpSlStepRangeMap,
   parseTpSlStepStart,
@@ -1394,6 +1397,12 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       defaultLeverage?: number | null;
       /** Принудительное плечо (всегда); null = выкл. */
       forcedLeverage?: number | null;
+      /** Режим выбора плеча из диапазона: null = наследовать глобальный */
+      leverageRangeMode?: 'min' | 'max' | 'mid' | null;
+      /** Минимально допустимое плечо: null = наследовать глобальный */
+      minLeverage?: number | null;
+      /** Максимально допустимое плечо: null = наследовать глобальный */
+      maxLeverage?: number | null;
       defaultEntryUsd?: string | null;
       martingaleMultiplier?: number | null;
       sourcePriority?: number | null;
@@ -1405,6 +1414,10 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       tpSlStepRange?: number | null;
     },
   ) {
+    const existing = await this.prisma.tgUserbotChat.findUnique({
+      where: { chatId },
+      select: { minLeverage: true, maxLeverage: true },
+    });
     const entryNorm =
       body.defaultEntryUsd !== undefined
         ? body.defaultEntryUsd === null || body.defaultEntryUsd.trim() === ''
@@ -1427,6 +1440,51 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           : body.forcedLeverage >= 1
             ? Math.floor(body.forcedLeverage)
             : null;
+    const rangeModeNorm =
+      body.leverageRangeMode === undefined
+        ? undefined
+        : body.leverageRangeMode === null
+          ? null
+          : body.leverageRangeMode === 'min' ||
+              body.leverageRangeMode === 'max' ||
+              body.leverageRangeMode === 'mid'
+            ? parseLeverageRangeMode(body.leverageRangeMode)
+            : (() => {
+                throw new BadRequestException(
+                  `leverageRangeMode: ожидается "min", "max", "mid" или null, получено ${JSON.stringify(body.leverageRangeMode)}`,
+                );
+              })();
+    const minLeverageNorm =
+      body.minLeverage === undefined
+        ? undefined
+        : body.minLeverage === null
+          ? null
+          : Number.isFinite(body.minLeverage) && body.minLeverage >= 1
+            ? Math.floor(body.minLeverage)
+            : null;
+    const maxLeverageNorm =
+      body.maxLeverage === undefined
+        ? undefined
+        : body.maxLeverage === null
+          ? null
+          : Number.isFinite(body.maxLeverage) && body.maxLeverage >= 1
+            ? Math.floor(body.maxLeverage)
+            : null;
+    const minEff =
+      minLeverageNorm === undefined ? (existing?.minLeverage ?? undefined) : minLeverageNorm;
+    const maxEff =
+      maxLeverageNorm === undefined ? (existing?.maxLeverage ?? undefined) : maxLeverageNorm;
+    if (
+      minEff != null &&
+      maxEff != null &&
+      Number.isFinite(minEff) &&
+      Number.isFinite(maxEff) &&
+      minEff > maxEff
+    ) {
+      throw new BadRequestException(
+        `Ограничения плеча некорректны: minLeverage (${minEff}) не может быть больше maxLeverage (${maxEff})`,
+      );
+    }
     const martingaleNorm =
       body.martingaleMultiplier === undefined
         ? undefined
@@ -1461,6 +1519,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         sourcePriority: sourcePriorityNorm ?? 0,
         defaultLeverage: levNorm ?? null,
         forcedLeverage: forcedLevNorm ?? null,
+        leverageRangeMode: rangeModeNorm ?? null,
+        minLeverage: minLeverageNorm ?? null,
+        maxLeverage: maxLeverageNorm ?? null,
         defaultEntryUsd: entryNorm ?? null,
         minLotBump: minLotBumpNorm ?? null,
       },
@@ -1469,6 +1530,11 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         ...(sourcePriorityNorm !== undefined ? { sourcePriority: sourcePriorityNorm } : {}),
         ...(levNorm !== undefined ? { defaultLeverage: levNorm } : {}),
         ...(forcedLevNorm !== undefined ? { forcedLeverage: forcedLevNorm } : {}),
+        ...(rangeModeNorm !== undefined
+          ? { leverageRangeMode: rangeModeNorm }
+          : {}),
+        ...(minLeverageNorm !== undefined ? { minLeverage: minLeverageNorm } : {}),
+        ...(maxLeverageNorm !== undefined ? { maxLeverage: maxLeverageNorm } : {}),
         ...(entryNorm !== undefined ? { defaultEntryUsd: entryNorm } : {}),
         ...(minLotBumpNorm !== undefined ? { minLotBump: minLotBumpNorm } : {}),
       },
@@ -1525,6 +1591,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         select: {
           defaultLeverage: true,
           forcedLeverage: true,
+          leverageRangeMode: true,
+          minLeverage: true,
+          maxLeverage: true,
           defaultEntryUsd: true,
           title: true,
         },
@@ -1545,6 +1614,18 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       chatForcedLeverage:
         chat?.forcedLeverage != null && chat.forcedLeverage >= 1
           ? chat.forcedLeverage
+          : undefined,
+      leverageRangeMode:
+        chat?.leverageRangeMode != null
+          ? parseLeverageRangeMode(chat.leverageRangeMode)
+          : undefined,
+      minAllowedLeverage:
+        chat?.minLeverage != null && chat.minLeverage >= 1
+          ? chat.minLeverage
+          : undefined,
+      maxAllowedLeverage:
+        chat?.maxLeverage != null && chat.maxLeverage >= 1
+          ? chat.maxLeverage
           : undefined,
     };
   }
