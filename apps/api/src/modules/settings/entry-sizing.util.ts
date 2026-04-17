@@ -17,7 +17,7 @@ export function parseDefaultEntryRaw(
   if (hasPercent) {
     const n = parseFloat(s.replace(/%/g, '').replace(',', '.').trim());
     if (Number.isFinite(n) && n > 0) {
-      return { kind: 'percent', percent: Math.min(n, 100) };
+      return { kind: 'percent', percent: Math.min(n, 1_000_000) };
     }
     return { kind: 'fixed', usd: 10 };
   }

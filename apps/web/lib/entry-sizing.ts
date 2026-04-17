@@ -22,7 +22,7 @@ export function serializeEntry(mode: EntrySizingMode, amount: string): string {
   const n = parseFloat(t);
   if (!Number.isFinite(n) || n <= 0) return '';
   if (mode === 'percent') {
-    return `${Math.min(n, 100)}%`;
+    return `${Math.min(n, 1_000_000)}%`;
   }
   return String(n);
 }

@@ -92,6 +92,11 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     return this.settings.getDefaultOrderUsd(d?.totalUsd);
   }
 
+  private async buildTelegramTranscriptOverrides(userId: number) {
+    const defaultOrderUsd = await this.getResolvedDefaultOrderUsd();
+    return { defaultOrderUsd };
+  }
+
   async onModuleInit(): Promise<void> {
     const token = await this.settings.get('TELEGRAM_BOT_TOKEN');
     if (!token) {
@@ -1706,6 +1711,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
               draft.partial ?? {},
               draft.userTurns,
               text,
+              await this.buildTelegramTranscriptOverrides(uid),
             );
             await this.handleParseResult(ctx, res, text);
             return;
@@ -1715,6 +1721,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
             const res = await this.transcript.applyCorrection(
               draft.signal,
               text,
+              await this.buildTelegramTranscriptOverrides(uid),
             );
             await this.handleParseResult(ctx, res, text);
             return;
@@ -1722,7 +1729,11 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         }
 
         this.logger.log(`TG text: new signal parse userId=${uid}`);
-        const res = await this.transcript.parse('text', { text });
+        const res = await this.transcript.parse(
+          'text',
+          { text },
+          await this.buildTelegramTranscriptOverrides(uid),
+        );
         await this.handleParseResult(ctx, res, text);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -1758,11 +1769,15 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
               },
             }
           : {};
-      const res = await this.transcript.parse('image', {
-        imageBase64: base64,
-        imageMime: 'image/jpeg',
-        ...continuation,
-      });
+      const res = await this.transcript.parse(
+        'image',
+        {
+          imageBase64: base64,
+          imageMime: 'image/jpeg',
+          ...continuation,
+        },
+        await this.buildTelegramTranscriptOverrides(uid),
+      );
       await this.handleParseResult(ctx, res, '[photo]');
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -1797,11 +1812,15 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
               },
             }
           : {};
-      const res = await this.transcript.parse('audio', {
-        audioBase64: base64,
-        audioMime: 'audio/ogg',
-        ...continuation,
-      });
+      const res = await this.transcript.parse(
+        'audio',
+        {
+          audioBase64: base64,
+          audioMime: 'audio/ogg',
+          ...continuation,
+        },
+        await this.buildTelegramTranscriptOverrides(uid),
+      );
       await this.handleParseResult(ctx, res, '[voice]');
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -1951,7 +1970,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       row?.chatId
         ? this.prisma.tgUserbotChat.findUnique({
             where: { chatId: row.chatId },
-            select: { title: true, defaultLeverage: true, defaultEntryUsd: true },
+            select: {
+              title: true,
+              defaultLeverage: true,
+              forcedLeverage: true,
+              defaultEntryUsd: true,
+            },
           })
         : Promise.resolve(null),
       this.bybit.getUnifiedUsdtBalanceDetails(),
@@ -1964,10 +1988,14 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       chat?.defaultLeverage != null && chat.defaultLeverage >= 1
         ? chat.defaultLeverage
         : undefined;
+    const chatForcedLeverage =
+      chat?.forcedLeverage != null && chat.forcedLeverage >= 1
+        ? chat.forcedLeverage
+        : undefined;
     const parsed = await this.transcript.parse(
       'text',
       { text },
-      { defaultOrderUsd, leverageDefault },
+      { defaultOrderUsd, leverageDefault, chatForcedLeverage },
     );
     if (parsed.ok !== true) {
       return {

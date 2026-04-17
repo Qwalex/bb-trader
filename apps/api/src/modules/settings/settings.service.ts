@@ -24,6 +24,8 @@ const DASHBOARD_TODOS_MAX_ID_LEN = 80;
 const DASHBOARD_TODOS_MAX_TEXT_LEN = 4000;
 
 const ENV_FALLBACK: Record<string, string> = {
+  /** Запись логов в таблицу AppLog (false — полностью отключить) */
+  APPLOG_ENABLED: 'true',
   /** Номинал по умолчанию, если в БД и .env ключ не задан */
   DEFAULT_ORDER_USD: '10',
   /** Если true — при номинале ниже minQty биржи поднимать qty до минимума (старое поведение); иначе ошибка */
@@ -119,6 +121,19 @@ export class SettingsService {
         normalized = normalizeSourceTpSlStepRangeJsonForPersist(value);
       } else if (key === 'SOURCE_TP_SL_STEP_START') {
         normalized = normalizeSourceTpSlStepStartJsonForPersist(value);
+      } else if (key === 'FORCED_LEVERAGE') {
+        const t = value.trim();
+        if (t === '') {
+          normalized = '';
+        } else {
+          const n = Number(t.replace(',', '.'));
+          if (!Number.isFinite(n) || n < 1) {
+            throw new BadRequestException(
+              'FORCED_LEVERAGE: ожидается целое число ≥ 1 или пустая строка (выкл.)',
+            );
+          }
+          normalized = String(Math.round(n));
+        }
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

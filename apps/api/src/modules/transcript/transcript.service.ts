@@ -16,6 +16,7 @@ import { AppLogService } from '../app-log/app-log.service';
 import { sanitizeForOpenRouterLog } from '../app-log/log-sanitize';
 import { BybitService } from '../bybit/bybit.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { resolveForcedLeverageWithChatOverride } from '../settings/forced-leverage.util';
 import { SettingsService } from '../settings/settings.service';
 import { SignalParseDto } from './dto/signal-parse.dto';
 import {
@@ -31,6 +32,8 @@ import {
 export type TranscriptParseOverrides = {
   defaultOrderUsd?: number;
   leverageDefault?: number;
+  /** Принудительное плечо из карточки TgUserbotChat (выше глобального FORCED_LEVERAGE) */
+  chatForcedLeverage?: number;
 };
 
 type OpenRouterLogContext = {
@@ -78,7 +81,7 @@ const TRANSCRIPT_RESPONSE_JSON_SCHEMA = {
         },
         leverage: { type: ['number', 'null'], minimum: 1 },
         orderUsd: { type: 'number', minimum: 0 },
-        capitalPercent: { type: 'number', minimum: 0, maximum: 100 },
+        capitalPercent: { type: 'number', minimum: 0, maximum: 1000000 },
         source: { type: ['string', 'null'] },
       },
       required: [
@@ -195,8 +198,8 @@ Field rules:
 - Extract prices only from explicit labels (Entry, Stop loss, SL, Targets/TP, etc.). Do not blend, infer, or average numbers from different fields.
 - Field labels without actual values (e.g. "Entry:", "SL:", "TP1:" with no number after them) do NOT count as known values.
 - takeProfits: one or more take-profit prices; several TPs mean equal split across levels.
-- orderUsd: total position notional in USDT (e.g. 10, 50, 100). If the user gives percent of balance instead, set orderUsd to 0 and set capitalPercent to that percent.
-- capitalPercent: use only when sizing by balance percent; otherwise 0.
+- orderUsd: total position notional in USDT (e.g. 10, 50, 100). If the user gives percent of balance instead, set orderUsd to 0 and set capitalPercent to that percent. If capitalPercent is above 100, orderUsd MUST be 0 — never output a positive orderUsd together with capitalPercent > 100 (no "100" placeholder).
+- capitalPercent: percent for sizing when orderUsd is 0. If 1–100: margin share of available balance; notional = margin × leverage. If above 100 (e.g. 500): notional = balance × (capitalPercent/100); leverage applies on exchange only (e.g. 500 with balance 10 → 50 USDT notional). Otherwise 0.
 - Default sizing: if size is not specified, set orderUsd to ${defaultOrderUsd} and capitalPercent to 0.
 - source: ONLY if the user explicitly names the signal provider (Telegram channel, app, or group), e.g. "Binance Killers", "Crypto Signals". Otherwise set source to null. NEVER use "text", "image", "audio", or any input-format word as source.
 `;
@@ -652,7 +655,7 @@ Be conservative: if unsure, return "other".`;
   }
 
   async generateFilterPatterns(params: {
-    kind: 'signal' | 'close' | 'result' | 'reentry';
+    kind: 'signal' | 'close' | 'result' | 'reentry' | 'ignore';
     example: string;
   }): Promise<{
     ok: boolean;
@@ -815,11 +818,9 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       });
       const ms = Date.now() - t0;
       this.logger.log(`applyCorrection: OpenRouter ok in ${ms}ms`);
-      const levOpts = await this.getLeverageFieldOptions(
-        overrides?.leverageDefault,
-      );
-      const result = this.finishTranscriptResult(
-        this.parseModelContent(content, levOpts, defaultOrderUsd),
+      const levOpts = await this.getLeverageFieldOptions(overrides);
+      const result = await this.finishTranscriptResult(
+        await this.parseModelContent(content, levOpts, defaultOrderUsd),
         levOpts,
         defaultOrderUsd,
       );
@@ -889,11 +890,9 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       });
       const ms = Date.now() - t0;
       this.logger.log(`continueSignalDraft: OpenRouter ok in ${ms}ms`);
-      const levOpts = await this.getLeverageFieldOptions(
-        overrides?.leverageDefault,
-      );
-      const result = this.finishTranscriptResult(
-        this.parseModelContent(content, levOpts, defaultOrderUsd),
+      const levOpts = await this.getLeverageFieldOptions(overrides);
+      const result = await this.finishTranscriptResult(
+        await this.parseModelContent(content, levOpts, defaultOrderUsd),
         levOpts,
         defaultOrderUsd,
       );
@@ -975,11 +974,9 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       this.logger.log(
         `parse: OpenRouter ok in ${ms}ms (primary=${model}${fallbackModels[0] ? `, fallback=${fallbackModels[0]}` : ''})`,
       );
-      const levOpts = await this.getLeverageFieldOptions(
-        overrides?.leverageDefault,
-      );
-      const parsed = this.finishTranscriptResult(
-        this.parseModelContent(content, levOpts, defaultOrderUsd),
+      const levOpts = await this.getLeverageFieldOptions(overrides);
+      const parsed = await this.finishTranscriptResult(
+        await this.parseModelContent(content, levOpts, defaultOrderUsd),
         levOpts,
         defaultOrderUsd,
       );
@@ -1300,12 +1297,21 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
 
   /**
    * Размер позиции: явный USDT, иначе (legacy) только % от депозита, иначе номинал из настроек DEFAULT_ORDER_USD.
+   * При capitalPercent > 100 всегда режим «только процент» (orderUsd в сигнале 0), иначе ложный
+   * orderUsd от LLM (часто 100 из примеров в промпте) перекрывает 200%+.
    */
   private resolveOrderUsd(dto: SignalParseDto, defaultOrderUsd: number): number {
-    if (dto.orderUsd != null && dto.orderUsd > 0) {
-      return dto.orderUsd;
+    const capPct = Number(dto.capitalPercent);
+    const cap = Number.isFinite(capPct) ? capPct : 0;
+    const ouRaw = Number(dto.orderUsd);
+    const ou = Number.isFinite(ouRaw) ? ouRaw : 0;
+    if (cap > 100) {
+      return 0;
     }
-    if ((dto.capitalPercent ?? 0) > 0) {
+    if (ou > 0) {
+      return ou;
+    }
+    if (cap > 0) {
       return 0;
     }
     return defaultOrderUsd;
@@ -1313,8 +1319,9 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
 
   /** Настройки плеча из SQLite / env: опциональная подстановка или обязательное поле в сигнале. */
   private async getLeverageFieldOptions(
-    overrideDefaultLeverage?: number | null,
+    overrides?: TranscriptParseOverrides | null,
   ): Promise<LeverageFieldOptions> {
+    const overrideDefaultLeverage = overrides?.leverageDefault;
     const defRaw = await this.settings.get('DEFAULT_LEVERAGE');
     const parsed =
       defRaw != null && String(defRaw).trim() !== ''
@@ -1335,9 +1342,16 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       );
     }
 
+    const rawForcedGlobal = await this.settings.get('FORCED_LEVERAGE');
+    const forcedLeverage = resolveForcedLeverageWithChatOverride(
+      overrides?.chatForcedLeverage,
+      rawForcedGlobal,
+    );
+
     return {
       requireLeverage: false,
       defaultLeverage,
+      forcedLeverage,
     };
   }
 
@@ -1357,31 +1371,37 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       return signalRaw;
     }
     const def = leverageOpts.defaultLeverage;
-    if (def === undefined || def < 1) {
+    const ff = leverageOpts.forcedLeverage;
+    if ((def === undefined || def < 1) && (ff == null || ff < 1)) {
       return signalRaw;
     }
     const o = { ...(signalRaw as Record<string, unknown>) };
-    const lev = o.leverage;
-    const n =
-      typeof lev === 'number'
-        ? lev
-        : lev != null
-          ? parseFloat(String(lev))
-          : NaN;
-    if (!Number.isFinite(n) || n < 1) {
-      o.leverage = def;
+    if (def != null && def >= 1) {
+      const lev = o.leverage;
+      const n =
+        typeof lev === 'number'
+          ? lev
+          : lev != null
+            ? parseFloat(String(lev))
+            : NaN;
+      if (!Number.isFinite(n) || n < 1) {
+        o.leverage = def;
+      }
+    }
+    if (ff != null && ff >= 1) {
+      o.leverage = ff;
     }
     return o;
   }
 
   /** Если partial уже полный — завершаем без повторного запроса. */
-  private finishTranscriptResult(
+  private async finishTranscriptResult(
     result: TranscriptResult,
     leverageOpts: LeverageFieldOptions,
     defaultOrderUsd: number,
-  ): TranscriptResult {
+  ): Promise<TranscriptResult> {
     if (result.ok === 'incomplete' && isCompletePartial(result.partial, leverageOpts)) {
-      const full = this.tryCompleteSignal(result.partial, leverageOpts, defaultOrderUsd);
+      const full = await this.tryCompleteSignal(result.partial, leverageOpts, defaultOrderUsd);
       if (full.ok === true) {
         return full;
       }
@@ -1389,13 +1409,15 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     return result;
   }
 
-  private tryCompleteSignal(
+  private async tryCompleteSignal(
     signalRaw: unknown,
     leverageOpts: LeverageFieldOptions,
     defaultOrderUsd: number,
-  ): TranscriptResult {
+  ): Promise<TranscriptResult> {
     const prepared = this.applyDefaultLeverageToSignalRaw(signalRaw, leverageOpts);
-    const dto = plainToInstance(SignalParseDto, prepared);
+    const dto = plainToInstance(SignalParseDto, prepared, {
+      enableImplicitConversion: true,
+    });
     const errors = validateSync(dto);
     if (errors.length > 0) {
       return {
@@ -1406,20 +1428,49 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     }
 
     const orderUsd = this.resolveOrderUsd(dto, defaultOrderUsd);
+    const capNorm = Number(dto.capitalPercent);
+    const capitalPercent =
+      Number.isFinite(capNorm) && capNorm >= 0 ? capNorm : 0;
+    const canonicalEntries = dto.entries ?? [];
+    const canonicalEntryIsRange = dto.entryIsRange === true;
+    const entryNormalized = this.normalizeEqualBoundRangeEntry({
+      entries: canonicalEntries,
+      entryIsRange: canonicalEntryIsRange,
+    });
     const signal: SignalDto = {
       pair: normalizeTradingPair(dto.pair),
       direction: dto.direction,
-      entries: dto.entries ?? [],
-      entryIsRange: dto.entryIsRange === true,
+      entries: entryNormalized.entries,
+      entryIsRange: entryNormalized.entryIsRange,
       stopLoss: dto.stopLoss,
       takeProfits: dto.takeProfits,
       leverage: dto.leverage,
       orderUsd,
-      capitalPercent: dto.capitalPercent ?? 0,
+      capitalPercent,
       source: sanitizeSignalSource(dto.source),
     };
 
     return { ok: true, signal };
+  }
+
+  /**
+   * Канонизирует "нулевой" диапазон входа A-A в обычный одиночный вход A.
+   * Применяется единообразно для новых сигналов и update-режима.
+   */
+  private normalizeEqualBoundRangeEntry(params: {
+    entries: number[];
+    entryIsRange: boolean;
+  }): { entries: number[]; entryIsRange: boolean } {
+    const { entries, entryIsRange } = params;
+    if (!entryIsRange || entries.length !== 2) {
+      return { entries, entryIsRange };
+    }
+    const a = entries[0]!;
+    const b = entries[1]!;
+    if (a !== b) {
+      return { entries, entryIsRange };
+    }
+    return { entries: [a], entryIsRange: false };
   }
 
   private defaultPromptForMissing(missing: string[]): string {
@@ -1443,11 +1494,11 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     };
   }
 
-  private parseModelContent(
+  private async parseModelContent(
     content: unknown,
     leverageOpts: LeverageFieldOptions,
     defaultOrderUsd: number,
-  ): TranscriptResult {
+  ): Promise<TranscriptResult> {
     const parsed = this.tryParseModelContent(content);
     if (!parsed.ok) {
       return parsed.result;
@@ -1487,7 +1538,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     }
 
     if (root.status === 'complete') {
-      const full = this.tryCompleteSignal(root.signal, leverageOpts, defaultOrderUsd);
+      const full = await this.tryCompleteSignal(root.signal, leverageOpts, defaultOrderUsd);
       if (full.ok === true) {
         return full;
       }
@@ -1496,7 +1547,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     }
 
     // Legacy / без поля status: сначала полный валидный сигнал, иначе — черновик
-    const full = this.tryCompleteSignal(root.signal, leverageOpts, defaultOrderUsd);
+    const full = await this.tryCompleteSignal(root.signal, leverageOpts, defaultOrderUsd);
     if (full.ok === true) {
       return full;
     }

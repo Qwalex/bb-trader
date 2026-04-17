@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { getApiBase } from '../../lib/api';
 
-type FilterKind = 'signal' | 'close' | 'result' | 'reentry';
+type FilterKind = 'signal' | 'close' | 'result' | 'reentry' | 'ignore';
 type FilterItem = {
   id: string;
   groupName: string;
@@ -28,6 +28,7 @@ const KIND_LABEL: Record<FilterKind, string> = {
   close: 'Закрытие сделки (closed/cancel)',
   result: 'Результаты (TP/SL/отчеты)',
   reentry: 'Перезаход в позицию',
+  ignore: 'Игнорировать (не отправлять в AI)',
 };
 
 const SECTION_TITLE_STYLE = {
@@ -90,6 +91,14 @@ Trade closed with 15.6938% profit.`,
 SL тот же`,
     ],
   },
+  ignore: {
+    patterns: ['free trial', 'vip доступ', 'реклама', 'subscribe'],
+    examples: [
+      `Открыт набор в VIP-группу.
+Переходите по ссылке и оформляйте подписку.
+Промокод действует 24 часа.`,
+    ],
+  },
 };
 
 export default function FiltersPage() {
@@ -137,7 +146,7 @@ export default function FiltersPage() {
     const map = new Map<string, Record<FilterKind, FilterItem[]>>();
     for (const item of exampleItems) {
       if (!map.has(item.groupName)) {
-        map.set(item.groupName, { signal: [], close: [], result: [], reentry: [] });
+        map.set(item.groupName, { signal: [], close: [], result: [], reentry: [], ignore: [] });
       }
       map.get(item.groupName)![item.kind].push(item);
     }
@@ -148,7 +157,7 @@ export default function FiltersPage() {
     const map = new Map<string, Record<FilterKind, PatternItem[]>>();
     for (const item of patternItems) {
       if (!map.has(item.groupName)) {
-        map.set(item.groupName, { signal: [], close: [], result: [], reentry: [] });
+        map.set(item.groupName, { signal: [], close: [], result: [], reentry: [], ignore: [] });
       }
       map.get(item.groupName)![item.kind].push(item);
     }
@@ -438,6 +447,7 @@ export default function FiltersPage() {
               <option value="close">Закрытие (closed/cancel)</option>
               <option value="result">Результат (TP/SL)</option>
               <option value="reentry">Перезаход</option>
+              <option value="ignore">Игнорировать</option>
             </select>
           </label>
         </div>
@@ -467,7 +477,7 @@ export default function FiltersPage() {
             gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
           }}
         >
-          {(['signal', 'close', 'result', 'reentry'] as const).map((sampleKind) => (
+          {(['signal', 'close', 'result', 'reentry', 'ignore'] as const).map((sampleKind) => (
             <div
               key={`example-hint-${sampleKind}`}
               style={{
@@ -578,6 +588,7 @@ export default function FiltersPage() {
               <option value="close">Закрытие (closed/cancel)</option>
               <option value="result">Результат (TP/SL)</option>
               <option value="reentry">Перезаход</option>
+              <option value="ignore">Игнорировать</option>
             </select>
           </label>
         </div>
@@ -607,7 +618,7 @@ export default function FiltersPage() {
             gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
           }}
         >
-          {(['signal', 'close', 'result', 'reentry'] as const).map((sampleKind) => (
+          {(['signal', 'close', 'result', 'reentry', 'ignore'] as const).map((sampleKind) => (
             <div
               key={`pattern-hint-${sampleKind}`}
               style={{
@@ -761,7 +772,7 @@ export default function FiltersPage() {
           <div className="card" style={{ padding: '0.85rem 1rem' }}>
             <h3 style={SECTION_TITLE_STYLE}>{activeFilterGroup} · Фильтры-паттерны</h3>
             {activePatternEntry ? (
-              (['signal', 'close', 'result', 'reentry'] as const).map((k) => (
+              (['signal', 'close', 'result', 'reentry', 'ignore'] as const).map((k) => (
                 <div key={`${activeFilterGroup}-pattern-${k}`} style={{ marginBottom: '0.9rem' }}>
                   <div
                     style={{
@@ -843,7 +854,7 @@ export default function FiltersPage() {
           <div key={activeFilterGroup} className="card">
             <h3 style={SECTION_TITLE_STYLE}>{activeFilterGroup} · Примеры для AI</h3>
             {activeExampleEntry ? (
-              (['signal', 'close', 'result', 'reentry'] as const).map((k) => (
+              (['signal', 'close', 'result', 'reentry', 'ignore'] as const).map((k) => (
                 <div key={`${activeFilterGroup}-${k}`} style={{ marginBottom: '0.9rem' }}>
                   <div
                     style={{

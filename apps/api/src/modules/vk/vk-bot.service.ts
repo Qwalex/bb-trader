@@ -170,6 +170,11 @@ export class VkBotService implements OnModuleInit, OnModuleDestroy {
     return this.settings.getDefaultOrderUsd(d?.totalUsd);
   }
 
+  private async buildVkTranscriptOverrides(userId: number) {
+    const defaultOrderUsd = await this.getResolvedDefaultOrderUsd();
+    return { defaultOrderUsd };
+  }
+
   private async resolveSourceForUser(
     userId: number,
     llmSource: string | undefined,
@@ -472,11 +477,15 @@ export class VkBotService implements OnModuleInit, OnModuleDestroy {
               },
             }
           : {};
-      const res = await this.transcript.parse('image', {
-        imageBase64: base64,
-        imageMime: 'image/jpeg',
-        ...continuation,
-      });
+      const res = await this.transcript.parse(
+        'image',
+        {
+          imageBase64: base64,
+          imageMime: 'image/jpeg',
+          ...continuation,
+        },
+        await this.buildVkTranscriptOverrides(fromId),
+      );
       await this.handleParseResultVk(fromId, peerId, res, '[photo]');
     } catch (e) {
       await this.sendPeer(peerId, `Ошибка: ${formatError(e)}`);
@@ -500,11 +509,15 @@ export class VkBotService implements OnModuleInit, OnModuleDestroy {
               },
             }
           : {};
-      const res = await this.transcript.parse('audio', {
-        audioBase64: base64,
-        audioMime: 'audio/ogg',
-        ...continuation,
-      });
+      const res = await this.transcript.parse(
+        'audio',
+        {
+          audioBase64: base64,
+          audioMime: 'audio/ogg',
+          ...continuation,
+        },
+        await this.buildVkTranscriptOverrides(fromId),
+      );
       await this.handleParseResultVk(fromId, peerId, res, '[voice]');
     } catch (e) {
       await this.sendPeer(peerId, `Ошибка: ${formatError(e)}`);
@@ -648,18 +661,27 @@ export class VkBotService implements OnModuleInit, OnModuleDestroy {
             draft.partial ?? {},
             draft.userTurns,
             text,
+            await this.buildVkTranscriptOverrides(fromId),
           );
           await this.handleParseResultVk(fromId, peerId, res, text);
           return;
         }
         if (draft.phase === 'ready' && draft.signal) {
-          const res = await this.transcript.applyCorrection(draft.signal, text);
+          const res = await this.transcript.applyCorrection(
+            draft.signal,
+            text,
+            await this.buildVkTranscriptOverrides(fromId),
+          );
           await this.handleParseResultVk(fromId, peerId, res, text);
           return;
         }
       }
 
-      const res = await this.transcript.parse('text', { text });
+      const res = await this.transcript.parse(
+        'text',
+        { text },
+        await this.buildVkTranscriptOverrides(fromId),
+      );
       await this.handleParseResultVk(fromId, peerId, res, text);
     } catch (e) {
       this.logger.error(`VK text: ${formatError(e)}`);
@@ -1072,7 +1094,12 @@ export class VkBotService implements OnModuleInit, OnModuleDestroy {
       row?.chatId
         ? this.prisma.tgUserbotChat.findFirst({
             where: { chatId: row.chatId },
-            select: { title: true, defaultLeverage: true, defaultEntryUsd: true },
+            select: {
+              title: true,
+              defaultLeverage: true,
+              forcedLeverage: true,
+              defaultEntryUsd: true,
+            },
           })
         : Promise.resolve(null),
       this.bybit.getUnifiedUsdtBalanceDetails(),
@@ -1085,10 +1112,14 @@ export class VkBotService implements OnModuleInit, OnModuleDestroy {
       chat?.defaultLeverage != null && chat.defaultLeverage >= 1
         ? chat.defaultLeverage
         : undefined;
+    const chatForcedLeverage =
+      chat?.forcedLeverage != null && chat.forcedLeverage >= 1
+        ? chat.forcedLeverage
+        : undefined;
     const parsed = await this.transcript.parse(
       'text',
       { text },
-      { defaultOrderUsd, leverageDefault },
+      { defaultOrderUsd, leverageDefault, chatForcedLeverage },
     );
     if (parsed.ok !== true) {
       return {

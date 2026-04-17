@@ -223,7 +223,7 @@ export class TelegramUserbotController {
       type: 'object',
       properties: {
         groupName: { type: 'string' },
-        kind: { type: 'string', enum: ['signal', 'close', 'result', 'reentry'] },
+        kind: { type: 'string', enum: ['signal', 'close', 'result', 'reentry', 'ignore'] },
         example: { type: 'string' },
         requiresQuote: { type: 'boolean' },
       },
@@ -235,7 +235,7 @@ export class TelegramUserbotController {
     @Body()
     body: {
       groupName?: string;
-      kind?: 'signal' | 'close' | 'result' | 'reentry';
+      kind?: 'signal' | 'close' | 'result' | 'reentry' | 'ignore';
       example?: string;
       requiresQuote?: boolean;
     },
@@ -257,7 +257,7 @@ export class TelegramUserbotController {
       type: 'object',
       properties: {
         groupName: { type: 'string' },
-        kind: { type: 'string', enum: ['signal', 'close', 'result', 'reentry'] },
+        kind: { type: 'string', enum: ['signal', 'close', 'result', 'reentry', 'ignore'] },
         pattern: { type: 'string' },
         requiresQuote: { type: 'boolean' },
       },
@@ -269,7 +269,7 @@ export class TelegramUserbotController {
     @Body()
     body: {
       groupName?: string;
-      kind?: 'signal' | 'close' | 'result' | 'reentry';
+      kind?: 'signal' | 'close' | 'result' | 'reentry' | 'ignore';
       pattern?: string;
       requiresQuote?: boolean;
     },
@@ -290,7 +290,7 @@ export class TelegramUserbotController {
     schema: {
       type: 'object',
       properties: {
-        kind: { type: 'string', enum: ['signal', 'close', 'result', 'reentry'] },
+        kind: { type: 'string', enum: ['signal', 'close', 'result', 'reentry', 'ignore'] },
         example: { type: 'string' },
       },
     },
@@ -300,7 +300,7 @@ export class TelegramUserbotController {
   async generateFilterPatterns(
     @Body()
     body: {
-      kind?: 'signal' | 'close' | 'result' | 'reentry';
+      kind?: 'signal' | 'close' | 'result' | 'reentry' | 'ignore';
       example?: string;
     },
   ) {
@@ -315,6 +315,12 @@ export class TelegramUserbotController {
       properties: {
         enabled: { type: 'boolean' },
         defaultLeverage: { type: 'number', nullable: true },
+        forcedLeverage: {
+          type: 'number',
+          nullable: true,
+          description:
+            'Принудительное плечо для сигналов из чата; null — выкл.; перекрывает плечо из сигнала и глобальные FORCED_*',
+        },
         defaultEntryUsd: { type: 'string', nullable: true },
         martingaleMultiplier: { type: 'number', nullable: true },
         sourcePriority: { type: 'number', nullable: true },
@@ -346,6 +352,7 @@ export class TelegramUserbotController {
     body: {
       enabled?: boolean;
       defaultLeverage?: number | null;
+      forcedLeverage?: number | null;
       defaultEntryUsd?: string | null;
       martingaleMultiplier?: number | null;
       sourcePriority?: number | null;

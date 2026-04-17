@@ -39,7 +39,7 @@ import { UserbotSignalHashService } from './userbot-signal-hash.service';
 import { parseSignalPriceArrayJson } from './userbot-signal-hash.util';
 
 type MessageKind = 'signal' | 'close' | 'reentry' | 'result' | 'other';
-type UserbotFilterKind = 'signal' | 'close' | 'result' | 'reentry';
+type UserbotFilterKind = 'signal' | 'close' | 'result' | 'reentry' | 'ignore';
 type UserbotFilterExampleMatch = {
   kind: UserbotFilterKind;
   score: number;
@@ -1050,7 +1050,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
   async createFilterExample(body: {
     groupName?: string;
-    kind?: 'signal' | 'close' | 'result' | 'reentry';
+    kind?: 'signal' | 'close' | 'result' | 'reentry' | 'ignore';
     example?: string;
     requiresQuote?: boolean;
   }) {
@@ -1061,8 +1061,14 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     if (!groupName) {
       return { ok: false, error: 'groupName обязателен' };
     }
-    if (kind !== 'signal' && kind !== 'close' && kind !== 'result' && kind !== 'reentry') {
-      return { ok: false, error: 'kind должен быть signal | close | result | reentry' };
+    if (
+      kind !== 'signal' &&
+      kind !== 'close' &&
+      kind !== 'result' &&
+      kind !== 'reentry' &&
+      kind !== 'ignore'
+    ) {
+      return { ok: false, error: 'kind должен быть signal | close | result | reentry | ignore' };
     }
     if (example.length < 6) {
       return { ok: false, error: 'example слишком короткий (минимум 6 символов)' };
@@ -1091,7 +1097,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
   async createFilterPattern(body: {
     groupName?: string;
-    kind?: 'signal' | 'close' | 'result' | 'reentry';
+    kind?: 'signal' | 'close' | 'result' | 'reentry' | 'ignore';
     pattern?: string;
     requiresQuote?: boolean;
   }) {
@@ -1102,8 +1108,14 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     if (!groupName) {
       return { ok: false, error: 'groupName обязателен' };
     }
-    if (kind !== 'signal' && kind !== 'close' && kind !== 'result' && kind !== 'reentry') {
-      return { ok: false, error: 'kind должен быть signal | close | result | reentry' };
+    if (
+      kind !== 'signal' &&
+      kind !== 'close' &&
+      kind !== 'result' &&
+      kind !== 'reentry' &&
+      kind !== 'ignore'
+    ) {
+      return { ok: false, error: 'kind должен быть signal | close | result | reentry | ignore' };
     }
     if (pattern.length < 2) {
       return { ok: false, error: 'pattern слишком короткий (минимум 2 символа)' };
@@ -1131,13 +1143,19 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   }
 
   async generateFilterPatterns(body: {
-    kind?: 'signal' | 'close' | 'result' | 'reentry';
+    kind?: 'signal' | 'close' | 'result' | 'reentry' | 'ignore';
     example?: string;
   }) {
     const kind = body.kind;
     const example = body.example?.trim() ?? '';
-    if (kind !== 'signal' && kind !== 'close' && kind !== 'result' && kind !== 'reentry') {
-      return { ok: false, error: 'kind должен быть signal | close | result | reentry' };
+    if (
+      kind !== 'signal' &&
+      kind !== 'close' &&
+      kind !== 'result' &&
+      kind !== 'reentry' &&
+      kind !== 'ignore'
+    ) {
+      return { ok: false, error: 'kind должен быть signal | close | result | reentry | ignore' };
     }
     if (example.length < 6) {
       return { ok: false, error: 'example слишком короткий (минимум 6 символов)' };
@@ -1374,6 +1392,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     body: {
       enabled?: boolean;
       defaultLeverage?: number | null;
+      /** Принудительное плечо (всегда); null = выкл. */
+      forcedLeverage?: number | null;
       defaultEntryUsd?: string | null;
       martingaleMultiplier?: number | null;
       sourcePriority?: number | null;
@@ -1398,6 +1418,14 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           ? null
           : body.defaultLeverage >= 1
             ? Math.floor(body.defaultLeverage)
+            : null;
+    const forcedLevNorm =
+      body.forcedLeverage === undefined
+        ? undefined
+        : body.forcedLeverage === null
+          ? null
+          : body.forcedLeverage >= 1
+            ? Math.floor(body.forcedLeverage)
             : null;
     const martingaleNorm =
       body.martingaleMultiplier === undefined
@@ -1432,6 +1460,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         enabled: body.enabled === true,
         sourcePriority: sourcePriorityNorm ?? 0,
         defaultLeverage: levNorm ?? null,
+        forcedLeverage: forcedLevNorm ?? null,
         defaultEntryUsd: entryNorm ?? null,
         minLotBump: minLotBumpNorm ?? null,
       },
@@ -1439,6 +1468,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         ...(body.enabled !== undefined ? { enabled: body.enabled } : {}),
         ...(sourcePriorityNorm !== undefined ? { sourcePriority: sourcePriorityNorm } : {}),
         ...(levNorm !== undefined ? { defaultLeverage: levNorm } : {}),
+        ...(forcedLevNorm !== undefined ? { forcedLeverage: forcedLevNorm } : {}),
         ...(entryNorm !== undefined ? { defaultEntryUsd: entryNorm } : {}),
         ...(minLotBumpNorm !== undefined ? { minLotBump: minLotBumpNorm } : {}),
       },
@@ -1492,7 +1522,12 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     const [chat, details] = await Promise.all([
       this.prisma.tgUserbotChat.findUnique({
         where: { chatId },
-        select: { defaultLeverage: true, defaultEntryUsd: true },
+        select: {
+          defaultLeverage: true,
+          forcedLeverage: true,
+          defaultEntryUsd: true,
+          title: true,
+        },
       }),
       this.bybit.getUnifiedUsdtBalanceDetails(),
     ]);
@@ -1507,6 +1542,10 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     return {
       defaultOrderUsd,
       leverageDefault,
+      chatForcedLeverage:
+        chat?.forcedLeverage != null && chat.forcedLeverage >= 1
+          ? chat.forcedLeverage
+          : undefined,
     };
   }
 
@@ -1830,6 +1869,42 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           hasQuotedSource,
           textPreview: this.makeTextPreview(text),
         });
+      }
+      if (filterKind === 'ignore' || exampleKind === 'ignore') {
+        const ignoreSource = filterKind === 'ignore' ? 'pattern' : 'example';
+        this.appendIngestStageLog('info', 'Userbot: ignored by user filter', ingest, {
+          groupName,
+          ignoreSource,
+          matchedPattern: patternMatch?.pattern ?? null,
+          matchedExampleScore: exampleMatch ? Number(exampleMatch.score.toFixed(4)) : null,
+          hasQuotedSource,
+        });
+        await this.updateIngest(ingest.id, {
+          classification: 'other',
+          status: 'ignored',
+          error:
+            ignoreSource === 'pattern'
+              ? 'Игнор по пользовательскому фильтр-паттерну'
+              : 'Игнор по пользовательскому фильтр-примеру',
+          aiRequest: this.limitTrace(
+            JSON.stringify({
+              operation: 'classifyMessage',
+              source: ignoreSource === 'pattern' ? 'group_filter_pattern' : 'group_filter_example',
+              groupName,
+              preferredKind: 'ignore',
+            }),
+          ),
+          aiResponse: this.limitTrace(
+            JSON.stringify({
+              forcedKind: 'ignore',
+              reason:
+                ignoreSource === 'pattern'
+                  ? 'matched by user ignore pattern for group'
+                  : 'matched by user ignore examples for group',
+            }),
+          ),
+        });
+        return;
       }
 
       const useAiClassifier = await this.getBoolSetting(
@@ -2501,7 +2576,13 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       const kind = row.kind as UserbotFilterKind;
       const exampleText = typeof row.example === 'string' ? row.example : '';
       const requiresQuote = row.requiresQuote === true;
-      if (kind !== 'signal' && kind !== 'close' && kind !== 'result' && kind !== 'reentry') {
+      if (
+        kind !== 'signal' &&
+        kind !== 'close' &&
+        kind !== 'result' &&
+        kind !== 'reentry' &&
+        kind !== 'ignore'
+      ) {
         continue;
       }
       if ((kind === 'close' || kind === 'reentry') && !hasQuotedSource) {
@@ -2557,7 +2638,13 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       if (name !== target || !pattern) {
         continue;
       }
-      if (kind !== 'signal' && kind !== 'close' && kind !== 'result' && kind !== 'reentry') {
+      if (
+        kind !== 'signal' &&
+        kind !== 'close' &&
+        kind !== 'result' &&
+        kind !== 'reentry' &&
+        kind !== 'ignore'
+      ) {
         continue;
       }
       if ((kind === 'close' || kind === 'reentry') && !hasQuotedSource) {
@@ -3829,12 +3916,12 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     ingestId?: string,
   ): Promise<{ kind: MessageKind; aiRequest?: string; aiResponse?: string }> {
     const replyId = String(replyToMessageId ?? '').trim();
-    const forcedKind =
-      preferredKind &&
-      (preferredKind === 'close' || preferredKind === 'reentry') &&
-      !replyId
+    const forcedKind: MessageKind | undefined =
+      preferredKind == null || preferredKind === 'ignore'
         ? undefined
-        : preferredKind;
+        : (preferredKind === 'close' || preferredKind === 'reentry') && !replyId
+          ? undefined
+          : preferredKind;
     if (forcedKind) {
       return {
         kind: forcedKind,

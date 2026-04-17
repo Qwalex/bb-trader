@@ -7,6 +7,7 @@ import { formatError } from '../../common/format-error';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppLogService } from '../app-log/app-log.service';
 import { OrdersService } from '../orders/orders.service';
+import { resolveForcedLeverageWithChatOverride } from '../settings/forced-leverage.util';
 import {
   parseSourceTpSlStepMap,
   parseSourceTpSlStepRangeMap,
@@ -683,11 +684,25 @@ export class BybitService {
     const low = Math.min(a, b);
     const high = Math.max(a, b);
     const W = high - low;
-    if (!Number.isFinite(W) || W <= 0) {
+    if (!Number.isFinite(W) || W < 0) {
       return {
         ok: false,
         error: 'Некорректный диапазон входа: границы совпадают или невалидны.',
       };
+    }
+    if (W === 0) {
+      void this.appLog.append(
+        'info',
+        'bybit',
+        'placeSignalOrders: диапазон входа с равными границами преобразован в один вход',
+        {
+          pair: signal.pair,
+          low,
+          high,
+          effectiveEntry: low,
+        },
+      );
+      return { ok: true, effectiveEntries: [low], weights: [1] };
     }
     const inset = 0.1 * W;
     if (lastPrice === undefined || !Number.isFinite(lastPrice) || lastPrice <= 0) {
@@ -1901,6 +1916,7 @@ export class BybitService {
     origin?: { chatId?: string; messageId?: string; signalExternalId?: string },
   ): Promise<PlaceOrdersResult> {
     signal = await this.applySourceMartingaleSizing(signal);
+    signal = await this.applyForcedLeverage(signal, origin);
     const symbol = normalizeTradingPair(signal.pair);
 
     const testnetMode =
@@ -2036,23 +2052,38 @@ export class BybitService {
       if (signal.orderUsd > 0) {
         leveragedNotional = signal.orderUsd;
       } else if (signal.capitalPercent > 0) {
-        const margin = balance * (signal.capitalPercent / 100);
-        leveragedNotional = margin * signal.leverage;
-        if (leveragedNotional < MIN_PERCENT_NOTIONAL_USD) {
-          void this.appLog.append(
-            'warn',
-            'bybit',
-            'placeSignalOrders: percent sizing поднят до минимального номинала',
-            {
-              symbol,
-              balance,
-              capitalPercent: signal.capitalPercent,
-              leverage: signal.leverage,
-              calculatedNotional: leveragedNotional,
-              minNotionalApplied: MIN_PERCENT_NOTIONAL_USD,
-            },
-          );
-          leveragedNotional = MIN_PERCENT_NOTIONAL_USD;
+        const pct = Number(signal.capitalPercent);
+        if (!Number.isFinite(pct) || pct <= 0) {
+          leveragedNotional = defaultOrderUsd;
+        } else {
+          /**
+           * ≤100% — доля баланса как маржа: номинал = маржа × плечо (как раньше).
+           * >100% — «процент от баланса» трактуем как целевой номинал: balance×(pct/100);
+           * плечо на бирже задаётся отдельно (маржа ≈ номинал/плечо), без второго умножения.
+           * Пример: баланс 10$, плечо 5×, 500% → номинал 50 USDT.
+           */
+          if (pct <= 100) {
+            const margin = balance * (pct / 100);
+            leveragedNotional = margin * signal.leverage;
+          } else {
+            leveragedNotional = balance * (pct / 100);
+          }
+          if (leveragedNotional < MIN_PERCENT_NOTIONAL_USD) {
+            void this.appLog.append(
+              'warn',
+              'bybit',
+              'placeSignalOrders: percent sizing поднят до минимального номинала',
+              {
+                symbol,
+                balance,
+                capitalPercent: signal.capitalPercent,
+                leverage: signal.leverage,
+                calculatedNotional: leveragedNotional,
+                minNotionalApplied: MIN_PERCENT_NOTIONAL_USD,
+              },
+            );
+            leveragedNotional = MIN_PERCENT_NOTIONAL_USD;
+          }
         }
       } else {
         leveragedNotional = defaultOrderUsd;
@@ -4108,6 +4139,38 @@ export class BybitService {
     }
   }
 
+  private async applyForcedLeverage(
+    signal: SignalDto,
+    origin?: { chatId?: string },
+  ): Promise<SignalDto> {
+    let chatForced: number | null | undefined;
+    const cid = origin?.chatId?.trim();
+    if (cid) {
+      const row = await this.prisma.tgUserbotChat.findUnique({
+        where: { chatId: cid },
+        select: { forcedLeverage: true },
+      });
+      chatForced = row?.forcedLeverage ?? undefined;
+    }
+    const rawGlobal = await this.settings.get('FORCED_LEVERAGE');
+    const src = String(signal.source ?? '').trim();
+    const resolved = resolveForcedLeverageWithChatOverride(chatForced, rawGlobal);
+    if (resolved == null) {
+      return signal;
+    }
+    if (resolved === signal.leverage) {
+      return signal;
+    }
+    void this.appLog.append('info', 'bybit', 'принудительное плечо', {
+      pair: signal.pair,
+      source: src || null,
+      sourceChatId: cid ?? null,
+      leverageBefore: signal.leverage,
+      leverageAfter: resolved,
+    });
+    return { ...signal, leverage: resolved };
+  }
+
   private parseSourceMartingaleMap(raw: string | undefined): Map<string, number> {
     const out = new Map<string, number>();
     const text = String(raw ?? '').trim();
@@ -4170,7 +4233,7 @@ export class BybitService {
     if (next.orderUsd > 0) {
       next.orderUsd = round(next.orderUsd * multiplier);
     } else if (next.capitalPercent > 0) {
-      next.capitalPercent = Math.min(100, round(next.capitalPercent * multiplier));
+      next.capitalPercent = Math.min(100_000, round(next.capitalPercent * multiplier));
     }
 
     void this.appLog.append('info', 'bybit', 'martingale applied by source', {
