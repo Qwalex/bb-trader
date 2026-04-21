@@ -149,6 +149,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   private qrState: QrState = { phase: 'idle' };
   private pollTimer: NodeJS.Timeout | null = null;
   private pollInFlight = false;
+  private reconnectInFlight = false;
+  private lastReconnectAttemptAtMs = 0;
   private balanceCheckCache:
     | {
         checkedAtMs: number;
@@ -1380,6 +1382,12 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     if (!this.client || !(await this.isClientAuthorized(this.client))) {
+      // После деплоя/рестарта или сетевого обрыва не ждём ручного "Подключить":
+      // пытаемся восстановить userbot из сохранённой сессии с троттлингом.
+      const enabled = await this.getBoolSetting('TELEGRAM_USERBOT_ENABLED', false);
+      if (enabled) {
+        await this.tryReconnectFromStoredSession();
+      }
       return;
     }
     if (this.enabledChatIds.size === 0) {
@@ -1392,6 +1400,31 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(`Userbot pollTick failed: ${formatError(e)}`);
     } finally {
       this.pollInFlight = false;
+    }
+  }
+
+  private async tryReconnectFromStoredSession(): Promise<void> {
+    if (this.reconnectInFlight) {
+      return;
+    }
+    const now = Date.now();
+    // Не долбим Telegram/API слишком часто.
+    if (now - this.lastReconnectAttemptAtMs < 30_000) {
+      return;
+    }
+    this.lastReconnectAttemptAtMs = now;
+    this.reconnectInFlight = true;
+    try {
+      const res = await this.connectFromStoredSession();
+      if (!res.ok) {
+        this.logger.warn(`Userbot auto-reconnect skipped: ${res.error ?? 'unknown error'}`);
+      } else {
+        this.logger.log('Userbot auto-reconnect: connected from stored session');
+      }
+    } catch (e) {
+      this.logger.warn(`Userbot auto-reconnect failed: ${formatError(e)}`);
+    } finally {
+      this.reconnectInFlight = false;
     }
   }
 
