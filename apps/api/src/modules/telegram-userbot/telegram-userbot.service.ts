@@ -1274,6 +1274,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         })) as unknown as Array<Record<string, unknown>>;
         chatsProcessed += 1;
         const lastSeenMessageId = this.lastSeenMessageIds.get(chat.chatId) ?? 0;
+        const enforceLastSeenCursor = !includeTodayMetrics;
         const candidates = list
           .map((m) => {
             const createdAt = this.extractMessageDate(m.date);
@@ -1296,6 +1297,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
             }
             if (!row.text || !row.messageId || !Number.isFinite(row.messageIdNum)) {
               return false;
+            }
+            if (!enforceLastSeenCursor) {
+              return true;
             }
             return row.messageIdNum > lastSeenMessageId;
           })
