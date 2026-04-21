@@ -3044,26 +3044,42 @@ export class BybitService {
     const idxTp = filledCount - rangeNum - 1;
     const useBreakeven =
       filledCount === startTpNumber || (filledCount > startTpNumber && idxTp < 0);
+    const haveAvgEntry = Number.isFinite(avgEntry) && avgEntry > 0;
+    const haveTick = Number.isFinite(tick) && tick > 0;
+    // Для BE-шага avgPrice обязателен: без него нечего ставить. Для шага по предыдущему TP —
+    // avgPrice нужен только для «пола безубытка»; если биржа временно отдала 0/пусто (UTA-гонка
+    // после fill), лучше продолжить с целью = предыдущий TP, чем молча пропускать все шаги.
+    if (useBreakeven && !haveAvgEntry) {
+      this.logger.warn(
+        `TP_SL_STEP: невалидный avgPrice для BE signalId=${fresh.id} ${symbol}`,
+      );
+      void this.appLog.append('warn', 'bybit', 'TP_SL_STEP: нет avgPrice для BE', {
+        signalId: fresh.id,
+        symbol,
+        avgPriceRaw: posRow.avgPrice,
+      });
+      return;
+    }
+    if (!haveTick) {
+      this.logger.warn(
+        `TP_SL_STEP: невалидный tickSize signalId=${fresh.id} ${symbol}`,
+      );
+      return;
+    }
+    // Безубыток — «пол» для SL после старта лестницы: ниже него (для лонга) / выше (для шорта)
+    // SL опускать нельзя, иначе после TP1 возможен выход в убыток. Сразу тик-снапим для сравнения
+    // и логов (avgPrice у мульти-филла часто идёт с субтиковой точностью).
+    const beSlRaw = haveAvgEntry
+      ? direction === 'long'
+        ? avgEntry - tick
+        : avgEntry + tick
+      : null;
+    const beSl =
+      beSlRaw !== null ? this.snapPriceToTickNum(beSlRaw, tickSize) : null;
     let newSl: number;
     if (useBreakeven) {
-      if (!Number.isFinite(avgEntry) || avgEntry <= 0) {
-        this.logger.warn(
-          `TP_SL_STEP: невалидный avgPrice signalId=${fresh.id} ${symbol}`,
-        );
-        void this.appLog.append('warn', 'bybit', 'TP_SL_STEP: нет avgPrice для BE', {
-          signalId: fresh.id,
-          symbol,
-          avgPriceRaw: posRow.avgPrice,
-        });
-        return;
-      }
-      if (!Number.isFinite(tick) || tick <= 0) {
-        this.logger.warn(
-          `TP_SL_STEP: невалидный tickSize для BE signalId=${fresh.id} ${symbol}`,
-        );
-        return;
-      }
-      newSl = direction === 'long' ? avgEntry - tick : avgEntry + tick;
+      // haveAvgEntry гарантирован выше для BE-ветки, так что beSl не null.
+      newSl = beSl!;
     } else {
       if (idxTp >= sorted.length) {
         this.logger.debug(
@@ -3074,16 +3090,47 @@ export class BybitService {
       newSl = sorted[idxTp]!;
     }
 
-    // Bybit: для лонга SL строго ниже mark, для шорта — строго выше. Уровень «предыдущего TP»
-    // после отката цены может оказаться по неверную сторону от mark — поджимаем на 1 тик от mark.
+    // Bybit: для лонга SL строго ниже mark, для шорта — строго выше. Если цель (BE / предыдущий TP)
+    // оказалась по неверную сторону от mark (цена уже откатилась дальше), поджимаем на 1 тик от mark,
+    // но только если зажатый уровень всё ещё хотя бы безубыточный. Иначе пропускаем шаг целиком —
+    // иначе SL подтянется ниже безубытка и позиция закроется в убыток.
     const markRef = parseFloat(String(posRow.markPrice ?? '0'));
-    const tickNum = parseFloat(tickSize);
-    if (Number.isFinite(markRef) && markRef > 0 && Number.isFinite(tickNum) && tickNum > 0) {
+    const hasValidMark = Number.isFinite(markRef) && markRef > 0;
+    if (hasValidMark) {
       if (direction === 'short' && newSl <= markRef) {
-        newSl = this.snapPriceToTickNum(markRef + tickNum, tickSize);
+        newSl = this.snapPriceToTickNum(markRef + tick, tickSize);
       } else if (direction === 'long' && newSl >= markRef) {
-        newSl = this.snapPriceToTickNum(markRef - tickNum, tickSize);
+        newSl = this.snapPriceToTickNum(markRef - tick, tickSize);
       }
+    }
+    // «Пол» безубытка: после старта лестницы SL не должен оказаться слабее BE (ни из-за зажима
+    // по mark, ни из-за того, что изначальная цель BE уже по неверную сторону от mark). Если
+    // avgPrice сейчас недоступен (редкая UTA-гонка после fill) — пола нет, пропускаем проверку.
+    const weakerThanBe =
+      beSl !== null &&
+      (direction === 'long' ? newSl < beSl : newSl > beSl);
+    if (weakerThanBe) {
+      const beLog = this.formatPriceToTick(beSl!, tickSize);
+      const newSlLog = this.formatPriceToTick(newSl, tickSize);
+      const markLog = this.formatPriceToTick(markRef, tickSize);
+      this.logger.warn(
+        `TP_SL_STEP: цель SL слабее безубытка (mark=${markLog} be=${beLog} target=${newSlLog}) — пропускаем шаг signalId=${fresh.id} ${symbol}`,
+      );
+      void this.appLog.append('warn', 'bybit', 'TP_SL_STEP: SL был бы слабее BE — пропуск', {
+        signalId: fresh.id,
+        symbol,
+        direction,
+        filledCount,
+        startTpNumber,
+        rangeNum,
+        targetStep,
+        mark: hasValidMark ? parseFloat(markLog) : null,
+        breakeven: parseFloat(beLog),
+        wouldBeSl: parseFloat(newSlLog),
+        hint:
+          'Цена откатилась за уровень безубытка после TP — SL не двигаем, чтобы не увести его ниже BE. Шаг повторится, когда цена вернётся выше BE (для лонга) / ниже (для шорта).',
+      });
+      return;
     }
 
     const currentSl = fresh.stopLoss;
@@ -3093,8 +3140,7 @@ export class BybitService {
       direction === 'long'
         ? newSlFormatted > currentSlTicked
         : newSlFormatted < currentSlTicked;
-    const tickTol =
-      Number.isFinite(tickNum) && tickNum > 0 ? tickNum * 0.6 : 1e-8;
+    const tickTol = haveTick ? tick * 0.6 : 1e-8;
     const alreadyThere =
       Number.isFinite(newSlFormatted) &&
       Number.isFinite(currentSlTicked) &&
