@@ -1301,8 +1301,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           })
           .sort((a, b) => a.messageIdNum - b.messageIdNum);
 
+        const enforceRecentWindow = !includeTodayMetrics;
         for (const m of candidates) {
-          if (!(await this.isMessageRecent(m.createdAt!))) {
+          if (enforceRecentWindow && !(await this.isMessageRecent(m.createdAt!))) {
             continue;
           }
           readMessages += 1;
