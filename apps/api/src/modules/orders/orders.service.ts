@@ -668,6 +668,7 @@ export class OrdersService {
         avgProfitPnl: 0,
         avgLossPnl: 0,
         closedPerDayAvg: 0,
+        statsPeriodDays: 1,
       };
     }
     const closed = await this.prisma.signal.findMany({
@@ -771,6 +772,7 @@ export class OrdersService {
       avgProfitPnl,
       avgLossPnl,
       closedPerDayAvg,
+      statsPeriodDays: days,
       liquidationTotal,
       liquidationBySource,
       liquidationByLeverage,
@@ -976,6 +978,7 @@ export class OrdersService {
       closedTotal: number;
       openTotal: number;
       totalPnl: number;
+      minClosedAt: Date | null;
     };
 
     const map = new Map<string, Acc>();
@@ -992,6 +995,7 @@ export class OrdersService {
           closedTotal: 0,
           openTotal: 0,
           totalPnl: 0,
+          minClosedAt: null,
         } satisfies Acc);
 
       if (r.status === 'CLOSED_WIN') {
@@ -1018,22 +1022,44 @@ export class OrdersService {
         r.status === 'CLOSED_MIXED'
       ) {
         acc.totalPnl += r.realizedPnl ?? 0;
+        if (r.closedAt instanceof Date && !Number.isNaN(r.closedAt.getTime())) {
+          const t = r.closedAt.getTime();
+          if (!acc.minClosedAt || t < acc.minClosedAt.getTime()) {
+            acc.minClosedAt = r.closedAt;
+          }
+        }
       }
 
       map.set(key, acc);
     }
 
+    const nowMs = Date.now();
+    const dayMs = 86_400_000;
+    const resetMs = statsResetAt?.getTime();
+
     const items = Array.from(map.entries())
-      .map(([, acc]) => ({
-        source: acc.source,
-        winrate: this.computeWinrate(acc.wins, acc.losses),
-        wins: acc.wins,
-        losses: acc.losses,
-        wL: `${acc.wins} / ${acc.losses}`,
-        totalClosed: acc.closedTotal,
-        openSignals: acc.openTotal,
-        totalPnl: acc.totalPnl,
-      }))
+      .map(([, acc]) => {
+        const firstCloseMs =
+          acc.minClosedAt instanceof Date && !Number.isNaN(acc.minClosedAt.getTime())
+            ? acc.minClosedAt.getTime()
+            : null;
+        const startMs =
+          firstCloseMs != null
+            ? Math.max(firstCloseMs, resetMs ?? firstCloseMs)
+            : resetMs ?? nowMs;
+        const statsPeriodDays = Math.max(1, Math.ceil((nowMs - startMs) / dayMs));
+        return {
+          source: acc.source,
+          winrate: this.computeWinrate(acc.wins, acc.losses),
+          wins: acc.wins,
+          losses: acc.losses,
+          wL: `${acc.wins} / ${acc.losses}`,
+          totalClosed: acc.closedTotal,
+          openSignals: acc.openTotal,
+          totalPnl: acc.totalPnl,
+          statsPeriodDays,
+        };
+      })
       .sort((a, b) => {
         const as = a.source ?? '—';
         const bs = b.source ?? '—';

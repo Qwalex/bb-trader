@@ -18,6 +18,7 @@ type Stats = {
   avgProfitPnl: number;
   avgLossPnl: number;
   closedPerDayAvg: number;
+  statsPeriodDays: number;
   liquidationTotal: number;
   liquidationBySource: Array<{ source: string | null; count: number }>;
   liquidationByLeverage: Array<{ leverage: number | null; count: number }>;
@@ -33,6 +34,7 @@ type SourceStatsItem = {
   totalClosed: number;
   openSignals: number;
   totalPnl: number;
+  statsPeriodDays: number;
 };
 type TopSources = {
   byPnl: SourceStatsItem[];
@@ -165,6 +167,27 @@ export default async function Home({
   const balanceMonth = compoundBalanceForecast(30);
   const balanceYear = compoundBalanceForecast(365);
 
+  const statsPeriodDays = Math.max(1, stats?.statsPeriodDays ?? 1);
+  const realizedReturnVsEquity =
+    stats && equityNum != null && equityNum > 0 ? stats.totalPnl / equityNum : null;
+  const aprRealized =
+    realizedReturnVsEquity != null && Number.isFinite(realizedReturnVsEquity)
+      ? (realizedReturnVsEquity / statsPeriodDays) * 365 * 100
+      : null;
+  const apyRealized =
+    realizedReturnVsEquity != null &&
+    Number.isFinite(realizedReturnVsEquity) &&
+    1 + realizedReturnVsEquity > 0
+      ? (Math.pow(1 + realizedReturnVsEquity, 365 / statsPeriodDays) - 1) * 100
+      : null;
+
+  const formatSourceApr = (row: SourceStatsItem): string => {
+    if (equityNum == null || equityNum <= 0) return '—';
+    const T = Math.max(1, row.statsPeriodDays ?? 1);
+    const apr = (row.totalPnl / equityNum / T) * 365 * 100;
+    return Number.isFinite(apr) ? `${apr.toFixed(1)}%` : '—';
+  };
+
   let dashboardTodos: DashboardTodoItem[] = [];
   try {
     const d = await fetchJson<{ items: DashboardTodoItem[] }>('/settings/dashboard-todos');
@@ -243,7 +266,8 @@ export default async function Home({
               <h3>Худший winrate</h3>
               <div className="value">{top.worstWinrate.winrate.toFixed(1)}%</div>
               <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
-                {top.worstWinrate.source ?? '—'} | W/L: {top.worstWinrate.wL}
+                {top.worstWinrate.source ?? '—'} | W/L: {top.worstWinrate.wL} | APR:{' '}
+                {formatSourceApr(top.worstWinrate)}
               </p>
             </div>
           )}
@@ -252,13 +276,37 @@ export default async function Home({
               <h3>Лучший winrate</h3>
               <div className="value">{top.bestWinrate.winrate.toFixed(1)}%</div>
               <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
-                {top.bestWinrate.source ?? '—'} | W/L: {top.bestWinrate.wL}
+                {top.bestWinrate.source ?? '—'} | W/L: {top.bestWinrate.wL} | APR:{' '}
+                {formatSourceApr(top.bestWinrate)}
               </p>
             </div>
           )}
           <div className="card">
             <h3>Всего PnL{source ? ' (источник)' : ''}</h3>
             <div className="value">{stats.totalPnl.toFixed(2)}</div>
+          </div>
+          <div className="card">
+            <h3>APR{source ? ' (источник)' : ''}</h3>
+            <div className="value">
+              {aprRealized != null && Number.isFinite(aprRealized)
+                ? `${aprRealized.toFixed(1)}%`
+                : '—'}
+            </div>
+            <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
+              Простая годовая: (ΣPnL ÷ equity) × (365 / T), T = {statsPeriodDays} дн. (окно
+              статистики). Без equity — прочерк.
+            </p>
+          </div>
+          <div className="card">
+            <h3>APY{source ? ' (источник)' : ''}</h3>
+            <div className="value">
+              {apyRealized != null && Number.isFinite(apyRealized)
+                ? `${apyRealized.toFixed(1)}%`
+                : '—'}
+            </div>
+            <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
+              Сложная годовая: (1 + ΣPnL/equity)^(365/T) − 1 за тот же период T.
+            </p>
           </div>
           <div className="card">
             <h3>Закрыто{source ? ' (источник)' : ''}</h3>
@@ -363,132 +411,153 @@ export default async function Home({
         </div>
       </div>
       {top && (
-        <div className="grid topSources" style={{ marginTop: '1rem' }}>
-          <div className="card" style={{ gridColumn: 'span 5' }}>
-            <h3>Топ источников по PnL</h3>
-            <div className="tableWrap" style={{ marginTop: '0.5rem' }}>
-              <table className="topSourcesTable">
-                <thead>
-                  <tr>
-                    <th className="sourceNameCell">Источник</th>
-                    <th>PnL</th>
-                    <th>Winrate</th>
-                    <th>W / L</th>
-                    <th>Закрыто</th>
-                    <th>Открыто</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {top.byPnl.map((r) => (
-                    <tr key={`pnl-${r.source ?? '—'}`}>
-                      <td className="sourceNameCell">
-                        <span className="sourceNameText">{r.source ?? '—'}</span>
-                      </td>
-                      <td>{r.totalPnl.toFixed(2)}</td>
-                      <td>{r.winrate.toFixed(1)}%</td>
-                      <td>{r.wL}</td>
-                      <td>{r.totalClosed}</td>
-                      <td>{r.openSignals}</td>
+        <>
+          <p
+            style={{
+              fontSize: '0.8rem',
+              color: 'var(--muted)',
+              marginTop: '1rem',
+              marginBottom: 0,
+            }}
+          >
+            APR по источникам: (PnL источника ÷ суммарный equity Bybit) × (365 / T); T — календарных
+            дней от первого закрытия источника в окне статистики (включая сброс на странице настроек).
+          </p>
+          <div className="grid topSources" style={{ marginTop: '0.5rem' }}>
+            <div className="card" style={{ gridColumn: 'span 5' }}>
+              <h3>Топ источников по PnL</h3>
+              <div className="tableWrap" style={{ marginTop: '0.5rem' }}>
+                <table className="topSourcesTable">
+                  <thead>
+                    <tr>
+                      <th className="sourceNameCell">Источник</th>
+                      <th>PnL</th>
+                      <th>APR</th>
+                      <th>Winrate</th>
+                      <th>W / L</th>
+                      <th>Закрыто</th>
+                      <th>Открыто</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {top.byPnl.map((r) => (
+                      <tr key={`pnl-${r.source ?? '—'}`}>
+                        <td className="sourceNameCell">
+                          <span className="sourceNameText">{r.source ?? '—'}</span>
+                        </td>
+                        <td>{r.totalPnl.toFixed(2)}</td>
+                        <td>{formatSourceApr(r)}</td>
+                        <td>{r.winrate.toFixed(1)}%</td>
+                        <td>{r.wL}</td>
+                        <td>{r.totalClosed}</td>
+                        <td>{r.openSignals}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div className="card" style={{ gridColumn: 'span 5' }}>
+              <h3>Топ источников по Winrate</h3>
+              <div className="tableWrap" style={{ marginTop: '0.5rem' }}>
+                <table className="topSourcesTable">
+                  <thead>
+                    <tr>
+                      <th className="sourceNameCell">Источник</th>
+                      <th>Winrate</th>
+                      <th>W / L</th>
+                      <th>PnL</th>
+                      <th>APR</th>
+                      <th>Закрыто</th>
+                      <th>Открыто</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {top.byWinrate.map((r) => (
+                      <tr key={`wr-${r.source ?? '—'}`}>
+                        <td className="sourceNameCell">
+                          <span className="sourceNameText">{r.source ?? '—'}</span>
+                        </td>
+                        <td>{r.winrate.toFixed(1)}%</td>
+                        <td>{r.wL}</td>
+                        <td>{r.totalPnl.toFixed(2)}</td>
+                        <td>{formatSourceApr(r)}</td>
+                        <td>{r.totalClosed}</td>
+                        <td>{r.openSignals}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div className="card" style={{ gridColumn: 'span 5' }}>
+              <h3>Топ источников по худшему PnL</h3>
+              <div className="tableWrap" style={{ marginTop: '0.5rem' }}>
+                <table className="topSourcesTable">
+                  <thead>
+                    <tr>
+                      <th className="sourceNameCell">Источник</th>
+                      <th>PnL</th>
+                      <th>APR</th>
+                      <th>Winrate</th>
+                      <th>W / L</th>
+                      <th>Закрыто</th>
+                      <th>Открыто</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {top.byWorstPnl.map((r) => (
+                      <tr key={`worst-pnl-${r.source ?? '—'}`}>
+                        <td className="sourceNameCell">
+                          <span className="sourceNameText">{r.source ?? '—'}</span>
+                        </td>
+                        <td>{r.totalPnl.toFixed(2)}</td>
+                        <td>{formatSourceApr(r)}</td>
+                        <td>{r.winrate.toFixed(1)}%</td>
+                        <td>{r.wL}</td>
+                        <td>{r.totalClosed}</td>
+                        <td>{r.openSignals}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div className="card" style={{ gridColumn: 'span 5' }}>
+              <h3>Топ источников по худшему Winrate</h3>
+              <div className="tableWrap" style={{ marginTop: '0.5rem' }}>
+                <table className="topSourcesTable">
+                  <thead>
+                    <tr>
+                      <th className="sourceNameCell">Источник</th>
+                      <th>Winrate</th>
+                      <th>W / L</th>
+                      <th>PnL</th>
+                      <th>APR</th>
+                      <th>Закрыто</th>
+                      <th>Открыто</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {top.byWorstWinrate.map((r) => (
+                      <tr key={`worst-wr-${r.source ?? '—'}`}>
+                        <td className="sourceNameCell">
+                          <span className="sourceNameText">{r.source ?? '—'}</span>
+                        </td>
+                        <td>{r.winrate.toFixed(1)}%</td>
+                        <td>{r.wL}</td>
+                        <td>{r.totalPnl.toFixed(2)}</td>
+                        <td>{formatSourceApr(r)}</td>
+                        <td>{r.totalClosed}</td>
+                        <td>{r.openSignals}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
-          <div className="card" style={{ gridColumn: 'span 5' }}>
-            <h3>Топ источников по Winrate</h3>
-            <div className="tableWrap" style={{ marginTop: '0.5rem' }}>
-              <table className="topSourcesTable">
-                <thead>
-                  <tr>
-                    <th className="sourceNameCell">Источник</th>
-                    <th>Winrate</th>
-                    <th>W / L</th>
-                    <th>PnL</th>
-                    <th>Закрыто</th>
-                    <th>Открыто</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {top.byWinrate.map((r) => (
-                    <tr key={`wr-${r.source ?? '—'}`}>
-                      <td className="sourceNameCell">
-                        <span className="sourceNameText">{r.source ?? '—'}</span>
-                      </td>
-                      <td>{r.winrate.toFixed(1)}%</td>
-                      <td>{r.wL}</td>
-                      <td>{r.totalPnl.toFixed(2)}</td>
-                      <td>{r.totalClosed}</td>
-                      <td>{r.openSignals}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-          <div className="card" style={{ gridColumn: 'span 5' }}>
-            <h3>Топ источников по худшему PnL</h3>
-            <div className="tableWrap" style={{ marginTop: '0.5rem' }}>
-              <table className="topSourcesTable">
-                <thead>
-                  <tr>
-                    <th className="sourceNameCell">Источник</th>
-                    <th>PnL</th>
-                    <th>Winrate</th>
-                    <th>W / L</th>
-                    <th>Закрыто</th>
-                    <th>Открыто</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {top.byWorstPnl.map((r) => (
-                    <tr key={`worst-pnl-${r.source ?? '—'}`}>
-                      <td className="sourceNameCell">
-                        <span className="sourceNameText">{r.source ?? '—'}</span>
-                      </td>
-                      <td>{r.totalPnl.toFixed(2)}</td>
-                      <td>{r.winrate.toFixed(1)}%</td>
-                      <td>{r.wL}</td>
-                      <td>{r.totalClosed}</td>
-                      <td>{r.openSignals}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-          <div className="card" style={{ gridColumn: 'span 5' }}>
-            <h3>Топ источников по худшему Winrate</h3>
-            <div className="tableWrap" style={{ marginTop: '0.5rem' }}>
-              <table className="topSourcesTable">
-                <thead>
-                  <tr>
-                    <th className="sourceNameCell">Источник</th>
-                    <th>Winrate</th>
-                    <th>W / L</th>
-                    <th>PnL</th>
-                    <th>Закрыто</th>
-                    <th>Открыто</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {top.byWorstWinrate.map((r) => (
-                    <tr key={`worst-wr-${r.source ?? '—'}`}>
-                      <td className="sourceNameCell">
-                        <span className="sourceNameText">{r.source ?? '—'}</span>
-                      </td>
-                      <td>{r.winrate.toFixed(1)}%</td>
-                      <td>{r.wL}</td>
-                      <td>{r.totalPnl.toFixed(2)}</td>
-                      <td>{r.totalClosed}</td>
-                      <td>{r.openSignals}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
+        </>
       )}
       {stats && (
         <div className="grid topSources" style={{ marginTop: '1rem' }}>
