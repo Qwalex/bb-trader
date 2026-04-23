@@ -472,3 +472,34 @@ model CabinetIngestRoute {
   @@index([ingestId, createdAt])
   @@index([cabinetId, createdAt])
 }
+
+model AuthUser {
+  id               String   @id @default(cuid())
+  login            String   @unique
+  passwordHash     String
+  role             String   @default("user")
+  telegramUserId   String?
+  failedLoginCount Int      @default(0)
+  firstLockUntil   DateTime?
+  manualLock       Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  resetCodes AuthPasswordReset[]
+
+  @@index([role, createdAt])
+  @@index([telegramUserId])
+}
+
+model AuthPasswordReset {
+  id         String   @id @default(cuid())
+  userId     String
+  user       AuthUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash   String
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([expiresAt, consumedAt])
+}

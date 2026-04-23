@@ -3,22 +3,30 @@
 ## Public Endpoints
 
 - `GET /health`
+- `POST /auth/register`
 - `POST /auth/login`
+- `POST /auth/password-reset/request`
+- `POST /auth/password-reset/confirm`
 - `GET /vk/callback`
 - `POST /vk/callback`
 
 ## Protected Endpoints (Require Auth Token)
 
 ### Auth
+
 - `GET /auth/me`
+- `POST /auth/users/unlock` (admin only)
 
 ### Cabinets
+
 - `GET /cabinets`
 
 ### Logs
+
 - `GET /logs`
 
 ### Diagnostics
+
 - `POST /diagnostics/run-latest`
 - `GET /diagnostics/runs`
 - `GET /diagnostics/runs/:id`
@@ -26,6 +34,7 @@
 - `GET /diagnostics/memory`
 
 ### Settings
+
 - `GET /settings`
 - `GET /settings/raw`
 - `GET /settings/dashboard-todos`
@@ -35,6 +44,7 @@
 - `POST /settings/incident/purge-secrets`
 
 ### Orders
+
 - `GET /orders/stats`
 - `GET /orders/pnl-series`
 - `GET /orders/trades`
@@ -51,6 +61,7 @@
 - `GET /orders/by-pair`
 
 ### Bybit
+
 - `GET /bybit/live`
 - `GET /bybit/balance-history`
 - `GET /bybit/signal/:signalId`
@@ -60,6 +71,7 @@
 - `GET /bybit/recalc-closed-pnl/:jobId`
 
 ### Telegram Userbot
+
 - `GET /telegram-userbot/status`
 - `GET /telegram-userbot/metrics/today`
 - `POST /telegram-userbot/connect`
@@ -110,4 +122,3 @@
 - `apps/web/app/trades/source-select.tsx`
 - `apps/web/app/trades/telegram-source-link.tsx`
 - `apps/web/app/trades/recalc-closed-pnl-button.tsx`
-

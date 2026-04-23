@@ -223,6 +223,33 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     this.bot?.stop('SIGTERM');
   }
 
+  async sendPasswordResetCode(params: {
+    telegramUserId: string;
+    login: string;
+    code: string;
+    expiresInMinutes: number;
+  }): Promise<{ ok: boolean; error?: string }> {
+    if (!this.bot) {
+      return { ok: false, error: 'Telegram bot не запущен' };
+    }
+    const userId = Number(params.telegramUserId);
+    if (!Number.isFinite(userId)) {
+      return { ok: false, error: 'Некорректный telegramUserId' };
+    }
+    const text =
+      `Код восстановления пароля\n` +
+      `Логин: ${params.login}\n` +
+      `Код: ${params.code}\n` +
+      `Действует: ${params.expiresInMinutes} мин.\n\n` +
+      `Если это были не вы — проигнорируйте сообщение.`;
+    try {
+      await this.bot.telegram.sendMessage(userId, text);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: formatError(e) };
+    }
+  }
+
   private startMemoryCleanupLoop(): void {
     if (this.cleanupTimer) return;
     // Очищаем in-memory структуры, чтобы они не росли бесконечно при долгом аптайме.

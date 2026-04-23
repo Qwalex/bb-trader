@@ -3,31 +3,144 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
+type AuthMode = 'login' | 'register' | 'reset';
+
 export default function LoginPage() {
   const router = useRouter();
+  const [mode, setMode] = useState<AuthMode>('login');
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
+  const [telegramUserId, setTelegramUserId] = useState('');
+  const [resetCode, setResetCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [unlockLogin, setUnlockLogin] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [ok, setOk] = useState<string | null>(null);
+  const [profile, setProfile] = useState<{ role?: string; login?: string } | null>(null);
 
   async function submit() {
     setSubmitting(true);
     setError(null);
+    setOk(null);
     try {
       const res = await fetch('/api/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ login, password }),
+        body: JSON.stringify(
+          mode === 'login'
+            ? { action: 'login', login, password }
+            : {
+                action: 'register',
+                login,
+                password,
+                telegramUserId,
+              },
+        ),
       });
       if (!res.ok) {
         const json = (await res.json().catch(() => null)) as { message?: string } | null;
         setError(json?.message ?? 'Не удалось выполнить вход');
         return;
       }
-      router.replace('/');
-      router.refresh();
+      if (mode === 'login') {
+        router.replace('/');
+        router.refresh();
+        return;
+      }
+      setOk('Регистрация выполнена. Теперь войдите.');
+      setMode('login');
     } catch {
       setError('Не удалось выполнить вход');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function requestResetCode() {
+    setSubmitting(true);
+    setError(null);
+    setOk(null);
+    try {
+      const res = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'request-reset', login }),
+      });
+      const json = (await res.json().catch(() => null)) as { message?: string } | null;
+      if (!res.ok) {
+        setError(json?.message ?? 'Не удалось отправить код');
+        return;
+      }
+      setOk('Код отправлен в ассистент-бот.');
+    } catch {
+      setError('Не удалось отправить код');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function confirmResetCode() {
+    setSubmitting(true);
+    setError(null);
+    setOk(null);
+    try {
+      const res = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'confirm-reset',
+          login,
+          code: resetCode,
+          newPassword,
+        }),
+      });
+      const json = (await res.json().catch(() => null)) as { message?: string } | null;
+      if (!res.ok) {
+        setError(json?.message ?? 'Не удалось изменить пароль');
+        return;
+      }
+      setOk('Пароль изменён. Войдите с новым паролем.');
+      setMode('login');
+      setResetCode('');
+      setNewPassword('');
+    } catch {
+      setError('Не удалось изменить пароль');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function loadProfile() {
+    const res = await fetch('/api/auth', { cache: 'no-store' });
+    const json = (await res.json().catch(() => null)) as
+      | { authenticated?: boolean; role?: string; login?: string }
+      | null;
+    if (!json?.authenticated) {
+      setProfile(null);
+      return;
+    }
+    setProfile({ role: json.role, login: json.login });
+  }
+
+  async function unlockUser() {
+    setSubmitting(true);
+    setError(null);
+    setOk(null);
+    try {
+      const res = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'unlock', unlockLogin }),
+      });
+      const json = (await res.json().catch(() => null)) as { message?: string } | null;
+      if (!res.ok) {
+        setError(json?.message ?? 'Не удалось разблокировать');
+        return;
+      }
+      setOk('Пользователь разблокирован.');
+    } catch {
+      setError('Не удалось разблокировать');
     } finally {
       setSubmitting(false);
     }
@@ -37,10 +150,26 @@ export default function LoginPage() {
     <>
       <h1 className="pageTitle">Вход</h1>
       <div className="card" style={{ maxWidth: 420 }}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+          <button className="btn" type="button" onClick={() => setMode('login')}>
+            Login
+          </button>
+          <button className="btn" type="button" onClick={() => setMode('register')}>
+            Register
+          </button>
+          <button className="btn" type="button" onClick={() => setMode('reset')}>
+            Reset
+          </button>
+        </div>
         <p style={{ color: 'var(--muted)' }}>
-          Войдите в общий аккаунт для работы с кабинетами и API.
+          {mode === 'login'
+            ? 'Войдите в аккаунт для работы с кабинетами и API.'
+            : mode === 'register'
+              ? 'Создайте новый аккаунт.'
+              : 'Восстановите пароль через код из ассистент-бота.'}
         </p>
         {error ? <p className="msg err">{error}</p> : null}
+        {ok ? <p className="msg ok">{ok}</p> : null}
         <div style={{ display: 'grid', gap: 12 }}>
           <input
             className="settingsAuthInput"
@@ -49,26 +178,90 @@ export default function LoginPage() {
             value={login}
             onChange={(e) => setLogin(e.target.value)}
           />
+          {mode !== 'reset' ? (
+            <input
+              className="settingsAuthInput"
+              type="password"
+              placeholder="Пароль"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          ) : null}
+          {mode === 'register' ? (
+            <input
+              className="settingsAuthInput"
+              placeholder="Telegram user id"
+              value={telegramUserId}
+              onChange={(e) => setTelegramUserId(e.target.value)}
+            />
+          ) : null}
+          {mode === 'reset' ? (
+            <>
+              <button
+                className="btn"
+                type="button"
+                disabled={submitting || !login.trim()}
+                onClick={() => void requestResetCode()}
+              >
+                {submitting ? 'Отправка...' : 'Отправить код в бота'}
+              </button>
+              <input
+                className="settingsAuthInput"
+                placeholder="Код из бота"
+                value={resetCode}
+                onChange={(e) => setResetCode(e.target.value)}
+              />
+              <input
+                className="settingsAuthInput"
+                type="password"
+                placeholder="Новый пароль"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+              />
+              <button
+                className="btn"
+                type="button"
+                disabled={submitting || !login.trim() || !resetCode.trim() || !newPassword.trim()}
+                onClick={() => void confirmResetCode()}
+              >
+                {submitting ? 'Сохранение...' : 'Подтвердить смену пароля'}
+              </button>
+            </>
+          ) : (
+            <button
+              className="btn"
+              type="button"
+              disabled={submitting || !login.trim() || !password.trim()}
+              onClick={() => void submit()}
+            >
+              {submitting ? 'Обработка...' : mode === 'login' ? 'Войти' : 'Зарегистрироваться'}
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="card" style={{ maxWidth: 420, marginTop: 16 }}>
+        <p style={{ color: 'var(--muted)' }}>Ручная разблокировка (admin)</p>
+        <div style={{ display: 'grid', gap: 12 }}>
+          <button className="btn" type="button" onClick={() => void loadProfile()}>
+            Обновить мой профиль
+          </button>
+          <p style={{ color: 'var(--muted)' }}>
+            Текущий пользователь: {profile?.login ?? '—'} / роль: {profile?.role ?? '—'}
+          </p>
           <input
             className="settingsAuthInput"
-            type="password"
-            placeholder="Пароль"
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !submitting && login.trim() && password.trim()) {
-                void submit();
-              }
-            }}
+            placeholder="Логин для разблокировки"
+            value={unlockLogin}
+            onChange={(e) => setUnlockLogin(e.target.value)}
           />
           <button
             className="btn"
             type="button"
-            disabled={submitting || !login.trim() || !password.trim()}
-            onClick={() => void submit()}
+            disabled={submitting || !unlockLogin.trim()}
+            onClick={() => void unlockUser()}
           >
-            {submitting ? 'Вход...' : 'Войти'}
+            Разблокировать
           </button>
         </div>
       </div>

@@ -57,6 +57,13 @@ type UserbotStatus = {
   };
 };
 
+type AuthMe = {
+  ok: boolean;
+  userId?: string | null;
+  login?: string | null;
+  role?: string | null;
+};
+
 export default async function Home({
   searchParams,
 }: {
@@ -70,6 +77,7 @@ export default async function Home({
   let top: TopSources | null = null;
   let sourceOptions: string[] = [];
   let userbotStatus: UserbotStatus | null = null;
+  let authMe: AuthMe | null = null;
   let err: string | null = null;
   try {
     const q = new URLSearchParams();
@@ -129,6 +137,11 @@ export default async function Home({
     ]);
   } catch (e) {
     err = e instanceof Error ? e.message : 'Ошибка API';
+  }
+  try {
+    authMe = await fetchJson<AuthMe>('/auth/me', undefined, cabinetId);
+  } catch {
+    authMe = null;
   }
   let balanceHistory: BalancePoint[] = [];
   try {
@@ -216,6 +229,11 @@ export default async function Home({
   return (
     <>
       <h1 className="pageTitle">Дашборд Test 1</h1>
+      {authMe?.userId ? (
+        <p style={{ color: 'var(--muted)', marginBottom: '0.75rem' }}>
+          Ваш user id: <code>{authMe.userId}</code>
+        </p>
+      ) : null}
       {err && (
         <p className="msg err" style={{ marginBottom: '1rem' }}>
           {err} — проверьте, что API запущен и NEXT_PUBLIC_API_URL верный.

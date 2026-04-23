@@ -28,6 +28,13 @@ export class ApiAuthGuard implements CanActivate {
 
     const req = context.switchToHttp().getRequest<{
       headers?: Record<string, string | string[] | undefined>;
+      auth?: {
+        userId?: string;
+        login: string;
+        role?: string;
+        exp: number;
+        iat: number;
+      };
     }>();
     const authSecret =
       this.config.get<string>('AUTH_JWT_SECRET')?.trim() ??
@@ -49,6 +56,13 @@ export class ApiAuthGuard implements CanActivate {
       secret: authSecret,
     });
     if (payload) {
+      req.auth = {
+        userId: payload.userId,
+        login: payload.login,
+        role: payload.role,
+        exp: payload.exp,
+        iat: payload.iat,
+      };
       return true;
     }
     throw new UnauthorizedException('Invalid API access token');
