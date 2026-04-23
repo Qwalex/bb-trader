@@ -7,6 +7,7 @@ import {
   Param,
   Post,
   Query,
+  Req,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -89,6 +90,12 @@ export class DiagnosticsController {
     }
   }
 
+  private assertAdmin(req: { auth?: { role?: string } }) {
+    if (String(req.auth?.role ?? '').trim().toLowerCase() !== 'admin') {
+      throw new ForbiddenException('Admin role required');
+    }
+  }
+
   @ApiOperation({ summary: 'Запустить диагностику по последним кейсам' })
   @ApiBody({
     schema: {
@@ -100,12 +107,14 @@ export class DiagnosticsController {
   @ApiOkResponse({ description: 'Диагностика запущена' })
   @Post('run-latest')
   async runLatest(
+    @Req() req: { auth?: { role?: string } },
     @Body() body?: { limit?: number },
     @Headers('host') host?: string,
     @Headers('origin') origin?: string,
     @Headers('referer') referer?: string,
     @Headers('sec-fetch-site') secFetchSite?: string,
   ) {
+    this.assertAdmin(req);
     this.assertSameOriginBrowserRequest(host, origin, referer, secFetchSite);
     return this.diagnostics.runLatestBatch({ limit: body?.limit });
   }
@@ -116,12 +125,14 @@ export class DiagnosticsController {
   @ApiOkResponse({ description: 'Список запусков получен' })
   @Get('runs')
   async runs(
+    @Req() req: { auth?: { role?: string } },
     @Query('limit') limit?: string,
     @Headers('host') host?: string,
     @Headers('origin') origin?: string,
     @Headers('referer') referer?: string,
     @Headers('sec-fetch-site') secFetchSite?: string,
   ) {
+    this.assertAdmin(req);
     this.assertSameOriginBrowserRequest(host, origin, referer, secFetchSite);
     const parsed = limit ? Number(limit) : undefined;
     return this.diagnostics.listRuns(Number.isFinite(parsed) ? parsed : undefined);
@@ -133,12 +144,14 @@ export class DiagnosticsController {
   @ApiOkResponse({ description: 'Детали запуска получены' })
   @Get('runs/:id')
   async runDetails(
+    @Req() req: { auth?: { role?: string } },
     @Param('id') id: string,
     @Headers('host') host?: string,
     @Headers('origin') origin?: string,
     @Headers('referer') referer?: string,
     @Headers('sec-fetch-site') secFetchSite?: string,
   ) {
+    this.assertAdmin(req);
     this.assertSameOriginBrowserRequest(host, origin, referer, secFetchSite);
     return this.diagnostics.getRunDetails(id);
   }
@@ -154,12 +167,14 @@ export class DiagnosticsController {
   @ApiOkResponse({ description: 'Рекомендации сгенерированы' })
   @Post('trading-advice')
   async tradingAdvice(
+    @Req() req: { auth?: { role?: string } },
     @Body() body?: { closedLimit?: number },
     @Headers('host') host?: string,
     @Headers('origin') origin?: string,
     @Headers('referer') referer?: string,
     @Headers('sec-fetch-site') secFetchSite?: string,
   ) {
+    this.assertAdmin(req);
     this.assertSameOriginBrowserRequest(host, origin, referer, secFetchSite);
     return this.tradingAdvisor.generateAdvice({
       closedLimit: body?.closedLimit,
@@ -172,12 +187,14 @@ export class DiagnosticsController {
   @ApiOkResponse({ description: 'Диагностика памяти получена' })
   @Get('memory')
   memory(
+    @Req() req: { auth?: { role?: string } },
     @Query('historyLimit') historyLimit?: string,
     @Headers('host') host?: string,
     @Headers('origin') origin?: string,
     @Headers('referer') referer?: string,
     @Headers('sec-fetch-site') secFetchSite?: string,
   ) {
+    this.assertAdmin(req);
     this.assertSameOriginBrowserRequest(host, origin, referer, secFetchSite);
     const parsed = historyLimit ? Number(historyLimit) : undefined;
     const limit = Number.isFinite(parsed) ? Number(parsed) : 30;

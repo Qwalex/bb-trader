@@ -25,6 +25,11 @@ import { pickRequestedCabinetId } from '../../common/cabinet-request.util';
 import { CabinetContextService } from '../cabinet/cabinet-context.service';
 import { CabinetService } from '../cabinet/cabinet.service';
 
+type AuthReq = {
+  headers?: Record<string, string | string[] | undefined>;
+  auth?: { userId?: string };
+};
+
 @ApiTags('Orders')
 @Controller('orders')
 export class OrdersController {
@@ -35,7 +40,7 @@ export class OrdersController {
   ) {}
 
   private async runWithCabinet<T>(
-    req: { headers?: Record<string, string | string[] | undefined> },
+    req: AuthReq,
     queryCabinetId: string | undefined,
     fn: () => Promise<T>,
   ): Promise<T> {
@@ -43,7 +48,8 @@ export class OrdersController {
       queryCabinetId,
       headers: req.headers,
     });
-    const cabinetId = await this.cabinets.resolveCabinetId(requested);
+    const userId = String(req.auth?.userId ?? '').trim() || null;
+    const cabinetId = await this.cabinets.resolveCabinetIdForUser(userId, requested);
     return this.cabinetContext.runWithCabinet(cabinetId, fn);
   }
 
@@ -52,7 +58,7 @@ export class OrdersController {
   @ApiOkResponse({ description: 'Статистика успешно получена' })
   @Get('stats')
   async stats(
-    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Req() req: AuthReq,
     @Query('cabinetId') cabinetId: string | undefined,
     @Query('source') source?: string,
   ) {
@@ -68,7 +74,7 @@ export class OrdersController {
   @ApiOkResponse({ description: 'Серия PnL успешно получена' })
   @Get('pnl-series')
   async pnlSeries(
-    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Req() req: AuthReq,
     @Query('cabinetId') cabinetId: string | undefined,
     @Query('bucket') bucket?: string,
     @Query('source') source?: string,
@@ -106,7 +112,7 @@ export class OrdersController {
   @ApiOkResponse({ description: 'Список сделок успешно получен' })
   @Get('trades')
   async trades(
-    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Req() req: AuthReq,
     @Query('cabinetId') cabinetId: string | undefined,
     @Query('signalId') signalId?: string,
     @Query('source') source?: string,
@@ -146,7 +152,7 @@ export class OrdersController {
   @ApiOkResponse({ description: 'Сделка удалена' })
   @Delete('trades/:id')
   async deleteTrade(
-    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Req() req: AuthReq,
     @Query('cabinetId') cabinetId: string | undefined,
     @Param('id') id: string,
   ) {
@@ -165,7 +171,7 @@ export class OrdersController {
   @ApiOkResponse({ description: 'Удаление всех сделок выполнено' })
   @Post('trades/delete-all')
   async deleteAllTrades(
-    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Req() req: AuthReq,
     @Query('cabinetId') cabinetId: string | undefined,
     @Body() body?: { confirm?: boolean },
   ) {
@@ -182,7 +188,7 @@ export class OrdersController {
   @ApiOkResponse({ description: 'Сделка восстановлена' })
   @Post('trades/:id/restore')
   async restoreTrade(
-    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Req() req: AuthReq,
     @Query('cabinetId') cabinetId: string | undefined,
     @Param('id') id: string,
   ) {
@@ -201,7 +207,7 @@ export class OrdersController {
   @ApiOkResponse({ description: 'Source обновлён' })
   @Patch('trades/:id/source')
   async updateTradeSource(
-    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Req() req: AuthReq,
     @Query('cabinetId') cabinetId: string | undefined,
     @Param('id') id: string,
     @Body() body: { source?: string | null },
@@ -230,7 +236,7 @@ export class OrdersController {
   @ApiOkResponse({ description: 'Telegram-привязка обновлена' })
   @Patch('trades/:id/telegram-source')
   async updateTradeTelegramSource(
-    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Req() req: AuthReq,
     @Query('cabinetId') cabinetId: string | undefined,
     @Param('id') id: string,
     @Body()
@@ -264,7 +270,7 @@ export class OrdersController {
   @ApiOkResponse({ description: 'PnL обновлён' })
   @Patch('trades/:id/pnl')
   async updateTradePnl(
-    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Req() req: AuthReq,
     @Query('cabinetId') cabinetId: string | undefined,
     @Param('id') id: string,
     @Body() body: { realizedPnl?: number | null },
@@ -283,7 +289,7 @@ export class OrdersController {
   @ApiOkResponse({ description: 'Статистика по source' })
   @Get('by-source')
   async bySource(
-    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Req() req: AuthReq,
     @Query('cabinetId') cabinetId: string | undefined,
   ) {
     return this.runWithCabinet(req, cabinetId, () => this.orders.statsBySource());
@@ -294,7 +300,7 @@ export class OrdersController {
   @ApiOkResponse({ description: 'Топ источников получен' })
   @Get('top-sources')
   async topSources(
-    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Req() req: AuthReq,
     @Query('cabinetId') cabinetId: string | undefined,
     @Query('limit') limit?: string,
   ) {
@@ -309,7 +315,7 @@ export class OrdersController {
   @ApiOkResponse({ description: 'Список source' })
   @Get('sources')
   async sources(
-    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Req() req: AuthReq,
     @Query('cabinetId') cabinetId: string | undefined,
   ) {
     return this.runWithCabinet(req, cabinetId, () =>
@@ -328,7 +334,7 @@ export class OrdersController {
   @ApiOkResponse({ description: 'Статистика сброшена' })
   @Post('reset-stats')
   async resetStats(
-    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Req() req: AuthReq,
     @Query('cabinetId') cabinetId: string | undefined,
     @Body() body?: { confirm?: boolean },
   ) {
@@ -342,7 +348,7 @@ export class OrdersController {
   @ApiOkResponse({ description: 'Статистика по парам' })
   @Get('by-pair')
   async byPair(
-    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Req() req: AuthReq,
     @Query('cabinetId') cabinetId: string | undefined,
   ) {
     return this.runWithCabinet(req, cabinetId, () => this.orders.statsByPair());

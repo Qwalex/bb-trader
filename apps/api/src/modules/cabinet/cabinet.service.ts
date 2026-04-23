@@ -83,6 +83,70 @@ export class CabinetService implements OnModuleInit {
     return this.getDefaultCabinetId();
   }
 
+  private async ensureUserDefaultCabinet(userIdRaw: string): Promise<string> {
+    const userId = String(userIdRaw ?? '').trim();
+    if (!userId) {
+      return this.getDefaultCabinetId();
+    }
+    const existing = await this.prisma.cabinet.findFirst({
+      where: { ownerUserId: userId },
+      orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+      select: { id: true },
+    });
+    if (existing?.id) {
+      return existing.id;
+    }
+    const baseSlug = this.normalizeSlug(`main-${userId.slice(0, 8)}`) || 'main-user';
+    let slug = baseSlug;
+    let idx = 2;
+    for (;;) {
+      const dupe = await this.prisma.cabinet.findUnique({
+        where: { slug },
+        select: { id: true },
+      });
+      if (!dupe) break;
+      slug = `${baseSlug}-${idx}`;
+      idx += 1;
+      if (idx > 1000) {
+        throw new Error('Unable to generate unique default cabinet slug');
+      }
+    }
+    const created = await this.prisma.cabinet.create({
+      data: {
+        slug,
+        name: DEFAULT_CABINET_NAME,
+        isDefault: false,
+        ownerUserId: userId,
+      },
+      select: { id: true },
+    });
+    return created.id;
+  }
+
+  async resolveCabinetIdForUser(
+    userIdRaw: string | null | undefined,
+    preferred?: string | null,
+  ): Promise<string> {
+    const userId = String(userIdRaw ?? '').trim();
+    if (!userId) {
+      return this.resolveCabinetId(preferred);
+    }
+    const requested = String(preferred ?? '').trim();
+    if (requested) {
+      const byId = await this.prisma.cabinet.findFirst({
+        where: { id: requested, ownerUserId: userId },
+        select: { id: true },
+      });
+      if (byId?.id) return byId.id;
+      const bySlug = await this.prisma.cabinet.findFirst({
+        where: { slug: requested.toLowerCase(), ownerUserId: userId },
+        select: { id: true },
+      });
+      if (bySlug?.id) return bySlug.id;
+    }
+    return this.ensureUserDefaultCabinet(userId);
+  }
+
   async resolveCabinetForTelegramUser(
     telegramUserId: number,
     preferred?: string | null,
@@ -120,6 +184,26 @@ export class CabinetService implements OnModuleInit {
     });
   }
 
+  async listCabinetsForUser(
+    userIdRaw: string | null | undefined,
+  ): Promise<Array<{ id: string; slug: string; name: string; isDefault: boolean }>> {
+    const userId = String(userIdRaw ?? '').trim();
+    if (!userId) {
+      return [];
+    }
+    await this.ensureUserDefaultCabinet(userId);
+    return this.prisma.cabinet.findMany({
+      where: { ownerUserId: userId },
+      orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+      select: {
+        id: true,
+        slug: true,
+        name: true,
+        isDefault: true,
+      },
+    });
+  }
+
   async listEnabledCabinetIdsForChat(chatId: string): Promise<string[]> {
     const chat = String(chatId ?? '').trim();
     if (!chat) {
@@ -145,6 +229,7 @@ export class CabinetService implements OnModuleInit {
   }
 
   async createCabinet(params: {
+    ownerUserId?: string | null;
     name: string;
     slug?: string;
   }): Promise<{ id: string; slug: string; name: string; isDefault: boolean }> {
@@ -175,6 +260,7 @@ export class CabinetService implements OnModuleInit {
         name,
         slug,
         isDefault: false,
+        ownerUserId: String(params.ownerUserId ?? '').trim() || undefined,
       },
       select: {
         id: true,
@@ -186,6 +272,7 @@ export class CabinetService implements OnModuleInit {
   }
 
   async updateCabinet(params: {
+    ownerUserId?: string | null;
     id: string;
     name?: string;
     slug?: string;
@@ -203,8 +290,16 @@ export class CabinetService implements OnModuleInit {
       if (!slug) throw new Error('Cabinet slug is invalid');
       data.slug = slug;
     }
+    const ownerUserId = String(params.ownerUserId ?? '').trim() || null;
+    const existing = await this.prisma.cabinet.findFirst({
+      where: { id, ownerUserId },
+      select: { id: true },
+    });
+    if (!existing?.id) {
+      throw new Error('Cabinet not found');
+    }
     return this.prisma.cabinet.update({
-      where: { id },
+      where: { id: existing.id },
       data,
       select: {
         id: true,
@@ -215,14 +310,21 @@ export class CabinetService implements OnModuleInit {
     });
   }
 
-  async deleteCabinet(idRaw: string): Promise<{ ok: true }> {
+  async deleteCabinet(
+    idRaw: string,
+    ownerUserIdRaw?: string | null,
+  ): Promise<{ ok: true }> {
     const id = String(idRaw ?? '').trim();
     if (!id) throw new Error('Cabinet id is required');
+    const ownerUserId = String(ownerUserIdRaw ?? '').trim() || null;
     const cabinet = await this.prisma.cabinet.findUnique({
       where: { id },
-      select: { id: true, isDefault: true },
+      select: { id: true, isDefault: true, ownerUserId: true },
     });
     if (!cabinet) throw new Error('Cabinet not found');
+    if ((cabinet.ownerUserId ?? null) !== ownerUserId) {
+      throw new Error('Cabinet not found');
+    }
     if (cabinet.isDefault) {
       throw new Error('Default cabinet cannot be deleted');
     }

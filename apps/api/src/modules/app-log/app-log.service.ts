@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import { CabinetContextService } from '../cabinet/cabinet-context.service';
 import { SettingsService } from '../settings/settings.service';
 
 import { pruneOldLogs, stringifyPayload } from './log-sanitize';
@@ -107,6 +108,7 @@ export class AppLogService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly cabinetContext: CabinetContextService,
     private readonly settings: SettingsService,
   ) {}
 
@@ -202,6 +204,7 @@ export class AppLogService {
         payload === undefined ? null : stringifyPayload(payload);
       await this.prisma.appLog.create({
         data: {
+          cabinetId: this.cabinetContext.getCabinetId() ?? undefined,
           level,
           category,
           message,
@@ -238,10 +241,11 @@ export class AppLogService {
     }[]
   > {
     const limit = Math.min(Math.max(options.limit ?? 200, 1), 1000);
+    const cabinetId = this.cabinetContext.getCabinetId();
     const where =
       options.category && options.category !== 'all'
-        ? { category: options.category }
-        : undefined;
+        ? { category: options.category, cabinetId: cabinetId ?? null }
+        : { cabinetId: cabinetId ?? null };
     return this.prisma.appLog.findMany({
       where,
       orderBy: { createdAt: 'desc' },

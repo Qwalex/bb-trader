@@ -21,6 +21,11 @@ import { pickRequestedCabinetId } from '../../common/cabinet-request.util';
 import { CabinetContextService } from '../cabinet/cabinet-context.service';
 import { CabinetService } from '../cabinet/cabinet.service';
 
+type AuthReq = {
+  headers?: Record<string, string | string[] | undefined>;
+  auth?: { userId?: string };
+};
+
 @ApiTags('Settings')
 @Controller('settings')
 export class SettingsController {
@@ -31,7 +36,7 @@ export class SettingsController {
   ) {}
 
   private async runWithCabinet<T>(
-    req: { headers?: Record<string, string | string[] | undefined> },
+    req: AuthReq,
     queryCabinetId: string | undefined,
     fn: () => Promise<T>,
   ): Promise<T> {
@@ -39,7 +44,8 @@ export class SettingsController {
       queryCabinetId,
       headers: req.headers,
     });
-    const cabinetId = await this.cabinets.resolveCabinetId(requested);
+    const userId = String(req.auth?.userId ?? '').trim() || null;
+    const cabinetId = await this.cabinets.resolveCabinetIdForUser(userId, requested);
     return this.cabinetContext.runWithCabinet(cabinetId, fn);
   }
 
@@ -47,7 +53,7 @@ export class SettingsController {
   @ApiOkResponse({ description: 'Настройки получены' })
   @Get()
   async list(
-    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Req() req: AuthReq,
     @Query('cabinetId') cabinetId?: string,
   ) {
     const rows = await this.runWithCabinet(req, cabinetId, () => this.settings.list());
@@ -65,7 +71,7 @@ export class SettingsController {
   @ApiOkResponse({ description: 'Raw-настройки получены' })
   @Get('raw')
   async listRaw(
-    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Req() req: AuthReq,
     @Query('cabinetId') cabinetId?: string,
   ) {
     const settings = await this.runWithCabinet(req, cabinetId, () => this.settings.list());
@@ -76,7 +82,7 @@ export class SettingsController {
   @ApiOkResponse({ description: 'Список пунктов' })
   @Get('dashboard-todos')
   async dashboardTodosGet(
-    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Req() req: AuthReq,
     @Query('cabinetId') cabinetId?: string,
   ) {
     const items = await this.runWithCabinet(req, cabinetId, () =>
@@ -108,7 +114,7 @@ export class SettingsController {
   @ApiOkResponse({ description: 'Сохранено' })
   @Put('dashboard-todos')
   async dashboardTodosPut(
-    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Req() req: AuthReq,
     @Query('cabinetId') cabinetId: string | undefined,
     @Body() body: { items?: unknown },
   ) {
@@ -131,7 +137,7 @@ export class SettingsController {
   @ApiOkResponse({ description: 'Настройка сохранена' })
   @Put()
   async upsert(
-    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Req() req: AuthReq,
     @Query('cabinetId') cabinetId: string | undefined,
     @Body() body: { key: string; value: string },
   ) {

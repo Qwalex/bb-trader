@@ -5,6 +5,18 @@ import { useRouter } from 'next/navigation';
 
 type AuthMode = 'login' | 'register' | 'reset';
 
+function normalizeBasePath(raw: string | undefined): string {
+  const t = (raw ?? '').trim();
+  if (!t || t === '/') return '';
+  return (t.startsWith('/') ? t : `/${t}`).replace(/\/+$/, '');
+}
+
+const appBasePath = normalizeBasePath(process.env.NEXT_PUBLIC_BASE_PATH);
+function withAppBasePath(url: string): string {
+  if (!url.startsWith('/')) return url;
+  return `${appBasePath}${url}`;
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [mode, setMode] = useState<AuthMode>('login');
@@ -13,11 +25,9 @@ export default function LoginPage() {
   const [telegramUserId, setTelegramUserId] = useState('');
   const [resetCode, setResetCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
-  const [unlockLogin, setUnlockLogin] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
-  const [profile, setProfile] = useState<{ role?: string; login?: string } | null>(null);
 
   async function submit() {
     setSubmitting(true);
@@ -44,8 +54,10 @@ export default function LoginPage() {
         return;
       }
       if (mode === 'login') {
-        router.replace('/');
+        const nextUrl = withAppBasePath('/');
+        router.replace(nextUrl);
         router.refresh();
+        window.location.assign(nextUrl);
         return;
       }
       setOk('Регистрация выполнена. Теперь войдите.');
@@ -106,41 +118,6 @@ export default function LoginPage() {
       setNewPassword('');
     } catch {
       setError('Не удалось изменить пароль');
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function loadProfile() {
-    const res = await fetch('/api/auth', { cache: 'no-store' });
-    const json = (await res.json().catch(() => null)) as
-      | { authenticated?: boolean; role?: string; login?: string }
-      | null;
-    if (!json?.authenticated) {
-      setProfile(null);
-      return;
-    }
-    setProfile({ role: json.role, login: json.login });
-  }
-
-  async function unlockUser() {
-    setSubmitting(true);
-    setError(null);
-    setOk(null);
-    try {
-      const res = await fetch('/api/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'unlock', unlockLogin }),
-      });
-      const json = (await res.json().catch(() => null)) as { message?: string } | null;
-      if (!res.ok) {
-        setError(json?.message ?? 'Не удалось разблокировать');
-        return;
-      }
-      setOk('Пользователь разблокирован.');
-    } catch {
-      setError('Не удалось разблокировать');
     } finally {
       setSubmitting(false);
     }
@@ -240,38 +217,6 @@ export default function LoginPage() {
           )}
         </div>
       </div>
-      <div className="card" style={{ maxWidth: 420, marginTop: 16 }}>
-        <p style={{ color: 'var(--muted)' }}>Профиль текущей сессии</p>
-        <div style={{ display: 'grid', gap: 12 }}>
-          <button className="btn" type="button" onClick={() => void loadProfile()}>
-            Обновить мой профиль
-          </button>
-          <p style={{ color: 'var(--muted)' }}>
-            Текущий пользователь: {profile?.login ?? '—'} / роль: {profile?.role ?? '—'}
-          </p>
-        </div>
-      </div>
-      {profile?.role === 'admin' ? (
-        <div className="card" style={{ maxWidth: 420, marginTop: 16 }}>
-          <p style={{ color: 'var(--muted)' }}>Ручная разблокировка (admin)</p>
-          <div style={{ display: 'grid', gap: 12 }}>
-            <input
-              className="settingsAuthInput"
-              placeholder="Логин для разблокировки"
-              value={unlockLogin}
-              onChange={(e) => setUnlockLogin(e.target.value)}
-            />
-            <button
-              className="btn"
-              type="button"
-              disabled={submitting || !unlockLogin.trim()}
-              onClick={() => void unlockUser()}
-            >
-              Разблокировать
-            </button>
-          </div>
-        </div>
-      ) : null}
     </>
   );
 }

@@ -14,6 +14,11 @@ import { pickRequestedCabinetId } from '../../common/cabinet-request.util';
 import { CabinetContextService } from '../cabinet/cabinet-context.service';
 import { CabinetService } from '../cabinet/cabinet.service';
 
+type AuthReq = {
+  headers?: Record<string, string | string[] | undefined>;
+  auth?: { userId?: string };
+};
+
 @ApiTags('Bybit')
 @Controller('bybit')
 export class BybitController {
@@ -25,7 +30,7 @@ export class BybitController {
   ) {}
 
   private async runWithCabinet<T>(
-    req: { headers?: Record<string, string | string[] | undefined> },
+    req: AuthReq,
     queryCabinetId: string | undefined,
     fn: () => Promise<T>,
   ): Promise<T> {
@@ -33,7 +38,8 @@ export class BybitController {
       queryCabinetId,
       headers: req.headers,
     });
-    const cabinetId = await this.cabinets.resolveCabinetId(requested);
+    const userId = String(req.auth?.userId ?? '').trim() || null;
+    const cabinetId = await this.cabinets.resolveCabinetIdForUser(userId, requested);
     return this.cabinetContext.runWithCabinet(cabinetId, fn);
   }
 
@@ -41,7 +47,7 @@ export class BybitController {
   @ApiOkResponse({ description: 'Снимок получен' })
   @Get('live')
   async live(
-    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Req() req: AuthReq,
     @Query('cabinetId') cabinetId?: string,
   ) {
     return this.runWithCabinet(req, cabinetId, () => this.bybit.getLiveExposureSnapshot());
@@ -53,7 +59,7 @@ export class BybitController {
   @ApiOkResponse({ description: 'История баланса получена' })
   @Get('balance-history')
   async balanceHistory(
-    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Req() req: AuthReq,
     @Query('cabinetId') cabinetId: string | undefined,
     @Query('days') days?: string,
   ) {
@@ -69,7 +75,7 @@ export class BybitController {
   @ApiOkResponse({ description: 'Отладочные данные по сделке' })
   @Get('signal/:signalId')
   async signalSnapshot(
-    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Req() req: AuthReq,
     @Query('cabinetId') cabinetId: string | undefined,
     @Param('signalId') signalId: string,
   ) {
@@ -83,7 +89,7 @@ export class BybitController {
   @ApiOkResponse({ description: 'Детализация PnL получена' })
   @Get('trade-pnl-breakdown/:signalId')
   async tradePnlBreakdown(
-    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Req() req: AuthReq,
     @Query('cabinetId') cabinetId: string | undefined,
     @Param('signalId') signalId: string,
   ) {
@@ -98,7 +104,7 @@ export class BybitController {
   @ApiOkResponse({ description: 'Команда закрытия отправлена' })
   @Post('close/:signalId')
   async closeSignal(
-    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Req() req: AuthReq,
     @Query('cabinetId') cabinetId: string | undefined,
     @Param('signalId') signalId: string,
     @Body() _body?: Record<string, unknown>,
@@ -122,7 +128,7 @@ export class BybitController {
   @ApiOkResponse({ description: 'Пересчёт запущен или выполнен' })
   @Post('recalc-closed-pnl')
   async recalcClosedPnl(
-    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Req() req: AuthReq,
     @Query('cabinetId') cabinetId: string | undefined,
     @Body() body?: { limit?: number; dryRun?: boolean; async?: boolean },
   ) {
@@ -145,7 +151,7 @@ export class BybitController {
   @ApiOkResponse({ description: 'Статус job получен' })
   @Get('recalc-closed-pnl/:jobId')
   async recalcClosedPnlJobStatus(
-    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Req() req: AuthReq,
     @Query('cabinetId') cabinetId: string | undefined,
     @Param('jobId') jobId: string,
   ) {

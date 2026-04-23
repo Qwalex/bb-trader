@@ -113,12 +113,15 @@ model BalanceSnapshot {
 
 model AppLog {
   id        String   @id @default(cuid())
+  cabinetId String?
+  cabinet   Cabinet? @relation(fields: [cabinetId], references: [id], onDelete: SetNull)
   level     String // info | warn | error | debug
   category  String // openrouter | telegram | bybit | orders | system
   message   String
   payload   String? // JSON
   createdAt DateTime @default(now())
 
+  @@index([cabinetId, createdAt])
   @@index([createdAt])
   @@index([category, createdAt])
 }
@@ -385,6 +388,8 @@ model Cabinet {
   slug             String                 @unique
   name             String
   isDefault        Boolean                @default(false)
+  ownerUserId      String?
+  ownerUser        AuthUser?              @relation(fields: [ownerUserId], references: [id], onDelete: SetNull)
   createdAt        DateTime               @default(now())
   updatedAt        DateTime               @updatedAt
   members          CabinetMember[]
@@ -398,6 +403,7 @@ model Cabinet {
   mirrorMessages   TgUserbotMirrorMessage[]
 
   @@index([isDefault])
+  @@index([ownerUserId, createdAt])
 }
 
 model CabinetMember {
@@ -486,6 +492,7 @@ model AuthUser {
   updatedAt        DateTime @updatedAt
 
   resetCodes AuthPasswordReset[]
+  cabinets  Cabinet[]
 
   @@index([role, createdAt])
   @@index([telegramUserId])
