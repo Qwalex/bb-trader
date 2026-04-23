@@ -14,7 +14,7 @@ import {
   YAxis,
 } from 'recharts';
 
-import { getApiBase } from '../../lib/api';
+import { fetchApiResponse } from '../../lib/api';
 
 type Period = 'day' | '3d' | 'week' | 'month' | 'year';
 
@@ -102,10 +102,10 @@ export default function OpenrouterSpendPage() {
       setError(null);
       try {
         const [spendRes, balanceRes] = await Promise.all([
-          fetch(
-            `${getApiBase()}/telegram-userbot/openrouter-spend?period=${encodeURIComponent(period)}`,
+          fetchApiResponse(
+            `/telegram-userbot/openrouter-spend?period=${encodeURIComponent(period)}`,
           ),
-          fetch(`${getApiBase()}/telegram-userbot/openrouter-balance`),
+          fetchApiResponse('/telegram-userbot/openrouter-balance'),
         ]);
         if (!spendRes.ok) throw new Error(String(spendRes.status));
         const [spendJson, balanceJson] = await Promise.all([

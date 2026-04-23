@@ -113,3 +113,33 @@ export async function fetchJson<T>(
   }
   return res.json() as Promise<T>;
 }
+
+export async function fetchApiResponse(
+  path: string,
+  init?: RequestInit,
+  cabinetId?: string | null,
+): Promise<Response> {
+  const effectiveCabinetId = String(
+    cabinetId ?? getClientCabinetId() ?? '',
+  ).trim();
+  const headers = new Headers(getApiAuthHeaders(init?.headers ?? undefined));
+  if (typeof window === 'undefined' && !headers.has('Authorization')) {
+    try {
+      const { cookies } = await import('next/headers');
+      const serverToken = (await cookies()).get('sb_auth')?.value?.trim();
+      if (serverToken) {
+        headers.set('Authorization', `Bearer ${serverToken}`);
+      }
+    } catch {
+      // no-op outside Next server runtime
+    }
+  }
+  if (effectiveCabinetId) {
+    headers.set('x-cabinet-id', effectiveCabinetId);
+  }
+  return fetch(`${getApiBase()}${withCabinetQuery(path, effectiveCabinetId)}`, {
+    ...init,
+    headers,
+    cache: 'no-store',
+  });
+}

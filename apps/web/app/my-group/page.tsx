@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
-import { getApiBase, withCabinetQuery } from '../../lib/api';
+import { fetchApiResponse } from '../../lib/api';
 
 type PublishGroup = {
   id: string;
@@ -24,15 +24,13 @@ export default function MyGroupPage() {
   const [chatId, setChatId] = useState('');
   const [publishEveryN, setPublishEveryN] = useState('1');
 
-  const withCabinet = (path: string) => {
+  const apiFetch = (path: string, init?: RequestInit) => {
     const cabinetId = localStorage.getItem('active_cabinet_id');
-    return `${getApiBase()}${withCabinetQuery(path, cabinetId)}`;
+    return fetchApiResponse(path, init, cabinetId);
   };
 
   async function loadAll() {
-    const res = await fetch(withCabinet('/telegram-userbot/publish-groups'), {
-      cache: 'no-store',
-    });
+    const res = await apiFetch('/telegram-userbot/publish-groups');
     const j = (await res.json()) as { items?: PublishGroup[] };
     setItems(Array.isArray(j.items) ? j.items : []);
   }
@@ -136,7 +134,7 @@ export default function MyGroupPage() {
             disabled={busy !== null}
             onClick={() =>
               void runBusy('create', async () => {
-                const res = await fetch(withCabinet('/telegram-userbot/publish-groups'), {
+                const res = await apiFetch('/telegram-userbot/publish-groups', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
@@ -191,7 +189,7 @@ export default function MyGroupPage() {
                       disabled={busy !== null}
                       onClick={() =>
                         void runBusy(`toggle-${g.id}`, async () => {
-                          const res = await fetch(withCabinet('/telegram-userbot/publish-groups'), {
+                          const res = await apiFetch('/telegram-userbot/publish-groups', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
@@ -215,8 +213,8 @@ export default function MyGroupPage() {
                       disabled={busy !== null}
                       onClick={() =>
                         void runBusy(`delete-${g.id}`, async () => {
-                          const res = await fetch(
-                            withCabinet(`/telegram-userbot/publish-groups/${encodeURIComponent(g.id)}/delete`),
+                          const res = await apiFetch(
+                            `/telegram-userbot/publish-groups/${encodeURIComponent(g.id)}/delete`,
                             { method: 'POST' },
                           );
                           const j = (await res.json()) as { ok?: boolean; error?: string };

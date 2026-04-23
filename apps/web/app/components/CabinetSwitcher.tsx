@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
-import { getApiBase } from '../../lib/api';
+import { fetchApiResponse } from '../../lib/api';
 
 type CabinetItem = {
   id: string;
@@ -20,7 +20,7 @@ export function CabinetSwitcher() {
   useEffect(() => {
     void (async () => {
       try {
-        const res = await fetch(`${getApiBase()}/cabinets`, { cache: 'no-store' });
+        const res = await fetchApiResponse('/cabinets');
         const json = (await res.json()) as { items?: CabinetItem[] };
         const list = Array.isArray(json.items) ? json.items : [];
         setItems(list);

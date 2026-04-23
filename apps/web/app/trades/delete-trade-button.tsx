@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
-import { getApiBase } from '../../lib/api';
+import { fetchApiResponse } from '../../lib/api';
 
 export function DeleteTradeButton(props: {
   tradeId: string;
@@ -28,7 +28,7 @@ export function DeleteTradeButton(props: {
 
     setDeleting(true);
     try {
-      const res = await fetch(`${getApiBase()}/orders/trades/${props.tradeId}`, {
+      const res = await fetchApiResponse(`/orders/trades/${props.tradeId}`, {
         method: 'DELETE',
       });
       if (!res.ok) {

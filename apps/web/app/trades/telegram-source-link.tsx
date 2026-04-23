@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 
-import { getApiBase } from '../../lib/api';
+import { fetchApiResponse } from '../../lib/api';
 
 type Props = {
   signalId: string;
@@ -56,14 +56,13 @@ export function TelegramSourceLink({
     setLoadingPick(true);
     setPickError(null);
     try {
-      const base = getApiBase();
       const q = new URLSearchParams();
       q.set('limit', '400');
       if (filterChatId.trim()) q.set('chatId', filterChatId.trim());
 
       const [chRes, candRes] = await Promise.all([
-        fetch(`${base}/telegram-userbot/chats`),
-        fetch(`${base}/telegram-userbot/ingest-link-candidates?${q.toString()}`),
+        fetchApiResponse('/telegram-userbot/chats'),
+        fetchApiResponse(`/telegram-userbot/ingest-link-candidates?${q.toString()}`),
       ]);
       if (!chRes.ok) {
         const t = await chRes.text().catch(() => '');
@@ -111,7 +110,7 @@ export function TelegramSourceLink({
 
     setSaving(true);
     try {
-      const res = await fetch(`${getApiBase()}/orders/trades/${signalId}/telegram-source`, {
+      const res = await fetchApiResponse(`/orders/trades/${signalId}/telegram-source`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

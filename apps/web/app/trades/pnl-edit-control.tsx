@@ -5,7 +5,7 @@ import { useId, useState } from 'react';
 
 import { useRouter } from 'next/navigation';
 
-import { getApiBase } from '../../lib/api';
+import { fetchApiResponse } from '../../lib/api';
 
 type Props = {
   signalId: string;
@@ -48,7 +48,7 @@ export function PnlEditControl({ signalId, status, realizedPnl, disabled, childr
 
     setSaving(true);
     try {
-      const res = await fetch(`${getApiBase()}/orders/trades/${signalId}/pnl`, {
+      const res = await fetchApiResponse(`/orders/trades/${signalId}/pnl`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ realizedPnl: nextPnl }),

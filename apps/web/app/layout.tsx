@@ -4,7 +4,6 @@ import localFont from 'next/font/local';
 import Link from 'next/link';
 
 import { CabinetSwitcher } from './components/CabinetSwitcher';
-import { ApiAuthFetchBridge } from './components/ApiAuthFetchBridge';
 import { PwaRegister } from './components/PwaRegister';
 
 import './globals.css';
@@ -128,7 +127,6 @@ export default async function RootLayout({
   return (
     <html lang="ru">
       <body className={`${geistSans.variable} ${geistMono.variable}`}>
-        <ApiAuthFetchBridge />
         <PwaRegister />
         <header className="nav">
           <strong className="brand">SignalsBot</strong>

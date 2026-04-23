@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { getApiBase } from '../../lib/api';
+import { fetchApiResponse } from '../../lib/api';
 import { formatDateTimeRu } from '../../lib/datetime';
 
 type LogRow = {
@@ -48,7 +48,7 @@ function isNoiseLogEvent(message: string): boolean {
 
 function tokenizeJson(pretty: string): JsonToken[] {
   const tokenRegex =
-    /"(?:\\.|[^"\\])*"(?=\s*:)|"(?:\\.|[^"\\])*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|\btrue\b|\bfalse\b|\bnull\b|[{}\[\],:]/g;
+    /"(?:\\.|[^"\\])*"(?=\s*:)|"(?:\\.|[^"\\])*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|\btrue\b|\bfalse\b|\bnull\b|[{}[\],:]/g;
   const out: JsonToken[] = [];
   let last = 0;
   for (const match of pretty.matchAll(tokenRegex)) {
@@ -68,7 +68,7 @@ function tokenizeJson(pretty: string): JsonToken[] {
       kind = 'boolean';
     } else if (token === 'null') {
       kind = 'null';
-    } else if (/^[{}\[\],:]$/.test(token)) {
+    } else if (/^[{}[\],:]$/.test(token)) {
       kind = 'punct';
     }
     out.push({ text: token, kind });
@@ -108,9 +108,7 @@ export default function LogsPage() {
       const q = new URLSearchParams();
       q.set('limit', String(limit));
       if (category !== 'all') q.set('category', category);
-      const res = await fetch(`${getApiBase()}/logs?${q.toString()}`, {
-        cache: 'no-store',
-      });
+      const res = await fetchApiResponse(`/logs?${q.toString()}`);
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       const data = (await res.json()) as LogRow[];
       setRows(data);

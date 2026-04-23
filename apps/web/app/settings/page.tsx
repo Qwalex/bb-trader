@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { TRADE_SIGNAL_NOTIFY_EVENT_OPTIONS } from '@repo/shared';
 
 import { EntrySizingControl } from '../components/EntrySizingControl';
-import { getApiBase } from '../../lib/api';
+import { fetchApiResponse } from '../../lib/api';
 import { parseStoredEntry, serializeEntry } from '../../lib/entry-sizing';
 
 function normalizeBasePath(raw: string | undefined): string {
@@ -500,7 +500,7 @@ export default function SettingsPage() {
 
   async function loadSettings() {
     try {
-      const res = await fetch(`${getApiBase()}/settings/raw`);
+      const res = await fetchApiResponse('/settings/raw');
       if (!res.ok) throw new Error(String(res.status));
       const j = (await res.json()) as {
         settings: Row[];
@@ -626,7 +626,7 @@ export default function SettingsPage() {
     try {
       let next = [...savedRows];
       for (const { key, value } of ops) {
-        const res = await fetch(`${getApiBase()}/settings`, {
+        const res = await fetchApiResponse('/settings', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ key, value }),
@@ -687,7 +687,7 @@ export default function SettingsPage() {
     setResetting(true);
     setMessage(null);
     try {
-      const res = await fetch(`${getApiBase()}/settings/reset-database`, {
+      const res = await fetchApiResponse('/settings/reset-database', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ confirm: true }),
@@ -764,7 +764,7 @@ export default function SettingsPage() {
     setResettingStats(true);
     setMessage(null);
     try {
-      const res = await fetch(`${getApiBase()}/orders/reset-stats`, {
+      const res = await fetchApiResponse('/orders/reset-stats', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ confirm: true }),

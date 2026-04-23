@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
-import { getApiBase } from '../../lib/api';
+import { fetchApiResponse } from '../../lib/api';
 
 type RecalcClosedPnlResult = {
   ok: boolean;
@@ -38,7 +38,7 @@ export function RecalcClosedPnlButton({ limit }: { limit: number }) {
   } | null>(null);
 
   async function startJob(dryRun: boolean): Promise<RecalcClosedPnlJobStatus> {
-    const res = await fetch(`${getApiBase()}/bybit/recalc-closed-pnl`, {
+    const res = await fetchApiResponse('/bybit/recalc-closed-pnl', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ dryRun, limit, async: true }),
@@ -54,9 +54,7 @@ export function RecalcClosedPnlButton({ limit }: { limit: number }) {
 
   async function pollJob(jobId: string): Promise<RecalcClosedPnlJobStatus> {
     for (;;) {
-      const res = await fetch(`${getApiBase()}/bybit/recalc-closed-pnl/${encodeURIComponent(jobId)}`, {
-        cache: 'no-store',
-      });
+      const res = await fetchApiResponse(`/bybit/recalc-closed-pnl/${encodeURIComponent(jobId)}`);
       if (!res.ok) {
         const text = await res.text().catch(() => '');
         throw new Error(text || `${res.status} ${res.statusText}`);

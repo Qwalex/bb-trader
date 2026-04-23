@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 
-import { getApiBase } from '../../lib/api';
+import { fetchApiResponse } from '../../lib/api';
 import { formatDateTimeRu } from '../../lib/datetime';
 
 type Recommendation = {
@@ -58,7 +58,7 @@ export default function AiPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${getApiBase()}/diagnostics/trading-advice`, {
+      const res = await fetchApiResponse('/diagnostics/trading-advice', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ closedLimit }),

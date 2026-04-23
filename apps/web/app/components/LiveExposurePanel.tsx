@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
-import { getApiBase } from '../../lib/api';
+import { fetchApiResponse } from '../../lib/api';
 import { formatDateTimeRu } from '../../lib/datetime';
 
 type LiveExposureOrder = {
@@ -62,13 +62,11 @@ export function LiveExposurePanel() {
   const [expandedBySignalId, setExpandedBySignalId] = useState<Record<string, boolean>>({});
   const [lastMsg, setLastMsg] = useState<string | null>(null);
 
-  const apiBase = useMemo(() => getApiBase(), []);
-
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${apiBase}/bybit/live`, { cache: 'no-store' });
+      const res = await fetchApiResponse('/bybit/live');
       if (!res.ok) {
         throw new Error(`${res.status} ${res.statusText}`);
       }
@@ -79,7 +77,7 @@ export function LiveExposurePanel() {
     } finally {
       setLoading(false);
     }
-  }, [apiBase]);
+  }, []);
 
   const closeSignal = useCallback(
     async (signalId: string, pair: string) => {
@@ -89,7 +87,7 @@ export function LiveExposurePanel() {
       setClosingId(signalId);
       setLastMsg(null);
       try {
-        const res = await fetch(`${apiBase}/bybit/close/${signalId}`, {
+        const res = await fetchApiResponse(`/bybit/close/${signalId}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({}),
@@ -114,7 +112,7 @@ export function LiveExposurePanel() {
         setClosingId(null);
       }
     },
-    [apiBase, load],
+    [load],
   );
 
   const loadSignalJson = useCallback(
@@ -122,9 +120,7 @@ export function LiveExposurePanel() {
       setJsonLoadingId(signalId);
       setError(null);
       try {
-        const res = await fetch(`${apiBase}/bybit/signal/${signalId}`, {
-          cache: 'no-store',
-        });
+        const res = await fetchApiResponse(`/bybit/signal/${signalId}`);
         if (!res.ok) {
           throw new Error(`${res.status} ${res.statusText}`);
         }
@@ -139,7 +135,7 @@ export function LiveExposurePanel() {
         setJsonLoadingId(null);
       }
     },
-    [apiBase],
+    [],
   );
 
   useEffect(() => {

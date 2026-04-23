@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
-import { getApiBase } from '../../lib/api';
+import { fetchApiResponse } from '../../lib/api';
 
 export function RestoreTradeButton(props: { tradeId: string; pair: string }) {
   const router = useRouter();
@@ -16,8 +16,8 @@ export function RestoreTradeButton(props: { tradeId: string; pair: string }) {
 
     setLoading(true);
     try {
-      const res = await fetch(
-        `${getApiBase()}/orders/trades/${props.tradeId}/restore`,
+      const res = await fetchApiResponse(
+        `/orders/trades/${props.tradeId}/restore`,
         { method: 'POST' },
       );
       if (!res.ok) {

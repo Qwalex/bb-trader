@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 
 import { useRouter } from 'next/navigation';
 
-import { getApiBase } from '../../lib/api';
+import { fetchApiResponse } from '../../lib/api';
 
 type Props = {
   signalId: string;
@@ -45,7 +45,7 @@ export function SourceSelect({
 
     setSaving(true);
     try {
-      const res = await fetch(`${getApiBase()}/orders/trades/${signalId}/source`, {
+      const res = await fetchApiResponse(`/orders/trades/${signalId}/source`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ source: nextSource }),

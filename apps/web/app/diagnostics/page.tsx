@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useRouter } from 'next/navigation';
 
-import { getApiBase } from '../../lib/api';
+import { fetchApiResponse } from '../../lib/api';
 import { formatDateTimeRu } from '../../lib/datetime';
 
 type RunRow = {
@@ -139,7 +139,7 @@ export default function DiagnosticsPage() {
     setLoadingRuns(true);
     setError(null);
     try {
-      const res = await fetch(`${getApiBase()}/diagnostics/runs?limit=30`, { cache: 'no-store' });
+      const res = await fetchApiResponse('/diagnostics/runs?limit=30');
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       const data = (await res.json()) as RunRow[];
       setRuns(data);
@@ -155,7 +155,7 @@ export default function DiagnosticsPage() {
     setLoadingDetails(true);
     setError(null);
     try {
-      const res = await fetch(`${getApiBase()}/diagnostics/runs/${runId}`, { cache: 'no-store' });
+      const res = await fetchApiResponse(`/diagnostics/runs/${runId}`);
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       const data = (await res.json()) as RunDetails;
       setDetails(data);
@@ -199,7 +199,7 @@ export default function DiagnosticsPage() {
     setRunNowLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${getApiBase()}/diagnostics/run-latest`, {
+      const res = await fetchApiResponse('/diagnostics/run-latest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ limit }),

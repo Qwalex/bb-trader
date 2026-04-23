@@ -4,7 +4,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 
 import { EntrySizingControl } from '../components/EntrySizingControl';
 import { UserbotMessageCard } from '../components/UserbotMessageCard';
-import { getApiBase } from '../../lib/api';
+import { getApiAuthHeaders, getApiBase } from '../../lib/api';
 import type { EntrySizingMode } from '../../lib/entry-sizing';
 import { parseStoredEntry, serializeEntry } from '../../lib/entry-sizing';
 
@@ -98,6 +98,12 @@ type TraceModalState = {
 };
 
 export default function TelegramUserbotPage() {
+  const apiFetch = (path: string, init?: RequestInit) =>
+    fetch(`${getApiBase()}${path}`, {
+      ...init,
+      headers: getApiAuthHeaders(init?.headers),
+      cache: 'no-store',
+    });
   const [status, setStatus] = useState<BotStatus | null>(null);
   const [chats, setChats] = useState<UserbotChat[]>([]);
   const [metrics, setMetrics] = useState<TodayMetrics | null>(null);
@@ -241,10 +247,10 @@ export default function TelegramUserbotPage() {
 
   async function loadAll() {
     const [s, c, m, raw] = await Promise.all([
-      fetch(`${getApiBase()}/telegram-userbot/status`).then((r) => r.json()),
-      fetch(`${getApiBase()}/telegram-userbot/chats`).then((r) => r.json()),
-      fetch(`${getApiBase()}/telegram-userbot/metrics/today`).then((r) => r.json()),
-      fetch(`${getApiBase()}/settings/raw`).then((r) => r.json()),
+      apiFetch('/telegram-userbot/status').then((r) => r.json()),
+      apiFetch('/telegram-userbot/chats').then((r) => r.json()),
+      apiFetch('/telegram-userbot/metrics/today').then((r) => r.json()),
+      apiFetch('/settings/raw').then((r) => r.json()),
     ]);
     setStatus(s as BotStatus);
     const chatsList = c as UserbotChat[];
@@ -285,8 +291,8 @@ export default function TelegramUserbotPage() {
       void (async () => {
         try {
           const [qrRes, metricsRes] = await Promise.all([
-            fetch(`${getApiBase()}/telegram-userbot/qr/status`),
-            fetch(`${getApiBase()}/telegram-userbot/metrics/today`),
+            apiFetch('/telegram-userbot/qr/status'),
+            apiFetch('/telegram-userbot/metrics/today'),
           ]);
           const j = (await qrRes.json()) as { qr?: BotStatus['qr']; connected?: boolean };
           const m = (await metricsRes.json()) as TodayMetrics;
@@ -552,7 +558,7 @@ export default function TelegramUserbotPage() {
                 disabled={busy !== null}
                 onClick={() =>
                   void runAction('save-global-defaults', async () => {
-                    await fetch(`${getApiBase()}/settings`, {
+                    await apiFetch('/settings', {
                       method: 'PUT',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({
@@ -560,12 +566,12 @@ export default function TelegramUserbotPage() {
                         value: serializeEntry(globalEntryMode, globalEntryAmount),
                       }),
                     });
-                    await fetch(`${getApiBase()}/settings`, {
+                    await apiFetch('/settings', {
                       method: 'PUT',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ key: 'DEFAULT_LEVERAGE', value: globalLev.trim() }),
                     });
-                    await fetch(`${getApiBase()}/settings`, {
+                    await apiFetch('/settings', {
                       method: 'PUT',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({
@@ -573,7 +579,7 @@ export default function TelegramUserbotPage() {
                         value: globalMartingaleDefault.trim(),
                       }),
                     });
-                    await fetch(`${getApiBase()}/settings`, {
+                    await apiFetch('/settings', {
                       method: 'PUT',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({
@@ -598,7 +604,7 @@ export default function TelegramUserbotPage() {
           type="button"
           onClick={() =>
             void runAction('connect', async () => {
-              const res = await fetch(`${getApiBase()}/telegram-userbot/connect`, {
+              const res = await apiFetch('/telegram-userbot/connect', {
                 method: 'POST',
               });
               const j = (await res.json()) as { ok?: boolean; error?: string };
@@ -618,8 +624,8 @@ export default function TelegramUserbotPage() {
           type="button"
           onClick={() =>
             void runAction('qr', async () => {
-              await fetch(`${getApiBase()}/telegram-userbot/qr/start`, { method: 'POST' });
-              const res = await fetch(`${getApiBase()}/telegram-userbot/qr/status`);
+              await apiFetch('/telegram-userbot/qr/start', { method: 'POST' });
+              const res = await apiFetch('/telegram-userbot/qr/status');
               const j = (await res.json()) as { qr?: BotStatus['qr']; connected?: boolean };
               setStatus((prev) =>
                 prev
@@ -638,7 +644,7 @@ export default function TelegramUserbotPage() {
           type="button"
           onClick={() =>
             void runAction('disconnect', async () => {
-              await fetch(`${getApiBase()}/telegram-userbot/disconnect`, { method: 'POST' });
+              await apiFetch('/telegram-userbot/disconnect', { method: 'POST' });
               await loadAll();
               setMsg({ type: 'ok', text: 'Userbot отключен' });
             })
@@ -652,7 +658,7 @@ export default function TelegramUserbotPage() {
           type="button"
           onClick={() =>
             void runAction('scan', async () => {
-              const res = await fetch(`${getApiBase()}/telegram-userbot/scan-today`, {
+              const res = await apiFetch('/telegram-userbot/scan-today', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ limitPerChat: 200 }),
@@ -682,7 +688,7 @@ export default function TelegramUserbotPage() {
           type="button"
           onClick={() =>
             void runAction('reread-all', async () => {
-              const res = await fetch(`${getApiBase()}/telegram-userbot/reread-all`, {
+              const res = await apiFetch('/telegram-userbot/reread-all', {
                 method: 'POST',
               });
               const j = (await res.json()) as {
@@ -720,7 +726,7 @@ export default function TelegramUserbotPage() {
           type="button"
           onClick={() =>
             void runAction('sync', async () => {
-              const res = await fetch(`${getApiBase()}/telegram-userbot/chats/sync`, {
+              const res = await apiFetch('/telegram-userbot/chats/sync', {
                 method: 'POST',
               });
               const j = (await res.json()) as { ok?: boolean; error?: string; upserted?: number };

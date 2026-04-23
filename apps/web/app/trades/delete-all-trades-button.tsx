@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
-import { getApiBase } from '../../lib/api';
+import { fetchApiResponse } from '../../lib/api';
 
 type DeleteAllTradesResult = {
   ok: boolean;
@@ -49,7 +49,7 @@ export function DeleteAllTradesButton() {
     setLoading(true);
     setMessage({ type: 'ok', text: 'Запущено последовательное удаление всех сделок…' });
     try {
-      const res = await fetch(`${getApiBase()}/orders/trades/delete-all`, {
+      const res = await fetchApiResponse('/orders/trades/delete-all', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ confirm: true }),
