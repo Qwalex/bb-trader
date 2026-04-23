@@ -517,6 +517,18 @@ export default function SettingsPage() {
     [scope],
   );
   const visibleKeySet = useMemo(() => new Set<string>(visibleKeys.map(({ key }) => key)), [visibleKeys]);
+  const visibleSections = useMemo(
+    () =>
+      SETTINGS_SECTIONS.map((section) => ({
+        ...section,
+        keys: section.keys.filter((key) =>
+          scope === 'cabinet'
+            ? CABINET_SCOPED_SETTING_KEY_SET.has(key)
+            : !CABINET_SCOPED_SETTING_KEY_SET.has(key),
+        ),
+      })).filter((section) => section.keys.length > 0),
+    [scope],
+  );
 
   async function loadSettings() {
     try {
@@ -1244,17 +1256,11 @@ export default function SettingsPage() {
         </button>
       </div>
       <div className="settingsAccordion" style={{ marginTop: '0.75rem' }}>
-        {SETTINGS_SECTIONS.map((section) => (
+        {visibleSections.map((section) => (
           <details key={section.id} className="card">
             <summary className="settingsSectionSummary">{section.title}</summary>
             <div className="settingsForm" style={{ marginTop: '0.9rem' }}>
-              {section.keys
-                .filter((key) =>
-                  scope === 'cabinet'
-                    ? CABINET_SCOPED_SETTING_KEY_SET.has(key)
-                    : !CABINET_SCOPED_SETTING_KEY_SET.has(key),
-                )
-                .map((key) => renderSettingField(key))}
+              {section.keys.map((key) => renderSettingField(key))}
             </div>
           </details>
         ))}
