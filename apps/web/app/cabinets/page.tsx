@@ -120,18 +120,18 @@ export default function CabinetsPage() {
 
       <div className="card" style={{ marginBottom: '1rem' }}>
         <h3 style={{ marginBottom: '0.7rem' }}>Создать кабинет</h3>
-        <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="cabinetFormRow">
           <input
+            className="settingsAuthInput"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Название"
-            style={{ minWidth: 220 }}
           />
           <input
+            className="settingsAuthInput"
             value={slug}
             onChange={(e) => setSlug(e.target.value)}
             placeholder="Slug (необязательно)"
-            style={{ minWidth: 220 }}
           />
           <button
             type="button"
@@ -153,7 +153,7 @@ export default function CabinetsPage() {
           <div style={{ display: 'grid', gap: '0.6rem' }}>
             {items.map((item) => (
               <div key={item.id} className="card" style={{ margin: 0 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.7rem' }}>
+                <div className="cabinetListRow">
                   <div>
                     <div style={{ fontWeight: 700 }}>
                       {item.name} {item.isDefault ? '(default)' : ''}

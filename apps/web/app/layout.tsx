@@ -1,10 +1,10 @@
 import type { Metadata, Viewport } from 'next';
 import { cookies } from 'next/headers';
 import localFont from 'next/font/local';
-import Link from 'next/link';
+import { NAV_MENU_HIDDEN_SETTING_KEY, NAV_MENU_ITEMS } from '@repo/shared';
 
-import { CabinetSwitcher } from './components/CabinetSwitcher';
 import { PwaRegister } from './components/PwaRegister';
+import { TopNav } from './components/TopNav';
 
 import './globals.css';
 
@@ -103,6 +103,7 @@ export default async function RootLayout({
   const cabinetId = cookieStore.get('cabinet_id')?.value?.trim() ?? '';
   const authToken = cookieStore.get('sb_auth')?.value?.trim() ?? '';
   let isAdmin = false;
+  let hiddenMenuIds: string[] = NAV_MENU_ITEMS.filter((i) => i.defaultHidden).map((i) => i.id);
   if (authToken) {
     try {
       const res = await fetch(`${getApiBaseForServer()}/auth/me`, {
@@ -115,39 +116,41 @@ export default async function RootLayout({
         const me = (await res.json()) as { role?: string };
         isAdmin = String(me.role ?? '').trim().toLowerCase() === 'admin';
       }
+      const settingsRes = await fetch(`${getApiBaseForServer()}/settings/raw`, {
+        cache: 'no-store',
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      });
+      if (settingsRes.ok) {
+        const settingsJson = (await settingsRes.json()) as {
+          settings?: Array<{ key: string; value: string }>;
+        };
+        const raw = settingsJson.settings?.find(
+          (s) => s.key === NAV_MENU_HIDDEN_SETTING_KEY,
+        )?.value;
+        if (raw) {
+          try {
+            const parsed = JSON.parse(raw) as unknown;
+            if (Array.isArray(parsed)) {
+              hiddenMenuIds = parsed
+                .map((v) => String(v).trim())
+                .filter((v) => v.length > 0);
+            }
+          } catch {
+            // keep defaults
+          }
+        }
+      }
     } catch {
       isAdmin = false;
     }
   }
-  const withCabinet = (path: string): string => {
-    if (!cabinetId) return path;
-    const hasQuery = path.includes('?');
-    return `${path}${hasQuery ? '&' : '?'}cabinetId=${encodeURIComponent(cabinetId)}`;
-  };
   return (
     <html lang="ru">
       <body className={`${geistSans.variable} ${geistMono.variable}`}>
         <PwaRegister />
-        <header className="nav">
-          <strong className="brand">SignalsBot</strong>
-          <CabinetSwitcher />
-          <nav className="navLinks">
-            <Link href={withCabinet('/')}>Дашборд</Link>
-            <Link href={withCabinet('/trades')}>Сделки</Link>
-            <Link href={withCabinet('/logs')}>Логи</Link>
-            <Link href={withCabinet('/ai')}>AI</Link>
-            {isAdmin ? <Link href={withCabinet('/diagnostics')}>Диагностика</Link> : null}
-            <Link href={withCabinet('/telegram-userbot')}>Userbot</Link>
-            {isAdmin ? (
-              <Link href={withCabinet('/openrouter-spend')}>Расходы OpenRouter</Link>
-            ) : null}
-            {isAdmin ? <Link href={withCabinet('/my-group')}>Моя группа</Link> : null}
-            <Link href={withCabinet('/filters')}>Фильтры</Link>
-            <Link href={withCabinet('/settings?scope=cabinet')}>Настройки кабинета</Link>
-            <Link href="/settings?scope=account">Настройки аккаунта</Link>
-            <Link href="/cabinets">Кабинеты</Link>
-          </nav>
-        </header>
+        <TopNav isAdmin={isAdmin} cabinetId={cabinetId} hiddenMenuIds={hiddenMenuIds} />
         <main className="main">{children}</main>
       </body>
     </html>

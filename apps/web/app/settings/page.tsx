@@ -5,6 +5,8 @@ import { useSearchParams } from 'next/navigation';
 
 import {
   CABINET_SCOPED_SETTING_KEY_SET,
+  NAV_MENU_HIDDEN_SETTING_KEY,
+  NAV_MENU_ITEMS,
   TRADE_SIGNAL_NOTIFY_EVENT_OPTIONS,
 } from '@repo/shared';
 
@@ -27,6 +29,7 @@ function withAppBasePath(url: string): string {
 const MODEL_HISTORY_KEY = 'OPENROUTER_MODEL_HISTORY';
 const DIAGNOSTIC_MODELS_KEY = 'OPENROUTER_DIAGNOSTIC_MODELS';
 const KEYS = [
+  { key: NAV_MENU_HIDDEN_SETTING_KEY, label: 'Скрытые пункты меню (бургер)' },
   { key: 'OPENROUTER_API_KEY', label: 'OpenRouter API key' },
   { key: 'OPENROUTER_MODEL_DEFAULT', label: 'Модель по умолчанию' },
   { key: 'OPENROUTER_MODEL_TEXT', label: 'Модель (текст)' },
@@ -245,6 +248,11 @@ function tpSlStepStartSelectFromDraft(
 }
 
 const SETTINGS_SECTIONS: { id: string; title: string; keys: string[] }[] = [
+  {
+    id: 'ui',
+    title: 'Интерфейс',
+    keys: [NAV_MENU_HIDDEN_SETTING_KEY],
+  },
   {
     id: 'openrouter',
     title: 'OpenRouter',
@@ -912,6 +920,62 @@ export default function SettingsPage() {
   }
 
   function renderSettingField(key: string) {
+    if (key === NAV_MENU_HIDDEN_SETTING_KEY) {
+      const currentSet = (() => {
+        const raw = valueForDraft(key).trim();
+        if (!raw) return new Set<string>();
+        try {
+          const parsed = JSON.parse(raw) as unknown;
+          if (!Array.isArray(parsed)) return new Set<string>();
+          return new Set<string>(parsed.map((x) => String(x)));
+        } catch {
+          return new Set<string>();
+        }
+      })();
+      const toggleItem = (id: string) => {
+        const next = new Set(currentSet);
+        if (next.has(id)) {
+          next.delete(id);
+        } else {
+          next.add(id);
+        }
+        const ordered = NAV_MENU_ITEMS.map((i) => i.id).filter((id2) => next.has(id2));
+        setDraftKey(key, JSON.stringify(ordered));
+      };
+      return (
+        <div key={key} style={{ gridColumn: '1 / -1' }}>
+          <span style={{ display: 'block', marginBottom: '0.35rem' }}>{LABEL_BY_KEY[key] ?? key}</span>
+          <p style={{ color: 'var(--muted)', fontSize: '0.88rem', margin: '0 0 0.6rem' }}>
+            Отмеченные пункты будут скрыты из верхней панели и показаны только в бургер-меню.
+          </p>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+              gap: '0.35rem 0.75rem',
+              padding: '0.5rem',
+              border: '1px solid var(--border)',
+              borderRadius: 6,
+              background: 'var(--card)',
+            }}
+          >
+            {NAV_MENU_ITEMS.map((item) => (
+              <label key={item.id} style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                <input
+                  type="checkbox"
+                  checked={currentSet.has(item.id)}
+                  disabled={saving || (item.id === 'dashboard' || item.id === 'trades')}
+                  onChange={() => toggleItem(item.id)}
+                />
+                <span style={{ color: 'var(--foreground)', fontSize: '0.88rem' }}>
+                  {item.label}
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
+      );
+    }
     if (key === 'TELEGRAM_NOTIFY_TRADE_EVENTS') {
       const raw = valueForDraft(key).trim().toLowerCase();
       const on =

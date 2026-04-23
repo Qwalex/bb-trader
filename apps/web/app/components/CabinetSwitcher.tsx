@@ -13,7 +13,7 @@ type CabinetItem = {
 
 const STORAGE_KEY = 'active_cabinet_id';
 
-export function CabinetSwitcher() {
+export function CabinetSwitcher({ compact = false }: { compact?: boolean }) {
   const [items, setItems] = useState<CabinetItem[]>([]);
   const [selected, setSelected] = useState('');
 
@@ -64,9 +64,10 @@ export function CabinetSwitcher() {
   }
 
   return (
-    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-      <span style={{ color: 'var(--muted)', fontSize: 12 }}>Кабинет:</span>
+    <label className={`cabinetSwitcher ${compact ? 'compact' : ''}`}>
+      <span className="cabinetSwitcherLabel">Кабинет:</span>
       <select
+        className="cabinetSwitcherSelect"
         value={effectiveSelected}
         onChange={(e) => {
           const next = e.target.value;
@@ -75,7 +76,6 @@ export function CabinetSwitcher() {
           url.searchParams.set('cabinetId', next);
           window.location.href = url.toString();
         }}
-        style={{ minWidth: 140 }}
       >
         {items.map((item) => (
           <option key={item.id} value={item.id}>

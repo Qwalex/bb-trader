@@ -93,3 +93,8 @@ export {
   CABINET_SCOPED_SETTING_KEY_SET,
   type CabinetScopedSettingKey,
 } from './cabinet-settings';
+export {
+  NAV_MENU_ITEMS,
+  NAV_MENU_HIDDEN_SETTING_KEY,
+  type NavMenuItemConfig,
+} from './nav-menu';
