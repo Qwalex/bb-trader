@@ -69,3 +69,4 @@ pnpm-debug.log*
 *.pem
 
 *.db
+.cursor/skills/bybit
