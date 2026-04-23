@@ -2,6 +2,7 @@ import { BalanceChart, type BalancePoint } from './components/BalanceChart';
 import { DashboardTodoList, type DashboardTodoItem } from './components/DashboardTodoList';
 import { PnlChart } from './components/PnlChart';
 import { LiveExposurePanel } from './components/LiveExposurePanel';
+import { SessionInfoBar } from './components/SessionInfoBar';
 
 import Link from 'next/link';
 
@@ -64,6 +65,13 @@ type AuthMe = {
   role?: string | null;
 };
 
+type CabinetItem = {
+  id: string;
+  slug: string;
+  name: string;
+  isDefault: boolean;
+};
+
 export default async function Home({
   searchParams,
 }: {
@@ -78,6 +86,7 @@ export default async function Home({
   let sourceOptions: string[] = [];
   let userbotStatus: UserbotStatus | null = null;
   let authMe: AuthMe | null = null;
+  let cabinetItems: CabinetItem[] = [];
   let err: string | null = null;
   try {
     const q = new URLSearchParams();
@@ -143,6 +152,16 @@ export default async function Home({
   } catch {
     authMe = null;
   }
+  try {
+    const cabinets = await fetchJson<{ items?: CabinetItem[] }>('/cabinets', undefined, cabinetId);
+    cabinetItems = Array.isArray(cabinets.items) ? cabinets.items : [];
+  } catch {
+    cabinetItems = [];
+  }
+  const currentCabinet =
+    (cabinetId ? cabinetItems.find((c) => c.id === cabinetId) : null) ??
+    cabinetItems.find((c) => c.isDefault) ??
+    null;
   let balanceHistory: BalancePoint[] = [];
   try {
     userbotStatus = await fetchJson<UserbotStatus>(
@@ -229,11 +248,11 @@ export default async function Home({
   return (
     <>
       <h1 className="pageTitle">Дашборд Test 1</h1>
-      {authMe?.userId ? (
-        <p style={{ color: 'var(--muted)', marginBottom: '0.75rem' }}>
-          Ваш user id: <code>{authMe.userId}</code>
-        </p>
-      ) : null}
+      <SessionInfoBar
+        login={authMe?.login ?? null}
+        userId={authMe?.userId ?? null}
+        cabinetName={currentCabinet?.name ?? null}
+      />
       {err && (
         <p className="msg err" style={{ marginBottom: '1rem' }}>
           {err} — проверьте, что API запущен и NEXT_PUBLIC_API_URL верный.
