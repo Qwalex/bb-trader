@@ -6,6 +6,7 @@ import { PrismaModule } from '../../prisma/prisma.module';
 import { SettingsModule } from '../settings/settings.module';
 import { TelegramModule } from '../telegram/telegram.module';
 import { VkModule } from '../vk/vk.module';
+import { WorkerQueueModule } from '../worker-queue/worker-queue.module';
 import { BalanceSnapshotService } from './balance-snapshot.service';
 import { BybitController } from './bybit.controller';
 import { BybitPollService } from './bybit-poll.service';
@@ -18,6 +19,7 @@ import { BybitService } from './bybit.service';
     forwardRef(() => OrdersModule),
     forwardRef(() => TelegramModule),
     forwardRef(() => VkModule),
+    forwardRef(() => WorkerQueueModule),
     AppLogModule,
   ],
   controllers: [BybitController],

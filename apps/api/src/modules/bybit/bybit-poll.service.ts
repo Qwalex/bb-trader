@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 
 import { SettingsService } from '../settings/settings.service';
-import { BybitService } from './bybit.service';
+import { WorkerQueueService } from '../worker-queue/worker-queue.service';
 
 @Injectable()
 export class BybitPollService {
@@ -11,8 +11,8 @@ export class BybitPollService {
   private isPolling = false;
 
   constructor(
-    private readonly bybit: BybitService,
     private readonly settings: SettingsService,
+    private readonly workers: WorkerQueueService,
   ) {}
 
   @Interval(1_000)
@@ -33,7 +33,7 @@ export class BybitPollService {
     this.isPolling = true;
     this.lastPollAt = now;
     try {
-      await this.bybit.pollOpenOrders();
+      await this.workers.enqueuePollSweep('interval');
     } catch (e) {
       this.logger.warn(`poll: ${e instanceof Error ? e.message : e}`);
     } finally {

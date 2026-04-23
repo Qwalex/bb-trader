@@ -88,3 +88,8 @@ export {
   parseTradeSignalNotifyEventFilter,
   type TradeSignalNotifyEventId,
 } from './trade-signal-events';
+export {
+  CABINET_SCOPED_SETTING_KEYS,
+  CABINET_SCOPED_SETTING_KEY_SET,
+  type CabinetScopedSettingKey,
+} from './cabinet-settings';

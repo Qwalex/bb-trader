@@ -1,5 +1,5 @@
-import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
-import { RestClientV5 } from 'bybit-api';
+import { forwardRef, Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { RestClientV5, WebsocketClient } from 'bybit-api';
 
 import { normalizeTradingPair, type SignalDto } from '@repo/shared';
 
@@ -21,6 +21,7 @@ import {
 import { SettingsService } from '../settings/settings.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { VkNotifyMirrorService } from '../vk/vk-notify-mirror.service';
+import { WorkerQueueService } from '../worker-queue/worker-queue.service';
 
 export interface PlaceOrdersResult {
   ok: boolean;
@@ -168,7 +169,7 @@ export interface SignalExecutionDebugSnapshot {
 }
 
 @Injectable()
-export class BybitService {
+export class BybitService implements OnModuleInit {
   private readonly logger = new Logger(BybitService.name);
   /**
    * Последнее невалидное значение глобального TP_SL_STEP_RANGE (trim): warn при смене «плохой» строки,
@@ -183,9 +184,10 @@ export class BybitService {
   private readonly staleReconcileSuspensions = new Map<string, { count: number; reason?: string }>();
   private static readonly STALE_RECONCILE_REQUIRED_CLEAN_POLLS = 3;
   private readonly placementLocks = new Set<string>();
-  private recalcQueue: Promise<void> = Promise.resolve();
   private readonly recalcJobs = new Map<string, RecalcClosedPnlJobStatus>();
   private readonly recalcJobOrder: string[] = [];
+  private wsClient: WebsocketClient | null = null;
+  private wsStarted = false;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -198,7 +200,13 @@ export class BybitService {
     @Inject(forwardRef(() => VkNotifyMirrorService))
     private readonly vkNotifyMirror: VkNotifyMirrorService,
     private readonly appLog: AppLogService,
+    @Inject(forwardRef(() => WorkerQueueService))
+    private readonly workers: WorkerQueueService,
   ) {}
+
+  onModuleInit(): void {
+    void this.startPrivateWsSync();
+  }
 
   private currentCabinetId(): string | null {
     return this.cabinetContext.getCabinetId();
@@ -302,6 +310,60 @@ export class BybitService {
       secret: creds.secret,
       testnet: creds.testnet,
     });
+  }
+
+  private async startPrivateWsSync(): Promise<void> {
+    if (this.wsStarted) return;
+    this.wsStarted = true;
+    try {
+      const creds = await this.getBybitCredentials();
+      if (!creds) {
+        this.logger.log('bybit ws disabled: no credentials');
+        return;
+      }
+      const enabledRaw = String(
+        (await this.settings.get('BYBIT_WS_SYNC_ENABLED')) ?? 'true',
+      )
+        .trim()
+        .toLowerCase();
+      if (enabledRaw === 'false' || enabledRaw === '0' || enabledRaw === 'off') {
+        this.logger.log('bybit ws sync disabled by BYBIT_WS_SYNC_ENABLED');
+        return;
+      }
+      this.wsClient = new WebsocketClient({
+        key: creds.key,
+        secret: creds.secret,
+        testnet: creds.testnet,
+      });
+      this.wsClient.subscribeV5(['order', 'position'], 'linear');
+      (this.wsClient as any).on('update', (evt: unknown) => {
+        void this.handleWsUpdate(evt);
+      });
+      (this.wsClient as any).on('open', () => {
+        this.logger.log('bybit private ws connected');
+      });
+      (this.wsClient as any).on('close', () => {
+        this.logger.warn('bybit private ws disconnected');
+      });
+      (this.wsClient as any).on('error', (err: unknown) => {
+        this.logger.warn(`bybit ws error: ${formatError(err)}`);
+      });
+    } catch (e) {
+      this.logger.warn(`bybit ws init failed: ${formatError(e)}`);
+    }
+  }
+
+  private async handleWsUpdate(evt: unknown): Promise<void> {
+    try {
+      const raw = evt as Record<string, unknown>;
+      const topic = String(raw?.topic ?? '').toLowerCase();
+      if (!topic.includes('order') && !topic.includes('position')) {
+        return;
+      }
+      await this.workers.enqueuePollSweep('bybit-ws-update');
+    } catch (e) {
+      this.logger.debug(`bybit ws update handling failed: ${formatError(e)}`);
+    }
   }
 
   /** Текущий USDT-баланс (best-effort) для внешних guard-проверок — доступные средства. */
@@ -1906,10 +1968,11 @@ export class BybitService {
   }
 
   /** Уведомление при авто‑закрытии ORDERS_PLACED после синхронизации с «чистой» биржей (без ручного closeSignalManually). */
-  private async notifyStaleReconcileTradeCancelled(
-    signalIds: string[],
-    reason: string,
-  ): Promise<void> {
+  async processTradeCancelledNotificationJob(params: {
+    signalIds: string[];
+    reason: string;
+  }): Promise<void> {
+    const { signalIds, reason } = params;
     for (const signalId of signalIds) {
       try {
         const signal = await this.orders.getSignalWithOrders(signalId);
@@ -1923,6 +1986,17 @@ export class BybitService {
         );
       }
     }
+  }
+
+  private async notifyStaleReconcileTradeCancelled(
+    signalIds: string[],
+    reason: string,
+  ): Promise<void> {
+    await this.workers.enqueueTradeCancelledNotification({
+      cabinetId: this.currentCabinetId(),
+      signalIds,
+      reason,
+    });
   }
 
   private async waitForSymbolToBeFlat(
@@ -4533,52 +4607,69 @@ export class BybitService {
         finishedAt: null,
       },
     });
-
-    this.recalcQueue = this.recalcQueue
-      .catch(() => undefined)
-      .then(async () => {
-        const current = this.recalcJobs.get(jobId);
-        if (!current) return;
-        current.status = 'running';
-        current.startedAt = new Date().toISOString();
-        await this.prisma.recalcClosedPnlJob.update({
-          where: { id: jobId },
-          data: {
-            status: 'running',
-            startedAt: new Date(current.startedAt),
-          },
-        });
-        try {
-          const result = await this.recalcClosedSignalsPnl({ dryRun, limit });
-          current.status = 'completed';
-          current.result = result;
-          current.finishedAt = new Date().toISOString();
-          await this.prisma.recalcClosedPnlJob.update({
-            where: { id: jobId },
-            data: {
-              status: 'completed',
-              finishedAt: new Date(current.finishedAt),
-              resultJson: JSON.stringify(result),
-              error: null,
-            },
-          });
-        } catch (e) {
-          current.status = 'failed';
-          current.error = formatError(e);
-          current.finishedAt = new Date().toISOString();
-          await this.prisma.recalcClosedPnlJob.update({
-            where: { id: jobId },
-            data: {
-              status: 'failed',
-              finishedAt: new Date(current.finishedAt),
-              error: current.error,
-            },
-          });
-          this.logger.error(`recalc job ${jobId} failed: ${current.error}`);
-        }
-      });
+    void this.workers.enqueueRecalcJob({
+      jobId,
+      dryRun,
+      limit,
+      cabinetId: this.currentCabinetId(),
+    });
 
     return { ...job };
+  }
+
+  async processRecalcClosedPnlQueueJob(params: {
+    jobId: string;
+    dryRun: boolean;
+    limit: number;
+  }): Promise<void> {
+    const current = this.recalcJobs.get(params.jobId);
+    if (current) {
+      current.status = 'running';
+      current.startedAt = new Date().toISOString();
+    }
+    await this.prisma.recalcClosedPnlJob.update({
+      where: { id: params.jobId },
+      data: {
+        status: 'running',
+        startedAt: new Date(),
+      },
+    });
+    try {
+      const result = await this.recalcClosedSignalsPnl({
+        dryRun: params.dryRun,
+        limit: params.limit,
+      });
+      if (current) {
+        current.status = 'completed';
+        current.result = result;
+        current.finishedAt = new Date().toISOString();
+      }
+      await this.prisma.recalcClosedPnlJob.update({
+        where: { id: params.jobId },
+        data: {
+          status: 'completed',
+          finishedAt: new Date(),
+          resultJson: JSON.stringify(result),
+          error: null,
+        },
+      });
+    } catch (e) {
+      const err = formatError(e);
+      if (current) {
+        current.status = 'failed';
+        current.error = err;
+        current.finishedAt = new Date().toISOString();
+      }
+      await this.prisma.recalcClosedPnlJob.update({
+        where: { id: params.jobId },
+        data: {
+          status: 'failed',
+          finishedAt: new Date(),
+          error: err,
+        },
+      });
+      throw e;
+    }
   }
 
   async getRecalcClosedPnlJobStatus(

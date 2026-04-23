@@ -76,6 +76,14 @@ type RunDetails = {
 };
 
 type ModelResultRow = NonNullable<RunDetails['modelResults']>[number];
+type QueueHealth = {
+  status: string;
+  queues?: {
+    execution?: Record<string, number>;
+    reconcile?: Record<string, number>;
+    notifications?: Record<string, number>;
+  };
+};
 
 function prettyJson(v: unknown): string {
   try {
@@ -107,6 +115,7 @@ export default function DiagnosticsPage() {
   const [runNowLoading, setRunNowLoading] = useState(false);
   const [limit, setLimit] = useState(5);
   const [error, setError] = useState<string | null>(null);
+  const [queueHealth, setQueueHealth] = useState<QueueHealth | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -151,6 +160,17 @@ export default function DiagnosticsPage() {
     }
   }, []);
 
+  const loadQueueHealth = useCallback(async () => {
+    try {
+      const res = await fetchApiResponse('/health/queues');
+      if (!res.ok) return;
+      const data = (await res.json()) as QueueHealth;
+      setQueueHealth(data);
+    } catch {
+      // no-op
+    }
+  }, []);
+
   const loadDetails = useCallback(async (runId: string) => {
     setLoadingDetails(true);
     setError(null);
@@ -169,7 +189,8 @@ export default function DiagnosticsPage() {
   useEffect(() => {
     if (!adminChecked) return;
     void loadRuns();
-  }, [adminChecked, loadRuns]);
+    void loadQueueHealth();
+  }, [adminChecked, loadRuns, loadQueueHealth]);
 
   useEffect(() => {
     if (!adminChecked) return;
@@ -268,6 +289,25 @@ export default function DiagnosticsPage() {
             Обновить список запусков
           </button>
         </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: '1rem' }}>
+        <h3 style={{ marginBottom: '0.75rem' }}>Очереди воркеров</h3>
+        {!queueHealth?.queues ? (
+          <p style={{ color: 'var(--muted)' }}>Нет данных по очередям.</p>
+        ) : (
+          <div style={{ display: 'grid', gap: '0.45rem', fontSize: '0.9rem' }}>
+            <div>
+              execution: {JSON.stringify(queueHealth.queues.execution ?? {})}
+            </div>
+            <div>
+              reconcile: {JSON.stringify(queueHealth.queues.reconcile ?? {})}
+            </div>
+            <div>
+              notifications: {JSON.stringify(queueHealth.queues.notifications ?? {})}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid" style={{ gridTemplateColumns: '1fr 2fr', gap: '1rem' }}>

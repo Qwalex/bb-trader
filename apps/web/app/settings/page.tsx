@@ -3,7 +3,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 
-import { TRADE_SIGNAL_NOTIFY_EVENT_OPTIONS } from '@repo/shared';
+import {
+  CABINET_SCOPED_SETTING_KEY_SET,
+  TRADE_SIGNAL_NOTIFY_EVENT_OPTIONS,
+} from '@repo/shared';
 
 import { EntrySizingControl } from '../components/EntrySizingControl';
 import { fetchApiResponse } from '../../lib/api';
@@ -211,32 +214,6 @@ const EXTRA_LABELS: Record<string, string> = {
   [DIAGNOSTIC_MODELS_KEY]: 'Модели для диагностики',
   [MODEL_HISTORY_KEY]: 'История моделей OpenRouter (автообновление)',
 };
-
-const CABINET_SCOPED_KEYS = new Set<string>([
-  'BYBIT_TESTNET',
-  'BYBIT_API_KEY_MAINNET',
-  'BYBIT_API_SECRET_MAINNET',
-  'BYBIT_API_KEY_TESTNET',
-  'BYBIT_API_SECRET_TESTNET',
-  'DEFAULT_ORDER_USD',
-  'MIN_CAPITAL_AMOUNT',
-  'BUMP_TO_MIN_EXCHANGE_LOT',
-  'DEFAULT_LEVERAGE_ENABLED',
-  'DEFAULT_LEVERAGE',
-  'FORCED_LEVERAGE',
-  'LEVERAGE_RANGE_MODE',
-  'MIN_ALLOWED_LEVERAGE',
-  'MAX_ALLOWED_LEVERAGE',
-  'SIGNAL_SOURCE',
-  'TELEGRAM_WHITELIST',
-  'TELEGRAM_NOTIFY_API_TRADE_CANCELLED',
-  'TELEGRAM_NOTIFY_TRADE_EVENTS',
-  'TELEGRAM_NOTIFY_TRADE_EVENT_TYPES',
-  'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',
-  'SOURCE_MARTINGALE_MULTIPLIERS',
-  'SOURCE_TP_SL_STEP_START',
-  'SOURCE_TP_SL_STEP_RANGE',
-]);
 
 function labelForKey(key: string): string {
   return LABEL_BY_KEY[key] ?? EXTRA_LABELS[key] ?? key;
@@ -533,7 +510,9 @@ export default function SettingsPage() {
   const visibleKeys = useMemo(
     () =>
       KEYS.filter(({ key }) =>
-        scope === 'cabinet' ? CABINET_SCOPED_KEYS.has(key) : !CABINET_SCOPED_KEYS.has(key),
+        scope === 'cabinet'
+          ? CABINET_SCOPED_SETTING_KEY_SET.has(key)
+          : !CABINET_SCOPED_SETTING_KEY_SET.has(key),
       ),
     [scope],
   );
@@ -1272,8 +1251,8 @@ export default function SettingsPage() {
               {section.keys
                 .filter((key) =>
                   scope === 'cabinet'
-                    ? CABINET_SCOPED_KEYS.has(key)
-                    : !CABINET_SCOPED_KEYS.has(key),
+                    ? CABINET_SCOPED_SETTING_KEY_SET.has(key)
+                    : !CABINET_SCOPED_SETTING_KEY_SET.has(key),
                 )
                 .map((key) => renderSettingField(key))}
             </div>

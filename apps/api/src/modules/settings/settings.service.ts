@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { CABINET_SCOPED_SETTING_KEY_SET } from '@repo/shared';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { CabinetContextService } from '../cabinet/cabinet-context.service';
@@ -39,32 +40,6 @@ const ENV_FALLBACK: Record<string, string> = {
   TP_SL_STEP_RANGE: '',
 };
 
-const CABINET_SCOPED_KEYS = new Set<string>([
-  'BYBIT_TESTNET',
-  'BYBIT_API_KEY_MAINNET',
-  'BYBIT_API_SECRET_MAINNET',
-  'BYBIT_API_KEY_TESTNET',
-  'BYBIT_API_SECRET_TESTNET',
-  'DEFAULT_ORDER_USD',
-  'MIN_CAPITAL_AMOUNT',
-  'BUMP_TO_MIN_EXCHANGE_LOT',
-  'DEFAULT_LEVERAGE_ENABLED',
-  'DEFAULT_LEVERAGE',
-  'FORCED_LEVERAGE',
-  'LEVERAGE_RANGE_MODE',
-  'MIN_ALLOWED_LEVERAGE',
-  'MAX_ALLOWED_LEVERAGE',
-  'SIGNAL_SOURCE',
-  'TELEGRAM_WHITELIST',
-  'TELEGRAM_NOTIFY_API_TRADE_CANCELLED',
-  'TELEGRAM_NOTIFY_TRADE_EVENTS',
-  'TELEGRAM_NOTIFY_TRADE_EVENT_TYPES',
-  'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',
-  'SOURCE_MARTINGALE_MULTIPLIERS',
-  'SOURCE_TP_SL_STEP_START',
-  'SOURCE_TP_SL_STEP_RANGE',
-]);
-
 @Injectable()
 export class SettingsService {
   private static readonly COMPROMISED_SECRET_KEYS = [
@@ -85,39 +60,81 @@ export class SettingsService {
     private readonly config: ConfigService,
     private readonly cabinetContext: CabinetContextService,
   ) {}
+  private static readonly CACHE_TTL_MS = 15_000;
+  private readonly valueCache = new Map<string, { value?: string; expiresAt: number }>();
 
   private currentCabinetId(): string | null {
     return this.cabinetContext.getCabinetId();
   }
 
   private isCabinetScopedKey(key: string): boolean {
-    return CABINET_SCOPED_KEYS.has(key);
+    return CABINET_SCOPED_SETTING_KEY_SET.has(key);
+  }
+
+  private cacheKey(cabinetId: string | null, key: string): string {
+    return `${cabinetId ?? '__global__'}:${key}`;
+  }
+
+  private readCache(cabinetId: string | null, key: string): string | undefined | null {
+    const cacheKey = this.cacheKey(cabinetId, key);
+    const hit = this.valueCache.get(cacheKey);
+    if (!hit) return null;
+    if (Date.now() > hit.expiresAt) {
+      this.valueCache.delete(cacheKey);
+      return null;
+    }
+    return hit.value;
+  }
+
+  private writeCache(cabinetId: string | null, key: string, value: string | undefined): void {
+    this.valueCache.set(this.cacheKey(cabinetId, key), {
+      value,
+      expiresAt: Date.now() + SettingsService.CACHE_TTL_MS,
+    });
+  }
+
+  private invalidateCacheForKey(key: string): void {
+    for (const k of this.valueCache.keys()) {
+      if (k.endsWith(`:${key}`)) {
+        this.valueCache.delete(k);
+      }
+    }
   }
 
   async get(key: string): Promise<string | undefined> {
     const cabinetId = this.currentCabinetId();
+    const cached = this.readCache(cabinetId, key);
+    if (cached !== null) {
+      return cached;
+    }
     if (cabinetId && this.isCabinetScopedKey(key)) {
       const scoped = await this.prisma.cabinetSetting.findUnique({
         where: { cabinetId_key: { cabinetId, key } },
         select: { value: true },
       });
       if (scoped?.value !== undefined && scoped.value !== '') {
+        this.writeCache(cabinetId, key, scoped.value);
         return scoped.value;
       }
     }
     const row = await this.prisma.setting.findUnique({ where: { key } });
     if (row?.value !== undefined && row?.value !== '') {
+      this.writeCache(cabinetId, key, row.value);
       return row.value;
     }
     const fromEnv = this.config.get<string>(key);
     if (fromEnv !== undefined && fromEnv !== '') {
+      this.writeCache(cabinetId, key, fromEnv);
       return fromEnv;
     }
     const fromProcess = process.env[key];
     if (fromProcess !== undefined && fromProcess !== '') {
+      this.writeCache(cabinetId, key, fromProcess);
       return fromProcess;
     }
-    return ENV_FALLBACK[key];
+    const fallback = ENV_FALLBACK[key];
+    this.writeCache(cabinetId, key, fallback);
+    return fallback;
   }
 
   /**
@@ -238,6 +255,7 @@ export class SettingsService {
         create: { cabinetId, key, value: normalized },
         update: { value: normalized },
       });
+      this.invalidateCacheForKey(key);
       return;
     }
     await this.prisma.setting.upsert({
@@ -245,12 +263,75 @@ export class SettingsService {
       create: { key, value: normalized },
       update: { value: normalized },
     });
+    this.invalidateCacheForKey(key);
   }
 
   async getMany(keys: string[]): Promise<Record<string, string | undefined>> {
-    const out: Record<string, string | undefined> = {};
-    for (const k of keys) {
-      out[k] = await this.get(k);
+    const out: Record<string, string | undefined> = Object.create(null) as Record<
+      string,
+      string | undefined
+    >;
+    const cabinetId = this.currentCabinetId();
+    const uniqueKeys = Array.from(new Set(keys));
+    const unresolved: string[] = [];
+    for (const key of uniqueKeys) {
+      const cached = this.readCache(cabinetId, key);
+      if (cached !== null) {
+        out[key] = cached;
+      } else {
+        unresolved.push(key);
+      }
+    }
+    if (unresolved.length === 0) {
+      return out;
+    }
+    const scopedKeys =
+      cabinetId != null ? unresolved.filter((k) => this.isCabinetScopedKey(k)) : [];
+    const [globalRows, scopedRows]: [
+      Array<{ key: string; value: string }>,
+      Array<{ key: string; value: string }>,
+    ] = await Promise.all([
+      this.prisma.setting.findMany({
+        where: { key: { in: unresolved } },
+        select: { key: true, value: true },
+      }),
+      cabinetId && scopedKeys.length > 0
+        ? this.prisma.cabinetSetting.findMany({
+            where: { cabinetId, key: { in: scopedKeys } },
+            select: { key: true, value: true },
+          })
+        : Promise.resolve([] as Array<{ key: string; value: string }>),
+    ]);
+    const globalMap = new Map(globalRows.map((row) => [row.key, row.value]));
+    const scopedMap = new Map(scopedRows.map((row) => [row.key, row.value]));
+    for (const key of unresolved) {
+      const scoped = scopedMap.get(key);
+      if (scoped !== undefined && scoped !== '') {
+        out[key] = scoped;
+        this.writeCache(cabinetId, key, scoped);
+        continue;
+      }
+      const global = globalMap.get(key);
+      if (global !== undefined && global !== '') {
+        out[key] = global;
+        this.writeCache(cabinetId, key, global);
+        continue;
+      }
+      const fromEnv = this.config.get<string>(key);
+      if (fromEnv !== undefined && fromEnv !== '') {
+        out[key] = fromEnv;
+        this.writeCache(cabinetId, key, fromEnv);
+        continue;
+      }
+      const fromProcess = process.env[key];
+      if (fromProcess !== undefined && fromProcess !== '') {
+        out[key] = fromProcess;
+        this.writeCache(cabinetId, key, fromProcess);
+        continue;
+      }
+      const fallback = ENV_FALLBACK[key];
+      out[key] = fallback;
+      this.writeCache(cabinetId, key, fallback);
     }
     return out;
   }

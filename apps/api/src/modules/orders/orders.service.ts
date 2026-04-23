@@ -282,30 +282,31 @@ export class OrdersService {
       );
     }
 
-    if (normalizedChat && normalizedMsg) {
-      const conflict = await this.prisma.signal.findFirst({
-        where: this.withCabinetScope({
-          id: { not: signalId },
-          deletedAt: null,
+    await this.prisma.$transaction(async (tx) => {
+      if (normalizedChat && normalizedMsg) {
+        const conflict = await tx.signal.findFirst({
+          where: this.withCabinetScope({
+            id: { not: signalId },
+            deletedAt: null,
+            sourceChatId: normalizedChat,
+            sourceMessageId: normalizedMsg,
+            status: { in: ['PENDING', 'ORDERS_PLACED', 'OPEN', 'PARSED'] },
+          }),
+          select: { id: true },
+        });
+        if (conflict) {
+          throw new BadRequestException(
+            `Уже есть активная сделка, привязанная к этому сообщению (${conflict.id.slice(0, 8)}…)`,
+          );
+        }
+      }
+      await tx.signal.updateMany({
+        where: this.withCabinetScope({ id: signalId }),
+        data: {
           sourceChatId: normalizedChat,
           sourceMessageId: normalizedMsg,
-          status: { in: ['PENDING', 'ORDERS_PLACED', 'OPEN', 'PARSED'] },
-        }),
-        select: { id: true },
+        },
       });
-      if (conflict) {
-        throw new BadRequestException(
-          `Уже есть активная сделка, привязанная к этому сообщению (${conflict.id.slice(0, 8)}…)`,
-        );
-      }
-    }
-
-    await this.prisma.signal.updateMany({
-      where: this.withCabinetScope({ id: signalId }),
-      data: {
-        sourceChatId: normalizedChat,
-        sourceMessageId: normalizedMsg,
-      },
     });
 
     await this.createSignalEvent(signalId, 'TELEGRAM_LINK_UPDATED', {
