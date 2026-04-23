@@ -143,7 +143,9 @@ export default async function RootLayout({
             ) : null}
             {isAdmin ? <Link href={withCabinet('/my-group')}>Моя группа</Link> : null}
             <Link href={withCabinet('/filters')}>Фильтры</Link>
-            <Link href={withCabinet('/settings')}>Настройки</Link>
+            <Link href={withCabinet('/settings?scope=cabinet')}>Настройки кабинета</Link>
+            <Link href="/settings?scope=account">Настройки аккаунта</Link>
+            {isAdmin ? <Link href="/cabinets">Кабинеты</Link> : null}
           </nav>
         </header>
         <main className="main">{children}</main>

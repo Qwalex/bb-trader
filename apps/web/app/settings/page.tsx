@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 
 import { TRADE_SIGNAL_NOTIFY_EVENT_OPTIONS } from '@repo/shared';
 
@@ -210,6 +211,32 @@ const EXTRA_LABELS: Record<string, string> = {
   [DIAGNOSTIC_MODELS_KEY]: 'Модели для диагностики',
   [MODEL_HISTORY_KEY]: 'История моделей OpenRouter (автообновление)',
 };
+
+const CABINET_SCOPED_KEYS = new Set<string>([
+  'BYBIT_TESTNET',
+  'BYBIT_API_KEY_MAINNET',
+  'BYBIT_API_SECRET_MAINNET',
+  'BYBIT_API_KEY_TESTNET',
+  'BYBIT_API_SECRET_TESTNET',
+  'DEFAULT_ORDER_USD',
+  'MIN_CAPITAL_AMOUNT',
+  'BUMP_TO_MIN_EXCHANGE_LOT',
+  'DEFAULT_LEVERAGE_ENABLED',
+  'DEFAULT_LEVERAGE',
+  'FORCED_LEVERAGE',
+  'LEVERAGE_RANGE_MODE',
+  'MIN_ALLOWED_LEVERAGE',
+  'MAX_ALLOWED_LEVERAGE',
+  'SIGNAL_SOURCE',
+  'TELEGRAM_WHITELIST',
+  'TELEGRAM_NOTIFY_API_TRADE_CANCELLED',
+  'TELEGRAM_NOTIFY_TRADE_EVENTS',
+  'TELEGRAM_NOTIFY_TRADE_EVENT_TYPES',
+  'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',
+  'SOURCE_MARTINGALE_MULTIPLIERS',
+  'SOURCE_TP_SL_STEP_START',
+  'SOURCE_TP_SL_STEP_RANGE',
+]);
 
 function labelForKey(key: string): string {
   return LABEL_BY_KEY[key] ?? EXTRA_LABELS[key] ?? key;
@@ -479,6 +506,8 @@ function buildPutOperations(saved: Row[], draft: Row[]): { key: string; value: s
 }
 
 export default function SettingsPage() {
+  const searchParams = useSearchParams();
+  const scope = searchParams.get('scope') === 'account' ? 'account' : 'cabinet';
   const [savedRows, setSavedRows] = useState<Row[]>([]);
   const [draftRows, setDraftRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
@@ -498,9 +527,21 @@ export default function SettingsPage() {
   const [newExcludedSource, setNewExcludedSource] = useState('');
   const [newDiagnosticModel, setNewDiagnosticModel] = useState('');
 
+  const apiFetchScoped = (path: string, init?: RequestInit) =>
+    fetchApiResponse(path, init, scope === 'account' ? '' : undefined);
+
+  const visibleKeys = useMemo(
+    () =>
+      KEYS.filter(({ key }) =>
+        scope === 'cabinet' ? CABINET_SCOPED_KEYS.has(key) : !CABINET_SCOPED_KEYS.has(key),
+      ),
+    [scope],
+  );
+  const visibleKeySet = useMemo(() => new Set<string>(visibleKeys.map(({ key }) => key)), [visibleKeys]);
+
   async function loadSettings() {
     try {
-      const res = await fetchApiResponse('/settings/raw');
+      const res = await apiFetchScoped('/settings/raw');
       if (!res.ok) throw new Error(String(res.status));
       const j = (await res.json()) as {
         settings: Row[];
@@ -537,12 +578,18 @@ export default function SettingsPage() {
         setAuthChecking(false);
       }
     })();
-  }, []);
+  }, [scope]);
 
-  const pendingChanges = useMemo(
-    () => collectPendingChanges(savedRows, draftRows),
-    [savedRows, draftRows],
-  );
+  const pendingChanges = useMemo(() => {
+    const all = collectPendingChanges(savedRows, draftRows);
+    return all.filter((c) => {
+      if (visibleKeySet.has(c.key)) return true;
+      if (scope === 'account') {
+        return c.key === 'SOURCE_LIST' || c.key === 'SOURCE_EXCLUDE_LIST' || c.key === DIAGNOSTIC_MODELS_KEY || c.key === MODEL_HISTORY_KEY;
+      }
+      return false;
+    });
+  }, [savedRows, draftRows, scope, visibleKeySet]);
   const hasPendingChanges = pendingChanges.length > 0;
 
   const valueForDraft = (key: string) => valueFor(draftRows, key);
@@ -619,14 +666,20 @@ export default function SettingsPage() {
   }
 
   async function saveAll() {
-    const ops = buildPutOperations(savedRows, draftRows);
+      const ops = buildPutOperations(savedRows, draftRows).filter(({ key }) => {
+        if (visibleKeySet.has(key)) return true;
+        if (scope === 'account') {
+          return key === 'SOURCE_LIST' || key === 'SOURCE_EXCLUDE_LIST' || key === DIAGNOSTIC_MODELS_KEY || key === MODEL_HISTORY_KEY;
+        }
+        return false;
+      });
     if (ops.length === 0) return;
     setSaving(true);
     setMessage(null);
     try {
       let next = [...savedRows];
       for (const { key, value } of ops) {
-        const res = await fetchApiResponse('/settings', {
+        const res = await apiFetchScoped('/settings', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ key, value }),
@@ -687,7 +740,7 @@ export default function SettingsPage() {
     setResetting(true);
     setMessage(null);
     try {
-      const res = await fetchApiResponse('/settings/reset-database', {
+      const res = await apiFetchScoped('/settings/reset-database', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ confirm: true }),
@@ -764,7 +817,7 @@ export default function SettingsPage() {
     setResettingStats(true);
     setMessage(null);
     try {
-      const res = await fetchApiResponse('/orders/reset-stats', {
+      const res = await apiFetchScoped('/orders/reset-stats', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ confirm: true }),
@@ -1185,12 +1238,22 @@ export default function SettingsPage() {
 
   return (
     <>
-      <h1 className="pageTitle">Настройки</h1>
+      <h1 className="pageTitle">
+        {scope === 'account' ? 'Настройки аккаунта (глобальные)' : 'Настройки кабинета'}
+      </h1>
       <p style={{ color: 'var(--muted)', marginBottom: '1rem' }}>
-        Значения хранятся в SQLite на сервере API. Чувствительные поля не
-        отображаются в списке GET /settings (только в raw для этой страницы).
-        Изменения применяются на сервере только после нажатия «Сохранить».
+        Значения хранятся в SQLite на сервере API. Глобальные настройки работают как
+        значения по умолчанию для всех кабинетов, а в режиме кабинета меняются только
+        cabinet-scoped override-поля.
       </p>
+      <div style={{ display: 'flex', gap: '0.6rem', marginBottom: '0.9rem' }}>
+        <a className={`btn ${scope === 'cabinet' ? '' : 'btnSecondary'}`} href={withAppBasePath('/settings?scope=cabinet')}>
+          Режим: Кабинет
+        </a>
+        <a className={`btn ${scope === 'account' ? '' : 'btnSecondary'}`} href={withAppBasePath('/settings?scope=account')}>
+          Режим: Аккаунт (глобально)
+        </a>
+      </div>
       {message && (
         <p className={`msg ${message.type === 'ok' ? 'ok' : 'err'}`}>
           {message.text}
@@ -1206,11 +1269,18 @@ export default function SettingsPage() {
           <details key={section.id} className="card">
             <summary className="settingsSectionSummary">{section.title}</summary>
             <div className="settingsForm" style={{ marginTop: '0.9rem' }}>
-              {section.keys.map((key) => renderSettingField(key))}
+              {section.keys
+                .filter((key) =>
+                  scope === 'cabinet'
+                    ? CABINET_SCOPED_KEYS.has(key)
+                    : !CABINET_SCOPED_KEYS.has(key),
+                )
+                .map((key) => renderSettingField(key))}
             </div>
           </details>
         ))}
 
+        {scope === 'account' ? (
         <details className="card">
           <summary className="settingsSectionSummary">Источники и исключения</summary>
           <div style={{ marginTop: '0.9rem' }}>
@@ -1332,7 +1402,9 @@ export default function SettingsPage() {
             </div>
           </div>
         </details>
+        ) : null}
 
+        {scope === 'account' ? (
         <details className="card">
           <summary className="settingsSectionSummary">Модели для диагностики</summary>
           <div style={{ marginTop: '0.9rem' }}>
@@ -1390,6 +1462,7 @@ export default function SettingsPage() {
             )}
           </div>
         </details>
+        ) : null}
 
         <details className="card">
           <summary className="settingsSectionSummary">Опасная зона</summary>
@@ -1399,22 +1472,26 @@ export default function SettingsPage() {
               БД удаляет сигналы, ордера, логи и настройки в SQLite.
             </p>
             <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                className="btn btnSecondary"
-                disabled={resettingStats}
-                onClick={() => void resetStats()}
-              >
-                {resettingStats ? 'Сброс статистики…' : 'Сбросить статистику'}
-              </button>
-              <button
-                type="button"
-                className="btnDanger"
-                disabled={resetting}
-                onClick={() => void resetDatabase()}
-              >
-                {resetting ? 'Сброс…' : 'Сбросить базу данных'}
-              </button>
+              {scope === 'cabinet' ? (
+                <button
+                  type="button"
+                  className="btn btnSecondary"
+                  disabled={resettingStats}
+                  onClick={() => void resetStats()}
+                >
+                  {resettingStats ? 'Сброс статистики…' : 'Сбросить статистику кабинета'}
+                </button>
+              ) : null}
+              {scope === 'account' ? (
+                <button
+                  type="button"
+                  className="btnDanger"
+                  disabled={resetting}
+                  onClick={() => void resetDatabase()}
+                >
+                  {resetting ? 'Сброс…' : 'Сбросить всю базу данных'}
+                </button>
+              ) : null}
             </div>
           </div>
         </details>

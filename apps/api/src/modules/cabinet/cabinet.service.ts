@@ -134,6 +134,101 @@ export class CabinetService implements OnModuleInit {
     }
     return [await this.getDefaultCabinetId()];
   }
+
+  private normalizeSlug(value: string): string {
+    return String(value ?? '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60);
+  }
+
+  async createCabinet(params: {
+    name: string;
+    slug?: string;
+  }): Promise<{ id: string; slug: string; name: string; isDefault: boolean }> {
+    const name = String(params.name ?? '').trim();
+    if (!name) {
+      throw new Error('Cabinet name is required');
+    }
+    const baseSlug = this.normalizeSlug(params.slug ?? name);
+    if (!baseSlug) {
+      throw new Error('Cabinet slug is invalid');
+    }
+    let slug = baseSlug;
+    let idx = 2;
+    for (;;) {
+      const exists = await this.prisma.cabinet.findUnique({
+        where: { slug },
+        select: { id: true },
+      });
+      if (!exists) break;
+      slug = `${baseSlug}-${idx}`;
+      idx += 1;
+      if (idx > 1000) {
+        throw new Error('Unable to generate unique cabinet slug');
+      }
+    }
+    return this.prisma.cabinet.create({
+      data: {
+        name,
+        slug,
+        isDefault: false,
+      },
+      select: {
+        id: true,
+        slug: true,
+        name: true,
+        isDefault: true,
+      },
+    });
+  }
+
+  async updateCabinet(params: {
+    id: string;
+    name?: string;
+    slug?: string;
+  }): Promise<{ id: string; slug: string; name: string; isDefault: boolean }> {
+    const id = String(params.id ?? '').trim();
+    if (!id) throw new Error('Cabinet id is required');
+    const data: { name?: string; slug?: string } = {};
+    if (params.name != null) {
+      const name = String(params.name).trim();
+      if (!name) throw new Error('Cabinet name is invalid');
+      data.name = name;
+    }
+    if (params.slug != null) {
+      const slug = this.normalizeSlug(params.slug);
+      if (!slug) throw new Error('Cabinet slug is invalid');
+      data.slug = slug;
+    }
+    return this.prisma.cabinet.update({
+      where: { id },
+      data,
+      select: {
+        id: true,
+        slug: true,
+        name: true,
+        isDefault: true,
+      },
+    });
+  }
+
+  async deleteCabinet(idRaw: string): Promise<{ ok: true }> {
+    const id = String(idRaw ?? '').trim();
+    if (!id) throw new Error('Cabinet id is required');
+    const cabinet = await this.prisma.cabinet.findUnique({
+      where: { id },
+      select: { id: true, isDefault: true },
+    });
+    if (!cabinet) throw new Error('Cabinet not found');
+    if (cabinet.isDefault) {
+      throw new Error('Default cabinet cannot be deleted');
+    }
+    await this.prisma.cabinet.delete({ where: { id } });
+    return { ok: true };
+  }
 }
 
 export { DEFAULT_CABINET_ID };
