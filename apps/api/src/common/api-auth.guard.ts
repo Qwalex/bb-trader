@@ -1,15 +1,14 @@
 import {
   CanActivate,
   ExecutionContext,
-  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
 
-import { parseCorsOrigins } from './cors-origins.util';
 import { IS_PUBLIC_ENDPOINT_KEY } from './public.decorator';
+import { verifySharedAuthToken } from './shared-auth-token';
 
 @Injectable()
 export class ApiAuthGuard implements CanActivate {
@@ -30,26 +29,28 @@ export class ApiAuthGuard implements CanActivate {
     const req = context.switchToHttp().getRequest<{
       headers?: Record<string, string | string[] | undefined>;
     }>();
-    const expectedToken =
-      this.config.get<string>('API_ACCESS_TOKEN')?.trim() ?? '';
+    const authSecret =
+      this.config.get<string>('AUTH_JWT_SECRET')?.trim() ??
+      this.config.get<string>('API_ACCESS_TOKEN')?.trim() ??
+      '';
+    if (!authSecret) {
+      throw new UnauthorizedException('Auth is not configured');
+    }
     const rawHeader = req.headers?.authorization;
     const authHeader = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
-    const token = this.extractBearerToken(authHeader);
-
-    if (expectedToken && token === expectedToken) {
-      return true;
-    }
-
-    if (!expectedToken) {
-      this.assertSameOriginBrowserRequest(req.headers);
-      return true;
-    }
-
+    const token =
+      this.extractBearerToken(authHeader) ??
+      this.extractTokenFromCookieHeader(req.headers?.cookie);
     if (!token) {
-      this.assertSameOriginBrowserRequest(req.headers);
+      throw new UnauthorizedException('Missing auth token');
+    }
+    const payload = verifySharedAuthToken({
+      token,
+      secret: authSecret,
+    });
+    if (payload) {
       return true;
     }
-
     throw new UnauthorizedException('Invalid API access token');
   }
 
@@ -62,56 +63,24 @@ export class ApiAuthGuard implements CanActivate {
     return match?.[1]?.trim() || null;
   }
 
-  private assertSameOriginBrowserRequest(
-    headers?: Record<string, string | string[] | undefined>,
-  ): void {
-    const pick = (key: string): string => {
-      const raw = headers?.[key];
-      const value = Array.isArray(raw) ? raw[0] : raw;
-      return String(value ?? '').trim();
-    };
-    const secFetchSite = pick('sec-fetch-site').toLowerCase();
-    if (
-      secFetchSite === 'same-origin' ||
-      secFetchSite === 'same-site' ||
-      secFetchSite === 'none'
-    ) {
-      return;
-    }
-
-    const originHeader = pick('origin');
-    if (originHeader) {
-      const normalizedOrigin = originHeader.trim().replace(/\/+$/, '');
-      const allowed = parseCorsOrigins(
-        this.config.get<string>('API_CORS_ORIGINS'),
-      );
-      if (allowed.includes(normalizedOrigin)) {
-        return;
-      }
-    }
-
-    const host = pick('host').toLowerCase();
-    if (!host) {
-      throw new ForbiddenException('API access denied: missing host header');
-    }
-    const expectedHost = host.split(',')[0]?.trim() ?? host;
-    const parseHost = (value: string): string | null => {
-      if (!value) return null;
+  private extractTokenFromCookieHeader(
+    value?: string | string[],
+  ): string | null {
+    const raw = Array.isArray(value) ? value[0] : value;
+    const text = String(raw ?? '').trim();
+    if (!text) return null;
+    for (const part of text.split(';')) {
+      const [k, ...rest] = part.split('=');
+      if (String(k ?? '').trim() !== 'sb_auth_token') continue;
+      const v = rest.join('=').trim();
+      if (!v) return null;
       try {
-        return new URL(value).host.toLowerCase();
+        return decodeURIComponent(v);
       } catch {
-        return null;
+        return v;
       }
-    };
-    const originHost = parseHost(pick('origin'));
-    const refererHost = parseHost(pick('referer'));
-    const sameOrigin =
-      (originHost != null && originHost === expectedHost) ||
-      (refererHost != null && refererHost === expectedHost);
-    if (!sameOrigin) {
-      throw new ForbiddenException(
-        'API доступен только с того же host, с origin из API_CORS_ORIGINS или с валидным API токеном',
-      );
     }
+    return null;
   }
+
 }

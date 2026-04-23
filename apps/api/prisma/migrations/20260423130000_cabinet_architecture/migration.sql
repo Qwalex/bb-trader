@@ -91,6 +91,11 @@ ALTER TABLE "TgUserbotPublishGroup" ADD COLUMN "cabinetId" TEXT;
 -- AlterTable
 ALTER TABLE "TgUserbotMirrorMessage" ADD COLUMN "cabinetId" TEXT;
 
+-- Pre-create unique indexes used by ON CONFLICT in backfill inserts
+CREATE UNIQUE INDEX "CabinetSetting_cabinetId_key_key" ON "CabinetSetting"("cabinetId", "key");
+CREATE UNIQUE INDEX "CabinetTelegramSource_cabinetId_chatId_key" ON "CabinetTelegramSource"("cabinetId", "chatId");
+CREATE UNIQUE INDEX "CabinetIngestRoute_cabinetId_ingestId_key" ON "CabinetIngestRoute"("cabinetId", "ingestId");
+
 -- Seed default cabinet
 INSERT INTO "Cabinet" ("id", "slug", "name", "isDefault", "createdAt", "updatedAt")
 VALUES ('cab_main', 'main', 'Main', true, NOW(), NOW())
@@ -189,13 +194,10 @@ CREATE INDEX "Cabinet_isDefault_idx" ON "Cabinet"("isDefault");
 CREATE UNIQUE INDEX "CabinetMember_cabinetId_telegramUserId_key" ON "CabinetMember"("cabinetId", "telegramUserId");
 CREATE INDEX "CabinetMember_telegramUserId_isActive_idx" ON "CabinetMember"("telegramUserId", "isActive");
 
-CREATE UNIQUE INDEX "CabinetSetting_cabinetId_key_key" ON "CabinetSetting"("cabinetId", "key");
 CREATE INDEX "CabinetSetting_cabinetId_updatedAt_idx" ON "CabinetSetting"("cabinetId", "updatedAt");
 
-CREATE UNIQUE INDEX "CabinetTelegramSource_cabinetId_chatId_key" ON "CabinetTelegramSource"("cabinetId", "chatId");
 CREATE INDEX "CabinetTelegramSource_chatId_enabled_idx" ON "CabinetTelegramSource"("chatId", "enabled");
 
-CREATE UNIQUE INDEX "CabinetIngestRoute_cabinetId_ingestId_key" ON "CabinetIngestRoute"("cabinetId", "ingestId");
 CREATE INDEX "CabinetIngestRoute_ingestId_createdAt_idx" ON "CabinetIngestRoute"("ingestId", "createdAt");
 CREATE INDEX "CabinetIngestRoute_cabinetId_createdAt_idx" ON "CabinetIngestRoute"("cabinetId", "createdAt");
 

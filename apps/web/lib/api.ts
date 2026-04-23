@@ -34,6 +34,21 @@ function getClientCabinetId(): string | undefined {
   return undefined;
 }
 
+function getClientTokenFromCookie(): string | undefined {
+  if (typeof window === 'undefined') return undefined;
+  const raw = document.cookie
+    .split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith('sb_auth_token='))
+    ?.slice('sb_auth_token='.length);
+  if (!raw) return undefined;
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
 export function withCabinetQuery(path: string, cabinetId?: string | null): string {
   const id = String(cabinetId ?? '').trim();
   if (!id) return path;
@@ -57,7 +72,8 @@ export function getApiAuthHeaders(init?: HeadersInit): Headers {
   const token = isServer
     ? (process.env.API_ACCESS_TOKEN?.trim() ??
       process.env.NEXT_PUBLIC_API_ACCESS_TOKEN?.trim())
-    : process.env.NEXT_PUBLIC_API_ACCESS_TOKEN?.trim();
+    : getClientTokenFromCookie() ??
+      process.env.NEXT_PUBLIC_API_ACCESS_TOKEN?.trim();
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
   }
@@ -73,6 +89,17 @@ export async function fetchJson<T>(
     cabinetId ?? getClientCabinetId() ?? '',
   ).trim();
   const headers = new Headers(getApiAuthHeaders(init?.headers ?? undefined));
+  if (typeof window === 'undefined' && !headers.has('Authorization')) {
+    try {
+      const { cookies } = await import('next/headers');
+      const serverToken = (await cookies()).get('sb_auth')?.value?.trim();
+      if (serverToken) {
+        headers.set('Authorization', `Bearer ${serverToken}`);
+      }
+    } catch {
+      // no-op outside Next server runtime
+    }
+  }
   if (effectiveCabinetId) {
     headers.set('x-cabinet-id', effectiveCabinetId);
   }

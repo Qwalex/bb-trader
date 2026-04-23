@@ -484,6 +484,7 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [authChecking, setAuthChecking] = useState(true);
   const [authenticated, setAuthenticated] = useState(false);
+  const [authLogin, setAuthLogin] = useState('');
   const [authPassword, setAuthPassword] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
   const [authSubmitting, setAuthSubmitting] = useState(false);
@@ -517,18 +518,12 @@ export default function SettingsPage() {
   useEffect(() => {
     void (async () => {
       try {
-        const res = await fetch(withAppBasePath('/api/settings-auth'));
+        const res = await fetch(withAppBasePath('/api/auth'));
         if (!res.ok) throw new Error(String(res.status));
         const j = (await res.json()) as {
           authenticated: boolean;
           enabled?: boolean;
         };
-        if (j.enabled === false) {
-          setAuthError('Пароль не настроен на web-сервере (SETTINGS_PAGE_PASSWORD)');
-          setAuthenticated(false);
-          setLoading(false);
-          return;
-        }
         setAuthenticated(Boolean(j.authenticated));
         if (j.authenticated) {
           await loadSettings();
@@ -790,10 +785,10 @@ export default function SettingsPage() {
     setAuthSubmitting(true);
     setAuthError(null);
     try {
-      const res = await fetch(withAppBasePath('/api/settings-auth'), {
+      const res = await fetch(withAppBasePath('/api/auth'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: authPassword }),
+        body: JSON.stringify({ login: authLogin, password: authPassword }),
       });
       if (!res.ok) {
         const j = (await res.json().catch(() => null)) as { message?: string } | null;
@@ -811,7 +806,7 @@ export default function SettingsPage() {
   }
 
   async function logout() {
-    await fetch(withAppBasePath('/api/settings-auth'), { method: 'DELETE' }).catch(
+    await fetch(withAppBasePath('/api/auth'), { method: 'DELETE' }).catch(
       () => undefined,
     );
     setAuthenticated(false);
@@ -828,10 +823,18 @@ export default function SettingsPage() {
         <h1 className="pageTitle">Настройки</h1>
         <div className="card settingsAuthCard">
           <p style={{ color: 'var(--muted)', marginBottom: '0.75rem' }}>
-            Страница защищена паролем.
+            Войдите в общий аккаунт.
           </p>
           {authError && <p className="msg err">{authError}</p>}
           <div className="settingsAuthForm">
+            <input
+              className="settingsAuthInput"
+              type="text"
+              value={authLogin}
+              autoComplete="username"
+              placeholder="Введите логин"
+              onChange={(e) => setAuthLogin(e.target.value)}
+            />
             <input
               className="settingsAuthInput"
               type="password"
@@ -840,7 +843,12 @@ export default function SettingsPage() {
               placeholder="Введите пароль"
               onChange={(e) => setAuthPassword(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && !authSubmitting && authPassword.trim()) {
+                if (
+                  e.key === 'Enter' &&
+                  !authSubmitting &&
+                  authPassword.trim() &&
+                  authLogin.trim()
+                ) {
                   void submitPassword();
                 }
               }}
@@ -848,7 +856,7 @@ export default function SettingsPage() {
             <button
               type="button"
               className="btn"
-              disabled={authSubmitting || !authPassword.trim()}
+              disabled={authSubmitting || !authPassword.trim() || !authLogin.trim()}
               onClick={() => void submitPassword()}
             >
               {authSubmitting ? 'Проверка…' : 'Войти'}

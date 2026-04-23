@@ -37,6 +37,14 @@ async function bootstrap() {
     .setDescription('REST API для SignalsBot (NestJS)')
     .setVersion('1.0')
     .addServer(swaggerServer, 'Proxy base path')
+    .addBearerAuth(
+      {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'Token',
+      },
+      'bearer',
+    )
     .build();
   const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('docs', app, swaggerDocument, {

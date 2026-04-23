@@ -9,6 +9,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { CabinetContextMiddleware } from './common/cabinet-context.middleware';
 import { AppLogModule } from './modules/app-log/app-log.module';
+import { AuthModule } from './modules/auth/auth.module';
 import { BybitModule } from './modules/bybit/bybit.module';
 import { CabinetModule } from './modules/cabinet/cabinet.module';
 import { OrdersModule } from './modules/orders/orders.module';
@@ -56,6 +57,7 @@ function loadEnvFilePaths(): string[] {
     }),
     ScheduleModule.forRoot(),
     PrismaModule,
+    AuthModule,
     CabinetModule,
     AppLogModule,
     DiagnosticsModule,
