@@ -394,6 +394,7 @@ model Cabinet {
   updatedAt        DateTime               @updatedAt
   members          CabinetMember[]
   settings         CabinetSetting[]
+  appLogs          AppLog[]
   telegramSources  CabinetTelegramSource[]
   ingestRoutes     CabinetIngestRoute[]
   signals          Signal[]
