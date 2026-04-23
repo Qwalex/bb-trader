@@ -317,18 +317,20 @@ export class CabinetService implements OnModuleInit {
     const id = String(idRaw ?? '').trim();
     if (!id) throw new Error('Cabinet id is required');
     const ownerUserId = String(ownerUserIdRaw ?? '').trim() || null;
-    const cabinet = await this.prisma.cabinet.findUnique({
-      where: { id },
-      select: { id: true, isDefault: true, ownerUserId: true },
+    const cabinet = await this.prisma.cabinet.findFirst({
+      where: { id, ownerUserId },
+      select: { id: true, isDefault: true },
     });
     if (!cabinet) throw new Error('Cabinet not found');
-    if ((cabinet.ownerUserId ?? null) !== ownerUserId) {
-      throw new Error('Cabinet not found');
-    }
     if (cabinet.isDefault) {
       throw new Error('Default cabinet cannot be deleted');
     }
-    await this.prisma.cabinet.delete({ where: { id } });
+    const deleted = await this.prisma.cabinet.deleteMany({
+      where: { id, ownerUserId },
+    });
+    if (deleted.count === 0) {
+      throw new Error('Cabinet not found');
+    }
     return { ok: true };
   }
 }
