@@ -72,6 +72,7 @@ const MAX_DRAFT_TURN_CHARS = 1500;
 export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TelegramService.name);
   private bot: Telegraf | null = null;
+  private readonly bots = new Map<string, Telegraf>();
   private botLaunchRetryTimer: NodeJS.Timeout | null = null;
   private cleanupTimer: NodeJS.Timeout | null = null;
   private shuttingDown = false;
@@ -108,62 +109,76 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleInit(): Promise<void> {
-    const token = await this.settings.get('TELEGRAM_BOT_TOKEN');
-    if (!token) {
-      this.logger.warn('TELEGRAM_BOT_TOKEN not set — Telegram bot disabled');
+    const cabinets = await this.prisma.cabinet.findMany({
+      select: { id: true, name: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    let launched = 0;
+    let primaryBot: Telegraf | null = null;
+    for (const cabinet of cabinets) {
+      const tokenRow = await this.prisma.cabinetSetting.findUnique({
+        where: {
+          cabinetId_key: { cabinetId: cabinet.id, key: 'TELEGRAM_BOT_TOKEN' },
+        },
+        select: { value: true },
+      });
+      const token = String(tokenRow?.value ?? '').trim();
+      if (!token) {
+        continue;
+      }
+      const bot = new Telegraf(token, {
+        handlerTimeout: 180_000,
+      });
+      bot.catch((err, ctx) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        const stack = err instanceof Error ? err.stack : undefined;
+        this.logger.error(
+          `Telegraf unhandled error (cabinet=${cabinet.id}): ${msg} updateType=${ctx?.updateType ?? '?'}`,
+          stack,
+        );
+        void ctx
+          ?.reply(
+            'Произошла ошибка при обработке сообщения. Проверьте логи сервера (TelegramService).',
+          )
+          .catch((e) =>
+            this.logger.warn(`Could not reply with error to user: ${String(e)}`),
+          );
+      });
+      this.bot = bot;
+      this.registerHandlers(cabinet.id);
+      try {
+        await bot.launch();
+        this.bots.set(cabinet.id, bot);
+        if (!primaryBot) {
+          primaryBot = bot;
+        }
+        launched += 1;
+        this.logger.log(`Telegram bot started for cabinet=${cabinet.id} (${cabinet.name})`);
+      } catch (e) {
+        this.logger.error(
+          `Telegram bot launch failed for cabinet=${cabinet.id}: ${formatError(e)}`,
+        );
+      }
+    }
+    if (launched === 0) {
+      this.logger.warn(
+        'No cabinet has TELEGRAM_BOT_TOKEN in cabinet settings — assistant bots are disabled',
+      );
       return;
     }
-    /** OpenRouter до 180s; иначе Telegraf обрывал обработчик на 90s — «тишина» в чате. */
-    this.bot = new Telegraf(token, {
-      handlerTimeout: 180_000,
-    });
-
-    this.bot.catch((err, ctx) => {
-      const msg = err instanceof Error ? err.message : String(err);
-      const stack = err instanceof Error ? err.stack : undefined;
-      this.logger.error(
-        `Telegraf unhandled error: ${msg} updateType=${ctx?.updateType ?? '?'}`,
-        stack,
-      );
-      void ctx
-        ?.reply(
-          'Произошла ошибка при обработке сообщения. Проверьте логи сервера (TelegramService).',
-        )
-        .catch((e) =>
-          this.logger.warn(`Could not reply with error to user: ${String(e)}`),
-        );
-    });
-
-    this.registerHandlers();
+    this.bot = primaryBot;
     this.shuttingDown = false;
     this.startMemoryCleanupLoop();
-    void this.launchBotWithRetry();
+    await this.sendStartupGreeting();
   }
 
   /** Уведомление пользователей из whitelist при старте (нужен хотя бы один /start от пользователя ранее). */
   private async sendStartupGreeting(): Promise<void> {
-    if (!this.bot) {
+    if (this.bots.size === 0) {
       return;
     }
-
-    const raw =
-      (await this.settings.get('TELEGRAM_WHITELIST')) ??
-      process.env.TELEGRAM_WHITELIST;
-
-    this.logger.log(
-      `sendStartupGreeting: whitelist loaded=${Boolean(raw?.trim())} (length=${raw?.trim()?.length ?? 0})`,
-    );
-
-    if (!raw?.trim()) {
-      this.logger.warn(
-        'Приветствие не отправлено: TELEGRAM_WHITELIST пустой или не загружен из .env. Проверьте файл env при запуске из apps/api — должен подхватываться корень монорепо.',
-      );
-      return;
-    }
-
     const text =
       (await this.settings.get('TELEGRAM_STARTUP_MESSAGE')) ??
-      process.env.TELEGRAM_STARTUP_MESSAGE ??
       [
         'SignalsBot запущен.',
         'Отправьте сигнал текстом, фото или голосом.',
@@ -171,44 +186,50 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         'Команды: /cancel — отменить черновик.',
       ].join('\n');
 
-    const ids = raw
-      .split(/[,\s]+/)
-      .map((s) => parseInt(s.trim(), 10))
-      .filter((n) => !Number.isNaN(n));
-
-    if (ids.length === 0) {
-      this.logger.warn(
-        `TELEGRAM_WHITELIST не удалось разобрать в числовые id (raw="${raw.slice(0, 80)}"). Пример: 123456789 или 111,222`,
-      );
-      return;
-    }
-
-    try {
-      const me = await this.bot.telegram.getMe();
-      this.logger.log(
-        `sendStartupGreeting: bot @${me.username ?? '?'} (id=${me.id}), отправка в ${ids.length} чат(ов): ${ids.join(', ')}`,
-      );
-    } catch (e) {
-      this.logger.error(
-        `sendStartupGreeting: getMe failed — токен бота неверен? ${e instanceof Error ? e.message : e}`,
-      );
-      return;
-    }
-
-    await new Promise((r) => setTimeout(r, 1500));
-
-    for (const id of ids) {
+    for (const [cabinetId, bot] of this.bots.entries()) {
+      const ids = await this.getWhitelistUserIdsForCabinet(cabinetId);
+      if (ids.length === 0) {
+        continue;
+      }
       try {
-        await this.bot.telegram.sendMessage(id, text);
-        this.logger.log(`Приветствие доставлено в chat_id=${id}`);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        this.logger.error(
-          `Приветствие НЕ доставлено в chat_id=${id}: ${msg}. Часто: пользователь не нажимал /start у этого бота, заблокировал бота, или id не тот (нужен ваш user id в личке с ботом).`,
+        const me = await bot.telegram.getMe();
+        this.logger.log(
+          `sendStartupGreeting: cabinet=${cabinetId} bot @${me.username ?? '?'} (id=${me.id}), users=${ids.join(', ')}`,
         );
+      } catch (e) {
+        this.logger.error(
+          `sendStartupGreeting: getMe failed cabinet=${cabinetId}: ${e instanceof Error ? e.message : e}`,
+        );
+        continue;
+      }
+      await new Promise((r) => setTimeout(r, 500));
+      for (const id of ids) {
+        try {
+          await bot.telegram.sendMessage(id, text);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          this.logger.warn(
+            `Startup greeting failed cabinet=${cabinetId} chat_id=${id}: ${msg}`,
+          );
+        }
       }
     }
   }
+  private async getWhitelistUserIdsForCabinet(cabinetId: string): Promise<number[]> {
+    const row = await this.prisma.cabinetSetting.findUnique({
+      where: { cabinetId_key: { cabinetId, key: 'TELEGRAM_WHITELIST' } },
+      select: { value: true },
+    });
+    const raw = String(row?.value ?? '').trim();
+    if (!raw) {
+      return [];
+    }
+    return raw
+      .split(/[,\s]+/)
+      .map((s) => parseInt(s.trim(), 10))
+      .filter((n) => Number.isFinite(n));
+  }
+
 
   async onModuleDestroy(): Promise<void> {
     this.shuttingDown = true;
@@ -220,7 +241,35 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       clearTimeout(this.botLaunchRetryTimer);
       this.botLaunchRetryTimer = null;
     }
-    this.bot?.stop('SIGTERM');
+    for (const bot of this.bots.values()) {
+      bot.stop('SIGTERM');
+    }
+    this.bots.clear();
+  }
+
+  private getBotForCabinet(cabinetId: string | null): Telegraf | null {
+    if (cabinetId) {
+      const scoped = this.bots.get(cabinetId);
+      if (scoped) return scoped;
+    }
+    return this.bot;
+  }
+
+  private async getBotForTelegramUserId(telegramUserIdRaw: string): Promise<Telegraf | null> {
+    const telegramUserId = String(telegramUserIdRaw ?? '').trim();
+    if (!telegramUserId) return this.bot;
+    const authUser = await this.prisma.authUser.findFirst({
+      where: { telegramUserId },
+      select: { id: true },
+    });
+    if (!authUser?.id) return this.bot;
+    const cabinet = await this.prisma.cabinet.findFirst({
+      where: { ownerUserId: authUser.id },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+    if (!cabinet?.id) return this.bot;
+    return this.getBotForCabinet(cabinet.id);
   }
 
   async sendPasswordResetCode(params: {
@@ -229,7 +278,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     code: string;
     expiresInMinutes: number;
   }): Promise<{ ok: boolean; error?: string }> {
-    if (!this.bot) {
+    const bot = await this.getBotForTelegramUserId(params.telegramUserId);
+    if (!bot) {
       return { ok: false, error: 'Telegram bot не запущен' };
     }
     const userId = Number(params.telegramUserId);
@@ -243,7 +293,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       `Действует: ${params.expiresInMinutes} мин.\n\n` +
       `Если это были не вы — проигнорируйте сообщение.`;
     try {
-      await this.bot.telegram.sendMessage(userId, text);
+      await bot.telegram.sendMessage(userId, text);
       return { ok: true };
     } catch (e) {
       return { ok: false, error: formatError(e) };
@@ -351,7 +401,14 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
   private async isAllowed(userId: number): Promise<boolean> {
     const ids = await this.getWhitelistUserIds();
-    return ids.includes(userId);
+    if (ids.includes(userId)) {
+      return true;
+    }
+    const linkedUser = await this.prisma.authUser.findFirst({
+      where: { telegramUserId: String(userId) },
+      select: { id: true },
+    });
+    return Boolean(linkedUser?.id);
   }
 
   private makeExternalRequestKey(cabinetId: string, ingestId: string): string {
@@ -380,16 +437,11 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async getWhitelistUserIds(): Promise<number[]> {
-    const raw =
-      (await this.settings.get('TELEGRAM_WHITELIST')) ??
-      process.env.TELEGRAM_WHITELIST;
-    if (!raw?.trim()) {
+    const cabinetId = this.currentCabinetId();
+    if (!cabinetId) {
       return [];
     }
-    return raw
-      .split(/[,\s]+/)
-      .map((s) => parseInt(s.trim(), 10))
-      .filter((n) => Number.isFinite(n));
+    return this.getWhitelistUserIdsForCabinet(cabinetId);
   }
 
   /** Подпись строки входов: зона vs DCA (для текста и HTML). */
@@ -546,7 +598,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     rawMessage?: string;
     onResult?: (result: ExternalConfirmationResult) => Promise<void> | void;
   }): Promise<{ ok: boolean; requestId?: string; deliveredTo: number; error?: string }> {
-    if (!this.bot) {
+    const bot = this.getBotForCabinet(this.currentCabinetId());
+    if (!bot) {
       return { ok: false, deliveredTo: 0, error: 'Telegram bot не запущен' };
     }
     const ids = await this.getWhitelistUserIds();
@@ -571,7 +624,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const msg = this.formatExternalSignalTable(params.signal, defaultOrderUsd);
     for (const uid of ids) {
       try {
-        await this.bot.telegram.sendMessage(
+        await bot.telegram.sendMessage(
           uid,
           msg,
           this.externalConfirmKeyboard(requestId),
@@ -603,7 +656,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     error: string;
     missingData?: string[];
   }): Promise<{ ok: boolean; deliveredTo: number; error?: string }> {
-    if (!this.bot) {
+    const bot = this.getBotForCabinet(this.currentCabinetId());
+    if (!bot) {
       return { ok: false, deliveredTo: 0, error: 'Telegram bot не запущен' };
     }
     const ids = await this.getWhitelistUserIds();
@@ -636,7 +690,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     let deliveredTo = 0;
     for (const uid of ids) {
       try {
-        await this.bot.telegram.sendMessage(uid, msg);
+        await bot.telegram.sendMessage(uid, msg);
         deliveredTo += 1;
       } catch (e) {
         this.logger.warn(`notifyUserbotSignalFailure -> ${uid}: ${formatError(e)}`);
@@ -662,7 +716,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     resultMessageText: string;
     quotedSnippet?: string;
   }): Promise<{ ok: boolean; deliveredTo: number; error?: string }> {
-    if (!this.bot) {
+    const bot = this.getBotForCabinet(this.currentCabinetId());
+    if (!bot) {
       return { ok: false, deliveredTo: 0, error: 'Telegram bot не запущен' };
     }
     const ids = await this.getWhitelistUserIds();
@@ -693,7 +748,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     let deliveredTo = 0;
     for (const uid of ids) {
       try {
-        await this.bot.telegram.sendMessage(uid, msg, {
+        await bot.telegram.sendMessage(uid, msg, {
           parse_mode: 'HTML',
           ...this.staleResultCancelKeyboard(params.signalId),
         });
@@ -736,7 +791,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (explicitlyOff) {
       return { ok: true, deliveredTo: 0 };
     }
-    if (!this.bot) {
+    const bot = this.getBotForCabinet(this.currentCabinetId());
+    if (!bot) {
       return { ok: false, deliveredTo: 0, error: 'Telegram bot не запущен' };
     }
     const ids = await this.getWhitelistUserIds();
@@ -786,7 +842,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     let deliveredTo = 0;
     for (const uid of ids) {
       try {
-        await this.bot.telegram.sendMessage(uid, msg, { parse_mode: 'HTML' });
+        await bot.telegram.sendMessage(uid, msg, { parse_mode: 'HTML' });
         deliveredTo += 1;
       } catch (e) {
         this.logger.warn(`notifyApiTradeCancelled -> ${uid}: ${formatError(e)}`);
@@ -818,7 +874,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (explicitlyOff) {
       return { ok: true, deliveredTo: 0 };
     }
-    if (!this.bot) {
+    const bot = this.getBotForCabinet(this.currentCabinetId());
+    if (!bot) {
       return { ok: false, deliveredTo: 0, error: 'Telegram bot не запущен' };
     }
     const ids = await this.getWhitelistUserIds();
@@ -848,7 +905,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     let deliveredTo = 0;
     for (const uid of ids) {
       try {
-        await this.bot.telegram.sendMessage(uid, msg, { parse_mode: 'HTML' });
+        await bot.telegram.sendMessage(uid, msg, { parse_mode: 'HTML' });
         deliveredTo += 1;
       } catch (e) {
         this.logger.warn(`notifyApiTradeLiquidation -> ${uid}: ${formatError(e)}`);
@@ -899,7 +956,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (evFilter.mode === 'only' && !evFilter.types.has(params.type)) {
       return;
     }
-    if (!this.bot) {
+    const bot = this.getBotForCabinet(this.currentCabinetId());
+    if (!bot) {
       return;
     }
     const ids = await this.getWhitelistUserIds();
@@ -947,7 +1005,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     for (const uid of ids) {
       try {
-        await this.bot.telegram.sendMessage(uid, msg, { parse_mode: 'HTML' });
+        await bot.telegram.sendMessage(uid, msg, { parse_mode: 'HTML' });
       } catch (e) {
         this.logger.warn(`notifyTradeSignalEvent -> ${uid}: ${formatError(e)}`);
       }
@@ -1469,7 +1527,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  private registerHandlers(): void {
+  private registerHandlers(cabinetId: string): void {
     if (!this.bot) return;
 
     const clearInlineKeyboard = async (ctx: Context) => {
@@ -1501,15 +1559,17 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         this.logger.debug('TG: no ctx.from — пропуск (канал/системное?)');
         return next();
       }
-      const allowed = await this.isAllowed(uid);
+      const allowed = await this.cabinetContext.runWithCabinet(cabinetId, () =>
+        this.isAllowed(uid),
+      );
       if (!allowed) {
         this.logger.warn(
-          `TG: доступ запрещён userId=${uid}. Проверьте TELEGRAM_WHITELIST (и что ключ загружен из .env).`,
+          `TG: доступ запрещён userId=${uid} cabinet=${cabinetId}. Проверьте TELEGRAM_WHITELIST в настройках кабинета.`,
         );
         await ctx.reply('Доступ запрещён.');
         return;
       }
-      return this.runWithUserCabinet(uid, () => next());
+      return this.cabinetContext.runWithCabinet(cabinetId, () => next());
     });
 
     this.bot.hears(/^Сводка$/i, async (ctx) => {
