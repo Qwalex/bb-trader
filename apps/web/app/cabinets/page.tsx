@@ -159,13 +159,13 @@ export default function CabinetsPage() {
                       {item.name} {item.isDefault ? '(default)' : ''}
                     </div>
                     <div style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>
-                      id: <code>{item.id}</code>
+                      id: <code className="cabinetCode">{item.id}</code>
                     </div>
                     <div style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>
-                      slug: <code>{item.slug}</code>
+                      slug: <code className="cabinetCode">{item.slug}</code>
                     </div>
                   </div>
-                  <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                  <div className="cabinetActions">
                     <button
                       className="btn btnSecondary"
                       type="button"

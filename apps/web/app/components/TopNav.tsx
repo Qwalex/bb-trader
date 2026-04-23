@@ -31,6 +31,7 @@ export function TopNav(props: TopNavProps) {
     if (item.adminOnly && !isAdmin) return false;
     return hiddenSet.has(item.id);
   });
+  const allItems = NAV_MENU_ITEMS.filter((item) => !(item.adminOnly && !isAdmin));
 
   return (
     <header className="nav">
@@ -54,8 +55,18 @@ export function TopNav(props: TopNavProps) {
             <span className="navBurgerCaption">Активный кабинет</span>
             <CabinetSwitcher compact />
           </div>
-          <div className="navBurgerLinks">
+          <div className="navBurgerLinks navBurgerLinksDesktop">
             {hiddenItems.map((item) => (
+              <Link
+                key={item.id}
+                href={item.cabinetAware ? withCabinet(item.href) : item.href}
+              >
+                {item.label}
+              </Link>
+            ))}
+          </div>
+          <div className="navBurgerLinks navBurgerLinksMobile">
+            {allItems.map((item) => (
               <Link
                 key={item.id}
                 href={item.cabinetAware ? withCabinet(item.href) : item.href}

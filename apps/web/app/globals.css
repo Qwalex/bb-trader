@@ -118,6 +118,10 @@ a:hover {
   padding: 0.32rem 0;
 }
 
+.navBurgerLinksMobile {
+  display: none;
+}
+
 .cabinetSwitcher {
   display: inline-flex;
   align-items: center;
@@ -159,6 +163,21 @@ a:hover {
   display: flex;
   justify-content: space-between;
   gap: 0.7rem;
+  min-width: 0;
+}
+
+.cabinetActions {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.cabinetCode {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 @media (max-width: 860px) {
@@ -1718,14 +1737,29 @@ h1.pageTitle {
   }
 
   .navLinks {
+    display: none;
     gap: 0.35rem 0.75rem;
   }
 
-  .navLinks a {
-    display: inline-flex;
-    align-items: center;
-    min-height: 44px;
-    padding: 0.2rem 0;
+  .navBurgerLinksDesktop {
+    display: none;
+  }
+
+  .navBurgerLinksMobile {
+    display: grid;
+  }
+
+  .cabinetListRow {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .cabinetActions {
+    width: 100%;
+  }
+
+  .cabinetActions button {
+    flex: 1 1 auto;
   }
 
   h1.pageTitle {
@@ -1911,15 +1945,9 @@ h1.pageTitle {
 }
 
 @media (max-width: 480px) {
-  .navLinks {
-    max-width: calc(100vw - 170px);
-    overflow-x: auto;
-    white-space: nowrap;
-  }
-
-  .navLinks a {
-    flex: 0 0 auto;
-    white-space: nowrap;
+  .cabinetActions {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .grid {
