@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 
 import { fetchApiResponse } from '../../lib/api';
 
@@ -13,8 +12,6 @@ type CabinetItem = {
 };
 
 export default function CabinetsPage() {
-  const router = useRouter();
-  const [adminChecked, setAdminChecked] = useState(false);
   const [items, setItems] = useState<CabinetItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
@@ -34,27 +31,8 @@ export default function CabinetsPage() {
   }
 
   useEffect(() => {
-    void (async () => {
-      try {
-        const res = await fetch('/api/auth', { cache: 'no-store' });
-        const json = (await res.json().catch(() => null)) as
-          | { authenticated?: boolean; role?: string }
-          | null;
-        const ok =
-          Boolean(json?.authenticated) &&
-          String(json?.role ?? '').trim().toLowerCase() === 'admin';
-        if (!ok) {
-          router.replace('/');
-          return;
-        }
-        await loadAll();
-      } catch {
-        router.replace('/');
-      } finally {
-        setAdminChecked(true);
-      }
-    })();
-  }, [router]);
+    void loadAll();
+  }, []);
 
   async function createCabinet() {
     const trimmedName = name.trim();
@@ -129,10 +107,6 @@ export default function CabinetsPage() {
     } finally {
       setBusy(null);
     }
-  }
-
-  if (!adminChecked) {
-    return <p style={{ color: 'var(--muted)' }}>Проверка доступа…</p>;
   }
 
   return (

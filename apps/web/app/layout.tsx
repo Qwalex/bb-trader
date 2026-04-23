@@ -145,7 +145,7 @@ export default async function RootLayout({
             <Link href={withCabinet('/filters')}>Фильтры</Link>
             <Link href={withCabinet('/settings?scope=cabinet')}>Настройки кабинета</Link>
             <Link href="/settings?scope=account">Настройки аккаунта</Link>
-            {isAdmin ? <Link href="/cabinets">Кабинеты</Link> : null}
+            <Link href="/cabinets">Кабинеты</Link>
           </nav>
         </header>
         <main className="main">{children}</main>
