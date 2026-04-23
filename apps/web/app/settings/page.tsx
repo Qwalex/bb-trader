@@ -584,7 +584,10 @@ export default function SettingsPage() {
     return all.filter((c) => {
       if (visibleKeySet.has(c.key)) return true;
       if (scope === 'account') {
-        return c.key === 'SOURCE_LIST' || c.key === 'SOURCE_EXCLUDE_LIST' || c.key === DIAGNOSTIC_MODELS_KEY || c.key === MODEL_HISTORY_KEY;
+        return c.key === DIAGNOSTIC_MODELS_KEY || c.key === MODEL_HISTORY_KEY;
+      }
+      if (scope === 'cabinet') {
+        return c.key === 'SOURCE_LIST' || c.key === 'SOURCE_EXCLUDE_LIST';
       }
       return false;
     });
@@ -668,7 +671,10 @@ export default function SettingsPage() {
       const ops = buildPutOperations(savedRows, draftRows).filter(({ key }) => {
         if (visibleKeySet.has(key)) return true;
         if (scope === 'account') {
-          return key === 'SOURCE_LIST' || key === 'SOURCE_EXCLUDE_LIST' || key === DIAGNOSTIC_MODELS_KEY || key === MODEL_HISTORY_KEY;
+          return key === DIAGNOSTIC_MODELS_KEY || key === MODEL_HISTORY_KEY;
+        }
+        if (scope === 'cabinet') {
+          return key === 'SOURCE_LIST' || key === 'SOURCE_EXCLUDE_LIST';
         }
         return false;
       });
@@ -1329,7 +1335,7 @@ export default function SettingsPage() {
           </details>
         ))}
 
-        {scope === 'account' ? (
+        {scope === 'cabinet' ? (
         <details className="card">
           <summary className="settingsSectionSummary">Источники и исключения</summary>
           <div style={{ marginTop: '0.9rem' }}>
