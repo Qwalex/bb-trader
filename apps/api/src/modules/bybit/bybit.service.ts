@@ -6,6 +6,7 @@ import { normalizeTradingPair, type SignalDto } from '@repo/shared';
 import { formatError } from '../../common/format-error';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppLogService } from '../app-log/app-log.service';
+import { CabinetContextService } from '../cabinet/cabinet-context.service';
 import { OrdersService } from '../orders/orders.service';
 import { resolveForcedLeverageWithChatOverride } from '../settings/forced-leverage.util';
 import {
@@ -189,6 +190,7 @@ export class BybitService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly settings: SettingsService,
+    private readonly cabinetContext: CabinetContextService,
     @Inject(forwardRef(() => OrdersService))
     private readonly orders: OrdersService,
     @Inject(forwardRef(() => TelegramService))
@@ -198,6 +200,10 @@ export class BybitService {
     private readonly appLog: AppLogService,
   ) {}
 
+  private currentCabinetId(): string | null {
+    return this.cabinetContext.getCabinetId();
+  }
+
   /**
    * Глобально: BUMP_TO_MIN_EXCHANGE_LOT (по умолчанию false).
    * По чату userbot: minLotBump — если задан, перекрывает глобальное значение.
@@ -205,6 +211,16 @@ export class BybitService {
   private async resolveBumpToMinExchangeLot(chatId?: string): Promise<boolean> {
     const trimmed = chatId?.trim();
     if (trimmed) {
+      const cabinetId = this.currentCabinetId();
+      if (cabinetId) {
+        const scoped = await this.prisma.cabinetTelegramSource.findUnique({
+          where: { cabinetId_chatId: { cabinetId, chatId: trimmed } },
+          select: { minLotBump: true },
+        });
+        if (scoped?.minLotBump != null) {
+          return scoped.minLotBump;
+        }
+      }
       const row = await this.prisma.tgUserbotChat.findUnique({
         where: { chatId: trimmed },
         select: { minLotBump: true },
@@ -2815,7 +2831,11 @@ export class BybitService {
     startNum: number;
     rangeNum: number;
   } | null> {
-    const mapRaw = await this.settings.get('SOURCE_TP_SL_STEP_START');
+    const [mapRaw, rangeMapRaw, scopedSource] = await Promise.all([
+      this.settings.get('SOURCE_TP_SL_STEP_START'),
+      this.settings.get('SOURCE_TP_SL_STEP_RANGE'),
+      this.getCabinetSourceByTitle(String(source ?? '')),
+    ]);
     const map = parseSourceTpSlStepMap(mapRaw, (kind, entryKey, val) => {
       if (!this.takeSourceTpMapSkipLogSlot(kind, entryKey, val)) {
         return;
@@ -2825,7 +2845,6 @@ export class BybitService {
         `SOURCE_TP_SL_STEP_${label}: пропущена невалидная запись key=${JSON.stringify(entryKey)} value=${JSON.stringify(val)}`,
       );
     });
-    const rangeMapRaw = await this.settings.get('SOURCE_TP_SL_STEP_RANGE');
     const rangeMap = parseSourceTpSlStepRangeMap(rangeMapRaw, (kind, entryKey, val) => {
       if (!this.takeSourceTpMapSkipLogSlot(kind, entryKey, val)) {
         return;
@@ -2837,7 +2856,9 @@ export class BybitService {
     });
     const key = String(source ?? '').trim().toLowerCase();
     let mode: TpSlStepStartMode;
-    if (key && map[key] !== undefined) {
+    if (scopedSource?.tpSlStepStart) {
+      mode = parseTpSlStepStart(scopedSource.tpSlStepStart);
+    } else if (key && map[key] !== undefined) {
       mode = map[key]!;
     } else {
       const explicit = await this.settings.get('TP_SL_STEP_START');
@@ -2864,7 +2885,12 @@ export class BybitService {
       );
     }
     const globalRange = parseTpSlStepRangeOptional(globalRangeRaw);
-    const sourceRange = key ? rangeMap[key] : undefined;
+    const sourceRange =
+      scopedSource?.tpSlStepRange != null
+        ? scopedSource.tpSlStepRange
+        : key
+          ? rangeMap[key]
+          : undefined;
     const rangeNum = resolveEffectiveTpSlRange(
       startNum,
       sourceRange !== undefined ? sourceRange : globalRange,
@@ -4316,11 +4342,23 @@ export class BybitService {
     let chatForced: number | null | undefined;
     const cid = origin?.chatId?.trim();
     if (cid) {
-      const row = await this.prisma.tgUserbotChat.findUnique({
-        where: { chatId: cid },
-        select: { forcedLeverage: true },
-      });
-      chatForced = row?.forcedLeverage ?? undefined;
+      const cabinetId = this.currentCabinetId();
+      if (cabinetId) {
+        const scoped = await this.prisma.cabinetTelegramSource.findUnique({
+          where: { cabinetId_chatId: { cabinetId, chatId: cid } },
+          select: { forcedLeverage: true },
+        });
+        if (scoped?.forcedLeverage != null) {
+          chatForced = scoped.forcedLeverage;
+        }
+      }
+      if (chatForced == null) {
+        const row = await this.prisma.tgUserbotChat.findUnique({
+          where: { chatId: cid },
+          select: { forcedLeverage: true },
+        });
+        chatForced = row?.forcedLeverage ?? undefined;
+      }
     }
     const rawGlobal = await this.settings.get('FORCED_LEVERAGE');
     const src = String(signal.source ?? '').trim();
@@ -4339,6 +4377,38 @@ export class BybitService {
       leverageAfter: resolved,
     });
     return { ...signal, leverage: resolved };
+  }
+
+  private async getCabinetSourceByTitle(source: string): Promise<{
+    tpSlStepStart: string | null;
+    tpSlStepRange: number | null;
+    martingaleMultiplier: number | null;
+  } | null> {
+    const cabinetId = this.currentCabinetId();
+    const title = source.trim();
+    if (!cabinetId || !title) {
+      return null;
+    }
+    const chat = await this.prisma.tgUserbotChat.findFirst({
+      where: { title: { equals: title, mode: 'insensitive' } },
+      select: { chatId: true },
+    });
+    if (!chat?.chatId) {
+      return null;
+    }
+    return this.prisma.cabinetTelegramSource.findUnique({
+      where: {
+        cabinetId_chatId: {
+          cabinetId,
+          chatId: chat.chatId,
+        },
+      },
+      select: {
+        tpSlStepStart: true,
+        tpSlStepRange: true,
+        martingaleMultiplier: true,
+      },
+    });
   }
 
   private parseSourceMartingaleMap(raw: string | undefined): Map<string, number> {
@@ -4372,9 +4442,10 @@ export class BybitService {
       return signal;
     }
 
-    const [rawMap, rawDefault] = await Promise.all([
+    const [rawMap, rawDefault, scopedSource] = await Promise.all([
       this.settings.get('SOURCE_MARTINGALE_MULTIPLIERS'),
       this.settings.get('SOURCE_MARTINGALE_DEFAULT_MULTIPLIER'),
+      this.getCabinetSourceByTitle(sourceRaw),
     ]);
     const bySource = this.parseSourceMartingaleMap(rawMap);
     const defaultMultiplierParsed = Number(rawDefault);
@@ -4382,7 +4453,12 @@ export class BybitService {
       Number.isFinite(defaultMultiplierParsed) && defaultMultiplierParsed > 1
         ? defaultMultiplierParsed
         : undefined;
-    const multiplier = bySource.get(sourceRaw.toLowerCase()) ?? defaultMultiplier;
+    const multiplier =
+      (scopedSource?.martingaleMultiplier != null && scopedSource.martingaleMultiplier > 1
+        ? scopedSource.martingaleMultiplier
+        : undefined) ??
+      bySource.get(sourceRaw.toLowerCase()) ??
+      defaultMultiplier;
     if (!multiplier || !Number.isFinite(multiplier) || multiplier <= 1) {
       return signal;
     }

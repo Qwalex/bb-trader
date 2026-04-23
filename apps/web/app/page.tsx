@@ -64,6 +64,7 @@ export default async function Home({
 }) {
   const sp = await searchParams;
   const source = typeof sp.source === 'string' ? sp.source.trim() : '';
+  const cabinetId = typeof sp.cabinetId === 'string' ? sp.cabinetId.trim() : '';
   let stats: Stats | null = null;
   let pnl: PnlPoint[] = [];
   let top: TopSources | null = null;
@@ -75,14 +76,18 @@ export default async function Home({
     if (source) q.set('source', source);
     const qs = q.toString();
     [stats, pnl, top, sourceOptions] = await Promise.all([
-      fetchJson<Stats>(`/orders/stats${qs ? `?${qs}` : ''}`),
-      fetchJson<PnlPoint[]>(`/orders/pnl-series?bucket=day${source ? `&source=${encodeURIComponent(source)}` : ''}`),
-      fetchJson<TopSources>('/orders/top-sources?limit=5'),
+      fetchJson<Stats>(`/orders/stats${qs ? `?${qs}` : ''}`, undefined, cabinetId),
+      fetchJson<PnlPoint[]>(
+        `/orders/pnl-series?bucket=day${source ? `&source=${encodeURIComponent(source)}` : ''}`,
+        undefined,
+        cabinetId,
+      ),
+      fetchJson<TopSources>('/orders/top-sources?limit=5', undefined, cabinetId),
       (async () => {
         try {
           const [sourcesFromDb, settingsRaw] = await Promise.all([
-            fetchJson<string[]>('/orders/sources'),
-            fetchJson<SettingsRaw>('/settings/raw'),
+            fetchJson<string[]>('/orders/sources', undefined, cabinetId),
+            fetchJson<SettingsRaw>('/settings/raw', undefined, cabinetId),
           ]);
           const raw = settingsRaw.settings.find((r) => r.key === 'SOURCE_LIST')?.value;
           const rawExcluded = settingsRaw.settings.find((r) => r.key === 'SOURCE_EXCLUDE_LIST')
@@ -127,12 +132,20 @@ export default async function Home({
   }
   let balanceHistory: BalancePoint[] = [];
   try {
-    userbotStatus = await fetchJson<UserbotStatus>('/telegram-userbot/status');
+    userbotStatus = await fetchJson<UserbotStatus>(
+      '/telegram-userbot/status',
+      undefined,
+      cabinetId,
+    );
   } catch {
     // Userbot status is optional for dashboard render.
   }
   try {
-    const bh = await fetchJson<{ points: BalancePoint[] }>('/bybit/balance-history?days=30');
+    const bh = await fetchJson<{ points: BalancePoint[] }>(
+      '/bybit/balance-history?days=30',
+      undefined,
+      cabinetId,
+    );
     balanceHistory = bh.points ?? [];
   } catch {
     // История баланса опциональна.
@@ -190,7 +203,11 @@ export default async function Home({
 
   let dashboardTodos: DashboardTodoItem[] = [];
   try {
-    const d = await fetchJson<{ items: DashboardTodoItem[] }>('/settings/dashboard-todos');
+    const d = await fetchJson<{ items: DashboardTodoItem[] }>(
+      '/settings/dashboard-todos',
+      undefined,
+      cabinetId,
+    );
     dashboardTodos = Array.isArray(d.items) ? d.items : [];
   } catch {
     dashboardTodos = [];
@@ -211,6 +228,7 @@ export default async function Home({
         </p>
       )}
       <form className="filters" method="get" action="/trade">
+        {cabinetId ? <input type="hidden" name="cabinetId" value={cabinetId} /> : null}
         <label>
           Источник
           <select

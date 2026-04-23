@@ -1,7 +1,9 @@
 import type { Metadata, Viewport } from 'next';
+import { cookies } from 'next/headers';
 import localFont from 'next/font/local';
 import Link from 'next/link';
 
+import { CabinetSwitcher } from './components/CabinetSwitcher';
 import { PwaRegister } from './components/PwaRegister';
 
 import './globals.css';
@@ -84,28 +86,35 @@ export const viewport: Viewport = {
   themeColor: '#0f1419',
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const cabinetId = (await cookies()).get('cabinet_id')?.value?.trim() ?? '';
+  const withCabinet = (path: string): string => {
+    if (!cabinetId) return path;
+    const hasQuery = path.includes('?');
+    return `${path}${hasQuery ? '&' : '?'}cabinetId=${encodeURIComponent(cabinetId)}`;
+  };
   return (
     <html lang="ru">
       <body className={`${geistSans.variable} ${geistMono.variable}`}>
         <PwaRegister />
         <header className="nav">
           <strong className="brand">SignalsBot</strong>
+          <CabinetSwitcher />
           <nav className="navLinks">
-            <Link href="/">Дашборд</Link>
-            <Link href="/trades">Сделки</Link>
-            <Link href="/logs">Логи</Link>
-            <Link href="/ai">AI</Link>
-            <Link href="/diagnostics">Диагностика</Link>
-            <Link href="/telegram-userbot">Userbot</Link>
-            <Link href="/openrouter-spend">Расходы OpenRouter</Link>
-            <Link href="/my-group">Моя группа</Link>
-            <Link href="/filters">Фильтры</Link>
-            <Link href="/settings">Настройки</Link>
+            <Link href={withCabinet('/')}>Дашборд</Link>
+            <Link href={withCabinet('/trades')}>Сделки</Link>
+            <Link href={withCabinet('/logs')}>Логи</Link>
+            <Link href={withCabinet('/ai')}>AI</Link>
+            <Link href={withCabinet('/diagnostics')}>Диагностика</Link>
+            <Link href={withCabinet('/telegram-userbot')}>Userbot</Link>
+            <Link href={withCabinet('/openrouter-spend')}>Расходы OpenRouter</Link>
+            <Link href={withCabinet('/my-group')}>Моя группа</Link>
+            <Link href={withCabinet('/filters')}>Фильтры</Link>
+            <Link href={withCabinet('/settings')}>Настройки</Link>
           </nav>
         </header>
         <main className="main">{children}</main>

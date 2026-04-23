@@ -15,6 +15,7 @@ import {
 import { AppLogService } from '../app-log/app-log.service';
 import { sanitizeForOpenRouterLog } from '../app-log/log-sanitize';
 import { BybitService } from '../bybit/bybit.service';
+import { CabinetContextService } from '../cabinet/cabinet-context.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { resolveForcedLeverageWithChatOverride } from '../settings/forced-leverage.util';
 import {
@@ -265,6 +266,7 @@ export class TranscriptService {
     private readonly settings: SettingsService,
     private readonly appLog: AppLogService,
     private readonly prisma: PrismaService,
+    private readonly cabinetContext: CabinetContextService,
     @Inject(forwardRef(() => BybitService))
     private readonly bybit: BybitService,
   ) {}
@@ -457,6 +459,7 @@ export class TranscriptService {
     nextRetryAt?: Date | null;
     lastError?: string | null;
   }): Promise<void> {
+    const cabinetId = this.cabinetContext.getCabinetId();
     const id = params.generationId.trim();
     if (!id) return;
     const existing = await this.prisma.openrouterGenerationCost.findUnique({
@@ -468,6 +471,7 @@ export class TranscriptService {
     await this.prisma.openrouterGenerationCost.upsert({
       where: { generationId: id },
       create: {
+        cabinetId,
         generationId: id,
         operation: params.operation ?? null,
         chatId: params.logContext?.chatId ?? null,
@@ -480,6 +484,7 @@ export class TranscriptService {
         lastError: params.lastError ?? null,
       },
       update: {
+        ...(cabinetId ? { cabinetId } : {}),
         operation: params.operation ?? undefined,
         chatId: params.logContext?.chatId ?? undefined,
         source: params.logContext?.source ?? undefined,

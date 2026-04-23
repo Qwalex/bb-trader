@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
-import { getApiBase } from '../../lib/api';
+import { getApiBase, withCabinetQuery } from '../../lib/api';
 
 type FilterKind = 'signal' | 'close' | 'result' | 'reentry' | 'ignore';
 type FilterItem = {
@@ -119,11 +119,16 @@ export default function FiltersPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
+  const withCabinet = (path: string) => {
+    const cabinetId = localStorage.getItem('active_cabinet_id');
+    return `${getApiBase()}${withCabinetQuery(path, cabinetId)}`;
+  };
+
   async function loadAll() {
     const [groupsRes, examplesRes, patternsRes] = await Promise.all([
-      fetch(`${getApiBase()}/telegram-userbot/filters/groups`).then((r) => r.json()),
-      fetch(`${getApiBase()}/telegram-userbot/filters/examples`).then((r) => r.json()),
-      fetch(`${getApiBase()}/telegram-userbot/filters/patterns`).then((r) => r.json()),
+      fetch(withCabinet('/telegram-userbot/filters/groups')).then((r) => r.json()),
+      fetch(withCabinet('/telegram-userbot/filters/examples')).then((r) => r.json()),
+      fetch(withCabinet('/telegram-userbot/filters/patterns')).then((r) => r.json()),
     ]);
     setGroups(((groupsRes as { groups?: string[] }).groups ?? []).filter(Boolean));
     setExampleItems(((examplesRes as { items?: FilterItem[] }).items ?? []).filter(Boolean));
@@ -211,7 +216,7 @@ export default function FiltersPage() {
     setBusy('add');
     setMsg(null);
     try {
-      const res = await fetch(`${getApiBase()}/telegram-userbot/filters/examples`, {
+      const res = await fetch(withCabinet('/telegram-userbot/filters/examples'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -245,7 +250,7 @@ export default function FiltersPage() {
     setMsg(null);
     try {
       const res = await fetch(
-        `${getApiBase()}/telegram-userbot/filters/examples/${encodeURIComponent(id)}/delete`,
+        withCabinet(`/telegram-userbot/filters/examples/${encodeURIComponent(id)}/delete`),
         { method: 'POST' },
       );
       if (!res.ok) {
@@ -270,7 +275,7 @@ export default function FiltersPage() {
     setBusy('add-pattern');
     setMsg(null);
     try {
-      const res = await fetch(`${getApiBase()}/telegram-userbot/filters/patterns`, {
+      const res = await fetch(withCabinet('/telegram-userbot/filters/patterns'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -313,7 +318,7 @@ export default function FiltersPage() {
     setBusy('generate-patterns');
     setMsg(null);
     try {
-      const res = await fetch(`${getApiBase()}/telegram-userbot/filters/patterns/generate`, {
+      const res = await fetch(withCabinet('/telegram-userbot/filters/patterns/generate'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ kind: params.kind, example: e }),
@@ -391,7 +396,7 @@ export default function FiltersPage() {
     setMsg(null);
     try {
       const res = await fetch(
-        `${getApiBase()}/telegram-userbot/filters/patterns/${encodeURIComponent(id)}/delete`,
+        withCabinet(`/telegram-userbot/filters/patterns/${encodeURIComponent(id)}/delete`),
         { method: 'POST' },
       );
       if (!res.ok) {

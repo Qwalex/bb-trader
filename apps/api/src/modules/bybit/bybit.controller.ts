@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, Req } from '@nestjs/common';
 import {
   ApiBody,
   ApiOkResponse,
@@ -10,6 +10,9 @@ import {
 
 import { BalanceSnapshotService } from './balance-snapshot.service';
 import { BybitService } from './bybit.service';
+import { pickRequestedCabinetId } from '../../common/cabinet-request.util';
+import { CabinetContextService } from '../cabinet/cabinet-context.service';
+import { CabinetService } from '../cabinet/cabinet.service';
 
 @ApiTags('Bybit')
 @Controller('bybit')
@@ -17,13 +20,31 @@ export class BybitController {
   constructor(
     private readonly bybit: BybitService,
     private readonly balanceSnapshots: BalanceSnapshotService,
+    private readonly cabinets: CabinetService,
+    private readonly cabinetContext: CabinetContextService,
   ) {}
+
+  private async runWithCabinet<T>(
+    req: { headers?: Record<string, string | string[] | undefined> },
+    queryCabinetId: string | undefined,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    const requested = pickRequestedCabinetId({
+      queryCabinetId,
+      headers: req.headers,
+    });
+    const cabinetId = await this.cabinets.resolveCabinetId(requested);
+    return this.cabinetContext.runWithCabinet(cabinetId, fn);
+  }
 
   @ApiOperation({ summary: 'Live-снимок экспозиции и ордеров Bybit' })
   @ApiOkResponse({ description: 'Снимок получен' })
   @Get('live')
-  async live() {
-    return this.bybit.getLiveExposureSnapshot();
+  async live(
+    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Query('cabinetId') cabinetId?: string,
+  ) {
+    return this.runWithCabinet(req, cabinetId, () => this.bybit.getLiveExposureSnapshot());
   }
 
   /** Дневные снимки суммарного USDT в SQLite (cron), без запросов к Bybit. Дашборд: график. */
@@ -31,9 +52,15 @@ export class BybitController {
   @ApiQuery({ name: 'days', required: false, description: 'Количество дней' })
   @ApiOkResponse({ description: 'История баланса получена' })
   @Get('balance-history')
-  async balanceHistory(@Query('days') days?: string) {
+  async balanceHistory(
+    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Query('cabinetId') cabinetId: string | undefined,
+    @Query('days') days?: string,
+  ) {
     const d = days != null ? Number.parseInt(String(days), 10) : 30;
-    const points = await this.balanceSnapshots.listRecent(Number.isFinite(d) ? d : 30);
+    const points = await this.runWithCabinet(req, cabinetId, () =>
+      this.balanceSnapshots.listRecent(Number.isFinite(d) ? d : 30),
+    );
     return { points };
   }
 
@@ -41,16 +68,28 @@ export class BybitController {
   @ApiParam({ name: 'signalId', description: 'ID сделки' })
   @ApiOkResponse({ description: 'Отладочные данные по сделке' })
   @Get('signal/:signalId')
-  async signalSnapshot(@Param('signalId') signalId: string) {
-    return this.bybit.getSignalExecutionDebugSnapshot(signalId);
+  async signalSnapshot(
+    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Query('cabinetId') cabinetId: string | undefined,
+    @Param('signalId') signalId: string,
+  ) {
+    return this.runWithCabinet(req, cabinetId, () =>
+      this.bybit.getSignalExecutionDebugSnapshot(signalId),
+    );
   }
 
   @ApiOperation({ summary: 'Детализация PnL/комиссий сделки из Bybit' })
   @ApiParam({ name: 'signalId', description: 'ID сделки' })
   @ApiOkResponse({ description: 'Детализация PnL получена' })
   @Get('trade-pnl-breakdown/:signalId')
-  async tradePnlBreakdown(@Param('signalId') signalId: string) {
-    return this.bybit.getTradePnlBreakdown(signalId);
+  async tradePnlBreakdown(
+    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Query('cabinetId') cabinetId: string | undefined,
+    @Param('signalId') signalId: string,
+  ) {
+    return this.runWithCabinet(req, cabinetId, () =>
+      this.bybit.getTradePnlBreakdown(signalId),
+    );
   }
 
   @ApiOperation({ summary: 'Ручное закрытие сделки на Bybit' })
@@ -59,10 +98,14 @@ export class BybitController {
   @ApiOkResponse({ description: 'Команда закрытия отправлена' })
   @Post('close/:signalId')
   async closeSignal(
+    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Query('cabinetId') cabinetId: string | undefined,
     @Param('signalId') signalId: string,
     @Body() _body?: Record<string, unknown>,
   ) {
-    return this.bybit.closeSignalManually(signalId);
+    return this.runWithCabinet(req, cabinetId, () =>
+      this.bybit.closeSignalManually(signalId),
+    );
   }
 
   @ApiOperation({ summary: 'Пересчёт closed PnL (sync/async)' })
@@ -79,17 +122,21 @@ export class BybitController {
   @ApiOkResponse({ description: 'Пересчёт запущен или выполнен' })
   @Post('recalc-closed-pnl')
   async recalcClosedPnl(
+    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Query('cabinetId') cabinetId: string | undefined,
     @Body() body?: { limit?: number; dryRun?: boolean; async?: boolean },
   ) {
-    if (body?.async !== false) {
-      return this.bybit.startRecalcClosedSignalsPnlJob({
+    return this.runWithCabinet(req, cabinetId, async () => {
+      if (body?.async !== false) {
+        return this.bybit.startRecalcClosedSignalsPnlJob({
+          limit: body?.limit,
+          dryRun: body?.dryRun ?? true,
+        });
+      }
+      return this.bybit.recalcClosedSignalsPnl({
         limit: body?.limit,
         dryRun: body?.dryRun ?? true,
       });
-    }
-    return this.bybit.recalcClosedSignalsPnl({
-      limit: body?.limit,
-      dryRun: body?.dryRun ?? true,
     });
   }
 
@@ -97,11 +144,17 @@ export class BybitController {
   @ApiParam({ name: 'jobId', description: 'ID job' })
   @ApiOkResponse({ description: 'Статус job получен' })
   @Get('recalc-closed-pnl/:jobId')
-  async recalcClosedPnlJobStatus(@Param('jobId') jobId: string) {
-    const status = await this.bybit.getRecalcClosedPnlJobStatus(jobId);
-    if (!status) {
-      return { ok: false, error: 'Job not found', jobId };
-    }
-    return { ok: true, ...status };
+  async recalcClosedPnlJobStatus(
+    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+    @Query('cabinetId') cabinetId: string | undefined,
+    @Param('jobId') jobId: string,
+  ) {
+    return this.runWithCabinet(req, cabinetId, async () => {
+      const status = await this.bybit.getRecalcClosedPnlJobStatus(jobId);
+      if (!status) {
+        return { ok: false, error: 'Job not found', jobId };
+      }
+      return { ok: true, ...status };
+    });
   }
 }

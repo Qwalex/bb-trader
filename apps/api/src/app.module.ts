@@ -1,14 +1,16 @@
 import { existsSync } from 'node:fs';
 import { basename, join } from 'node:path';
 
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { CabinetContextMiddleware } from './common/cabinet-context.middleware';
 import { AppLogModule } from './modules/app-log/app-log.module';
 import { BybitModule } from './modules/bybit/bybit.module';
+import { CabinetModule } from './modules/cabinet/cabinet.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { DiagnosticsModule } from './modules/diagnostics/diagnostics.module';
 import { SettingsModule } from './modules/settings/settings.module';
@@ -54,6 +56,7 @@ function loadEnvFilePaths(): string[] {
     }),
     ScheduleModule.forRoot(),
     PrismaModule,
+    CabinetModule,
     AppLogModule,
     DiagnosticsModule,
     SettingsModule,
@@ -67,4 +70,8 @@ function loadEnvFilePaths(): string[] {
   controllers: [AppController],
   providers: [AppService],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(CabinetContextMiddleware).forRoutes('*');
+  }
+}

@@ -77,6 +77,7 @@ export default async function TradesPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const sp = await searchParams;
+  const cabinetId = typeof sp.cabinetId === 'string' ? sp.cabinetId : '';
   const q = new URLSearchParams();
   const signalId = typeof sp.signalId === 'string' ? sp.signalId : '';
   const source = typeof sp.source === 'string' ? sp.source : '';
@@ -102,6 +103,7 @@ export default async function TradesPage({
   if (sortBy !== 'createdAt') q.set('sortBy', sortBy);
   if (refreshPnl) q.set('refreshPnl', '1');
   if (martingaleSteps) q.set('martingaleSteps', '1');
+  if (cabinetId) q.set('cabinetId', cabinetId);
   q.set('page', page);
 
   let data: TradesRes | null = null;
@@ -111,10 +113,10 @@ export default async function TradesPage({
     // 1) Список источников (нужно для dropdown и не должен ломать таблицу)
     try {
       const [sourcesFromDb, settingsRaw] = await Promise.all([
-        fetchJson<string[]>(`/orders/sources`),
+        fetchJson<string[]>(`/orders/sources`, undefined, cabinetId),
         fetchJson<{
           settings: { key: string; value: string }[];
-        }>(`/settings/raw`),
+        }>(`/settings/raw`, undefined, cabinetId),
       ]);
 
       const raw = settingsRaw.settings.find((r) => r.key === 'SOURCE_LIST')
@@ -160,7 +162,7 @@ export default async function TradesPage({
     }
 
     // 2) Таблица сделок
-    data = await fetchJson<TradesRes>(`/orders/trades?${q.toString()}`);
+    data = await fetchJson<TradesRes>(`/orders/trades?${q.toString()}`, undefined, cabinetId);
   } catch (e) {
     err = e instanceof Error ? e.message : 'Ошибка';
   }

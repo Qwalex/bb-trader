@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import { CabinetContextService } from '../cabinet/cabinet-context.service';
 
 import {
   parseDefaultEntryRaw,
@@ -38,6 +39,32 @@ const ENV_FALLBACK: Record<string, string> = {
   TP_SL_STEP_RANGE: '',
 };
 
+const CABINET_SCOPED_KEYS = new Set<string>([
+  'BYBIT_TESTNET',
+  'BYBIT_API_KEY_MAINNET',
+  'BYBIT_API_SECRET_MAINNET',
+  'BYBIT_API_KEY_TESTNET',
+  'BYBIT_API_SECRET_TESTNET',
+  'DEFAULT_ORDER_USD',
+  'MIN_CAPITAL_AMOUNT',
+  'BUMP_TO_MIN_EXCHANGE_LOT',
+  'DEFAULT_LEVERAGE_ENABLED',
+  'DEFAULT_LEVERAGE',
+  'FORCED_LEVERAGE',
+  'LEVERAGE_RANGE_MODE',
+  'MIN_ALLOWED_LEVERAGE',
+  'MAX_ALLOWED_LEVERAGE',
+  'SIGNAL_SOURCE',
+  'TELEGRAM_WHITELIST',
+  'TELEGRAM_NOTIFY_API_TRADE_CANCELLED',
+  'TELEGRAM_NOTIFY_TRADE_EVENTS',
+  'TELEGRAM_NOTIFY_TRADE_EVENT_TYPES',
+  'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',
+  'SOURCE_MARTINGALE_MULTIPLIERS',
+  'SOURCE_TP_SL_STEP_START',
+  'SOURCE_TP_SL_STEP_RANGE',
+]);
+
 @Injectable()
 export class SettingsService {
   private static readonly COMPROMISED_SECRET_KEYS = [
@@ -56,9 +83,28 @@ export class SettingsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly cabinetContext: CabinetContextService,
   ) {}
 
+  private currentCabinetId(): string | null {
+    return this.cabinetContext.getCabinetId();
+  }
+
+  private isCabinetScopedKey(key: string): boolean {
+    return CABINET_SCOPED_KEYS.has(key);
+  }
+
   async get(key: string): Promise<string | undefined> {
+    const cabinetId = this.currentCabinetId();
+    if (cabinetId && this.isCabinetScopedKey(key)) {
+      const scoped = await this.prisma.cabinetSetting.findUnique({
+        where: { cabinetId_key: { cabinetId, key } },
+        select: { value: true },
+      });
+      if (scoped?.value !== undefined && scoped.value !== '') {
+        return scoped.value;
+      }
+    }
     const row = await this.prisma.setting.findUnique({ where: { key } });
     if (row?.value !== undefined && row?.value !== '') {
       return row.value;
@@ -185,6 +231,15 @@ export class SettingsService {
         );
       }
     }
+    const cabinetId = this.currentCabinetId();
+    if (cabinetId && this.isCabinetScopedKey(key)) {
+      await this.prisma.cabinetSetting.upsert({
+        where: { cabinetId_key: { cabinetId, key } },
+        create: { cabinetId, key, value: normalized },
+        update: { value: normalized },
+      });
+      return;
+    }
     await this.prisma.setting.upsert({
       where: { key },
       create: { key, value: normalized },
@@ -201,7 +256,28 @@ export class SettingsService {
   }
 
   async list(): Promise<{ key: string; value: string }[]> {
-    return this.prisma.setting.findMany({ orderBy: { key: 'asc' } });
+    const cabinetId = this.currentCabinetId();
+    if (!cabinetId) {
+      return this.prisma.setting.findMany({ orderBy: { key: 'asc' } });
+    }
+    const [globalRows, scopedRows] = await Promise.all([
+      this.prisma.setting.findMany({ orderBy: { key: 'asc' } }),
+      this.prisma.cabinetSetting.findMany({
+        where: { cabinetId },
+        orderBy: { key: 'asc' },
+        select: { key: true, value: true },
+      }),
+    ]);
+    const map = new Map<string, string>();
+    for (const row of globalRows) {
+      map.set(row.key, row.value);
+    }
+    for (const row of scopedRows) {
+      map.set(row.key, row.value);
+    }
+    return Array.from(map.entries())
+      .map(([key, value]) => ({ key, value }))
+      .sort((a, b) => a.key.localeCompare(b.key, 'ru'));
   }
 
   /** Чтение только из БД (без подмешивания .env). */
@@ -286,6 +362,10 @@ export class SettingsService {
    */
   async resetAllData(): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
+      await tx.cabinetIngestRoute.deleteMany();
+      await tx.cabinetTelegramSource.deleteMany();
+      await tx.cabinetSetting.deleteMany();
+      await tx.cabinetMember.deleteMany();
       await tx.diagnosticStepResult.deleteMany();
       await tx.diagnosticLog.deleteMany();
       await tx.diagnosticModelResult.deleteMany();
@@ -295,6 +375,7 @@ export class SettingsService {
       await tx.signal.deleteMany();
       await tx.appLog.deleteMany();
       await tx.setting.deleteMany();
+      await tx.cabinet.deleteMany();
     });
   }
 
@@ -306,6 +387,11 @@ export class SettingsService {
         data: { value: '' },
       });
       updated += res.count;
+      const scoped = await this.prisma.cabinetSetting.updateMany({
+        where: { key },
+        data: { value: '' },
+      });
+      updated += scoped.count;
     }
     return {
       updated,

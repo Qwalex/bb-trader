@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import { CabinetContextService } from '../cabinet/cabinet-context.service';
+import { CabinetService } from '../cabinet/cabinet.service';
 
 import { BybitService } from './bybit.service';
 
@@ -23,17 +25,24 @@ export class BalanceSnapshotService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly bybit: BybitService,
+    private readonly cabinets: CabinetService,
+    private readonly cabinetContext: CabinetContextService,
   ) {}
 
   /** Раз в сутки (00:05 UTC): читаем суммарный баланс с Bybit и сохраняем в БД. */
   @Cron('0 5 0 * * *')
   async cronDailyTotalBalance(): Promise<void> {
     try {
-      const details = await this.bybit.getUnifiedUsdtBalanceDetails();
-      if (!details || !Number.isFinite(details.totalUsd)) {
-        return;
+      const cabinets = await this.cabinets.listCabinets();
+      for (const cabinet of cabinets) {
+        await this.cabinetContext.runWithCabinet(cabinet.id, async () => {
+          const details = await this.bybit.getUnifiedUsdtBalanceDetails();
+          if (!details || !Number.isFinite(details.totalUsd)) {
+            return;
+          }
+          await this.upsertToday(details.totalUsd);
+        });
       }
-      await this.upsertToday(details.totalUsd);
     } catch (e) {
       this.logger.warn(`cronDailyTotalBalance: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -47,9 +56,13 @@ export class BalanceSnapshotService {
     if (!Number.isFinite(totalUsd)) {
       return;
     }
+    const cabinetId = this.cabinetContext.getCabinetId();
     const { start, end } = utcTodayRange();
     const existing = await this.prisma.balanceSnapshot.findFirst({
-      where: { createdAt: { gte: start, lt: end } },
+      where: {
+        cabinetId,
+        createdAt: { gte: start, lt: end },
+      },
       orderBy: { createdAt: 'desc' },
       select: { id: true },
     });
@@ -60,16 +73,20 @@ export class BalanceSnapshotService {
       });
     } else {
       await this.prisma.balanceSnapshot.create({
-        data: { totalUsd },
+        data: { cabinetId, totalUsd },
       });
     }
   }
 
   async listRecent(days: number): Promise<{ at: string; totalUsd: number }[]> {
     const d = Math.min(Math.max(1, Math.floor(days)), 365);
+    const cabinetId = this.cabinetContext.getCabinetId();
     const since = new Date(Date.now() - d * 24 * 60 * 60 * 1000);
     const rows = await this.prisma.balanceSnapshot.findMany({
-      where: { createdAt: { gte: since } },
+      where: {
+        cabinetId,
+        createdAt: { gte: since },
+      },
       orderBy: { createdAt: 'asc' },
       select: { createdAt: true, totalUsd: true },
     });

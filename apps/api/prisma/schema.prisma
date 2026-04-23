@@ -9,6 +9,8 @@ datasource db {
 
 model Signal {
   id             String   @id @default(cuid())
+  cabinetId      String?
+  cabinet        Cabinet? @relation(fields: [cabinetId], references: [id], onDelete: SetNull)
   pair           String
   direction      String
   entries        String // JSON number[]
@@ -42,6 +44,8 @@ model Signal {
 
   @@index([sourceChatId, sourceMessageId])
   @@index([sourceChatId, signalExternalId])
+  @@index([cabinetId, deletedAt, createdAt])
+  @@index([cabinetId, deletedAt, closedAt])
   @@index([deletedAt, createdAt])
   @@index([deletedAt, closedAt])
 }
@@ -98,9 +102,12 @@ model Setting {
 /// Один снимок суммарного USDT-баланса (equity) в сутки — для графика на дашборде.
 model BalanceSnapshot {
   id        String   @id @default(cuid())
+  cabinetId String?
+  cabinet   Cabinet? @relation(fields: [cabinetId], references: [id], onDelete: SetNull)
   createdAt DateTime @default(now())
   totalUsd  Float
 
+  @@index([cabinetId, createdAt])
   @@index([createdAt])
 }
 
@@ -140,6 +147,7 @@ model TgUserbotChat {
   minLotBump Boolean?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  cabinetSources CabinetTelegramSource[]
 }
 
 model TgUserbotIngest {
@@ -155,6 +163,7 @@ model TgUserbotIngest {
   status         String // ignored | duplicate_message | duplicate_signal | placed | parse_incomplete | parse_error | blocked_by_setting | place_error
   error          String?
   createdAt      DateTime @default(now())
+  routes         CabinetIngestRoute[]
 
   @@index([chatId, messageId])
   @@index([signalHash])
@@ -196,17 +205,24 @@ model TgUserbotFilterPattern {
 
 model TgUserbotPublishGroup {
   id            String   @id @default(cuid())
+  cabinetId     String?
+  cabinet       Cabinet? @relation(fields: [cabinetId], references: [id], onDelete: SetNull)
   title         String
-  chatId        String   @unique
+  chatId        String
   enabled       Boolean  @default(true)
   publishEveryN Int      @default(1)
   signalCounter Int      @default(0)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+
+  @@unique([cabinetId, chatId])
+  @@index([cabinetId, enabled])
 }
 
 model TgUserbotMirrorMessage {
   id                     String   @id @default(cuid())
+  cabinetId              String?
+  cabinet                Cabinet? @relation(fields: [cabinetId], references: [id], onDelete: SetNull)
   publishGroupId         String
   ingestId               String
   sourceChatId           String
@@ -223,6 +239,7 @@ model TgUserbotMirrorMessage {
   updatedAt              DateTime @updatedAt
 
   @@unique([publishGroupId, ingestId, kind])
+  @@index([cabinetId, createdAt])
   @@index([publishGroupId, sourceChatId, sourceMessageId, kind])
   @@index([publishGroupId, rootSourceChatId, rootSourceMessageId, kind])
   @@index([createdAt])
@@ -342,6 +359,8 @@ model DiagnosticLog {
 
 model OpenrouterGenerationCost {
   id           String   @id @default(cuid())
+  cabinetId    String?
+  cabinet      Cabinet? @relation(fields: [cabinetId], references: [id], onDelete: SetNull)
   generationId String   @unique
   operation    String?
   chatId       String?
@@ -355,7 +374,101 @@ model OpenrouterGenerationCost {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  @@index([cabinetId, createdAt])
   @@index([status, nextRetryAt])
   @@index([createdAt])
   @@index([chatId, createdAt])
+}
+
+model Cabinet {
+  id               String                 @id @default(cuid())
+  slug             String                 @unique
+  name             String
+  isDefault        Boolean                @default(false)
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  members          CabinetMember[]
+  settings         CabinetSetting[]
+  telegramSources  CabinetTelegramSource[]
+  ingestRoutes     CabinetIngestRoute[]
+  signals          Signal[]
+  balanceSnapshots BalanceSnapshot[]
+  openrouterCosts  OpenrouterGenerationCost[]
+  publishGroups    TgUserbotPublishGroup[]
+  mirrorMessages   TgUserbotMirrorMessage[]
+
+  @@index([isDefault])
+}
+
+model CabinetMember {
+  id             String   @id @default(cuid())
+  cabinetId      String
+  cabinet        Cabinet  @relation(fields: [cabinetId], references: [id], onDelete: Cascade)
+  telegramUserId String
+  role           String   @default("owner")
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([cabinetId, telegramUserId])
+  @@index([telegramUserId, isActive])
+}
+
+model CabinetSetting {
+  id        String   @id @default(cuid())
+  cabinetId String
+  cabinet   Cabinet  @relation(fields: [cabinetId], references: [id], onDelete: Cascade)
+  key       String
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([cabinetId, key])
+  @@index([cabinetId, updatedAt])
+}
+
+model CabinetTelegramSource {
+  id                String   @id @default(cuid())
+  cabinetId         String
+  cabinet           Cabinet  @relation(fields: [cabinetId], references: [id], onDelete: Cascade)
+  chatId            String
+  chat              TgUserbotChat @relation(fields: [chatId], references: [chatId], onDelete: Cascade)
+  enabled           Boolean  @default(false)
+  sourcePriority    Int      @default(0)
+  defaultLeverage   Int?
+  forcedLeverage    Int?
+  leverageRangeMode String?
+  minLeverage       Int?
+  maxLeverage       Int?
+  defaultEntryUsd   String?
+  minLotBump        Boolean?
+  martingaleMultiplier Float?
+  tpSlStepStart     String?
+  tpSlStepRange     Int?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([cabinetId, chatId])
+  @@index([chatId, enabled])
+}
+
+model CabinetIngestRoute {
+  id             String   @id @default(cuid())
+  cabinetId      String
+  cabinet        Cabinet  @relation(fields: [cabinetId], references: [id], onDelete: Cascade)
+  ingestId       String
+  ingest         TgUserbotIngest @relation(fields: [ingestId], references: [id], onDelete: Cascade)
+  chatId         String
+  classification String   @default("other")
+  status         String   @default("queued")
+  error          String?
+  aiRequest      String?
+  aiResponse     String?
+  signalId       String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([cabinetId, ingestId])
+  @@index([ingestId, createdAt])
+  @@index([cabinetId, createdAt])
 }

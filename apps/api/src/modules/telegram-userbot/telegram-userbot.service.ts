@@ -17,6 +17,8 @@ import * as QRCode from 'qrcode';
 import { formatError } from '../../common/format-error';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppLogService } from '../app-log/app-log.service';
+import { CabinetContextService } from '../cabinet/cabinet-context.service';
+import { CabinetService } from '../cabinet/cabinet.service';
 import { SettingsService } from '../settings/settings.service';
 import {
   parseLeverageRangeMode,
@@ -95,6 +97,7 @@ type IngestProcessJob = {
   textLen: number;
   meta?: { replyToMessageId?: string; signalExternalId?: string };
   options?: ProcessIngestOptions;
+  route?: { id: string; cabinetId: string };
 };
 
 type ActiveSignalLookup = {
@@ -115,6 +118,21 @@ type ActiveSignalLookup = {
 
 type SourceMartingaleMap = Record<string, number>;
 type OpenrouterSpendPeriod = 'day' | '3d' | 'week' | 'month' | 'year';
+type ScopedChatOverride = {
+  chatId: string;
+  enabled: boolean;
+  sourcePriority: number;
+  defaultLeverage: number | null;
+  forcedLeverage: number | null;
+  leverageRangeMode: string | null;
+  minLeverage: number | null;
+  maxLeverage: number | null;
+  defaultEntryUsd: string | null;
+  minLotBump: boolean | null;
+  martingaleMultiplier: number | null;
+  tpSlStepStart: string | null;
+  tpSlStepRange: number | null;
+};
 
 const USERBOT_POLL_INTERVAL_MS = 2000;
 const USERBOT_POLL_FETCH_LIMIT = 20;
@@ -138,6 +156,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   private readonly lastSeenMessageIds = new Map<string, number>();
   private readonly processingQueue: IngestProcessJob[] = [];
   private readonly processingQueuedIds = new Set<string>();
+  private readonly processingActiveIngestIds = new Set<string>();
   private processingWorkersActive = 0;
 
   private client: TelegramClient | null = null;
@@ -172,6 +191,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly settings: SettingsService,
+    private readonly cabinets: CabinetService,
+    private readonly cabinetContext: CabinetContextService,
     private readonly transcript: TranscriptService,
     private readonly bybit: BybitService,
     private readonly orders: OrdersService,
@@ -213,10 +234,15 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         this.settings.get('TELEGRAM_USERBOT_API_HASH'),
         this.settings.get('TELEGRAM_USERBOT_SESSION'),
       ]);
-    const chatsTotal = await this.prisma.tgUserbotChat.count();
-    const chatsEnabled = await this.prisma.tgUserbotChat.count({
-      where: { enabled: true },
-    });
+    const [chatsTotal, chatsEnabled] = await Promise.all([
+      this.prisma.tgUserbotChat.count(),
+      this.prisma.cabinetTelegramSource.count({
+        where: {
+          cabinetId: this.cabinetContext.getCabinetId() ?? undefined,
+          enabled: true,
+        },
+      }),
+    ]);
     return {
       connected: await this.isClientAuthorized(this.client),
       enabled,
@@ -473,25 +499,74 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   }
 
   async listChats() {
-    const [rows, bySource, tpSlBySource, tpSlRangeBySource, openrouterSpendTodayByChatId] =
+    const cabinetId = this.cabinetContext.getCabinetId();
+    const [rows, scopedRowsRaw, bySource, tpSlBySource, tpSlRangeBySource, openrouterSpendTodayByChatId] =
       await Promise.all([
         this.prisma.tgUserbotChat.findMany({
-          orderBy: [{ enabled: 'desc' }, { title: 'asc' }],
+          orderBy: [{ title: 'asc' }],
         }),
+        cabinetId
+          ? this.prisma.cabinetTelegramSource.findMany({
+              where: { cabinetId },
+              select: {
+                chatId: true,
+                enabled: true,
+                sourcePriority: true,
+                defaultLeverage: true,
+                forcedLeverage: true,
+                leverageRangeMode: true,
+                minLeverage: true,
+                maxLeverage: true,
+                defaultEntryUsd: true,
+                minLotBump: true,
+                martingaleMultiplier: true,
+                tpSlStepStart: true,
+                tpSlStepRange: true,
+              },
+            })
+          : Promise.resolve([]),
         this.getSourceMartingaleMap(),
         this.getSourceTpSlStepMap(),
         this.getSourceTpSlStepRangeMap(),
         this.getTodayOpenRouterSpendByChatId(),
       ]);
-    return rows.map((row) => ({
-      ...row,
-      sourcePriority: this.normalizeSourcePriority((row as { sourcePriority?: number }).sourcePriority),
-      martingaleMultiplier:
-        bySource[row.title.trim().toLowerCase()] ?? null,
-      tpSlStepStart: tpSlBySource[row.title.trim().toLowerCase()] ?? null,
-      tpSlStepRange: tpSlRangeBySource[row.title.trim().toLowerCase()] ?? null,
-      openrouterCostTodayUsd: openrouterSpendTodayByChatId[row.chatId] ?? 0,
-    }));
+    const scopedRows = scopedRowsRaw as ScopedChatOverride[];
+    const scopedByChatId = new Map<string, ScopedChatOverride>(
+      scopedRows.map((row) => [row.chatId, row] as [string, ScopedChatOverride]),
+    );
+    return rows
+      .map((row) => {
+        const scoped = scopedByChatId.get(row.chatId);
+        const sourceKey = row.title.trim().toLowerCase();
+        return {
+          ...row,
+          enabled: scoped?.enabled ?? row.enabled,
+          sourcePriority: this.normalizeSourcePriority(
+            (scoped?.sourcePriority ?? row.sourcePriority) as number | undefined,
+          ),
+          defaultLeverage: scoped?.defaultLeverage ?? row.defaultLeverage,
+          forcedLeverage: scoped?.forcedLeverage ?? row.forcedLeverage,
+          leverageRangeMode: scoped?.leverageRangeMode ?? row.leverageRangeMode,
+          minLeverage: scoped?.minLeverage ?? row.minLeverage,
+          maxLeverage: scoped?.maxLeverage ?? row.maxLeverage,
+          defaultEntryUsd: scoped?.defaultEntryUsd ?? row.defaultEntryUsd,
+          minLotBump: scoped?.minLotBump ?? row.minLotBump,
+          martingaleMultiplier:
+            scoped?.martingaleMultiplier ??
+            bySource[sourceKey] ??
+            null,
+          tpSlStepStart:
+            scoped?.tpSlStepStart ??
+            tpSlBySource[sourceKey] ??
+            null,
+          tpSlStepRange:
+            scoped?.tpSlStepRange ??
+            tpSlRangeBySource[sourceKey] ??
+            null,
+          openrouterCostTodayUsd: openrouterSpendTodayByChatId[row.chatId] ?? 0,
+        };
+      })
+      .sort((a, b) => Number(b.enabled) - Number(a.enabled) || a.title.localeCompare(b.title, 'ru'));
   }
 
   private parseNumberOrNull(value: unknown): number | null {
@@ -576,10 +651,12 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async getTodayOpenRouterSpendByChatId(): Promise<Record<string, number>> {
+    const cabinetId = this.cabinetContext.getCabinetId();
     const dayStart = new Date();
     dayStart.setHours(0, 0, 0, 0);
     const rows = await this.prisma.openrouterGenerationCost.findMany({
       where: {
+        cabinetId,
         status: 'resolved',
         costUsd: { not: null },
         createdAt: { gte: dayStart },
@@ -637,6 +714,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   }
 
   async getOpenrouterSpendAnalytics(period: OpenrouterSpendPeriod = 'day') {
+    const cabinetId = this.cabinetContext.getCabinetId();
     const safePeriod: OpenrouterSpendPeriod =
       period === 'day' ||
       period === '3d' ||
@@ -650,6 +728,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     const [rows, chats] = await Promise.all([
       this.prisma.openrouterGenerationCost.findMany({
         where: {
+          cabinetId,
           status: 'resolved',
           costUsd: { not: null },
           createdAt: { gte: startAt, lte: endAt },
@@ -895,8 +974,10 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   }
 
   async listPublishGroups() {
+    const cabinetId = this.cabinetContext.getCabinetId();
     const prismaAny = this.prisma as any;
     const rows = await prismaAny.tgUserbotPublishGroup.findMany({
+      where: { cabinetId },
       orderBy: [{ enabled: 'desc' }, { title: 'asc' }],
     });
     return { items: rows };
@@ -909,6 +990,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     enabled?: boolean;
     publishEveryN?: number;
   }) {
+    const cabinetId = this.cabinetContext.getCabinetId();
     const title = body.title?.trim() ?? '';
     const chatId = body.chatId?.trim() ?? '';
     const enabled = body.enabled !== false;
@@ -921,23 +1003,29 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       const prismaAny = this.prisma as any;
       const updated = await prismaAny.tgUserbotPublishGroup.update({
         where: { id },
-        data: { title, chatId, enabled, publishEveryN },
+        data: { title, chatId, enabled, publishEveryN, cabinetId },
       });
       return { ok: true, item: updated };
     }
 
     const prismaAny = this.prisma as any;
     const created = await prismaAny.tgUserbotPublishGroup.create({
-      data: { title, chatId, enabled, publishEveryN },
+      data: { title, chatId, enabled, publishEveryN, cabinetId },
     });
     return { ok: true, item: created };
   }
 
   async deletePublishGroup(id: string) {
+    const cabinetId = this.cabinetContext.getCabinetId();
     const v = id.trim();
     if (!v) return { ok: false, error: 'id обязателен' };
     const prismaAny = this.prisma as any;
-    await prismaAny.tgUserbotPublishGroup.delete({ where: { id: v } });
+    const row = await prismaAny.tgUserbotPublishGroup.findFirst({
+      where: { id: v, cabinetId },
+      select: { id: true },
+    });
+    if (!row) return { ok: false, error: 'publish-группа не найдена' };
+    await prismaAny.tgUserbotPublishGroup.delete({ where: { id: row.id } });
     return { ok: true };
   }
 
@@ -1006,14 +1094,21 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   }
 
   async listFilterGroups() {
-    const chatRows = await this.prisma.tgUserbotChat.findMany({
-      where: { enabled: true },
-      orderBy: { title: 'asc' },
-      select: { title: true },
+    const chatRows = await this.prisma.cabinetTelegramSource.findMany({
+      where: {
+        cabinetId: this.cabinetContext.getCabinetId() ?? undefined,
+        enabled: true,
+      },
+      orderBy: { chatId: 'asc' },
+      select: {
+        chat: {
+          select: { title: true },
+        },
+      },
     });
     const names = new Set<string>();
     for (const row of chatRows) {
-      const v = typeof row.title === 'string' ? row.title.trim() : '';
+      const v = typeof row.chat?.title === 'string' ? row.chat.title.trim() : '';
       if (v) names.add(String(v));
     }
     return {
@@ -1255,9 +1350,12 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     if (!this.client || !(await this.isClientAuthorized(this.client))) {
       return { ok: false, error: 'Userbot не подключен.' };
     }
-    const enabledChats = await this.prisma.tgUserbotChat.findMany({
-      where: { enabled: true },
-      select: { chatId: true, title: true },
+    const enabledChats = await this.prisma.cabinetTelegramSource.findMany({
+      where: {
+        cabinetId: this.cabinetContext.getCabinetId() ?? undefined,
+        enabled: true,
+      },
+      select: { chatId: true, chat: { select: { title: true } } },
     });
     const limitPerChat =
       typeof limitPerChatRaw === 'number' && Number.isFinite(limitPerChatRaw)
@@ -1452,8 +1550,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       tpSlStepRange?: number | null;
     },
   ) {
-    const existing = await this.prisma.tgUserbotChat.findUnique({
-      where: { chatId },
+    const cabinetId = this.cabinetContext.getCabinetId() ?? (await this.cabinets.getDefaultCabinetId());
+    const existing = await this.prisma.cabinetTelegramSource.findUnique({
+      where: { cabinetId_chatId: { cabinetId, chatId } },
       select: { minLeverage: true, maxLeverage: true },
     });
     const entryNorm =
@@ -1547,12 +1646,46 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           ? null
           : Boolean(body.minLotBump);
 
-    const prismaAny = this.prisma as any;
-    const row = await prismaAny.tgUserbotChat.upsert({
+    await this.prisma.tgUserbotChat.upsert({
       where: { chatId },
       create: {
         chatId,
         title: chatId,
+        enabled: false,
+      },
+      update: {},
+    });
+    const tpSlStartNorm =
+      body.tpSlStepStart === undefined
+        ? undefined
+        : body.tpSlStepStart === null || String(body.tpSlStepStart).trim() === ''
+          ? null
+          : parseTpSlStepStart(String(body.tpSlStepStart));
+    const tpSlRangeNorm =
+      body.tpSlStepRange === undefined
+        ? undefined
+        : body.tpSlStepRange === null
+          ? null
+          : (() => {
+              if (!Number.isFinite(body.tpSlStepRange)) {
+                throw new BadRequestException(
+                  'tpSlStepRange: ожидается null или целое 1–5',
+                );
+              }
+              const n = Math.trunc(body.tpSlStepRange as number);
+              if (n < 1 || n > 5) {
+                throw new BadRequestException(
+                  `tpSlStepRange: ожидается целое 1–5, получено ${JSON.stringify(body.tpSlStepRange)}`,
+                );
+              }
+              return n;
+            })();
+
+    await this.prisma.cabinetTelegramSource.upsert({
+      where: { cabinetId_chatId: { cabinetId, chatId } },
+      create: {
+        cabinetId,
+        chatId,
         enabled: body.enabled === true,
         sourcePriority: sourcePriorityNorm ?? 0,
         defaultLeverage: levNorm ?? null,
@@ -1562,59 +1695,25 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         maxLeverage: maxLeverageNorm ?? null,
         defaultEntryUsd: entryNorm ?? null,
         minLotBump: minLotBumpNorm ?? null,
+        martingaleMultiplier: martingaleNorm ?? null,
+        tpSlStepStart: tpSlStartNorm ?? null,
+        tpSlStepRange: tpSlRangeNorm ?? null,
       },
       update: {
         ...(body.enabled !== undefined ? { enabled: body.enabled } : {}),
         ...(sourcePriorityNorm !== undefined ? { sourcePriority: sourcePriorityNorm } : {}),
         ...(levNorm !== undefined ? { defaultLeverage: levNorm } : {}),
         ...(forcedLevNorm !== undefined ? { forcedLeverage: forcedLevNorm } : {}),
-        ...(rangeModeNorm !== undefined
-          ? { leverageRangeMode: rangeModeNorm }
-          : {}),
+        ...(rangeModeNorm !== undefined ? { leverageRangeMode: rangeModeNorm } : {}),
         ...(minLeverageNorm !== undefined ? { minLeverage: minLeverageNorm } : {}),
         ...(maxLeverageNorm !== undefined ? { maxLeverage: maxLeverageNorm } : {}),
         ...(entryNorm !== undefined ? { defaultEntryUsd: entryNorm } : {}),
         ...(minLotBumpNorm !== undefined ? { minLotBump: minLotBumpNorm } : {}),
+        ...(martingaleNorm !== undefined ? { martingaleMultiplier: martingaleNorm } : {}),
+        ...(tpSlStartNorm !== undefined ? { tpSlStepStart: tpSlStartNorm } : {}),
+        ...(tpSlRangeNorm !== undefined ? { tpSlStepRange: tpSlRangeNorm } : {}),
       },
     });
-    if (martingaleNorm !== undefined) {
-      const rowTitle = String(row?.title ?? chatId);
-      await this.setSourceMartingaleMultiplier(rowTitle, martingaleNorm);
-    }
-
-    if (body.tpSlStepStart !== undefined) {
-      const rowTitle = String(row?.title ?? chatId);
-      const raw = body.tpSlStepStart;
-      if (raw === null || String(raw).trim() === '') {
-        await this.setSourceTpSlStepStart(rowTitle, null);
-      } else {
-        await this.setSourceTpSlStepStart(
-          rowTitle,
-          parseTpSlStepStart(String(raw)),
-        );
-      }
-    }
-
-    if (body.tpSlStepRange !== undefined) {
-      const rowTitle = String(row?.title ?? chatId);
-      const r = body.tpSlStepRange;
-      if (r === null) {
-        await this.setSourceTpSlStepRange(rowTitle, null);
-      } else {
-        if (!Number.isFinite(r)) {
-          throw new BadRequestException(
-            'tpSlStepRange: ожидается null или целое 1–5',
-          );
-        }
-        const n = Math.trunc(r as number);
-        if (n < 1 || n > 5) {
-          throw new BadRequestException(
-            `tpSlStepRange: ожидается целое 1–5, получено ${JSON.stringify(r)}`,
-          );
-        }
-        await this.setSourceTpSlStepRange(rowTitle, n);
-      }
-    }
 
     await this.refreshEnabledChatsCache();
     return { ok: true };
@@ -1623,7 +1722,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   private async buildTranscriptParseOverrides(
     chatId: string,
   ): Promise<TranscriptParseOverrides> {
-    const [chat, details] = await Promise.all([
+    const cabinetId = this.cabinetContext.getCabinetId();
+    const [chat, scoped, details] = await Promise.all([
       this.prisma.tgUserbotChat.findUnique({
         where: { chatId },
         select: {
@@ -1636,34 +1736,57 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           title: true,
         },
       }),
+      cabinetId
+        ? this.prisma.cabinetTelegramSource.findUnique({
+            where: { cabinetId_chatId: { cabinetId, chatId } },
+            select: {
+              defaultLeverage: true,
+              forcedLeverage: true,
+              leverageRangeMode: true,
+              minLeverage: true,
+              maxLeverage: true,
+              defaultEntryUsd: true,
+            },
+          })
+        : Promise.resolve(null),
       this.bybit.getUnifiedUsdtBalanceDetails(),
     ]);
     const defaultOrderUsd = await this.settings.resolveDefaultEntryUsd({
-      rawOverride: chat?.defaultEntryUsd,
+      rawOverride: scoped?.defaultEntryUsd ?? chat?.defaultEntryUsd,
       balanceTotalUsd: details?.totalUsd,
     });
     const leverageDefault =
-      chat?.defaultLeverage != null && chat.defaultLeverage >= 1
-        ? chat.defaultLeverage
+      scoped?.defaultLeverage != null && scoped.defaultLeverage >= 1
+        ? scoped.defaultLeverage
+        : chat?.defaultLeverage != null && chat.defaultLeverage >= 1
+          ? chat.defaultLeverage
         : undefined;
     return {
       defaultOrderUsd,
       leverageDefault,
       chatForcedLeverage:
-        chat?.forcedLeverage != null && chat.forcedLeverage >= 1
-          ? chat.forcedLeverage
+        scoped?.forcedLeverage != null && scoped.forcedLeverage >= 1
+          ? scoped.forcedLeverage
+          : chat?.forcedLeverage != null && chat.forcedLeverage >= 1
+            ? chat.forcedLeverage
           : undefined,
       leverageRangeMode:
-        chat?.leverageRangeMode != null
-          ? parseLeverageRangeMode(chat.leverageRangeMode)
+        scoped?.leverageRangeMode != null
+          ? parseLeverageRangeMode(scoped.leverageRangeMode)
+          : chat?.leverageRangeMode != null
+            ? parseLeverageRangeMode(chat.leverageRangeMode)
           : undefined,
       minAllowedLeverage:
-        chat?.minLeverage != null && chat.minLeverage >= 1
-          ? chat.minLeverage
+        scoped?.minLeverage != null && scoped.minLeverage >= 1
+          ? scoped.minLeverage
+          : chat?.minLeverage != null && chat.minLeverage >= 1
+            ? chat.minLeverage
           : undefined,
       maxAllowedLeverage:
-        chat?.maxLeverage != null && chat.maxLeverage >= 1
-          ? chat.maxLeverage
+        scoped?.maxLeverage != null && scoped.maxLeverage >= 1
+          ? scoped.maxLeverage
+          : chat?.maxLeverage != null && chat.maxLeverage >= 1
+            ? chat.maxLeverage
           : undefined,
     };
   }
@@ -1752,31 +1875,55 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    this.enqueueIngestJob({
-      ingest: {
-        id: ingest.id,
-        chatId: ingest.chatId,
-        messageId: ingest.messageId,
-        signalHash: null,
-        status: ingest.status,
-      },
-      text: text.length > USERBOT_INLINE_TEXT_MAX_CHARS ? null : text,
-      textLen: text.length,
-      meta,
-      options: {
-        enforceBalanceGuard: true,
-        ...options,
-        ingestCreatedAt: ingest.createdAt,
-      },
-    });
+    const cabinetIds = await this.cabinets.listEnabledCabinetIdsForChat(chatId);
+    for (const cabinetId of cabinetIds) {
+      const route = await this.prisma.cabinetIngestRoute.upsert({
+        where: { cabinetId_ingestId: { cabinetId, ingestId: ingest.id } },
+        create: {
+          cabinetId,
+          ingestId: ingest.id,
+          chatId,
+          classification: 'other',
+          status: 'queued',
+        },
+        update: {
+          chatId,
+          classification: 'other',
+          status: 'queued',
+          error: null,
+          aiRequest: null,
+          aiResponse: null,
+        },
+        select: { id: true, cabinetId: true },
+      });
+      this.enqueueIngestJob({
+        ingest: {
+          id: ingest.id,
+          chatId: ingest.chatId,
+          messageId: ingest.messageId,
+          signalHash: null,
+          status: ingest.status,
+        },
+        text: text.length > USERBOT_INLINE_TEXT_MAX_CHARS ? null : text,
+        textLen: text.length,
+        meta,
+        options: {
+          enforceBalanceGuard: true,
+          ...options,
+          ingestCreatedAt: ingest.createdAt,
+        },
+        route,
+      });
+    }
   }
 
   private enqueueIngestJob(job: IngestProcessJob): void {
-    if (this.processingQueuedIds.has(job.ingest.id)) {
+    const queueKey = `${job.ingest.id}:${job.route?.id ?? 'default'}`;
+    if (this.processingQueuedIds.has(queueKey)) {
       return;
     }
     // Ставим "замок" сразу, чтобы не было гонки и дубликатов при async-проверке лимита.
-    this.processingQueuedIds.add(job.ingest.id);
+    this.processingQueuedIds.add(queueKey);
 
     // Защита от неконтролируемого роста памяти: ограничиваем очередь.
     // При переполнении помечаем ingest как ignored с причиной "overloaded".
@@ -1788,7 +1935,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         10_000,
       );
       if (this.processingQueue.length >= maxQueue) {
-        this.processingQueuedIds.delete(job.ingest.id);
+        this.processingQueuedIds.delete(queueKey);
         void this.appLog.append(
           'warn',
           'telegram',
@@ -1818,7 +1965,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       this.pumpIngestQueue();
     })().catch((e) => {
       // При ошибке не держим "замок" навсегда.
-      this.processingQueuedIds.delete(job.ingest.id);
+      this.processingQueuedIds.delete(queueKey);
       this.logger.warn(`enqueueIngestJob failed: ${formatError(e)}`);
     });
   }
@@ -1828,13 +1975,21 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       this.processingWorkersActive < USERBOT_PROCESSING_CONCURRENCY &&
       this.processingQueue.length > 0
     ) {
-      const job = this.processingQueue.shift();
+      const nextIdx = this.processingQueue.findIndex(
+        (item) => !this.processingActiveIngestIds.has(item.ingest.id),
+      );
+      if (nextIdx < 0) {
+        return;
+      }
+      const [job] = this.processingQueue.splice(nextIdx, 1);
       if (!job) {
         return;
       }
-      this.processingQueuedIds.delete(job.ingest.id);
+      this.processingQueuedIds.delete(`${job.ingest.id}:${job.route?.id ?? 'default'}`);
+      this.processingActiveIngestIds.add(job.ingest.id);
       this.processingWorkersActive += 1;
       void this.runIngestJob(job).finally(() => {
+        this.processingActiveIngestIds.delete(job.ingest.id);
         this.processingWorkersActive -= 1;
         this.pumpIngestQueue();
       });
@@ -1851,12 +2006,37 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         });
         text = row?.text ?? '';
       }
-      await this.processIngestRecord(
-        job.ingest,
-        text,
-        job.meta,
-        job.options,
-      );
+      const cabinetId = job.route?.cabinetId ?? (await this.cabinets.getDefaultCabinetId());
+      await this.cabinetContext.runWithCabinet(cabinetId, async () => {
+        await this.processIngestRecord(
+          job.ingest,
+          text,
+          job.meta,
+          job.options,
+        );
+      });
+      if (job.route?.id) {
+        const ingestRow = await this.prisma.tgUserbotIngest.findUnique({
+          where: { id: job.ingest.id },
+          select: {
+            classification: true,
+            status: true,
+            error: true,
+            aiRequest: true,
+            aiResponse: true,
+          },
+        });
+        await this.prisma.cabinetIngestRoute.update({
+          where: { id: job.route.id },
+          data: {
+            classification: ingestRow?.classification ?? 'other',
+            status: ingestRow?.status ?? 'ignored',
+            error: ingestRow?.error ?? null,
+            aiRequest: ingestRow?.aiRequest ?? null,
+            aiResponse: ingestRow?.aiResponse ?? null,
+          },
+        });
+      }
     } catch (e) {
       const error = formatError(e);
       this.logger.error(`runIngestJob failed ingest=${job.ingest.id}: ${error}`);
@@ -1865,6 +2045,18 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         status: 'ignored',
         error,
       });
+      if (job.route?.id) {
+        await this.prisma.cabinetIngestRoute
+          .update({
+            where: { id: job.route.id },
+            data: {
+              classification: 'other',
+              status: 'ignored',
+              error,
+            },
+          })
+          .catch(() => undefined);
+      }
     }
   }
 
@@ -1946,14 +2138,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
-      const chatMetaRaw = await (this.prisma as any).tgUserbotChat.findUnique({
-        where: { chatId: ingest.chatId },
-        select: { title: true, sourcePriority: true },
-      });
-      const chatMeta = chatMetaRaw as
-        | { title?: string | null; sourcePriority?: number | null }
-        | null;
-      const groupName = chatMeta?.title?.trim() || ingest.chatId;
+      const chatMeta = await this.getScopedChatMeta(ingest.chatId);
+      const groupName = chatMeta.title || ingest.chatId;
       const replyToMessageId = meta?.replyToMessageId?.trim() || undefined;
       const signalExternalId =
         meta?.signalExternalId?.trim() || this.extractSignalExternalId(text) || undefined;
@@ -3277,14 +3463,11 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       return { ok: true, mode: 'result_notify_disabled', signalId: signal.id };
     }
 
-    const chatMeta = await this.prisma.tgUserbotChat.findUnique({
-      where: { chatId: params.chatId },
-      select: { title: true },
-    });
+    const chatMeta = await this.getScopedChatMeta(params.chatId);
     const notify = await this.telegramBot.notifyUserbotResultWithoutEntry({
       ingestId: params.ingestId,
       chatId: params.chatId,
-      groupTitle: chatMeta?.title?.trim() || undefined,
+      groupTitle: chatMeta.title || undefined,
       pair: signal.pair,
       signalId: signal.id,
       resultMessageText: params.text,
@@ -3293,7 +3476,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     void this.vkNotifyMirror.mirrorNotifyUserbotResultWithoutEntry({
       ingestId: params.ingestId,
       chatId: params.chatId,
-      groupTitle: chatMeta?.title?.trim() || undefined,
+      groupTitle: chatMeta.title || undefined,
       pair: signal.pair,
       signalId: signal.id,
       resultMessageText: params.text,
@@ -3701,13 +3884,44 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     return Math.max(0, Math.floor(n));
   }
 
+  private async getScopedChatMeta(chatId: string): Promise<{
+    title: string | null;
+    sourcePriority: number;
+  }> {
+    const [chat, scoped] = await Promise.all([
+      this.prisma.tgUserbotChat.findUnique({
+        where: { chatId },
+        select: { title: true, sourcePriority: true },
+      }),
+      this.cabinetContext.getCabinetId()
+        ? this.prisma.cabinetTelegramSource.findUnique({
+            where: {
+              cabinetId_chatId: {
+                cabinetId: this.cabinetContext.getCabinetId()!,
+                chatId,
+              },
+            },
+            select: { sourcePriority: true },
+          })
+        : Promise.resolve(null),
+    ]);
+    return {
+      title: chat?.title?.trim() || null,
+      sourcePriority: this.normalizeSourcePriority(
+        scoped?.sourcePriority ?? chat?.sourcePriority,
+      ),
+    };
+  }
+
   private async findActiveSignalForPairAndDirection(
     pair: string,
     direction: 'long' | 'short',
   ): Promise<ActiveSignalLookup | null> {
     const wantPair = normalizeTradingPair(pair);
+    const cabinetId = this.cabinetContext.getCabinetId();
     const rows = await this.prisma.signal.findMany({
       where: {
+        ...(cabinetId ? { cabinetId } : {}),
         deletedAt: null,
         status: { in: ['ORDERS_PLACED', 'OPEN', 'PARSED'] },
         direction,
@@ -3743,16 +3957,10 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     if (!chatId) {
       return { priority: 0, sourceName };
     }
-    const chatRaw = await (this.prisma as any).tgUserbotChat.findUnique({
-      where: { chatId },
-      select: { title: true, sourcePriority: true },
-    });
-    const chat = chatRaw as
-      | { title?: string | null; sourcePriority?: number | null }
-      | null;
+    const chat = await this.getScopedChatMeta(chatId);
     return {
       priority: this.normalizeSourcePriority(chat?.sourcePriority),
-      sourceName: chat?.title?.trim() || sourceName || chatId,
+      sourceName: chat?.title || sourceName || chatId,
     };
   }
 
@@ -3936,10 +4144,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     if (!enabled) {
       return;
     }
-    const chatMeta = await this.prisma.tgUserbotChat.findUnique({
-      where: { chatId: params.chatId },
-    });
-    const groupTitle = chatMeta?.title?.trim();
+    const chatMeta = await this.getScopedChatMeta(params.chatId);
+    const groupTitle = chatMeta.title;
     const notify = await this.telegramBot.notifyUserbotSignalFailure({
       ...params,
       groupTitle: groupTitle && groupTitle.length > 0 ? groupTitle : undefined,
@@ -4250,11 +4456,20 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async refreshEnabledChatsCache() {
-    const rows = await this.prisma.tgUserbotChat.findMany({
-      where: { enabled: true },
-      select: { chatId: true },
-    });
-    this.enabledChatIds = new Set(rows.map((r) => r.chatId));
+    const [scopedRows, legacyRows] = await Promise.all([
+      this.prisma.cabinetTelegramSource.findMany({
+        where: { enabled: true },
+        select: { chatId: true },
+      }),
+      this.prisma.tgUserbotChat.findMany({
+        where: { enabled: true },
+        select: { chatId: true },
+      }),
+    ]);
+    this.enabledChatIds = new Set([
+      ...scopedRows.map((r) => r.chatId),
+      ...legacyRows.map((r) => r.chatId),
+    ]);
   }
 
   private async getApiCreds(): Promise<{ apiId: number; apiHash: string }> {
@@ -4443,15 +4658,21 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     signal: SignalDto;
     sourceChatTitle?: string;
   }): Promise<void> {
+    const cabinetId = this.cabinetContext.getCabinetId();
     const prismaAny = this.prisma as any;
     const groups = await prismaAny.tgUserbotPublishGroup.findMany({
-      where: { enabled: true },
+      where: { enabled: true, cabinetId },
       orderBy: { createdAt: 'asc' },
     });
     if (groups.length === 0) return;
     for (const g of groups) {
       const existing = await prismaAny.tgUserbotMirrorMessage.findFirst({
-        where: { publishGroupId: g.id, ingestId: params.ingest.id, kind: 'signal' },
+        where: {
+          cabinetId,
+          publishGroupId: g.id,
+          ingestId: params.ingest.id,
+          kind: 'signal',
+        },
         select: { id: true },
       });
       if (existing) continue;
@@ -4477,6 +4698,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         await prismaAny.tgUserbotMirrorMessage.create({
           data: {
             publishGroupId: g.id,
+            cabinetId,
             ingestId: params.ingest.id,
             sourceChatId: params.ingest.chatId,
             sourceMessageId: params.ingest.messageId,
@@ -4495,6 +4717,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       await prismaAny.tgUserbotMirrorMessage.create({
         data: {
           publishGroupId: g.id,
+          cabinetId,
           ingestId: params.ingest.id,
           sourceChatId: params.ingest.chatId,
           sourceMessageId: params.ingest.messageId,
@@ -4514,15 +4737,21 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     text: string;
     rootSourceMessageId?: string;
   }): Promise<void> {
+    const cabinetId = this.cabinetContext.getCabinetId();
     const prismaAny = this.prisma as any;
     const groups = await prismaAny.tgUserbotPublishGroup.findMany({
-      where: { enabled: true },
+      where: { enabled: true, cabinetId },
       orderBy: { createdAt: 'asc' },
     });
     if (groups.length === 0) return;
     for (const g of groups) {
       const existing = await prismaAny.tgUserbotMirrorMessage.findFirst({
-        where: { publishGroupId: g.id, ingestId: params.ingest.id, kind: params.kind },
+        where: {
+          cabinetId,
+          publishGroupId: g.id,
+          ingestId: params.ingest.id,
+          kind: params.kind,
+        },
         select: { id: true },
       });
       if (existing) continue;
@@ -4530,6 +4759,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         await prismaAny.tgUserbotMirrorMessage.create({
           data: {
             publishGroupId: g.id,
+            cabinetId,
             ingestId: params.ingest.id,
             sourceChatId: params.ingest.chatId,
             sourceMessageId: params.ingest.messageId,
@@ -4544,6 +4774,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       const rootPosted = await prismaAny.tgUserbotMirrorMessage.findFirst({
         where: {
           publishGroupId: g.id,
+          cabinetId,
           kind: 'signal',
           sourceChatId: params.ingest.chatId,
           sourceMessageId: params.rootSourceMessageId,
@@ -4556,6 +4787,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         await prismaAny.tgUserbotMirrorMessage.create({
           data: {
             publishGroupId: g.id,
+            cabinetId,
             ingestId: params.ingest.id,
             sourceChatId: params.ingest.chatId,
             sourceMessageId: params.ingest.messageId,
@@ -4580,6 +4812,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       await prismaAny.tgUserbotMirrorMessage.create({
         data: {
           publishGroupId: g.id,
+          cabinetId,
           ingestId: params.ingest.id,
           sourceChatId: params.ingest.chatId,
           sourceMessageId: params.ingest.messageId,

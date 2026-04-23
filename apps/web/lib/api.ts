@@ -27,6 +27,23 @@ export function getApiBase(): string {
   );
 }
 
+function getClientCabinetId(): string | undefined {
+  if (typeof window === 'undefined') return undefined;
+  const fromStorage = window.localStorage.getItem('active_cabinet_id')?.trim();
+  if (fromStorage) return fromStorage;
+  return undefined;
+}
+
+export function withCabinetQuery(path: string, cabinetId?: string | null): string {
+  const id = String(cabinetId ?? '').trim();
+  if (!id) return path;
+  const [baseRaw, hash = ''] = path.split('#', 2);
+  const base = baseRaw ?? path;
+  const hasQuery = base.includes('?');
+  const next = `${base}${hasQuery ? '&' : '?'}cabinetId=${encodeURIComponent(id)}`;
+  return hash ? `${next}#${hash}` : next;
+}
+
 /** Заголовки для запросов к API (Bearer из env). */
 export function getApiAuthHeaders(init?: HeadersInit): Headers {
   const headers = new Headers(init ?? undefined);
@@ -47,9 +64,19 @@ export function getApiAuthHeaders(init?: HeadersInit): Headers {
   return headers;
 }
 
-export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const headers = getApiAuthHeaders(init?.headers ?? undefined);
-  const res = await fetch(`${getApiBase()}${path}`, {
+export async function fetchJson<T>(
+  path: string,
+  init?: RequestInit,
+  cabinetId?: string | null,
+): Promise<T> {
+  const effectiveCabinetId = String(
+    cabinetId ?? getClientCabinetId() ?? '',
+  ).trim();
+  const headers = new Headers(getApiAuthHeaders(init?.headers ?? undefined));
+  if (effectiveCabinetId) {
+    headers.set('x-cabinet-id', effectiveCabinetId);
+  }
+  const res = await fetch(`${getApiBase()}${withCabinetQuery(path, effectiveCabinetId)}`, {
     ...init,
     headers,
     cache: 'no-store',

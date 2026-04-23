@@ -16,6 +16,8 @@ import type { Order, Signal } from '@prisma/client';
 import { formatError } from '../../common/format-error';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppLogService } from '../app-log/app-log.service';
+import { CabinetContextService } from '../cabinet/cabinet-context.service';
+import { CabinetService } from '../cabinet/cabinet.service';
 import { SettingsService } from '../settings/settings.service';
 import {
   mergePartialSignals,
@@ -52,6 +54,8 @@ type ExternalConfirmationResult = {
 };
 
 type ExternalConfirmationRequest = {
+  requestId: string;
+  cabinetId: string;
   ingestId: string;
   signal: SignalDto;
   rawMessage?: string;
@@ -80,6 +84,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     private readonly settings: SettingsService,
+    private readonly cabinets: CabinetService,
+    private readonly cabinetContext: CabinetContextService,
     @Inject(forwardRef(() => TranscriptService))
     private readonly transcript: TranscriptService,
     @Inject(forwardRef(() => BybitService))
@@ -321,6 +327,31 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     return ids.includes(userId);
   }
 
+  private makeExternalRequestKey(cabinetId: string, ingestId: string): string {
+    return `${cabinetId}|${ingestId}`;
+  }
+
+  private parseExternalRequestKey(raw: string): { cabinetId: string; ingestId: string } {
+    const text = String(raw ?? '').trim();
+    const idx = text.indexOf('|');
+    if (idx <= 0) {
+      return { cabinetId: '', ingestId: text };
+    }
+    return {
+      cabinetId: text.slice(0, idx).trim(),
+      ingestId: text.slice(idx + 1).trim(),
+    };
+  }
+
+  private async runWithUserCabinet<T>(userId: number, fn: () => Promise<T>): Promise<T> {
+    const cabinetId = await this.cabinets.resolveCabinetForTelegramUser(userId);
+    return this.cabinetContext.runWithCabinet(cabinetId, fn);
+  }
+
+  private currentCabinetId(): string | null {
+    return this.cabinetContext.getCabinetId();
+  }
+
   private async getWhitelistUserIds(): Promise<number[]> {
     const raw =
       (await this.settings.get('TELEGRAM_WHITELIST')) ??
@@ -446,8 +477,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async getDistinctSources(): Promise<string[]> {
+    const cabinetId = this.currentCabinetId();
     const rows = await this.prisma.signal.findMany({
-      where: { source: { not: null } },
+      where: { cabinetId, source: { not: null } },
       select: { source: true },
       distinct: ['source'],
       orderBy: { createdAt: 'desc' },
@@ -494,9 +526,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (ids.length === 0) {
       return { ok: false, deliveredTo: 0, error: 'TELEGRAM_WHITELIST пуст' };
     }
-    const requestId = params.ingestId;
+    const cabinetId =
+      this.cabinetContext.getCabinetId() ?? (await this.cabinets.getDefaultCabinetId());
+    const requestId = this.makeExternalRequestKey(cabinetId, params.ingestId);
     this.externalConfirmations.set(requestId, {
-      ingestId: requestId,
+      requestId,
+      cabinetId,
+      ingestId: params.ingestId,
       signal: params.signal,
       rawMessage: params.rawMessage,
       createdAt: Date.now(),
@@ -848,8 +884,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     let pairLine = '';
     let sourceLine = '';
     try {
+      const cabinetId = this.currentCabinetId();
       const sig = await this.prisma.signal.findFirst({
-        where: { id: params.signalId, deletedAt: null },
+        where: { id: params.signalId, cabinetId, deletedAt: null },
         select: { pair: true, source: true },
       });
       if (sig) {
@@ -1175,6 +1212,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
     const openDb = await this.prisma.signal.count({
       where: {
+        cabinetId: this.currentCabinetId(),
         deletedAt: null,
         status: { in: ['ORDERS_PLACED', 'OPEN', 'PARSED'] },
       },
@@ -1237,7 +1275,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     const exists = await this.prisma.signal.findFirst({
-      where: { id: sid, deletedAt: null },
+      where: { id: sid, cabinetId: this.currentCabinetId(), deletedAt: null },
       select: { id: true },
     });
     if (!exists) {
@@ -1444,7 +1482,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         await ctx.reply('Доступ запрещён.');
         return;
       }
-      return next();
+      return this.runWithUserCabinet(uid, () => next());
     });
 
     this.bot.hears(/^Сводка$/i, async (ctx) => {
@@ -1614,15 +1652,19 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     this.bot.action(/^ub_confirm:(.+)$/i, async (ctx) => {
       const uid = ctx.from?.id;
-      const ingestId = ctx.match?.[1];
-      if (!uid || !ingestId) {
+      const requestId = ctx.match?.[1];
+      if (!uid || !requestId) {
         await ctx.answerCbQuery();
         return;
       }
-      const req = this.externalConfirmations.get(ingestId);
+      const req = this.externalConfirmations.get(requestId);
+      const parsed = this.parseExternalRequestKey(requestId);
+      const cabinetId = req?.cabinetId || parsed.cabinetId;
+      const ingestId = req?.ingestId || parsed.ingestId;
       await ctx.answerCbQuery('Подтверждаю сигнал...');
-
-      const fallback = await this.confirmFromIngestId(ingestId);
+      const fallback = await this.cabinetContext.runWithCabinet(cabinetId || null, () =>
+        this.confirmFromIngestId(ingestId),
+      );
       if (!fallback.ok) {
         await req?.onResult?.({
           decision: 'confirmed',
@@ -1633,7 +1675,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         await ctx.reply(`Подтверждение не выполнено: ${fallback.error}`);
         return;
       }
-      this.externalConfirmations.delete(ingestId);
+      this.externalConfirmations.delete(requestId);
       await req?.onResult?.({
         decision: 'confirmed',
         ok: true,
@@ -1648,13 +1690,15 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     this.bot.action(/^ub_reject:(.+)$/i, async (ctx) => {
       const uid = ctx.from?.id;
-      const ingestId = ctx.match?.[1];
-      if (!uid || !ingestId) {
+      const requestId = ctx.match?.[1];
+      if (!uid || !requestId) {
         await ctx.answerCbQuery();
         return;
       }
-      const req = this.externalConfirmations.get(ingestId);
-      this.externalConfirmations.delete(ingestId);
+      const req = this.externalConfirmations.get(requestId);
+      this.externalConfirmations.delete(requestId);
+      const parsed = this.parseExternalRequestKey(requestId);
+      const ingestId = req?.ingestId || parsed.ingestId;
       await ctx.answerCbQuery('Сигнал отклонён');
       await req?.onResult?.({
         decision: 'rejected',
@@ -2082,7 +2126,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (!text) {
       return { ok: false, error: 'Текст сообщения для подтверждения не найден' };
     }
-    const [chat, details] = await Promise.all([
+    const cabinetId = this.cabinetContext.getCabinetId();
+    const [chat, scopedChat, details] = await Promise.all([
       row?.chatId
         ? this.prisma.tgUserbotChat.findUnique({
             where: { chatId: row.chatId },
@@ -2094,19 +2139,38 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
             },
           })
         : Promise.resolve(null),
+      row?.chatId && cabinetId
+        ? this.prisma.cabinetTelegramSource.findUnique({
+            where: {
+              cabinetId_chatId: {
+                cabinetId,
+                chatId: row.chatId,
+              },
+            },
+            select: {
+              defaultLeverage: true,
+              forcedLeverage: true,
+              defaultEntryUsd: true,
+            },
+          })
+        : Promise.resolve(null),
       this.bybit.getUnifiedUsdtBalanceDetails(),
     ]);
     const defaultOrderUsd = await this.settings.resolveDefaultEntryUsd({
-      rawOverride: chat?.defaultEntryUsd,
+      rawOverride: scopedChat?.defaultEntryUsd ?? chat?.defaultEntryUsd,
       balanceTotalUsd: details?.totalUsd,
     });
     const leverageDefault =
-      chat?.defaultLeverage != null && chat.defaultLeverage >= 1
-        ? chat.defaultLeverage
+      scopedChat?.defaultLeverage != null && scopedChat.defaultLeverage >= 1
+        ? scopedChat.defaultLeverage
+        : chat?.defaultLeverage != null && chat.defaultLeverage >= 1
+          ? chat.defaultLeverage
         : undefined;
     const chatForcedLeverage =
-      chat?.forcedLeverage != null && chat.forcedLeverage >= 1
-        ? chat.forcedLeverage
+      scopedChat?.forcedLeverage != null && scopedChat.forcedLeverage >= 1
+        ? scopedChat.forcedLeverage
+        : chat?.forcedLeverage != null && chat.forcedLeverage >= 1
+          ? chat.forcedLeverage
         : undefined;
     const parsed = await this.transcript.parse(
       'text',
