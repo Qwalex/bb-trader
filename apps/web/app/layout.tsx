@@ -4,6 +4,7 @@ import localFont from 'next/font/local';
 import Link from 'next/link';
 
 import { CabinetSwitcher } from './components/CabinetSwitcher';
+import { ApiAuthFetchBridge } from './components/ApiAuthFetchBridge';
 import { PwaRegister } from './components/PwaRegister';
 
 import './globals.css';
@@ -18,6 +19,14 @@ const basePath = normalizeBasePath(process.env.NEXT_PUBLIC_BASE_PATH);
 function withBasePath(url: string): string {
   if (!url.startsWith('/')) return url;
   return `${basePath}${url}`;
+}
+
+function getApiBaseForServer(): string {
+  return (
+    process.env.API_INTERNAL_URL?.replace(/\/$/, '') ??
+    process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ??
+    'http://api:3001'
+  );
 }
 
 const geistSans = localFont({
@@ -91,7 +100,26 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const cabinetId = (await cookies()).get('cabinet_id')?.value?.trim() ?? '';
+  const cookieStore = await cookies();
+  const cabinetId = cookieStore.get('cabinet_id')?.value?.trim() ?? '';
+  const authToken = cookieStore.get('sb_auth')?.value?.trim() ?? '';
+  let isAdmin = false;
+  if (authToken) {
+    try {
+      const res = await fetch(`${getApiBaseForServer()}/auth/me`, {
+        cache: 'no-store',
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      });
+      if (res.ok) {
+        const me = (await res.json()) as { role?: string };
+        isAdmin = String(me.role ?? '').trim().toLowerCase() === 'admin';
+      }
+    } catch {
+      isAdmin = false;
+    }
+  }
   const withCabinet = (path: string): string => {
     if (!cabinetId) return path;
     const hasQuery = path.includes('?');
@@ -100,6 +128,7 @@ export default async function RootLayout({
   return (
     <html lang="ru">
       <body className={`${geistSans.variable} ${geistMono.variable}`}>
+        <ApiAuthFetchBridge />
         <PwaRegister />
         <header className="nav">
           <strong className="brand">SignalsBot</strong>
@@ -109,10 +138,12 @@ export default async function RootLayout({
             <Link href={withCabinet('/trades')}>Сделки</Link>
             <Link href={withCabinet('/logs')}>Логи</Link>
             <Link href={withCabinet('/ai')}>AI</Link>
-            <Link href={withCabinet('/diagnostics')}>Диагностика</Link>
+            {isAdmin ? <Link href={withCabinet('/diagnostics')}>Диагностика</Link> : null}
             <Link href={withCabinet('/telegram-userbot')}>Userbot</Link>
-            <Link href={withCabinet('/openrouter-spend')}>Расходы OpenRouter</Link>
-            <Link href={withCabinet('/my-group')}>Моя группа</Link>
+            {isAdmin ? (
+              <Link href={withCabinet('/openrouter-spend')}>Расходы OpenRouter</Link>
+            ) : null}
+            {isAdmin ? <Link href={withCabinet('/my-group')}>Моя группа</Link> : null}
             <Link href={withCabinet('/filters')}>Фильтры</Link>
             <Link href={withCabinet('/settings')}>Настройки</Link>
           </nav>

@@ -241,7 +241,7 @@ export default function LoginPage() {
         </div>
       </div>
       <div className="card" style={{ maxWidth: 420, marginTop: 16 }}>
-        <p style={{ color: 'var(--muted)' }}>Ручная разблокировка (admin)</p>
+        <p style={{ color: 'var(--muted)' }}>Профиль текущей сессии</p>
         <div style={{ display: 'grid', gap: 12 }}>
           <button className="btn" type="button" onClick={() => void loadProfile()}>
             Обновить мой профиль
@@ -249,22 +249,29 @@ export default function LoginPage() {
           <p style={{ color: 'var(--muted)' }}>
             Текущий пользователь: {profile?.login ?? '—'} / роль: {profile?.role ?? '—'}
           </p>
-          <input
-            className="settingsAuthInput"
-            placeholder="Логин для разблокировки"
-            value={unlockLogin}
-            onChange={(e) => setUnlockLogin(e.target.value)}
-          />
-          <button
-            className="btn"
-            type="button"
-            disabled={submitting || !unlockLogin.trim()}
-            onClick={() => void unlockUser()}
-          >
-            Разблокировать
-          </button>
         </div>
       </div>
+      {profile?.role === 'admin' ? (
+        <div className="card" style={{ maxWidth: 420, marginTop: 16 }}>
+          <p style={{ color: 'var(--muted)' }}>Ручная разблокировка (admin)</p>
+          <div style={{ display: 'grid', gap: 12 }}>
+            <input
+              className="settingsAuthInput"
+              placeholder="Логин для разблокировки"
+              value={unlockLogin}
+              onChange={(e) => setUnlockLogin(e.target.value)}
+            />
+            <button
+              className="btn"
+              type="button"
+              disabled={submitting || !unlockLogin.trim()}
+              onClick={() => void unlockUser()}
+            >
+              Разблокировать
+            </button>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }

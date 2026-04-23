@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 import { getApiBase, withCabinetQuery } from '../../lib/api';
 
@@ -14,6 +15,8 @@ type PublishGroup = {
 };
 
 export default function MyGroupPage() {
+  const router = useRouter();
+  const [adminChecked, setAdminChecked] = useState(false);
   const [items, setItems] = useState<PublishGroup[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
@@ -35,8 +38,36 @@ export default function MyGroupPage() {
   }
 
   useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch('/api/auth', { cache: 'no-store' });
+        const json = (await res.json().catch(() => null)) as
+          | { authenticated?: boolean; role?: string }
+          | null;
+        const ok =
+          Boolean(json?.authenticated) &&
+          String(json?.role ?? '').trim().toLowerCase() === 'admin';
+        if (!ok) {
+          router.replace('/');
+          return;
+        }
+      } catch {
+        router.replace('/');
+        return;
+      } finally {
+        setAdminChecked(true);
+      }
+    })();
+  }, [router]);
+
+  useEffect(() => {
+    if (!adminChecked) return;
     void loadAll();
-  }, []);
+  }, [adminChecked]);
+
+  if (!adminChecked) {
+    return <p style={{ color: 'var(--muted)' }}>Проверка доступа…</p>;
+  }
 
   async function runBusy(key: string, fn: () => Promise<void>) {
     setBusy(key);

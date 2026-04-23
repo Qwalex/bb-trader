@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useRouter } from 'next/navigation';
 
 import { getApiBase } from '../../lib/api';
 import { formatDateTimeRu } from '../../lib/datetime';
@@ -96,6 +97,8 @@ const payloadStyle: CSSProperties = {
 };
 
 export default function DiagnosticsPage() {
+  const router = useRouter();
+  const [adminChecked, setAdminChecked] = useState(false);
   const [runs, setRuns] = useState<RunRow[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [details, setDetails] = useState<RunDetails | null>(null);
@@ -104,6 +107,33 @@ export default function DiagnosticsPage() {
   const [runNowLoading, setRunNowLoading] = useState(false);
   const [limit, setLimit] = useState(5);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch('/api/auth', { cache: 'no-store' });
+        const json = (await res.json().catch(() => null)) as
+          | { authenticated?: boolean; role?: string }
+          | null;
+        const ok =
+          Boolean(json?.authenticated) &&
+          String(json?.role ?? '').trim().toLowerCase() === 'admin';
+        if (!ok) {
+          router.replace('/');
+          return;
+        }
+      } catch {
+        router.replace('/');
+        return;
+      } finally {
+        setAdminChecked(true);
+      }
+    })();
+  }, [router]);
+
+  if (!adminChecked) {
+    return <p style={{ color: 'var(--muted)' }}>Проверка доступа…</p>;
+  }
 
   const loadRuns = useCallback(async () => {
     setLoadingRuns(true);
@@ -137,16 +167,19 @@ export default function DiagnosticsPage() {
   }, []);
 
   useEffect(() => {
+    if (!adminChecked) return;
     void loadRuns();
-  }, [loadRuns]);
+  }, [adminChecked, loadRuns]);
 
   useEffect(() => {
+    if (!adminChecked) return;
     if (selectedRunId) {
       void loadDetails(selectedRunId);
     }
-  }, [selectedRunId, loadDetails]);
+  }, [adminChecked, selectedRunId, loadDetails]);
 
   useEffect(() => {
+    if (!adminChecked) return;
     const status = details?.run?.status;
     const currentRunId = details?.run?.id;
     if (
@@ -160,7 +193,7 @@ export default function DiagnosticsPage() {
       void Promise.all([loadDetails(selectedRunId), loadRuns()]);
     }, 2500);
     return () => window.clearTimeout(timer);
-  }, [details?.run?.id, details?.run?.status, selectedRunId, loadDetails, loadRuns]);
+  }, [adminChecked, details?.run?.id, details?.run?.status, selectedRunId, loadDetails, loadRuns]);
 
   async function runLatestNow() {
     setRunNowLoading(true);

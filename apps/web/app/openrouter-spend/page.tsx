@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Bar,
   BarChart,
@@ -63,6 +64,8 @@ function formatDateLabel(iso: string, period: Period): string {
 }
 
 export default function OpenrouterSpendPage() {
+  const router = useRouter();
+  const [adminChecked, setAdminChecked] = useState(false);
   const [period, setPeriod] = useState<Period>('day');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -70,6 +73,30 @@ export default function OpenrouterSpendPage() {
   const [balance, setBalance] = useState<OpenrouterBalance | null>(null);
 
   useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch('/api/auth', { cache: 'no-store' });
+        const json = (await res.json().catch(() => null)) as
+          | { authenticated?: boolean; role?: string }
+          | null;
+        const ok =
+          Boolean(json?.authenticated) &&
+          String(json?.role ?? '').trim().toLowerCase() === 'admin';
+        if (!ok) {
+          router.replace('/');
+          return;
+        }
+      } catch {
+        router.replace('/');
+        return;
+      } finally {
+        setAdminChecked(true);
+      }
+    })();
+  }, [router]);
+
+  useEffect(() => {
+    if (!adminChecked) return;
     void (async () => {
       setLoading(true);
       setError(null);
@@ -99,7 +126,11 @@ export default function OpenrouterSpendPage() {
         setLoading(false);
       }
     })();
-  }, [period]);
+  }, [adminChecked, period]);
+
+  if (!adminChecked) {
+    return <p style={{ color: 'var(--muted)' }}>Проверка доступа…</p>;
+  }
 
   const timelineData = useMemo(() => {
     if (!data) return [];
