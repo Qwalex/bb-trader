@@ -410,7 +410,12 @@ export class BybitService {
   private async getLinearInstrumentFilters(
     client: RestClientV5,
     symbol: string,
-  ): Promise<{ qtyStep: string; minQty: string; tickSize: string }> {
+  ): Promise<{
+    qtyStep: string;
+    minQty: string;
+    tickSize: string;
+    maxLeverage?: number;
+  }> {
     const res = await client.getInstrumentsInfo({
       category: 'linear',
       symbol,
@@ -418,10 +423,14 @@ export class BybitService {
     const info = res.result?.list?.[0];
     const lot = info?.lotSizeFilter;
     const price = info?.priceFilter;
+    const maxLeverageRaw = Number(info?.leverageFilter?.maxLeverage);
+    const maxLeverage =
+      Number.isFinite(maxLeverageRaw) && maxLeverageRaw > 0 ? maxLeverageRaw : undefined;
     return {
       qtyStep: lot?.qtyStep ?? '0.001',
       minQty: lot?.minOrderQty ?? '0.001',
       tickSize: price?.tickSize ?? '0.0001',
+      maxLeverage,
     };
   }
 
@@ -2063,6 +2072,26 @@ export class BybitService {
         orderUsd: signal.orderUsd,
         leverage: signal.leverage,
       });
+      const { qtyStep, minQty, tickSize, maxLeverage } = await this.getLinearInstrumentFilters(
+        client,
+        symbol,
+      );
+      const requestedLeverage = signal.leverage;
+      const effectiveLeverage =
+        maxLeverage && requestedLeverage > maxLeverage ? maxLeverage : requestedLeverage;
+      if (effectiveLeverage !== requestedLeverage) {
+        void this.appLog.append(
+          'warn',
+          'bybit',
+          'placeSignalOrders: плечо ограничено максимумом инструмента',
+          {
+            symbol,
+            requestedLeverage,
+            appliedLeverage: effectiveLeverage,
+            maxLeverage,
+          },
+        );
+      }
       const balanceDetails = await this.getUsdtBalanceDetails(client);
       const balance = balanceDetails.availableUsd;
       const defaultOrderUsd = await this.settings.getDefaultOrderUsd(
@@ -2093,7 +2122,7 @@ export class BybitService {
            */
           if (pct <= 100) {
             const margin = balance * (pct / 100);
-            leveragedNotional = margin * signal.leverage;
+            leveragedNotional = margin * effectiveLeverage;
           } else {
             leveragedNotional = balance * (pct / 100);
           }
@@ -2106,7 +2135,7 @@ export class BybitService {
                 symbol,
                 balance,
                 capitalPercent: signal.capitalPercent,
-                leverage: signal.leverage,
+                leverage: effectiveLeverage,
                 calculatedNotional: leveragedNotional,
                 minNotionalApplied: MIN_PERCENT_NOTIONAL_USD,
               },
@@ -2120,32 +2149,52 @@ export class BybitService {
       const leverageRes = await client.setLeverage({
         category: 'linear',
         symbol,
-        buyLeverage: String(signal.leverage),
-        sellLeverage: String(signal.leverage),
+        buyLeverage: String(effectiveLeverage),
+        sellLeverage: String(effectiveLeverage),
       });
       // 110043 = leverage not modified (уже выставлено нужное плечо)
-      if (leverageRes.retCode !== 0 && leverageRes.retCode !== 110043) {
-        const errText = `setLeverage failed: ${leverageRes.retCode} ${String(leverageRes.retMsg ?? '')}`;
+      let leverageResult = leverageRes;
+      if (leverageResult.retCode === 110013) {
+        const retMsg = String(leverageResult.retMsg ?? '');
+        const parsedMax = Number(retMsg.match(/maxLeverage\s*\[([0-9.]+)\]/i)?.[1]);
+        if (Number.isFinite(parsedMax) && parsedMax > 0 && parsedMax < effectiveLeverage) {
+          void this.appLog.append(
+            'warn',
+            'bybit',
+            'setLeverage: повтор с максимумом из risk limit',
+            {
+              symbol,
+              requestedLeverage: effectiveLeverage,
+              retryLeverage: parsedMax,
+              retCode: leverageResult.retCode,
+              retMsg,
+            },
+          );
+          leverageResult = await client.setLeverage({
+            category: 'linear',
+            symbol,
+            buyLeverage: String(parsedMax),
+            sellLeverage: String(parsedMax),
+          });
+        }
+      }
+      if (leverageResult.retCode !== 0 && leverageResult.retCode !== 110043) {
+        const errText = `setLeverage failed: ${leverageResult.retCode} ${String(leverageResult.retMsg ?? '')}`;
         void this.appLog.append('error', 'bybit', 'setLeverage отклонён', {
           symbol,
-          leverage: signal.leverage,
-          retCode: leverageRes.retCode,
-          retMsg: String(leverageRes.retMsg ?? ''),
+          leverage: effectiveLeverage,
+          retCode: leverageResult.retCode,
+          retMsg: String(leverageResult.retMsg ?? ''),
         });
         return { ok: false, error: errText };
       }
-      if (leverageRes.retCode === 110043) {
+      if (leverageResult.retCode === 110043) {
         void this.appLog.append('info', 'bybit', 'setLeverage: плечо уже было установлено', {
           symbol,
-          leverage: signal.leverage,
-          retCode: leverageRes.retCode,
+          leverage: effectiveLeverage,
+          retCode: leverageResult.retCode,
         });
       }
-
-      const { qtyStep, minQty, tickSize } = await this.getLinearInstrumentFilters(
-        client,
-        symbol,
-      );
       const minQtyNum = parseFloat(minQty);
       const requestedEntries = signal.entries;
       const rangePlan = this.applyEntryRangeResolution(signal, lastPrice, tickSize);
