@@ -40,6 +40,38 @@ const ENV_FALLBACK: Record<string, string> = {
   TP_SL_STEP_RANGE: '',
 };
 
+const GLOBAL_SHARED_SETTING_KEYS = new Set<string>([
+  NAV_MENU_HIDDEN_SETTING_KEY,
+  'OPENROUTER_API_KEY',
+  'OPENROUTER_MODEL_DEFAULT',
+  'OPENROUTER_MODEL_TEXT',
+  'OPENROUTER_MODEL_AI_ADVISOR',
+  'OPENROUTER_MODEL_TEXT_FALLBACK_1',
+  'OPENROUTER_MODEL_IMAGE',
+  'OPENROUTER_MODEL_IMAGE_FALLBACK_1',
+  'OPENROUTER_MODEL_AUDIO',
+  'OPENROUTER_MODEL_AUDIO_FALLBACK_1',
+  'OPENROUTER_MODEL_HISTORY',
+  'DIAGNOSTIC_BATCH_SIZE',
+  'DIAGNOSTIC_MAX_LOG_LINES',
+  'APPLOG_ENABLED',
+  'APPLOG_LOG_NOISY_EVENTS',
+  'OPENROUTER_DIAGNOSTIC_MODELS',
+  'MIN_CAPITAL_AMOUNT',
+  'DEFAULT_ORDER_USD',
+  'BUMP_TO_MIN_EXCHANGE_LOT',
+  'DEFAULT_LEVERAGE_ENABLED',
+  'DEFAULT_LEVERAGE',
+  'FORCED_LEVERAGE',
+  'LEVERAGE_RANGE_MODE',
+  'MIN_ALLOWED_LEVERAGE',
+  'MAX_ALLOWED_LEVERAGE',
+  'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',
+  'POLLING_INTERVAL_MS',
+  'TP_SL_STEP_START',
+  'TP_SL_STEP_RANGE',
+]);
+
 @Injectable()
 export class SettingsService {
   private static readonly COMPROMISED_SECRET_KEYS = [
@@ -73,6 +105,10 @@ export class SettingsService {
 
   private isCabinetScopedKey(key: string): boolean {
     return CABINET_SCOPED_SETTING_KEY_SET.has(key);
+  }
+
+  private isGlobalSharedKey(key: string): boolean {
+    return GLOBAL_SHARED_SETTING_KEYS.has(key);
   }
 
   private cacheKey(cabinetId: string | null, key: string): string {
@@ -133,7 +169,7 @@ export class SettingsService {
     if (cached !== null) {
       return cached;
     }
-    if (cabinetId && this.isCabinetScopedKey(key)) {
+    if (cabinetId && this.isCabinetScopedKey(key) && !this.isGlobalSharedKey(key)) {
       const scoped = await this.prisma.cabinetSetting.findUnique({
         where: { cabinetId_key: { cabinetId, key } },
         select: { value: true },
@@ -143,7 +179,7 @@ export class SettingsService {
         return scoped.value;
       }
     }
-    if (ownerUserId) {
+    if (ownerUserId && !this.isGlobalSharedKey(key)) {
       const userRow = await this.prisma.userSetting.findUnique({
         where: { userId_key: { userId: ownerUserId, key } },
         select: { value: true },
@@ -153,7 +189,7 @@ export class SettingsService {
         return userRow.value;
       }
     }
-    if (!ownerUserId) {
+    if (!ownerUserId || this.isGlobalSharedKey(key)) {
       const row = await this.prisma.setting.findUnique({ where: { key } });
       if (row?.value !== undefined && row?.value !== '') {
         this.writeCache(cabinetId, key, row.value);
@@ -214,6 +250,9 @@ export class SettingsService {
   async set(key: string, value: string): Promise<void> {
     let normalized = value;
     try {
+      if (key === 'TELEGRAM_BOT_TOKEN') {
+        normalized = value.trim();
+      } else
       if (key === 'TP_SL_STEP_RANGE') {
         normalized = normalizeTpSlStepRangeForPersist(value);
       } else if (key === 'TP_SL_STEP_START') {
@@ -288,7 +327,22 @@ export class SettingsService {
     }
     const cabinetId = this.currentCabinetId();
     const ownerUserId = await this.resolveCurrentUserId();
-    if (cabinetId && this.isCabinetScopedKey(key)) {
+    if (cabinetId && this.isCabinetScopedKey(key) && !this.isGlobalSharedKey(key)) {
+      if (key === 'TELEGRAM_BOT_TOKEN' && normalized) {
+        const duplicated = await this.prisma.cabinetSetting.findFirst({
+          where: {
+            key: 'TELEGRAM_BOT_TOKEN',
+            value: normalized,
+            cabinetId: { not: cabinetId },
+          },
+          select: { cabinetId: true },
+        });
+        if (duplicated) {
+          throw new BadRequestException(
+            'Этот Telegram bot token уже используется в другом кабинете. Токен должен быть уникальным для каждого кабинета.',
+          );
+        }
+      }
       await this.prisma.cabinetSetting.upsert({
         where: { cabinetId_key: { cabinetId, key } },
         create: { cabinetId, key, value: normalized },
@@ -297,7 +351,7 @@ export class SettingsService {
       this.invalidateCacheForKey(key);
       return;
     }
-    if (ownerUserId) {
+    if (ownerUserId && !this.isGlobalSharedKey(key)) {
       await this.prisma.userSetting.upsert({
         where: { userId_key: { userId: ownerUserId, key } },
         create: { userId: ownerUserId, key, value: normalized },
@@ -335,13 +389,15 @@ export class SettingsService {
       return out;
     }
     const scopedKeys =
-      cabinetId != null ? unresolved.filter((k) => this.isCabinetScopedKey(k)) : [];
+      cabinetId != null
+        ? unresolved.filter((k) => this.isCabinetScopedKey(k) && !this.isGlobalSharedKey(k))
+        : [];
     const [globalRows, scopedRows, userRows]: [
       Array<{ key: string; value: string }>,
       Array<{ key: string; value: string }>,
       Array<{ key: string; value: string }>,
     ] = await Promise.all([
-      ownerUserId
+      ownerUserId && !unresolved.some((k) => this.isGlobalSharedKey(k))
         ? Promise.resolve([] as Array<{ key: string; value: string }>)
         : this.prisma.setting.findMany({
             where: { key: { in: unresolved } },
@@ -355,7 +411,10 @@ export class SettingsService {
         : Promise.resolve([] as Array<{ key: string; value: string }>),
       ownerUserId
         ? this.prisma.userSetting.findMany({
-            where: { userId: ownerUserId, key: { in: unresolved } },
+            where: {
+              userId: ownerUserId,
+              key: { in: unresolved.filter((k) => !this.isGlobalSharedKey(k)) },
+            },
             select: { key: true, value: true },
           })
         : Promise.resolve([] as Array<{ key: string; value: string }>),
@@ -405,9 +464,7 @@ export class SettingsService {
     const cabinetId = this.currentCabinetId();
     const ownerUserId = await this.resolveCurrentUserId();
     const [globalRows, scopedRows, userRows] = await Promise.all([
-      ownerUserId
-        ? Promise.resolve([] as Array<{ key: string; value: string }>)
-        : this.prisma.setting.findMany({ orderBy: { key: 'asc' } }),
+      this.prisma.setting.findMany({ orderBy: { key: 'asc' } }),
       cabinetId
         ? this.prisma.cabinetSetting.findMany({
             where: { cabinetId },

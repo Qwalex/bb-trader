@@ -28,6 +28,37 @@ function withAppBasePath(url: string): string {
 
 const MODEL_HISTORY_KEY = 'OPENROUTER_MODEL_HISTORY';
 const DIAGNOSTIC_MODELS_KEY = 'OPENROUTER_DIAGNOSTIC_MODELS';
+const ADMIN_GLOBAL_KEYS = new Set<string>([
+  NAV_MENU_HIDDEN_SETTING_KEY,
+  'OPENROUTER_API_KEY',
+  'OPENROUTER_MODEL_DEFAULT',
+  'OPENROUTER_MODEL_TEXT',
+  'OPENROUTER_MODEL_AI_ADVISOR',
+  'OPENROUTER_MODEL_TEXT_FALLBACK_1',
+  'OPENROUTER_MODEL_IMAGE',
+  'OPENROUTER_MODEL_IMAGE_FALLBACK_1',
+  'OPENROUTER_MODEL_AUDIO',
+  'OPENROUTER_MODEL_AUDIO_FALLBACK_1',
+  'OPENROUTER_MODEL_HISTORY',
+  'DIAGNOSTIC_BATCH_SIZE',
+  'DIAGNOSTIC_MAX_LOG_LINES',
+  'APPLOG_ENABLED',
+  'APPLOG_LOG_NOISY_EVENTS',
+  DIAGNOSTIC_MODELS_KEY,
+  'MIN_CAPITAL_AMOUNT',
+  'DEFAULT_ORDER_USD',
+  'BUMP_TO_MIN_EXCHANGE_LOT',
+  'DEFAULT_LEVERAGE_ENABLED',
+  'DEFAULT_LEVERAGE',
+  'FORCED_LEVERAGE',
+  'LEVERAGE_RANGE_MODE',
+  'MIN_ALLOWED_LEVERAGE',
+  'MAX_ALLOWED_LEVERAGE',
+  'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',
+  'POLLING_INTERVAL_MS',
+  'TP_SL_STEP_START',
+  'TP_SL_STEP_RANGE',
+]);
 const KEYS = [
   { key: NAV_MENU_HIDDEN_SETTING_KEY, label: 'Скрытые пункты меню (бургер)' },
   { key: 'OPENROUTER_API_KEY', label: 'OpenRouter API key' },
@@ -492,12 +523,13 @@ function buildPutOperations(saved: Row[], draft: Row[]): { key: string; value: s
 
 export default function SettingsPage() {
   const searchParams = useSearchParams();
-  const scope = searchParams.get('scope') === 'account' ? 'account' : 'cabinet';
+  const requestedScope = searchParams.get('scope') === 'account' ? 'account' : 'cabinet';
   const [savedRows, setSavedRows] = useState<Row[]>([]);
   const [draftRows, setDraftRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [authChecking, setAuthChecking] = useState(true);
   const [authenticated, setAuthenticated] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [authLogin, setAuthLogin] = useState('');
   const [authPassword, setAuthPassword] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
@@ -511,18 +543,25 @@ export default function SettingsPage() {
   const [newSource, setNewSource] = useState('');
   const [newExcludedSource, setNewExcludedSource] = useState('');
   const [newDiagnosticModel, setNewDiagnosticModel] = useState('');
+  const scope = !isAdmin && requestedScope === 'account' ? 'cabinet' : requestedScope;
 
   const apiFetchScoped = (path: string, init?: RequestInit) =>
     fetchApiResponse(path, init, scope === 'account' ? '' : undefined);
 
   const visibleKeys = useMemo(
     () =>
-      KEYS.filter(({ key }) =>
-        scope === 'cabinet'
-          ? CABINET_SCOPED_SETTING_KEY_SET.has(key)
-          : !CABINET_SCOPED_SETTING_KEY_SET.has(key),
-      ),
-    [scope],
+      KEYS.filter(({ key }) => {
+        if (scope === 'account') {
+          return isAdmin && ADMIN_GLOBAL_KEYS.has(key);
+        }
+        if (scope === 'cabinet') {
+          if (!CABINET_SCOPED_SETTING_KEY_SET.has(key)) return false;
+          if (!isAdmin && ADMIN_GLOBAL_KEYS.has(key)) return false;
+          return true;
+        }
+        return false;
+      }),
+    [scope, isAdmin],
   );
   const visibleKeySet = useMemo(() => new Set<string>(visibleKeys.map(({ key }) => key)), [visibleKeys]);
   const visibleSections = useMemo(
@@ -534,8 +573,12 @@ export default function SettingsPage() {
             ? CABINET_SCOPED_SETTING_KEY_SET.has(key)
             : !CABINET_SCOPED_SETTING_KEY_SET.has(key),
         ),
-      })).filter((section) => section.keys.length > 0),
-    [scope],
+      }))
+        .filter((section) => section.keys.length > 0)
+        .filter((section) =>
+          isAdmin ? true : !['ui', 'openrouter', 'trading', 'diagnostics'].includes(section.id),
+        ),
+    [scope, isAdmin],
   );
 
   async function loadSettings() {
@@ -563,8 +606,10 @@ export default function SettingsPage() {
         const j = (await res.json()) as {
           authenticated: boolean;
           enabled?: boolean;
+          role?: string;
         };
         setAuthenticated(Boolean(j.authenticated));
+        setIsAdmin(String(j.role ?? '').trim().toLowerCase() === 'admin');
         if (j.authenticated) {
           await loadSettings();
         } else {
@@ -1311,9 +1356,11 @@ export default function SettingsPage() {
         <a className={`btn ${scope === 'cabinet' ? '' : 'btnSecondary'}`} href={withAppBasePath('/settings?scope=cabinet')}>
           Режим: Кабинет
         </a>
-        <a className={`btn ${scope === 'account' ? '' : 'btnSecondary'}`} href={withAppBasePath('/settings?scope=account')}>
-          Режим: Аккаунт (глобально)
-        </a>
+        {isAdmin ? (
+          <a className={`btn ${scope === 'account' ? '' : 'btnSecondary'}`} href={withAppBasePath('/settings?scope=account')}>
+            Режим: Аккаунт (глобально)
+          </a>
+        ) : null}
       </div>
       {message && (
         <p className={`msg ${message.type === 'ok' ? 'ok' : 'err'}`}>
@@ -1459,7 +1506,7 @@ export default function SettingsPage() {
         </details>
         ) : null}
 
-        {scope === 'account' ? (
+        {scope === 'account' && isAdmin ? (
         <details className="card">
           <summary className="settingsSectionSummary">Модели для диагностики</summary>
           <div style={{ marginTop: '0.9rem' }}>
@@ -1519,6 +1566,7 @@ export default function SettingsPage() {
         </details>
         ) : null}
 
+        {isAdmin ? (
         <details className="card">
           <summary className="settingsSectionSummary">Опасная зона</summary>
           <div style={{ marginTop: '0.9rem' }}>
@@ -1550,6 +1598,7 @@ export default function SettingsPage() {
             </div>
           </div>
         </details>
+        ) : null}
       </div>
 
       <div

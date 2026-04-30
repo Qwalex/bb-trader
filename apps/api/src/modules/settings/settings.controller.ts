@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  ForbiddenException,
   Get,
   Post,
   Put,
@@ -23,8 +24,40 @@ import { CabinetService } from '../cabinet/cabinet.service';
 
 type AuthReq = {
   headers?: Record<string, string | string[] | undefined>;
-  auth?: { userId?: string };
+  auth?: { userId?: string; role?: string };
 };
+
+const ADMIN_ONLY_GLOBAL_KEYS = new Set<string>([
+  'NAV_MENU_HIDDEN',
+  'OPENROUTER_API_KEY',
+  'OPENROUTER_MODEL_DEFAULT',
+  'OPENROUTER_MODEL_TEXT',
+  'OPENROUTER_MODEL_AI_ADVISOR',
+  'OPENROUTER_MODEL_TEXT_FALLBACK_1',
+  'OPENROUTER_MODEL_IMAGE',
+  'OPENROUTER_MODEL_IMAGE_FALLBACK_1',
+  'OPENROUTER_MODEL_AUDIO',
+  'OPENROUTER_MODEL_AUDIO_FALLBACK_1',
+  'OPENROUTER_MODEL_HISTORY',
+  'DIAGNOSTIC_BATCH_SIZE',
+  'DIAGNOSTIC_MAX_LOG_LINES',
+  'APPLOG_ENABLED',
+  'APPLOG_LOG_NOISY_EVENTS',
+  'OPENROUTER_DIAGNOSTIC_MODELS',
+  'MIN_CAPITAL_AMOUNT',
+  'DEFAULT_ORDER_USD',
+  'BUMP_TO_MIN_EXCHANGE_LOT',
+  'DEFAULT_LEVERAGE_ENABLED',
+  'DEFAULT_LEVERAGE',
+  'FORCED_LEVERAGE',
+  'LEVERAGE_RANGE_MODE',
+  'MIN_ALLOWED_LEVERAGE',
+  'MAX_ALLOWED_LEVERAGE',
+  'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',
+  'POLLING_INTERVAL_MS',
+  'TP_SL_STEP_START',
+  'TP_SL_STEP_RANGE',
+]);
 
 @ApiTags('Settings')
 @Controller('settings')
@@ -47,6 +80,10 @@ export class SettingsController {
     const userId = String(req.auth?.userId ?? '').trim() || null;
     const cabinetId = await this.cabinets.resolveCabinetIdForUser(userId, requested);
     return this.cabinetContext.runWithCabinet(cabinetId, fn);
+  }
+
+  private isAdmin(req: AuthReq): boolean {
+    return String(req.auth?.role ?? '').trim().toLowerCase() === 'admin';
   }
 
   @ApiOperation({ summary: 'Список настроек (секреты замаскированы)' })
@@ -141,6 +178,9 @@ export class SettingsController {
     @Query('cabinetId') cabinetId: string | undefined,
     @Body() body: { key: string; value: string },
   ) {
+    if (ADMIN_ONLY_GLOBAL_KEYS.has(body.key) && !this.isAdmin(req)) {
+      throw new ForbiddenException('Этот ключ может изменять только администратор');
+    }
     await this.runWithCabinet(req, cabinetId, () => this.settings.set(body.key, body.value));
     return { ok: true };
   }
@@ -159,7 +199,13 @@ export class SettingsController {
   @ApiBadRequestResponse({ description: 'Не передано confirm=true' })
   @ApiOkResponse({ description: 'База сброшена' })
   @Post('reset-database')
-  async resetDatabase(@Body() body: { confirm?: boolean }) {
+  async resetDatabase(
+    @Req() req: AuthReq,
+    @Body() body: { confirm?: boolean },
+  ) {
+    if (!this.isAdmin(req)) {
+      throw new ForbiddenException('Сброс базы доступен только администратору');
+    }
     if (body?.confirm !== true) {
       throw new BadRequestException(
         'Укажите { "confirm": true } для подтверждения сброса базы',
@@ -179,7 +225,13 @@ export class SettingsController {
   @ApiBadRequestResponse({ description: 'Не передано confirm=true' })
   @ApiOkResponse({ description: 'Секреты очищены' })
   @Post('incident/purge-secrets')
-  async purgeCompromisedSecrets(@Body() body: { confirm?: boolean }) {
+  async purgeCompromisedSecrets(
+    @Req() req: AuthReq,
+    @Body() body: { confirm?: boolean },
+  ) {
+    if (!this.isAdmin(req)) {
+      throw new ForbiddenException('Очистка секретов доступна только администратору');
+    }
     if (body?.confirm !== true) {
       throw new BadRequestException(
         'Укажите { "confirm": true } для очистки скомпрометированных секретов',
