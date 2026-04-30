@@ -1,12 +1,14 @@
 # Security Risks Register
 
 ## Severity
+
 - Critical
 - High
 - Medium
 - Low
 
 ## Risk Template
+
 - ID: `SEC-###`
 - Severity:
 - Area/File:
@@ -17,6 +19,7 @@
 - Linked task: `AUD-###`
 
 ## Active Risks
+
 - `SEC-001` (Medium), `apps/web/app/api/auth/route.ts` + `apps/web/lib/api.ts`, browser-readable auth token and public-token fallback risk reduced: `NEXT_PUBLIC_API_ACCESS_TOKEN` fallback removed and `sb_auth_token` limited to non-production only; residual compatibility cookie remains in dev, status `mitigated`, linked task `AUD-013`.
 - `SEC-002` (Low), `scripts/watch-ssh-availability.sh`, switched from disabled host checks to configurable strict host checking with known_hosts and HTTPS notify default, status `mitigated`.
 - `SEC-003` (Low), `docker-compose*.yml`, hardcoded DB credentials and browser-exposed API token env reduced via env-substitution defaults and removal of `NEXT_PUBLIC_API_ACCESS_TOKEN` from compose environments, status `mitigated`.

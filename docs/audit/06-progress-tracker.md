@@ -1,13 +1,16 @@
 # Progress Tracker
 
 ## Status Legend
+
 - `todo`
 - `in_progress`
 - `blocked`
 - `done`
 
 ## Task Card Template
+
 ### AUD-###
+
 - Status:
 - Scope:
 - Files:
@@ -19,7 +22,9 @@
 - Linked risks (`SEC-###`):
 
 ## Active Queue
+
 ### AUD-001
+
 - Status: `in_progress`
 - Scope: Bootstrap `docs/audit` and task governance.
 - Files: `docs/audit/*`
@@ -31,6 +36,7 @@
 - Linked risks (`SEC-###`): N/A
 
 ### AUD-002
+
 - Status: `done`
 - Scope: API Wave 1 (high-risk large files).
 - Files: `apps/api/src/modules/telegram/*`, `apps/api/src/modules/telegram-userbot/*`, `apps/api/src/modules/settings/*`
@@ -42,6 +48,7 @@
 - Linked risks (`SEC-###`): `SEC-001`, `SEC-003`
 
 ### AUD-003
+
 - Status: `done`
 - Scope: Web Wave 1 (high-risk pages and auth/api layer).
 - Files: `apps/web/lib/api.ts`, `apps/web/lib/api.constants.ts`, `apps/web/lib/api-auth.util.ts`, `apps/web/app/api/auth/route.ts`, `apps/web/app/components/TopNav.tsx`
@@ -53,6 +60,7 @@
 - Linked risks (`SEC-###`): `SEC-001`
 
 ### AUD-004
+
 - Status: `done`
 - Scope: Infra Wave 1.
 - Files: root compose/railway/scripts.
@@ -64,6 +72,7 @@
 - Linked risks (`SEC-###`): `SEC-002`, `SEC-003`
 
 ### AUD-005
+
 - Status: `done`
 - Scope: Full coverage of remaining files.
 - Files: repository-wide.
@@ -75,6 +84,7 @@
 - Linked risks (`SEC-###`): `SEC-001`, `SEC-002`, `SEC-003`
 
 ### AUD-006
+
 - Status: `done`
 - Scope: Deep audit + safe decomposition of `apps/api/src/modules/bybit/bybit.service.ts`.
 - Files: `apps/api/src/modules/bybit/bybit.service.ts`, `apps/api/src/modules/bybit/bybit-json.util.ts`, `docs/audit/07-full-audit-backlog.md`, `AGENTS.md`, `docs/audit/05-agent-work-contract.md`.
@@ -86,6 +96,7 @@
 - Linked risks (`SEC-###`): `SEC-004`
 
 ### AUD-007
+
 - Status: `done`
 - Scope: Deep audit + safe decomposition of `apps/api/src/modules/telegram-userbot/telegram-userbot.service.ts`.
 - Files: `apps/api/src/modules/telegram-userbot/telegram-userbot.service.ts`, `apps/api/src/modules/telegram-userbot/telegram-userbot-source.util.ts`
@@ -97,6 +108,7 @@
 - Linked risks (`SEC-###`): `SEC-004`
 
 ### AUD-008
+
 - Status: `done`
 - Scope: Deep audit + safe decomposition of `apps/api/src/modules/telegram/telegram.service.ts`.
 - Files: `apps/api/src/modules/telegram/telegram.service.ts`, `apps/api/src/modules/telegram/telegram-trade-parse.util.ts`
@@ -108,6 +120,7 @@
 - Linked risks (`SEC-###`): `SEC-004`
 
 ### AUD-009
+
 - Status: `done`
 - Scope: Deep audit + safe decomposition of `apps/api/src/modules/transcript/transcript.service.ts`.
 - Files: `apps/api/src/modules/transcript/transcript.service.ts`, `apps/api/src/modules/transcript/transcript.constants.ts`
@@ -119,6 +132,7 @@
 - Linked risks (`SEC-###`): `SEC-004`
 
 ### AUD-010
+
 - Status: `done`
 - Scope: Deep audit + safe decomposition of `apps/api/src/modules/orders/orders.service.ts`.
 - Files: `apps/api/src/modules/orders/orders.service.ts`, `apps/api/src/modules/orders/orders-source.util.ts`
@@ -130,6 +144,7 @@
 - Linked risks (`SEC-###`): `SEC-004`
 
 ### AUD-011
+
 - Status: `done`
 - Scope: Deep audit + safe decomposition of `apps/web/app/settings/page.tsx`.
 - Files: `apps/web/app/settings/*`
@@ -141,6 +156,7 @@
 - Linked risks (`SEC-###`): `SEC-010`
 
 ### AUD-012
+
 - Status: `done`
 - Scope: Deep audit + safe decomposition of `apps/web/app/telegram-userbot/page.tsx`.
 - Files: `apps/web/app/telegram-userbot/page.tsx`, `apps/web/lib/cabinet-client.util.ts`, `apps/web/app/filters/page.tsx`, `apps/web/app/my-group/page.tsx`
@@ -152,6 +168,7 @@
 - Linked risks (`SEC-###`): `SEC-010`
 
 ### AUD-013
+
 - Status: `done`
 - Scope: Auth/session boundary sweep for web+api integration.
 - Files: `apps/web/app/api/auth/*`, `apps/web/lib/api*`, `apps/api/src/common/*`, `apps/api/src/modules/auth/*`
@@ -163,6 +180,7 @@
 - Linked risks (`SEC-###`): `SEC-001`, `SEC-005`, `SEC-006`, `SEC-007`, `SEC-009`, `SEC-010`
 
 ### AUD-014
+
 - Status: `done`
 - Scope: Config/infra secrets and unsafe defaults review.
 - Files: `docker-compose*.yml`, `railway*.toml`, `railpack*.json`, `scripts/*`, `.github/workflows/*`
@@ -174,6 +192,7 @@
 - Linked risks (`SEC-###`): `SEC-008`, `SEC-011`
 
 ### AUD-015
+
 - Status: `done`
 - Scope: Input validation and error normalization in high-risk API endpoints.
 - Files: controllers/services in `apps/api/src/modules/*` (priority: trading, bots, diagnostics).
@@ -185,6 +204,7 @@
 - Linked risks (`SEC-###`): `SEC-012`
 
 ### AUD-016
+
 - Status: `done`
 - Scope: Remaining API modules sweep.
 - Files: `apps/api/src/modules/vk/*`, `diagnostics/*`, `cabinet/*`, `settings/*`, `worker-queue/*`, `app-log/*`
@@ -196,6 +216,7 @@
 - Linked risks (`SEC-###`): `SEC-004`
 
 ### AUD-017
+
 - Status: `done`
 - Scope: Remaining web pages/components sweep.
 - Files: `apps/web/app/**/*`, excluding tasks already covered by `AUD-011..012`.
@@ -207,6 +228,7 @@
 - Linked risks (`SEC-###`): `SEC-010`
 
 ### AUD-018
+
 - Status: `done`
 - Scope: Shared types/contracts drift check.
 - Files: `packages/shared/src/*` + usages in api/web.
@@ -218,6 +240,7 @@
 - Linked risks (`SEC-###`): N/A
 
 ### AUD-019
+
 - Status: `done`
 - Scope: Agent documentation completion and cross-doc consistency.
 - Files: `AGENTS.md`, `.cursor/rules/*`, `docs/audit/*`, key operational docs in `docs/*`.
@@ -229,6 +252,7 @@
 - Linked risks (`SEC-###`): `SEC-008`, `SEC-011`
 
 ### AUD-020
+
 - Status: `done`
 - Scope: Additional typing decomposition for large API/Web files (`*.types.ts` extraction).
 - Files: `apps/api/src/modules/telegram-userbot/telegram-userbot.types.ts`, `apps/api/src/modules/telegram/telegram.types.ts`, `apps/api/src/modules/transcript/transcript.types.ts`, `apps/web/app/settings/settings.types.ts`, `apps/web/app/telegram-userbot/telegram-userbot.types.ts` + corresponding service/page imports.
