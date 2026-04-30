@@ -170,14 +170,15 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   private pollInFlight = false;
   private reconnectInFlight = false;
   private lastReconnectAttemptAtMs = 0;
-  private balanceCheckCache:
-    | {
-        checkedAtMs: number;
-        balanceUsd: number | undefined;
-        totalBalanceUsd: number | undefined;
-        minBalanceUsd: number;
-      }
-    | undefined;
+  private readonly balanceCheckCacheByCabinet = new Map<
+    string,
+    {
+      checkedAtMs: number;
+      balanceUsd: number | undefined;
+      totalBalanceUsd: number | undefined;
+      minBalanceUsd: number;
+    }
+  >();
   private messageRecencyCache:
     | {
         checkedAtMs: number;
@@ -4360,26 +4361,28 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       USERBOT_MIN_BALANCE_USD_DEFAULT,
       0,
     );
+    const cabinetCacheKey = this.cabinetContext.getCabinetId() ?? '__global__';
     const now = Date.now();
     let balanceUsd: number | undefined;
     let totalBalanceUsd: number | undefined;
+    const cached = this.balanceCheckCacheByCabinet.get(cabinetCacheKey);
     if (
-      this.balanceCheckCache &&
-      now - this.balanceCheckCache.checkedAtMs < USERBOT_BALANCE_CHECK_CACHE_MS &&
-      this.balanceCheckCache.minBalanceUsd === minBalanceUsd
+      cached &&
+      now - cached.checkedAtMs < USERBOT_BALANCE_CHECK_CACHE_MS &&
+      cached.minBalanceUsd === minBalanceUsd
     ) {
-      balanceUsd = this.balanceCheckCache.balanceUsd;
-      totalBalanceUsd = this.balanceCheckCache.totalBalanceUsd;
+      balanceUsd = cached.balanceUsd;
+      totalBalanceUsd = cached.totalBalanceUsd;
     } else {
       const details = await this.bybit.getUnifiedUsdtBalanceDetails();
       balanceUsd = details?.availableUsd;
       totalBalanceUsd = details?.totalUsd;
-      this.balanceCheckCache = {
+      this.balanceCheckCacheByCabinet.set(cabinetCacheKey, {
         checkedAtMs: now,
         balanceUsd,
         totalBalanceUsd,
         minBalanceUsd,
-      };
+      });
     }
 
     const paused =
