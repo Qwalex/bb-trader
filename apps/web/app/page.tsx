@@ -267,7 +267,7 @@ export default async function Home({
             `Автоматическая установка ордеров приостановлена: доступный баланс ниже порога ${guard.minBalanceUsd.toFixed(2)}$`}
         </p>
       )}
-      <form className="filters" method="get" action="/trade">
+      <form className="filters" method="get" action="/">
         {cabinetId ? <input type="hidden" name="cabinetId" value={cabinetId} /> : null}
         <label>
           Источник
