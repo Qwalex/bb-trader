@@ -34,8 +34,8 @@ import {
 /** До Bybit/Orders/Telegram: иначе orders → telegram раньше transcript. */
 import {
   TranscriptService,
-  type TranscriptParseOverrides,
 } from '../transcript/transcript.service';
+import type { TranscriptParseOverrides } from '../transcript/transcript.types';
 import { BybitService } from '../bybit/bybit.service';
 import { OrdersService } from '../orders/orders.service';
 import { TelegramService } from '../telegram/telegram.service';
@@ -61,96 +61,18 @@ import {
   parseSourceMartingaleMap,
   type SourceMartingaleMap,
 } from './telegram-userbot-source.util';
-
-type MessageKind = 'signal' | 'close' | 'reentry' | 'result' | 'other';
-type UserbotFilterKind = 'signal' | 'close' | 'result' | 'reentry' | 'ignore';
-type UserbotFilterExampleMatch = {
-  kind: UserbotFilterKind;
-  score: number;
-  examplePreview: string;
-  requiresQuote: boolean;
-};
-type UserbotFilterPatternMatch = {
-  kind: UserbotFilterKind;
-  pattern: string;
-  requiresQuote: boolean;
-};
-type QrPhase =
-  | 'idle'
-  | 'starting'
-  | 'waiting_scan'
-  | 'authorized'
-  | 'cancelled'
-  | 'error';
-
-type QrState = {
-  phase: QrPhase;
-  loginUrl?: string;
-  qrDataUrl?: string;
-  startedAt?: string;
-  updatedAt?: string;
-  error?: string;
-};
-
-type ProcessIngestOptions = {
-  enforceBalanceGuard?: boolean;
-  source?: 'realtime' | 'poll' | 'manual-reread' | 'manual-reread-all';
-  telegramReceivedAt?: Date;
-  ingestCreatedAt?: Date;
-  enqueuedAtMs?: number;
-};
-
-type IngestProcessJob = {
-  ingest: {
-    id: string;
-    chatId: string;
-    messageId: string;
-    signalHash: string | null;
-    status: string;
-  };
-  /**
-   * Текст сообщения может быть большим. Чтобы очередь не раздувала память,
-   * храним текст inline только до лимита; иначе подтягиваем из БД по ingest.id.
-   */
-  text: string | null;
-  textLen: number;
-  meta?: { replyToMessageId?: string; signalExternalId?: string };
-  options?: ProcessIngestOptions;
-  route?: { id: string; cabinetId: string };
-};
-
-type ActiveSignalLookup = {
-  id: string;
-  pair: string;
-  direction: string;
-  entries: string;
-  stopLoss: number;
-  takeProfits: string;
-  leverage: number;
-  orderUsd: number;
-  capitalPercent: number;
-  source: string | null;
-  sourceChatId: string | null;
-  sourceMessageId: string | null;
-  signalExternalId?: string | null;
-};
-
-type OpenrouterSpendPeriod = 'day' | '3d' | 'week' | 'month' | 'year';
-type ScopedChatOverride = {
-  chatId: string;
-  enabled: boolean;
-  sourcePriority: number;
-  defaultLeverage: number | null;
-  forcedLeverage: number | null;
-  leverageRangeMode: string | null;
-  minLeverage: number | null;
-  maxLeverage: number | null;
-  defaultEntryUsd: string | null;
-  minLotBump: boolean | null;
-  martingaleMultiplier: number | null;
-  tpSlStepStart: string | null;
-  tpSlStepRange: number | null;
-};
+import type {
+  ActiveSignalLookup,
+  IngestProcessJob,
+  MessageKind,
+  OpenrouterSpendPeriod,
+  ProcessIngestOptions,
+  QrState,
+  ScopedChatOverride,
+  UserbotFilterExampleMatch,
+  UserbotFilterKind,
+  UserbotFilterPatternMatch,
+} from './telegram-userbot.types';
 
 @Injectable()
 export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {

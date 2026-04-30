@@ -227,3 +227,14 @@
 - Manual verification: Pending.
 - Docs updated: Pending.
 - Linked risks (`SEC-###`): Pending.
+
+### AUD-020
+- Status: `done`
+- Scope: Additional typing decomposition for large API/Web files (`*.types.ts` extraction).
+- Files: `apps/api/src/modules/telegram-userbot/telegram-userbot.types.ts`, `apps/api/src/modules/telegram/telegram.types.ts`, `apps/api/src/modules/transcript/transcript.types.ts`, `apps/web/app/settings/settings.types.ts`, `apps/web/app/telegram-userbot/telegram-userbot.types.ts` + corresponding service/page imports.
+- Findings: large orchestration files still contained substantial inline typing blocks, reducing readability and slowing safe edits.
+- Changes: moved non-trivial inline types from services/pages to co-located `*.types.ts` files and rewired type imports; kept behavior unchanged.
+- Decomposition notes (`utils/constants/hooks/types`): typing layer separated from runtime logic for major api/web modules.
+- Manual verification: `npm run -w apps/api build` passed; `npm run -w apps/web build` passed.
+- Docs updated: `06-progress-tracker.md`.
+- Linked risks (`SEC-###`): `SEC-004`, `SEC-010`

@@ -37,6 +37,12 @@ import {
   OPENROUTER_SITE_URL,
   OPENROUTER_URL,
 } from './transcript.constants';
+import type {
+  OpenRouterLogContext,
+  TranscriptMessage,
+  TranscriptMessagePart,
+  TranscriptParseOverrides,
+} from './transcript.types';
 import {
   fieldLabelRu,
   isCompletePartial,
@@ -45,27 +51,6 @@ import {
   normalizePartialSignal,
   sanitizeSignalSource,
 } from './partial-signal.util';
-
-/** Опциональные дефолты для разбора (userbot: по чату). */
-export type TranscriptParseOverrides = {
-  defaultOrderUsd?: number;
-  leverageDefault?: number;
-  /** Принудительное плечо из карточки TgUserbotChat (выше глобального FORCED_LEVERAGE) */
-  chatForcedLeverage?: number;
-  /** Режим выбора плеча из диапазона (min|max|mid). */
-  leverageRangeMode?: 'min' | 'max' | 'mid';
-  /** Минимально допустимое плечо (кроме forced). */
-  minAllowedLeverage?: number;
-  /** Максимально допустимое плечо (кроме forced). */
-  maxAllowedLeverage?: number;
-};
-
-type OpenRouterLogContext = {
-  chatId?: string;
-  source?: string;
-  ingestId?: string;
-  stage?: string;
-};
 
 const TRANSCRIPT_RESPONSE_JSON_SCHEMA = {
   type: 'object',
@@ -233,16 +218,6 @@ function buildSystemPrompt(defaultOrderUsd: number): string {
 ${buildJsonSchemaRules(defaultOrderUsd)}
 `;
 }
-
-type TranscriptMessagePart =
-  | { type: 'text'; text: string }
-  | { type: 'image_url'; imageUrl: { url: string } }
-  | { type: 'input_audio'; inputAudio: { data: string; format: string } };
-
-type TranscriptMessage = {
-  role: 'system' | 'user';
-  content: string | TranscriptMessagePart[];
-};
 
 function normalizeOpenRouterAudioFormat(
   audioMime: string | undefined,

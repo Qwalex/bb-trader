@@ -37,41 +37,11 @@ import {
   parseNumberArrayFromJson,
   parseTakeProfitsForDisplay,
 } from './telegram-trade-parse.util';
-
-type DraftPhase = 'collecting' | 'ready' | 'awaiting_source';
-
-type DraftSession = {
-  phase: DraftPhase;
-  /** Последняя активность по черновику (ms). */
-  updatedAtMs: number;
-  /** Сообщения пользователя с начала сессии (контекст до подтверждения). */
-  userTurns: string[];
-  /** Готовый сигнал после полного разбора. */
-  signal?: SignalDto;
-  /** Накопленные поля, пока не хватает данных. */
-  partial?: Partial<SignalDto>;
-  /** Существующие источники для выбора (фаза awaiting_source). */
-  pendingSources?: string[];
-};
-
-type ExternalConfirmationResult = {
-  decision: 'confirmed' | 'rejected';
-  ok: boolean;
-  error?: string;
-  signalId?: string;
-  bybitOrderIds?: string[];
-  actorUserId?: number;
-};
-
-type ExternalConfirmationRequest = {
-  requestId: string;
-  cabinetId: string;
-  ingestId: string;
-  signal: SignalDto;
-  rawMessage?: string;
-  createdAt: number;
-  onResult?: (result: ExternalConfirmationResult) => Promise<void> | void;
-};
+import type {
+  DraftSession,
+  ExternalConfirmationRequest,
+  ExternalConfirmationResult,
+} from './telegram.types';
 
 @Injectable()
 export class TelegramService implements OnModuleInit, OnModuleDestroy {

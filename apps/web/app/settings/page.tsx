@@ -13,6 +13,7 @@ import {
 import { EntrySizingControl } from '../components/EntrySizingControl';
 import { fetchApiResponse } from '../../lib/api';
 import { parseStoredEntry, serializeEntry } from '../../lib/entry-sizing';
+import type { PendingChange, Row } from './settings.types';
 
 function normalizeBasePath(raw: string | undefined): string {
   const t = (raw ?? '').trim();
@@ -394,8 +395,6 @@ function mergeModelHistory(current: string[], value: string): string[] {
   return [v, ...current.filter((item) => item !== v)].slice(0, 50);
 }
 
-type Row = { key: string; value: string };
-
 function valueFor(rows: Row[], key: string): string {
   return rows.find((r) => r.key === key)?.value ?? '';
 }
@@ -447,13 +446,6 @@ function formatPreviewValue(key: string, value: string): string {
   const t = value.length > 200 ? `${value.slice(0, 200)}…` : value;
   return t;
 }
-
-type PendingChange = {
-  key: string;
-  label: string;
-  before: string;
-  after: string;
-};
 
 function collectPendingChanges(saved: Row[], draft: Row[]): PendingChange[] {
   const out: PendingChange[] = [];
