@@ -210,12 +210,11 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     if (!enabled) {
       return;
     }
-    try {
-      await this.connectFromStoredSession();
-    } catch (e) {
+    // Не блокируем bootstrap API: userbot может долго подключаться/висеть по сети.
+    void this.connectFromStoredSession().catch((e) => {
       const msg = formatError(e);
       this.logger.warn(`Userbot auto-connect skipped: ${msg}`);
-    }
+    });
   }
 
   async onModuleDestroy(): Promise<void> {
