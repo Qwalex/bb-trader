@@ -8,6 +8,17 @@ import { AppLogService } from './app-log.service';
 export class AppLogController {
   constructor(private readonly appLog: AppLogService) {}
 
+  private parseLimit(raw: string | undefined): number {
+    if (!raw) {
+      return 200;
+    }
+    const n = Number.parseInt(raw, 10);
+    if (!Number.isFinite(n)) {
+      return 200;
+    }
+    return Math.min(Math.max(n, 1), 1000);
+  }
+
   private isAdmin(req: { auth?: { role?: string } }): boolean {
     return String(req.auth?.role ?? '').trim().toLowerCase() === 'admin';
   }
@@ -26,7 +37,7 @@ export class AppLogController {
       throw new ForbiddenException('Логи доступны только администратору');
     }
     return this.appLog.list({
-      limit: limit ? parseInt(limit, 10) : 200,
+      limit: this.parseLimit(limit),
       category: category?.trim() || undefined,
     });
   }

@@ -39,6 +39,14 @@ export class OrdersController {
     private readonly cabinetContext: CabinetContextService,
   ) {}
 
+  private parsePositiveInt(raw: string | undefined, fallback: number, max: number): number {
+    const parsed = raw ? Number.parseInt(raw, 10) : fallback;
+    if (!Number.isFinite(parsed)) {
+      return fallback;
+    }
+    return Math.min(Math.max(Math.trunc(parsed), 1), max);
+  }
+
   private async runWithCabinet<T>(
     req: AuthReq,
     queryCabinetId: string | undefined,
@@ -139,8 +147,8 @@ export class OrdersController {
         to: to ? new Date(to) : undefined,
         includeDeleted: includeDeleted === '1' || includeDeleted === 'true',
         sortBy: sortBy === 'closedAt' ? 'closedAt' : 'createdAt',
-        page: page ? parseInt(page, 10) : 1,
-        pageSize: pageSize ? parseInt(pageSize, 10) : 20,
+        page: this.parsePositiveInt(page, 1, 10_000),
+        pageSize: this.parsePositiveInt(pageSize, 20, 200),
         refreshPnlFromExchange: truthy(refreshPnl),
         includeMartingaleSteps: truthy(martingaleSteps),
       }),

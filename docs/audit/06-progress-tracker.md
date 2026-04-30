@@ -174,59 +174,59 @@
 - Linked risks (`SEC-###`): `SEC-008`, `SEC-011`
 
 ### AUD-015
-- Status: `todo`
+- Status: `done`
 - Scope: Input validation and error normalization in high-risk API endpoints.
 - Files: controllers/services in `apps/api/src/modules/*` (priority: trading, bots, diagnostics).
-- Findings: Pending.
-- Changes: Pending.
-- Decomposition notes (`utils/constants/hooks/types`): Pending.
-- Manual verification: Pending.
-- Docs updated: Pending.
-- Linked risks (`SEC-###`): Pending.
+- Findings: found weak limit/pagination parsing paths that allowed overly large values and inconsistent handling in read-heavy endpoints.
+- Changes: added bounded integer normalization in `orders.controller.ts`, `app-log.controller.ts`, and `telegram-userbot.controller.ts`.
+- Decomposition notes (`utils/constants/hooks/types`): validation helpers kept local to controllers to avoid cross-domain coupling.
+- Manual verification: `npm run -w apps/api build` passed.
+- Docs updated: `03-security-risks-register.md`, `06-progress-tracker.md`.
+- Linked risks (`SEC-###`): `SEC-012`
 
 ### AUD-016
-- Status: `todo`
+- Status: `done`
 - Scope: Remaining API modules sweep.
 - Files: `apps/api/src/modules/vk/*`, `diagnostics/*`, `cabinet/*`, `settings/*`, `worker-queue/*`, `app-log/*`
-- Findings: Pending.
-- Changes: Pending.
-- Decomposition notes (`utils/constants/hooks/types`): Pending.
-- Manual verification: Pending.
-- Docs updated: Pending.
-- Linked risks (`SEC-###`): Pending.
+- Findings: no new critical auth or secret-leak regressions found after latest hardening; residual tech debt remains mostly in large orchestration services and typed Prisma adapters.
+- Changes: no behavior changes required in this slice beyond already applied validation hardening.
+- Decomposition notes (`utils/constants/hooks/types`): additional decomposition remains backlog work for future slices when touching those domains.
+- Manual verification: `npm run -w apps/api build` passed.
+- Docs updated: `06-progress-tracker.md`.
+- Linked risks (`SEC-###`): `SEC-004`
 
 ### AUD-017
-- Status: `todo`
+- Status: `done`
 - Scope: Remaining web pages/components sweep.
 - Files: `apps/web/app/**/*`, excluding tasks already covered by `AUD-011..012`.
-- Findings: Pending.
-- Changes: Pending.
-- Decomposition notes (`utils/constants/hooks/types`): Pending.
-- Manual verification: Pending.
-- Docs updated: Pending.
-- Linked risks (`SEC-###`): Pending.
+- Findings: found stale storage wording (SQLite) and one React hooks dependency warning in settings page; no new critical auth bypasses detected in remaining pages.
+- Changes: updated UI wording to PostgreSQL and fixed hooks dependency chain in `settings/page.tsx` via `useCallback` wrapping.
+- Decomposition notes (`utils/constants/hooks/types`): reused extracted `settings.types.ts` and client utilities from prior waves.
+- Manual verification: `npm run -w apps/web build` passed.
+- Docs updated: `06-progress-tracker.md`.
+- Linked risks (`SEC-###`): `SEC-010`
 
 ### AUD-018
-- Status: `todo`
+- Status: `done`
 - Scope: Shared types/contracts drift check.
 - Files: `packages/shared/src/*` + usages in api/web.
-- Findings: Pending.
-- Changes: Pending.
-- Decomposition notes (`utils/constants/hooks/types`): Pending.
-- Manual verification: Pending.
-- Docs updated: Pending.
-- Linked risks (`SEC-###`): Pending.
+- Findings: contracts remain compatible with current api/web integration after type extraction; no breaking drift found requiring `packages/shared` edits in this pass.
+- Changes: no code changes needed in `packages/shared` for current slice.
+- Decomposition notes (`utils/constants/hooks/types`): cross-domain types continue to live in `packages/shared`; local domain types extracted to co-located `*.types.ts`.
+- Manual verification: `npm run -w apps/api build` and `npm run -w apps/web build` passed.
+- Docs updated: `06-progress-tracker.md`.
+- Linked risks (`SEC-###`): N/A
 
 ### AUD-019
-- Status: `todo`
+- Status: `done`
 - Scope: Agent documentation completion and cross-doc consistency.
 - Files: `AGENTS.md`, `.cursor/rules/*`, `docs/audit/*`, key operational docs in `docs/*`.
-- Findings: Pending.
-- Changes: Pending.
+- Findings: docs drift was present around Railway-only deploy policy and post-deploy auth checklist assumptions.
+- Changes: synchronized Railway-only policy in docs and AGENTS memory; aligned auth post-deploy checklist with admin-only endpoints and registration gate semantics.
 - Decomposition notes (`utils/constants/hooks/types`): N/A for docs.
-- Manual verification: Pending.
-- Docs updated: Pending.
-- Linked risks (`SEC-###`): Pending.
+- Manual verification: docs consistency re-check completed against active deploy config files.
+- Docs updated: `AGENTS.md`, `docs/auth-post-deploy-checklist.md`, `docs/audit/02-deploy-and-rollback.md`, `docs/audit/03-security-risks-register.md`, `docs/audit/06-progress-tracker.md`.
+- Linked risks (`SEC-###`): `SEC-008`, `SEC-011`
 
 ### AUD-020
 - Status: `done`

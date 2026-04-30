@@ -41,6 +41,14 @@ export class TelegramUserbotController {
     return this.cabinetContext.runWithCabinet(cabinetId, fn);
   }
 
+  private parseLimit(raw: string | undefined, fallback: number, max = 500): number {
+    const n = raw ? Number.parseInt(raw, 10) : fallback;
+    if (!Number.isFinite(n)) {
+      return fallback;
+    }
+    return Math.min(Math.max(Math.trunc(n), 1), max);
+  }
+
   @ApiOperation({ summary: 'Статус userbot' })
   @ApiOkResponse({ description: 'Статус получен' })
   @Get('status')
@@ -143,10 +151,8 @@ export class TelegramUserbotController {
     @Query('limit') limit?: string,
     @Query('chatId') chatId?: string,
   ) {
-    const raw = limit ? parseInt(limit, 10) : undefined;
-    const n = Number.isFinite(raw) ? raw : undefined;
     return this.userbot.listIngestLinkCandidates({
-      limit: n,
+      limit: this.parseLimit(limit, 100, 500),
       chatId: typeof chatId === 'string' ? chatId : undefined,
     });
   }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 
 import {
@@ -537,8 +537,11 @@ export default function SettingsPage() {
   const [newDiagnosticModel, setNewDiagnosticModel] = useState('');
   const scope = !isAdmin && requestedScope === 'account' ? 'cabinet' : requestedScope;
 
-  const apiFetchScoped = (path: string, init?: RequestInit) =>
-    fetchApiResponse(path, init, scope === 'account' ? '' : undefined);
+  const apiFetchScoped = useCallback(
+    (path: string, init?: RequestInit) =>
+      fetchApiResponse(path, init, scope === 'account' ? '' : undefined),
+    [scope],
+  );
 
   const visibleKeys = useMemo(
     () =>
@@ -573,7 +576,7 @@ export default function SettingsPage() {
     [scope, isAdmin],
   );
 
-  async function loadSettings() {
+  const loadSettings = useCallback(async () => {
     try {
       const res = await apiFetchScoped('/settings/raw');
       if (!res.ok) throw new Error(String(res.status));
@@ -588,7 +591,7 @@ export default function SettingsPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [apiFetchScoped]);
 
   useEffect(() => {
     void (async () => {
@@ -614,7 +617,7 @@ export default function SettingsPage() {
         setAuthChecking(false);
       }
     })();
-  }, [scope]);
+  }, [scope, loadSettings]);
 
   const pendingChanges = useMemo(() => {
     const all = collectPendingChanges(savedRows, draftRows);
