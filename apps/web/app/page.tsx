@@ -5,6 +5,7 @@ import { LiveExposurePanel } from './components/LiveExposurePanel';
 import { SessionInfoBar } from './components/SessionInfoBar';
 
 import Link from 'next/link';
+import { cookies } from 'next/headers';
 
 import { fetchJson } from '../lib/api';
 
@@ -77,9 +78,12 @@ export default async function Home({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const cookieStore = await cookies();
+  const cabinetIdFromCookie = cookieStore.get('cabinet_id')?.value?.trim() ?? '';
   const sp = await searchParams;
   const source = typeof sp.source === 'string' ? sp.source.trim() : '';
-  const cabinetId = typeof sp.cabinetId === 'string' ? sp.cabinetId.trim() : '';
+  const cabinetIdFromQuery = typeof sp.cabinetId === 'string' ? sp.cabinetId.trim() : '';
+  const cabinetId = cabinetIdFromQuery || cabinetIdFromCookie;
   let stats: Stats | null = null;
   let pnl: PnlPoint[] = [];
   let top: TopSources | null = null;

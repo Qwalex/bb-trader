@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Query, Req } from '@nestjs/common';
 import {
   ApiBody,
   ApiOkResponse,
@@ -9,24 +9,56 @@ import {
 } from '@nestjs/swagger';
 
 import { TelegramUserbotService } from './telegram-userbot.service';
+import { pickRequestedCabinetId } from '../../common/cabinet-request.util';
+import { CabinetContextService } from '../cabinet/cabinet-context.service';
+import { CabinetService } from '../cabinet/cabinet.service';
+
+type AuthReq = {
+  headers?: Record<string, string | string[] | undefined>;
+  auth?: { userId?: string };
+};
 
 @ApiTags('Telegram Userbot')
 @Controller('telegram-userbot')
 export class TelegramUserbotController {
-  constructor(private readonly userbot: TelegramUserbotService) {}
+  constructor(
+    private readonly userbot: TelegramUserbotService,
+    private readonly cabinets: CabinetService,
+    private readonly cabinetContext: CabinetContextService,
+  ) {}
+
+  private async runWithCabinet<T>(
+    req: AuthReq,
+    queryCabinetId: string | undefined,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    const requested = pickRequestedCabinetId({
+      queryCabinetId,
+      headers: req.headers,
+    });
+    const userId = String(req.auth?.userId ?? '').trim() || null;
+    const cabinetId = await this.cabinets.resolveCabinetIdForUser(userId, requested);
+    return this.cabinetContext.runWithCabinet(cabinetId, fn);
+  }
 
   @ApiOperation({ summary: 'Статус userbot' })
   @ApiOkResponse({ description: 'Статус получен' })
   @Get('status')
-  async status() {
-    return this.userbot.getStatus();
+  async status(
+    @Req() req: AuthReq,
+    @Query('cabinetId') cabinetId?: string,
+  ) {
+    return this.runWithCabinet(req, cabinetId, () => this.userbot.getStatus());
   }
 
   @ApiOperation({ summary: 'Метрики userbot за сегодня' })
   @ApiOkResponse({ description: 'Метрики получены' })
   @Get('metrics/today')
-  async metricsToday() {
-    return this.userbot.getTodayMetrics();
+  async metricsToday(
+    @Req() req: AuthReq,
+    @Query('cabinetId') cabinetId?: string,
+  ) {
+    return this.runWithCabinet(req, cabinetId, () => this.userbot.getTodayMetrics());
   }
 
   @ApiOperation({ summary: 'Подключить userbot из сохраненной сессии' })
