@@ -55,6 +55,19 @@ export class AuthService {
       .filter((v) => v.length > 0);
   }
 
+  private isPublicRegistrationEnabled(): boolean {
+    const raw = String(this.config.get<string>('AUTH_ALLOW_PUBLIC_REGISTER') ?? '')
+      .trim()
+      .toLowerCase();
+    if (raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on') {
+      return true;
+    }
+    if (raw === '0' || raw === 'false' || raw === 'no' || raw === 'off') {
+      return false;
+    }
+    return this.config.get<string>('NODE_ENV') !== 'production';
+  }
+
   private isEnvAdminUser(userId: string): boolean {
     const id = String(userId ?? '').trim();
     if (!id) return false;
@@ -120,6 +133,9 @@ export class AuthService {
     password: string;
     telegramUserId?: string | null;
   }): Promise<{ id: string; login: string; role: string }> {
+    if (!this.isPublicRegistrationEnabled()) {
+      throw new ForbiddenException('Public registration is disabled');
+    }
     const login = String(params.login ?? '').trim().toLowerCase();
     const password = String(params.password ?? '').trim();
     const telegramUserId = String(params.telegramUserId ?? '').trim() || null;

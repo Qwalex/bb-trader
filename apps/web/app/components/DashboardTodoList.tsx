@@ -139,7 +139,7 @@ export function DashboardTodoList({ initialItems, layout = 'below' }: Props) {
   return (
     <div className={cardClass}>
       <h3>Заметки / todo</h3>
-      <p className="dashboardTodoHint">Сохраняются в базе (SQLite), общие для этой инсталляции API</p>
+      <p className="dashboardTodoHint">Сохраняются в базе (PostgreSQL), общие для этой инсталляции API</p>
       {saveErr && (
         <p className="msg err" style={{ fontSize: '0.8rem', marginBottom: '0.65rem' }}>
           {saveErr}

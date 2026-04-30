@@ -13,7 +13,8 @@ Use this checklist after deploying auth changes to the target domain.
 - `POST $BASE_URL/auth/register` with JSON:
   - `{ "login": "$LOGIN", "password": "$PASSWORD", "telegramUserId": "<tg-user-id>" }`
 - Expect:
-  - `200` and user payload
+  - `200` and user payload (если `AUTH_ALLOW_PUBLIC_REGISTER=true`)
+  - `403` with `Public registration is disabled` (production default)
 - Repeat register with same login:
   - expect `409`/validation error
 
@@ -67,9 +68,12 @@ Call each endpoint with valid bearer token and confirm `200`:
 - `/orders/sources`
 - `/bybit/live`
 - `/telegram-userbot/status`
+- `/diagnostics/runs`
+
+Admin-only (use admin token, otherwise expect `403`):
+
 - `/settings/raw`
 - `/logs`
-- `/diagnostics/runs`
 
 ## 7) Protected Mutations Smoke
 

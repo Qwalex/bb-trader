@@ -73,3 +73,157 @@
 - Manual verification: `apps/api` build OK, `apps/web` build OK, lint diagnostics for touched files clean.
 - Docs updated: all files in `docs/audit/*` + `AGENTS.md`.
 - Linked risks (`SEC-###`): `SEC-001`, `SEC-002`, `SEC-003`
+
+### AUD-006
+- Status: `done`
+- Scope: Deep audit + safe decomposition of `apps/api/src/modules/bybit/bybit.service.ts`.
+- Files: `apps/api/src/modules/bybit/bybit.service.ts`, `apps/api/src/modules/bybit/bybit-json.util.ts`, `docs/audit/07-full-audit-backlog.md`, `AGENTS.md`, `docs/audit/05-agent-work-contract.md`.
+- Findings: Repeated JSON parsing logic in orchestration service increased file size/noise and raised maintenance risk; key giant-file candidates confirmed for wave order.
+- Changes: Added `07-full-audit-backlog.md`; extracted JSON parse helpers to `bybit-json.util.ts` and reused them in `BybitService` (behavior-preserving); synced agent workflow rules for context retention.
+- Decomposition notes (`utils/constants/hooks/types`): First extraction done (`bybit-json.util.ts`); next slices should continue moving pure parsers/mappers/constants out of `bybit.service.ts`.
+- Manual verification: `npm run -w apps/api build` passed.
+- Docs updated: `05-agent-work-contract.md`, `06-progress-tracker.md`, `07-full-audit-backlog.md`, `AGENTS.md`.
+- Linked risks (`SEC-###`): `SEC-004`
+
+### AUD-007
+- Status: `done`
+- Scope: Deep audit + safe decomposition of `apps/api/src/modules/telegram-userbot/telegram-userbot.service.ts`.
+- Files: `apps/api/src/modules/telegram-userbot/telegram-userbot.service.ts`, `apps/api/src/modules/telegram-userbot/telegram-userbot-source.util.ts`
+- Findings: large service contained inline parser for source martingale map, increasing coupling and reducing reuse.
+- Changes: extracted source martingale parser/type into `telegram-userbot-source.util.ts` and reused in service.
+- Decomposition notes (`utils/constants/hooks/types`): moved pure parser + type out of service orchestration layer.
+- Manual verification: `npm run -w apps/api build` passed.
+- Docs updated: `06-progress-tracker.md`.
+- Linked risks (`SEC-###`): `SEC-004`
+
+### AUD-008
+- Status: `done`
+- Scope: Deep audit + safe decomposition of `apps/api/src/modules/telegram/telegram.service.ts`.
+- Files: `apps/api/src/modules/telegram/telegram.service.ts`, `apps/api/src/modules/telegram/telegram-trade-parse.util.ts`
+- Findings: trade detail formatter duplicated JSON parsing logic for entries/TP display inside service.
+- Changes: extracted trade parsing/display helpers to `telegram-trade-parse.util.ts`; service now focuses on orchestration/formatting.
+- Decomposition notes (`utils/constants/hooks/types`): moved pure parsing helpers to dedicated util file.
+- Manual verification: `npm run -w apps/api build` passed.
+- Docs updated: `06-progress-tracker.md`.
+- Linked risks (`SEC-###`): `SEC-004`
+
+### AUD-009
+- Status: `done`
+- Scope: Deep audit + safe decomposition of `apps/api/src/modules/transcript/transcript.service.ts`.
+- Files: `apps/api/src/modules/transcript/transcript.service.ts`, `apps/api/src/modules/transcript/transcript.constants.ts`
+- Findings: OpenRouter runtime constants were mixed with service logic, making config surface harder to review.
+- Changes: extracted OpenRouter URLs/retry/batch constants into `transcript.constants.ts` and reused in service.
+- Decomposition notes (`utils/constants/hooks/types`): moved runtime constants to dedicated constants module.
+- Manual verification: `npm run -w apps/api build` passed.
+- Docs updated: `06-progress-tracker.md`.
+- Linked risks (`SEC-###`): `SEC-004`
+
+### AUD-010
+- Status: `done`
+- Scope: Deep audit + safe decomposition of `apps/api/src/modules/orders/orders.service.ts`.
+- Files: `apps/api/src/modules/orders/orders.service.ts`, `apps/api/src/modules/orders/orders-source.util.ts`
+- Findings: source exclusion list parser was embedded into service and mixed with domain queries.
+- Changes: extracted source list parser into `orders-source.util.ts`; service uses util for excluded sources set.
+- Decomposition notes (`utils/constants/hooks/types`): moved pure parse helper to isolated util.
+- Manual verification: `npm run -w apps/api build` passed.
+- Docs updated: `06-progress-tracker.md`.
+- Linked risks (`SEC-###`): `SEC-004`
+
+### AUD-011
+- Status: `done`
+- Scope: Deep audit + safe decomposition of `apps/web/app/settings/page.tsx`.
+- Files: `apps/web/app/settings/*`
+- Findings: settings UI still referenced legacy SQLite storage model, creating operator confusion against real PostgreSQL runtime.
+- Changes: updated settings page copy to PostgreSQL wording for reset/save informational blocks.
+- Decomposition notes (`utils/constants/hooks/types`): no structural split in this slice; focus on correctness and operational clarity.
+- Manual verification: `npm run -w apps/web build` passed.
+- Docs updated: `06-progress-tracker.md`.
+- Linked risks (`SEC-###`): `SEC-010`
+
+### AUD-012
+- Status: `done`
+- Scope: Deep audit + safe decomposition of `apps/web/app/telegram-userbot/page.tsx`.
+- Files: `apps/web/app/telegram-userbot/page.tsx`, `apps/web/lib/cabinet-client.util.ts`, `apps/web/app/filters/page.tsx`, `apps/web/app/my-group/page.tsx`
+- Findings: cabinet id resolution logic and API-call scaffolding were duplicated across large client pages.
+- Changes: extracted shared client cabinet resolver (`cabinet-client.util.ts`) and reused across `telegram-userbot`, `filters`, and `my-group` pages; kept auth-aware fetch path centralized.
+- Decomposition notes (`utils/constants/hooks/types`): moved repeated client cabinet helper out of page-level files.
+- Manual verification: `npm run -w apps/web build` passed.
+- Docs updated: `06-progress-tracker.md`.
+- Linked risks (`SEC-###`): `SEC-010`
+
+### AUD-013
+- Status: `done`
+- Scope: Auth/session boundary sweep for web+api integration.
+- Files: `apps/web/app/api/auth/*`, `apps/web/lib/api*`, `apps/api/src/common/*`, `apps/api/src/modules/auth/*`
+- Findings: Confirmed API-side critical exposure points (`settings/raw`, `/logs`, malformed cookie decode) and web-side auth boundary drift (`NEXT_PUBLIC_API_ACCESS_TOKEN` fallback + production browser-readable token cookie).
+- Changes: Added admin-only guard for `GET /settings/raw`; added admin-only guard for `GET /logs`; hardened cookie decode in `CabinetContextMiddleware`; removed `NEXT_PUBLIC_API_ACCESS_TOKEN` fallback in web API client; limited `sb_auth_token` issuance/cleanup to non-production only; removed README guidance to set public API token in browser env; added `AUTH_ALLOW_PUBLIC_REGISTER` gate in `AuthService` (default deny in production); replaced raw unauthenticated `fetch` in `telegram-userbot` source stats with shared `apiFetch`.
+- Decomposition notes (`utils/constants/hooks/types`): N/A for this security hardening slice.
+- Manual verification: `npm run -w apps/api build` passed; `npm run -w apps/web build` passed.
+- Docs updated: `01-env-and-secrets-matrix.md`, `03-security-risks-register.md`, `06-progress-tracker.md`, `README.md`, `docs/auth-post-deploy-checklist.md`.
+- Linked risks (`SEC-###`): `SEC-001`, `SEC-005`, `SEC-006`, `SEC-007`, `SEC-009`, `SEC-010`
+
+### AUD-014
+- Status: `done`
+- Scope: Config/infra secrets and unsafe defaults review.
+- Files: `docker-compose*.yml`, `railway*.toml`, `railpack*.json`, `scripts/*`, `.github/workflows/*`
+- Findings: Deploy workflows referenced `restart*.sh` scripts that were absent in repository, making VPS deploy flow non-reproducible from git source.
+- Changes: Removed VPS-only deployment surface (`restart.sh`, `restart-dev.sh`, `restart-test.sh`, `.github/workflows/deploy*.yml`) and aligned docs to Railway-only deployment policy; removed `nixpacks.toml` and `nixpacks.web.toml` to keep a single Railpack config path.
+- Decomposition notes (`utils/constants/hooks/types`): N/A unless scripts are split.
+- Manual verification: repository grep confirms no references to `restart*.sh` or VPS deploy workflows remain in active deployment path docs/config.
+- Docs updated: `02-deploy-and-rollback.md`, `03-security-risks-register.md`, `06-progress-tracker.md`, `AGENTS.md`, `.gitignore`.
+- Linked risks (`SEC-###`): `SEC-008`, `SEC-011`
+
+### AUD-015
+- Status: `todo`
+- Scope: Input validation and error normalization in high-risk API endpoints.
+- Files: controllers/services in `apps/api/src/modules/*` (priority: trading, bots, diagnostics).
+- Findings: Pending.
+- Changes: Pending.
+- Decomposition notes (`utils/constants/hooks/types`): Pending.
+- Manual verification: Pending.
+- Docs updated: Pending.
+- Linked risks (`SEC-###`): Pending.
+
+### AUD-016
+- Status: `todo`
+- Scope: Remaining API modules sweep.
+- Files: `apps/api/src/modules/vk/*`, `diagnostics/*`, `cabinet/*`, `settings/*`, `worker-queue/*`, `app-log/*`
+- Findings: Pending.
+- Changes: Pending.
+- Decomposition notes (`utils/constants/hooks/types`): Pending.
+- Manual verification: Pending.
+- Docs updated: Pending.
+- Linked risks (`SEC-###`): Pending.
+
+### AUD-017
+- Status: `todo`
+- Scope: Remaining web pages/components sweep.
+- Files: `apps/web/app/**/*`, excluding tasks already covered by `AUD-011..012`.
+- Findings: Pending.
+- Changes: Pending.
+- Decomposition notes (`utils/constants/hooks/types`): Pending.
+- Manual verification: Pending.
+- Docs updated: Pending.
+- Linked risks (`SEC-###`): Pending.
+
+### AUD-018
+- Status: `todo`
+- Scope: Shared types/contracts drift check.
+- Files: `packages/shared/src/*` + usages in api/web.
+- Findings: Pending.
+- Changes: Pending.
+- Decomposition notes (`utils/constants/hooks/types`): Pending.
+- Manual verification: Pending.
+- Docs updated: Pending.
+- Linked risks (`SEC-###`): Pending.
+
+### AUD-019
+- Status: `todo`
+- Scope: Agent documentation completion and cross-doc consistency.
+- Files: `AGENTS.md`, `.cursor/rules/*`, `docs/audit/*`, key operational docs in `docs/*`.
+- Findings: Pending.
+- Changes: Pending.
+- Decomposition notes (`utils/constants/hooks/types`): N/A for docs.
+- Manual verification: Pending.
+- Docs updated: Pending.
+- Linked risks (`SEC-###`): Pending.

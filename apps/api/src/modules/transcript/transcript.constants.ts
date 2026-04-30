@@ -1,0 +1,10 @@
+export const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
+export const OPENROUTER_GENERATION_URL = 'https://openrouter.ai/api/v1/generation';
+export const OPENROUTER_CREDITS_URL = 'https://openrouter.ai/api/v1/credits';
+export const OPENROUTER_SITE_URL = 'https://signals-bot.local';
+export const OPENROUTER_APP_TITLE = 'SignalsBot';
+export const OPENROUTER_MAX_RETRIES = 5;
+export const OPENROUTER_RETRY_DELAY_MS = 1_000;
+export const OPENROUTER_GENERATION_LOOKUP_MAX_ATTEMPTS = 8;
+export const OPENROUTER_GENERATION_LOOKUP_DELAY_MS = 1_500;
+export const OPENROUTER_GENERATION_WORKER_BATCH = 50;

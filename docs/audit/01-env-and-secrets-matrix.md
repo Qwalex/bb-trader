@@ -15,6 +15,7 @@
 - AI provider credentials and endpoints.
 - Telegram/VK bot tokens and admin identifiers.
 - Auth and API shared secrets/tokens.
+- Auth policy switches: `AUTH_ALLOW_PUBLIC_REGISTER` (runtime registration gate).
 
 ## Hard Rules
 - Never log secrets in plain text.

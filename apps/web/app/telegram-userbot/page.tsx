@@ -5,6 +5,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { EntrySizingControl } from '../components/EntrySizingControl';
 import { UserbotMessageCard } from '../components/UserbotMessageCard';
 import { getApiAuthHeaders, getApiBase, withCabinetQuery } from '../../lib/api';
+import { readActiveCabinetIdClient } from '../../lib/cabinet-client.util';
 import type { EntrySizingMode } from '../../lib/entry-sizing';
 import { parseStoredEntry, serializeEntry } from '../../lib/entry-sizing';
 
@@ -98,20 +99,8 @@ type TraceModalState = {
 };
 
 export default function TelegramUserbotPage() {
-  const getActiveCabinetId = (): string => {
-    const fromQuery = new URLSearchParams(window.location.search).get('cabinetId')?.trim() ?? '';
-    if (fromQuery) return fromQuery;
-    const fromStorage = window.localStorage.getItem('active_cabinet_id')?.trim() ?? '';
-    if (fromStorage) return fromStorage;
-    const fromCookie = document.cookie
-      .split(';')
-      .map((p) => p.trim())
-      .find((p) => p.startsWith('cabinet_id='))
-      ?.split('=')[1];
-    return fromCookie ? decodeURIComponent(fromCookie).trim() : '';
-  };
   const buildApiUrl = (path: string): string =>
-    `${getApiBase()}${withCabinetQuery(path, getActiveCabinetId())}`;
+    `${getApiBase()}${withCabinetQuery(path, readActiveCabinetIdClient())}`;
   const apiFetch = (path: string, init?: RequestInit) =>
     fetch(buildApiUrl(path), {
       ...init,
@@ -227,9 +216,7 @@ export default function TelegramUserbotPage() {
       try {
         const results = await Promise.all(
           missing.map(async (source) => {
-            const res = await fetch(
-              buildApiUrl(`/orders/stats?source=${encodeURIComponent(source)}`),
-            );
+            const res = await apiFetch(`/orders/stats?source=${encodeURIComponent(source)}`);
             if (!res.ok) {
               return { source, winrate: 0, totalPnl: 0 };
             }

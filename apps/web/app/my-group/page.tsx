@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { fetchApiResponse } from '../../lib/api';
+import { readActiveCabinetIdClient } from '../../lib/cabinet-client.util';
 
 type PublishGroup = {
   id: string;
@@ -25,8 +26,7 @@ export default function MyGroupPage() {
   const [publishEveryN, setPublishEveryN] = useState('1');
 
   const apiFetch = (path: string, init?: RequestInit) => {
-    const cabinetId = localStorage.getItem('active_cabinet_id');
-    return fetchApiResponse(path, init, cabinetId);
+    return fetchApiResponse(path, init, readActiveCabinetIdClient());
   };
 
   async function loadAll() {

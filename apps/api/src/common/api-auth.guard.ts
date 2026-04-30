@@ -7,6 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
 
+import { extractBearerToken, extractTokenFromCookieHeader } from './auth-token.util';
 import { IS_PUBLIC_ENDPOINT_KEY } from './public.decorator';
 import { verifySharedAuthToken } from './shared-auth-token';
 
@@ -51,8 +52,7 @@ export class ApiAuthGuard implements CanActivate {
     const rawHeader = req.headers?.authorization;
     const authHeader = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
     const token =
-      this.extractBearerToken(authHeader) ??
-      this.extractTokenFromCookieHeader(req.headers?.cookie);
+      extractBearerToken(authHeader) ?? extractTokenFromCookieHeader(req.headers?.cookie);
     if (!token) {
       throw new UnauthorizedException('Missing auth token');
     }
@@ -71,35 +71,6 @@ export class ApiAuthGuard implements CanActivate {
       return true;
     }
     throw new UnauthorizedException('Invalid API access token');
-  }
-
-  private extractBearerToken(value?: string): string | null {
-    const raw = String(value ?? '').trim();
-    if (!raw) {
-      return null;
-    }
-    const match = raw.match(/^Bearer\s+(.+)$/i);
-    return match?.[1]?.trim() || null;
-  }
-
-  private extractTokenFromCookieHeader(
-    value?: string | string[],
-  ): string | null {
-    const raw = Array.isArray(value) ? value[0] : value;
-    const text = String(raw ?? '').trim();
-    if (!text) return null;
-    for (const part of text.split(';')) {
-      const [k, ...rest] = part.split('=');
-      if (String(k ?? '').trim() !== 'sb_auth_token') continue;
-      const v = rest.join('=').trim();
-      if (!v) return null;
-      try {
-        return decodeURIComponent(v);
-      } catch {
-        return v;
-      }
-    }
-    return null;
   }
 
 }

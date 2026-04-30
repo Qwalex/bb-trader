@@ -19,6 +19,7 @@ import { TelegramService } from '../telegram/telegram.service';
 import { UserbotSignalHashService } from '../telegram-userbot/userbot-signal-hash.service';
 
 import { formatError } from '../../common/format-error';
+import { parseStringList } from './orders-source.util';
 
 export interface TradesFilter {
   signalId?: string;
@@ -921,26 +922,9 @@ export class OrdersService {
     return stepBySignalId;
   }
 
-  private parseStringList(raw: string | undefined): string[] {
-    const text = String(raw ?? '').trim();
-    if (!text) return [];
-    try {
-      const parsed = JSON.parse(text) as unknown;
-      if (!Array.isArray(parsed)) return [];
-      return parsed
-        .map((v) => (typeof v === 'string' ? v.trim() : ''))
-        .filter((v) => v.length > 0);
-    } catch {
-      return text
-        .split(/[\n,]/g)
-        .map((v) => v.trim())
-        .filter((v) => v.length > 0);
-    }
-  }
-
   private async getExcludedSourcesSet(): Promise<Set<string>> {
     const raw = await this.settings.get('SOURCE_EXCLUDE_LIST');
-    return new Set(this.parseStringList(raw));
+    return new Set(parseStringList(raw));
   }
 
   private async getStatsResetAt(): Promise<Date | undefined> {

@@ -26,6 +26,18 @@ import {
 import { SettingsService } from '../settings/settings.service';
 import { SignalParseDto } from './dto/signal-parse.dto';
 import {
+  OPENROUTER_APP_TITLE,
+  OPENROUTER_CREDITS_URL,
+  OPENROUTER_GENERATION_LOOKUP_DELAY_MS,
+  OPENROUTER_GENERATION_LOOKUP_MAX_ATTEMPTS,
+  OPENROUTER_GENERATION_URL,
+  OPENROUTER_GENERATION_WORKER_BATCH,
+  OPENROUTER_MAX_RETRIES,
+  OPENROUTER_RETRY_DELAY_MS,
+  OPENROUTER_SITE_URL,
+  OPENROUTER_URL,
+} from './transcript.constants';
+import {
   fieldLabelRu,
   isCompletePartial,
   listMissingRequiredFields,
@@ -54,17 +66,6 @@ type OpenRouterLogContext = {
   ingestId?: string;
   stage?: string;
 };
-
-const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const OPENROUTER_GENERATION_URL = 'https://openrouter.ai/api/v1/generation';
-const OPENROUTER_CREDITS_URL = 'https://openrouter.ai/api/v1/credits';
-const OPENROUTER_SITE_URL = 'https://signals-bot.local';
-const OPENROUTER_APP_TITLE = 'SignalsBot';
-const OPENROUTER_MAX_RETRIES = 5;
-const OPENROUTER_RETRY_DELAY_MS = 1_000;
-const OPENROUTER_GENERATION_LOOKUP_MAX_ATTEMPTS = 8;
-const OPENROUTER_GENERATION_LOOKUP_DELAY_MS = 1_500;
-const OPENROUTER_GENERATION_WORKER_BATCH = 50;
 
 const TRANSCRIPT_RESPONSE_JSON_SCHEMA = {
   type: 'object',

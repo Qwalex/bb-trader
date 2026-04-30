@@ -22,6 +22,7 @@ import { SettingsService } from '../settings/settings.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { VkNotifyMirrorService } from '../vk/vk-notify-mirror.service';
 import { WorkerQueueService } from '../worker-queue/worker-queue.service';
+import { parseNumberArrayFromJson, parseSourceMultiplierMap } from './bybit-json.util';
 
 export interface PlaceOrdersResult {
   ok: boolean;
@@ -1864,23 +1865,6 @@ export class BybitService implements OnModuleInit {
     };
   }
 
-  private parseNumArray(raw: string | null | undefined): number[] {
-    if (!raw || typeof raw !== 'string') {
-      return [];
-    }
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      if (!Array.isArray(parsed)) {
-        return [];
-      }
-      return parsed
-        .map((item) => Number(item))
-        .filter((item) => Number.isFinite(item));
-    } catch {
-      return [];
-    }
-  }
-
   private async notifyApiTradeCancelled(
     signal: {
       id: string;
@@ -1902,10 +1886,10 @@ export class BybitService implements OnModuleInit {
         signalId: signal.id,
         pair: signal.pair,
         direction: signal.direction,
-        entries: this.parseNumArray(signal.entries),
+        entries: parseNumberArrayFromJson(signal.entries),
         entryIsRange: signal.entryIsRange,
         stopLoss: signal.stopLoss,
-        takeProfits: this.parseNumArray(signal.takeProfits),
+        takeProfits: parseNumberArrayFromJson(signal.takeProfits),
         leverage: signal.leverage,
         orderUsd: signal.orderUsd,
         capitalPercent: signal.capitalPercent,
@@ -1921,10 +1905,10 @@ export class BybitService implements OnModuleInit {
         signalId: signal.id,
         pair: signal.pair,
         direction: signal.direction,
-        entries: this.parseNumArray(signal.entries),
+        entries: parseNumberArrayFromJson(signal.entries),
         entryIsRange: signal.entryIsRange,
         stopLoss: signal.stopLoss,
-        takeProfits: this.parseNumArray(signal.takeProfits),
+        takeProfits: parseNumberArrayFromJson(signal.takeProfits),
         leverage: signal.leverage,
         orderUsd: signal.orderUsd,
         capitalPercent: signal.capitalPercent,
@@ -4485,31 +4469,6 @@ export class BybitService implements OnModuleInit {
     });
   }
 
-  private parseSourceMartingaleMap(raw: string | undefined): Map<string, number> {
-    const out = new Map<string, number>();
-    const text = String(raw ?? '').trim();
-    if (!text) {
-      return out;
-    }
-    try {
-      const parsed = JSON.parse(text) as unknown;
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        return out;
-      }
-      for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-        const key = String(k ?? '').trim().toLowerCase();
-        const val = Number(v);
-        if (!key || !Number.isFinite(val) || val <= 1) {
-          continue;
-        }
-        out.set(key, val);
-      }
-      return out;
-    } catch {
-      return out;
-    }
-  }
-
   private async applySourceMartingaleSizing(signal: SignalDto): Promise<SignalDto> {
     const sourceRaw = String(signal.source ?? '').trim();
     if (!sourceRaw) {
@@ -4521,7 +4480,7 @@ export class BybitService implements OnModuleInit {
       this.settings.get('SOURCE_MARTINGALE_DEFAULT_MULTIPLIER'),
       this.getCabinetSourceByTitle(sourceRaw),
     ]);
-    const bySource = this.parseSourceMartingaleMap(rawMap);
+    const bySource = parseSourceMultiplierMap(rawMap);
     const defaultMultiplierParsed = Number(rawDefault);
     const defaultMultiplier =
       Number.isFinite(defaultMultiplierParsed) && defaultMultiplierParsed > 1

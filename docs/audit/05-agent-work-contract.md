@@ -15,6 +15,12 @@
 - Risks found and mitigated.
 - Manual verification steps.
 - Documentation updated.
+- Explicit status transition in `06-progress-tracker.md` (`todo -> in_progress -> done/blocked`).
+
+## Context Retention Rules
+- Keep one active task at a time (`in_progress`) to avoid context drift.
+- Before pausing, write short handoff notes in the active task card: current state, next step, blockers.
+- Keep the global sequence aligned with `07-full-audit-backlog.md`; do not skip wave order without reason.
 
 ## Forbidden Shortcuts
 - Silent behavior changes without notes.

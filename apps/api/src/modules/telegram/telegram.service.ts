@@ -33,6 +33,10 @@ import {
   MAX_DRAFT_TURN_CHARS,
   MAX_DRAFT_USER_TURNS,
 } from './telegram.constants';
+import {
+  parseNumberArrayFromJson,
+  parseTakeProfitsForDisplay,
+} from './telegram-trade-parse.util';
 
 type DraftPhase = 'collecting' | 'ready' | 'awaiting_source';
 
@@ -1459,17 +1463,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   private formatTradeDetailHtml(signal: Signal & { orders: Order[] }): string {
-    let entryNums: number[] = [];
-    try {
-      const e = JSON.parse(signal.entries) as unknown;
-      if (Array.isArray(e)) {
-        entryNums = e
-          .map((x) => Number(x))
-          .filter((n) => Number.isFinite(n));
-      }
-    } catch {
-      entryNums = [];
-    }
+    const entryNums = parseNumberArrayFromJson(signal.entries);
     const entryLine = this.tgEsc(
       entryNums.length > 0
         ? this.formatEntryLineText({
@@ -1478,13 +1472,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           })
         : String(signal.entries),
     );
-    let tps: string;
-    try {
-      const t = JSON.parse(signal.takeProfits) as unknown;
-      tps = Array.isArray(t) ? t.map((x) => String(x)).join(', ') : signal.takeProfits;
-    } catch {
-      tps = signal.takeProfits;
-    }
+    const tps = parseTakeProfitsForDisplay(signal.takeProfits);
     const ordersLines = signal.orders
       .map(
         (o) =>

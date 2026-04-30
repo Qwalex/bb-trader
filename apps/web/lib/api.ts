@@ -61,11 +61,7 @@ export function getApiAuthHeaders(init?: HeadersInit): Headers {
       headers.set('Origin', origin);
     }
   }
-  const token = isServer
-    ? (process.env.API_ACCESS_TOKEN?.trim() ??
-      process.env.NEXT_PUBLIC_API_ACCESS_TOKEN?.trim())
-    : getClientTokenFromCookie() ??
-      process.env.NEXT_PUBLIC_API_ACCESS_TOKEN?.trim();
+  const token = isServer ? process.env.API_ACCESS_TOKEN?.trim() : getClientTokenFromCookie();
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
   }

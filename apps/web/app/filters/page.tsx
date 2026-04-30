@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { getApiAuthHeaders, getApiBase, withCabinetQuery } from '../../lib/api';
+import { readActiveCabinetIdClient } from '../../lib/cabinet-client.util';
 
 type FilterKind = 'signal' | 'close' | 'result' | 'reentry' | 'ignore';
 type FilterItem = {
@@ -120,8 +121,7 @@ export default function FiltersPage() {
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
   const withCabinet = (path: string) => {
-    const cabinetId = localStorage.getItem('active_cabinet_id');
-    return `${getApiBase()}${withCabinetQuery(path, cabinetId)}`;
+    return `${getApiBase()}${withCabinetQuery(path, readActiveCabinetIdClient())}`;
   };
   const apiFetch = (path: string, init?: RequestInit) =>
     fetch(withCabinet(path), {

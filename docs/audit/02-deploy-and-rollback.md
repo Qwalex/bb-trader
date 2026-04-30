@@ -2,7 +2,7 @@
 
 ## Deploy Paths
 - Railway: API and Web as separate services from one repo.
-- Docker/VPS scripts: `restart.sh`, `restart-dev.sh`, `restart-test.sh`.
+- Railway-only policy: VPS restart scripts and VPS deploy workflows are intentionally removed from the repository.
 
 ## Deploy Safety Checklist
 - Validate env keys for target environment.

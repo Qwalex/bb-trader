@@ -780,7 +780,7 @@ export default function SettingsPage() {
 
   async function resetDatabase() {
     const ok = window.confirm(
-      'Удалить все данные в SQLite на сервере API?\n\n' +
+      'Удалить все данные в PostgreSQL на сервере API?\n\n' +
         'Будут удалены: сигналы, ордера, логи и сохранённые в БД настройки (ключи, токены и т.д.).\n' +
         'Переменные из .env не затрагиваются.',
     );
@@ -1348,7 +1348,7 @@ export default function SettingsPage() {
         {scope === 'account' ? 'Настройки аккаунта (глобальные)' : 'Настройки кабинета'}
       </h1>
       <p style={{ color: 'var(--muted)', marginBottom: '1rem' }}>
-        Значения хранятся в SQLite на сервере API. Глобальные настройки работают как
+        Значения хранятся в PostgreSQL на сервере API. Глобальные настройки работают как
         значения по умолчанию для всех кабинетов, а в режиме кабинета меняются только
         cabinet-scoped override-поля.
       </p>
@@ -1572,7 +1572,7 @@ export default function SettingsPage() {
           <div style={{ marginTop: '0.9rem' }}>
             <p style={{ color: 'var(--muted)', marginBottom: '0.75rem', fontSize: '0.9rem' }}>
               Сброс статистики не удаляет сделки, а только начинает расчет метрик заново. Полный сброс
-              БД удаляет сигналы, ордера, логи и настройки в SQLite.
+              БД удаляет сигналы, ордера, логи и настройки в PostgreSQL.
             </p>
             <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
               {scope === 'cabinet' ? (
@@ -1616,7 +1616,7 @@ export default function SettingsPage() {
         {hasPendingChanges ? (
           <>
             <p style={{ color: 'var(--muted)', fontSize: '0.88rem', marginBottom: '0.6rem' }}>
-              Будут записаны в SQLite следующие отличия от последнего сохранённого состояния:
+              Будут записаны в PostgreSQL следующие отличия от последнего сохранённого состояния:
             </p>
             <ul
               style={{

@@ -23,19 +23,20 @@ function clearAuthCookies(response: NextResponse): void {
     path: '/',
     maxAge: 0,
   });
-  response.cookies.set(AUTH_TOKEN_COOKIE, '', {
-    httpOnly: false,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    path: '/',
-    maxAge: 0,
-  });
+  if (process.env.NODE_ENV !== 'production') {
+    response.cookies.set(AUTH_TOKEN_COOKIE, '', {
+      httpOnly: false,
+      secure: false,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 0,
+    });
+  }
 }
 
 export async function GET(request: Request) {
   const cookieHeader = request.headers.get('cookie') ?? '';
-  const tokenRaw = readCookieValue(cookieHeader, AUTH_COOKIE);
-  const token = tokenRaw ? decodeURIComponent(tokenRaw) : '';
+  const token = readCookieValue(cookieHeader, AUTH_COOKIE) ?? '';
   if (!token) {
     return NextResponse.json({ authenticated: false });
   }
@@ -160,7 +161,7 @@ export async function POST(request: Request) {
         cache: 'no-store',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${decodeURIComponent(token)}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ login: unlockLogin }),
       });
@@ -211,13 +212,15 @@ export async function POST(request: Request) {
       path: '/',
       maxAge,
     });
-    response.cookies.set(AUTH_TOKEN_COOKIE, token, {
-      httpOnly: false,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      path: '/',
-      maxAge,
-    });
+    if (process.env.NODE_ENV !== 'production') {
+      response.cookies.set(AUTH_TOKEN_COOKIE, token, {
+        httpOnly: false,
+        secure: false,
+        sameSite: 'lax',
+        path: '/',
+        maxAge,
+      });
+    }
     return response;
   } catch {
     return NextResponse.json(

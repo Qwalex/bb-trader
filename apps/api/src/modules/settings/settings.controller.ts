@@ -80,6 +80,9 @@ export class SettingsController {
     @Req() req: AuthReq,
     @Query('cabinetId') cabinetId?: string,
   ) {
+    if (!this.isAdmin(req)) {
+      throw new ForbiddenException('Raw-настройки доступны только администратору');
+    }
     const settings = await this.runWithCabinet(req, cabinetId, () => this.settings.list());
     return { settings };
   }

@@ -26,10 +26,11 @@ cd apps/api && npx prisma migrate deploy && cd ../..
 # apps/api/.env
 API_ACCESS_TOKEN=change-me-very-strong-token
 API_CORS_ORIGINS=http://localhost:3000
-
-# apps/web/.env.local
-NEXT_PUBLIC_API_ACCESS_TOKEN=change-me-very-strong-token
+AUTH_ALLOW_PUBLIC_REGISTER=false
 ```
+
+`NEXT_PUBLIC_API_ACCESS_TOKEN` больше не используется как fallback и не должен задаваться в браузерной среде.
+`AUTH_ALLOW_PUBLIC_REGISTER` по умолчанию выключен в production (в non-production включен, если не задан явно).
 
 1. Разработка (API на `:3001`, web на `:3000`):
 

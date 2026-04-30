@@ -25,7 +25,7 @@
 ### Railway (деплой)
 
 - Два сервиса из одного репозитория: **API** и **Web**; отдельно **PostgreSQL** (New → Database → PostgreSQL, привязать к API).
-- **Railpack** (билдер по умолчанию на Railway): в корне **`railpack.json`** — Node 22, сборка через **`npm run build -w`** (shared → api / shared → api types → web), старт `start:railway` (без `turbo.json` в образе). Для сервиса **Web** в Variables задать **`RAILPACK_CONFIG_FILE=railpack.web.json`** (путь относительно корня репо). Файлы **`nixpacks.toml`** при Railpack **не используются**.
+- **Railpack** (билдер по умолчанию на Railway): в корне **`railpack.json`** — Node 22, сборка через **`npm run build -w`** (shared → api / shared → api types → web), старт `start:railway` (без `turbo.json` в образе). Для сервиса **Web** в Variables задать **`RAILPACK_CONFIG_FILE=railpack.web.json`** (путь относительно корня репо). Nixpacks-конфиги удалены из репозитория как неиспользуемые.
 - Если удобнее без JSON: переменные **`RAILPACK_INSTALL_CMD`** (`npm ci`), **`RAILPACK_BUILD_CMD`**, **`RAILPACK_START_CMD`** (см. [Railpack env](https://railpack.com/config/environment-variables)).
 - **Порт и healthcheck:** Railway подставляет **`PORT`**; API слушает **`PORT`**, затем `API_PORT`. В UI сервиса указать **Config-as-code** → **`/railway.api.toml`** и **`/railway.web.toml`** соответственно (health: **`/health`**, таймаут 120 с). У web маршрут `GET /health` в приложении; если задан **`NEXT_BASE_PATH`**, в `railway.web.toml` поправить **`healthcheckPath`** на `/<basePath>/health`. При фильтрации по Host разрешить **`healthcheck.railway.app`** ([док](https://docs.railway.com/deployments/healthchecks)).
 - **Переменные API:** как локально + `DATABASE_URL`; `API_SWAGGER_SERVER` без nginx-прокси — часто `/` или полный публичный URL API.
@@ -42,5 +42,8 @@
   - `04-operational-runbooks.md`
   - `05-agent-work-contract.md`
   - `06-progress-tracker.md`
+- План полного покрытия и очередность волн поддерживаются в `docs/audit/07-full-audit-backlog.md`.
 - Любая заметная доработка должна синхронно обновлять минимум `06-progress-tracker.md`; при рисках/уязвимостях также обновлять `03-security-risks-register.md`.
+- Для крупного аудита вести работу малыми карточками `AUD-###`: одновременно только одна `in_progress`, остальные `todo/blocked/done`, и обязательно фиксировать ручную проверку.
 - Стандарт декомпозиции: утилиты, константы, хуки, типы, мапперы и адаптеры выносить в отдельные файлы (предпочтительно 1 сущность = 1 файл), но без искусственного дробления.
+- Политика деплоя: Railway-only. VPS restart-скрипты и VPS-specific GitHub workflows не поддерживаются в этом репозитории.

@@ -57,6 +57,10 @@ import {
   USERBOT_POLL_INTERVAL_MS,
   USERBOT_PROCESSING_CONCURRENCY,
 } from './telegram-userbot.constants';
+import {
+  parseSourceMartingaleMap,
+  type SourceMartingaleMap,
+} from './telegram-userbot-source.util';
 
 type MessageKind = 'signal' | 'close' | 'reentry' | 'result' | 'other';
 type UserbotFilterKind = 'signal' | 'close' | 'result' | 'reentry' | 'ignore';
@@ -131,7 +135,6 @@ type ActiveSignalLookup = {
   signalExternalId?: string | null;
 };
 
-type SourceMartingaleMap = Record<string, number>;
 type OpenrouterSpendPeriod = 'day' | '3d' | 'week' | 'month' | 'year';
 type ScopedChatOverride = {
   chatId: string;
@@ -974,34 +977,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private parseSourceMartingaleMap(raw: string | undefined): SourceMartingaleMap {
-    const out: SourceMartingaleMap = {};
-    const text = String(raw ?? '').trim();
-    if (!text) {
-      return out;
-    }
-    try {
-      const parsed = JSON.parse(text) as unknown;
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        return out;
-      }
-      for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-        const key = String(k ?? '').trim().toLowerCase();
-        const n = Number(v);
-        if (!key || !Number.isFinite(n) || n <= 1) {
-          continue;
-        }
-        out[key] = n;
-      }
-    } catch {
-      return {};
-    }
-    return out;
-  }
-
   private async getSourceMartingaleMap(): Promise<SourceMartingaleMap> {
     const raw = await this.settings.get('SOURCE_MARTINGALE_MULTIPLIERS');
-    return this.parseSourceMartingaleMap(raw);
+    return parseSourceMartingaleMap(raw);
   }
 
   private takeSourceTpMapSkipLogSlot(
