@@ -1,0 +1,20 @@
+---
+description: Enforce pragmatic decomposition and file boundaries
+alwaysApply: true
+---
+
+# Decomposition And File Boundaries
+
+- Decompose large files incrementally without changing business behavior in the same step.
+- Prefer one isolated concern per file:
+  - utilities -> `*.util.ts`
+  - constants -> `*.constants.ts`
+  - mappers/adapters -> dedicated files
+  - hooks (web) -> dedicated `hooks/*` files
+- Keep service/page files focused on orchestration, not low-level helpers.
+- Do not split code artificially: stop decomposition when additional files reduce readability or add import noise.
+- For repeated logic in 2+ places, extract to a shared module near the domain.
+
+## PR/Task Check
+- State what was extracted and why.
+- Confirm behavior parity for the touched flow via manual verification notes.

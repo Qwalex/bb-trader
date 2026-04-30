@@ -21,43 +21,12 @@ import { SettingsService } from './settings.service';
 import { pickRequestedCabinetId } from '../../common/cabinet-request.util';
 import { CabinetContextService } from '../cabinet/cabinet-context.service';
 import { CabinetService } from '../cabinet/cabinet.service';
+import { ADMIN_ONLY_GLOBAL_KEYS } from './settings.constants';
 
 type AuthReq = {
   headers?: Record<string, string | string[] | undefined>;
   auth?: { userId?: string; role?: string };
 };
-
-const ADMIN_ONLY_GLOBAL_KEYS = new Set<string>([
-  'NAV_MENU_HIDDEN',
-  'OPENROUTER_API_KEY',
-  'OPENROUTER_MODEL_DEFAULT',
-  'OPENROUTER_MODEL_TEXT',
-  'OPENROUTER_MODEL_AI_ADVISOR',
-  'OPENROUTER_MODEL_TEXT_FALLBACK_1',
-  'OPENROUTER_MODEL_IMAGE',
-  'OPENROUTER_MODEL_IMAGE_FALLBACK_1',
-  'OPENROUTER_MODEL_AUDIO',
-  'OPENROUTER_MODEL_AUDIO_FALLBACK_1',
-  'OPENROUTER_MODEL_HISTORY',
-  'DIAGNOSTIC_BATCH_SIZE',
-  'DIAGNOSTIC_MAX_LOG_LINES',
-  'APPLOG_ENABLED',
-  'APPLOG_LOG_NOISY_EVENTS',
-  'OPENROUTER_DIAGNOSTIC_MODELS',
-  'MIN_CAPITAL_AMOUNT',
-  'DEFAULT_ORDER_USD',
-  'BUMP_TO_MIN_EXCHANGE_LOT',
-  'DEFAULT_LEVERAGE_ENABLED',
-  'DEFAULT_LEVERAGE',
-  'FORCED_LEVERAGE',
-  'LEVERAGE_RANGE_MODE',
-  'MIN_ALLOWED_LEVERAGE',
-  'MAX_ALLOWED_LEVERAGE',
-  'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',
-  'POLLING_INTERVAL_MS',
-  'TP_SL_STEP_START',
-  'TP_SL_STEP_RANGE',
-]);
 
 @ApiTags('Settings')
 @Controller('settings')

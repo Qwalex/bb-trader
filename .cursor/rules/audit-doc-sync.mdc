@@ -1,0 +1,17 @@
+---
+description: Require audit docs and tracker sync for every meaningful change
+alwaysApply: true
+---
+
+# Audit Documentation Sync
+
+- For every meaningful refactor/fix, update `docs/audit/06-progress-tracker.md`.
+- If risk/security impact exists, also update `docs/audit/03-security-risks-register.md`.
+- Keep entries short and factual:
+  - scope
+  - files changed
+  - findings
+  - mitigation/result
+  - manual verification
+- Do not postpone docs updates to the end of a long session; update per completed task slice.
+- Keep `AGENTS.md` aligned when project-wide conventions or runtime facts change.

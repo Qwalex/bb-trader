@@ -1,0 +1,17 @@
+---
+description: Apply safe refactor defaults and security baseline
+alwaysApply: true
+---
+
+# Safe Refactor And Security Baseline
+
+- Refactor in behavior-preserving steps first, then functional improvements.
+- Prefer centralizing auth/token/cookie handling; avoid duplicated parsing logic.
+- Do not introduce browser-readable secrets unless explicitly required.
+- Normalize error handling through shared helpers (no silent catch blocks).
+- Avoid destructive operational commands in scripts (no forced reset flows by default).
+- Favor configurable env-based credentials over hardcoded values in compose/scripts.
+
+## Before Finishing
+- Run build/lint checks for touched apps where feasible.
+- Record residual risks explicitly in audit docs when not fully removable now.

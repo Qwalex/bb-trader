@@ -3,9 +3,9 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: signals
-      POSTGRES_PASSWORD: signals
-      POSTGRES_DB: signals
+      POSTGRES_USER: ${POSTGRES_USER:-signals}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-signals}
+      POSTGRES_DB: ${POSTGRES_DB:-signals}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -21,7 +21,7 @@ services:
       dockerfile: Dockerfile.api
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql://signals:signals@postgres:5432/signals?schema=public
+      DATABASE_URL: postgresql://${POSTGRES_USER:-signals}:${POSTGRES_PASSWORD:-signals}@postgres:5432/${POSTGRES_DB:-signals}?schema=public
       API_PORT: "3001"
       API_HOST: 0.0.0.0
       STACK_SLUG: ${STACK_SLUG:-trade}
@@ -55,7 +55,6 @@ services:
       API_INTERNAL_URL: ${WEB_API_INTERNAL_URL:-http://api:3001}
       API_ACCESS_TOKEN: ${API_ACCESS_TOKEN:-}
       SETTINGS_PAGE_PASSWORD: ${SETTINGS_PAGE_PASSWORD:-}
-      NEXT_PUBLIC_API_ACCESS_TOKEN: ${NEXT_PUBLIC_API_ACCESS_TOKEN:-}
     ports:
       - "127.0.0.1:3003:3000"
     depends_on:

@@ -1,3 +1,10 @@
+import { getClientTokenFromCookie, getServerTokenFromCookies } from './api-auth.util';
+import {
+  ACTIVE_CABINET_STORAGE_KEY,
+  DEFAULT_CLIENT_API_BASE_SUFFIX,
+  DEFAULT_INTERNAL_API_BASE,
+} from './api.constants';
+
 /**
  * Публичный origin веб-приложения (`WEB_APP_ORIGIN`), совпадает с одним из API_CORS_ORIGINS на API.
  * Нужен для SSR: серверный fetch не шлёт браузерный Origin, без него ApiAuthGuard отвечает 403.
@@ -18,35 +25,20 @@ export function getApiBase(): string {
     return (
       process.env.API_INTERNAL_URL?.replace(/\/$/, '') ??
       process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ??
-      'http://api:3001'
+      DEFAULT_INTERNAL_API_BASE
     );
   }
   return (
     process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ??
-    `${window.location.origin}/trade-api`
+    `${window.location.origin}${DEFAULT_CLIENT_API_BASE_SUFFIX}`
   );
 }
 
 function getClientCabinetId(): string | undefined {
   if (typeof window === 'undefined') return undefined;
-  const fromStorage = window.localStorage.getItem('active_cabinet_id')?.trim();
+  const fromStorage = window.localStorage.getItem(ACTIVE_CABINET_STORAGE_KEY)?.trim();
   if (fromStorage) return fromStorage;
   return undefined;
-}
-
-function getClientTokenFromCookie(): string | undefined {
-  if (typeof window === 'undefined') return undefined;
-  const raw = document.cookie
-    .split(';')
-    .map((part) => part.trim())
-    .find((part) => part.startsWith('sb_auth_token='))
-    ?.slice('sb_auth_token='.length);
-  if (!raw) return undefined;
-  try {
-    return decodeURIComponent(raw);
-  } catch {
-    return raw;
-  }
 }
 
 export function withCabinetQuery(path: string, cabinetId?: string | null): string {
@@ -80,6 +72,16 @@ export function getApiAuthHeaders(init?: HeadersInit): Headers {
   return headers;
 }
 
+async function enrichAuthHeaderForServer(headers: Headers): Promise<void> {
+  if (typeof window !== 'undefined' || headers.has('Authorization')) {
+    return;
+  }
+  const serverToken = await getServerTokenFromCookies();
+  if (serverToken) {
+    headers.set('Authorization', `Bearer ${serverToken}`);
+  }
+}
+
 export async function fetchJson<T>(
   path: string,
   init?: RequestInit,
@@ -89,17 +91,7 @@ export async function fetchJson<T>(
     cabinetId ?? getClientCabinetId() ?? '',
   ).trim();
   const headers = new Headers(getApiAuthHeaders(init?.headers ?? undefined));
-  if (typeof window === 'undefined' && !headers.has('Authorization')) {
-    try {
-      const { cookies } = await import('next/headers');
-      const serverToken = (await cookies()).get('sb_auth')?.value?.trim();
-      if (serverToken) {
-        headers.set('Authorization', `Bearer ${serverToken}`);
-      }
-    } catch {
-      // no-op outside Next server runtime
-    }
-  }
+  await enrichAuthHeaderForServer(headers);
   if (effectiveCabinetId) {
     headers.set('x-cabinet-id', effectiveCabinetId);
   }
@@ -123,17 +115,7 @@ export async function fetchApiResponse(
     cabinetId ?? getClientCabinetId() ?? '',
   ).trim();
   const headers = new Headers(getApiAuthHeaders(init?.headers ?? undefined));
-  if (typeof window === 'undefined' && !headers.has('Authorization')) {
-    try {
-      const { cookies } = await import('next/headers');
-      const serverToken = (await cookies()).get('sb_auth')?.value?.trim();
-      if (serverToken) {
-        headers.set('Authorization', `Bearer ${serverToken}`);
-      }
-    } catch {
-      // no-op outside Next server runtime
-    }
-  }
+  await enrichAuthHeaderForServer(headers);
   if (effectiveCabinetId) {
     headers.set('x-cabinet-id', effectiveCabinetId);
   }

@@ -4,7 +4,9 @@ set -u
 TARGET_HOST="${1:-80.76.32.76}"
 TARGET_USER="${2:-root}"
 INTERVAL_SEC="${3:-5}"
-NOTIFY_URL="http://dev.qwalex.ru/notify?text=vps_is_live"
+NOTIFY_URL="${NOTIFY_URL:-https://dev.qwalex.ru/notify?text=vps_is_live}"
+STRICT_HOST_KEY_CHECKING="${STRICT_HOST_KEY_CHECKING:-accept-new}"
+KNOWN_HOSTS_FILE="${KNOWN_HOSTS_FILE:-$HOME/.ssh/known_hosts}"
 
 if [[ ! "$INTERVAL_SEC" =~ ^[0-9]+$ ]] || [[ "$INTERVAL_SEC" -lt 1 ]]; then
   echo "INTERVAL_SEC must be a positive integer"
@@ -15,8 +17,8 @@ check_ssh() {
   local out rc
   out="$(ssh \
     -o BatchMode=yes \
-    -o StrictHostKeyChecking=no \
-    -o UserKnownHostsFile=/dev/null \
+    -o StrictHostKeyChecking="${STRICT_HOST_KEY_CHECKING}" \
+    -o UserKnownHostsFile="${KNOWN_HOSTS_FILE}" \
     -o ConnectTimeout=4 \
     "${TARGET_USER}@${TARGET_HOST}" "exit" 2>&1)"
   rc=$?

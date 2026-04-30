@@ -15,62 +15,18 @@ import {
   normalizeTpSlStepRangeForPersist,
   normalizeTpSlStepStartForPersist,
 } from './tp-sl-step.util';
+import {
+  DASHBOARD_TODOS_MAX_ID_LEN,
+  DASHBOARD_TODOS_MAX_ITEMS,
+  DASHBOARD_TODOS_MAX_TEXT_LEN,
+  ENV_FALLBACK,
+  GLOBAL_SHARED_SETTING_KEYS,
+} from './settings.constants';
 
 /** JSON-массив заметок на дашборде: `{ id, text }[]` */
 export const DASHBOARD_TODOS_SETTING_KEY = 'DASHBOARD_TODOS';
 
 export type DashboardTodoItemDto = { id: string; text: string };
-
-const DASHBOARD_TODOS_MAX_ITEMS = 200;
-const DASHBOARD_TODOS_MAX_ID_LEN = 80;
-const DASHBOARD_TODOS_MAX_TEXT_LEN = 4000;
-
-const ENV_FALLBACK: Record<string, string> = {
-  /** Запись логов в таблицу AppLog (false — полностью отключить) */
-  APPLOG_ENABLED: 'true',
-  /** Номинал по умолчанию, если в БД и .env ключ не задан */
-  DEFAULT_ORDER_USD: '10',
-  /** Если true — при номинале ниже minQty биржи поднимать qty до минимума (старое поведение); иначе ошибка */
-  BUMP_TO_MIN_EXCHANGE_LOT: 'false',
-  /** Если true — в AppLog (БД) писать шумные события; по умолчанию false */
-  APPLOG_LOG_NOISY_EVENTS: 'false',
-  /**
-   * Пусто — эффективный диапазон подтягивания SL = номер стартового TP (как при пустой строке в БД).
-   */
-  TP_SL_STEP_RANGE: '',
-};
-
-const GLOBAL_SHARED_SETTING_KEYS = new Set<string>([
-  NAV_MENU_HIDDEN_SETTING_KEY,
-  'OPENROUTER_API_KEY',
-  'OPENROUTER_MODEL_DEFAULT',
-  'OPENROUTER_MODEL_TEXT',
-  'OPENROUTER_MODEL_AI_ADVISOR',
-  'OPENROUTER_MODEL_TEXT_FALLBACK_1',
-  'OPENROUTER_MODEL_IMAGE',
-  'OPENROUTER_MODEL_IMAGE_FALLBACK_1',
-  'OPENROUTER_MODEL_AUDIO',
-  'OPENROUTER_MODEL_AUDIO_FALLBACK_1',
-  'OPENROUTER_MODEL_HISTORY',
-  'DIAGNOSTIC_BATCH_SIZE',
-  'DIAGNOSTIC_MAX_LOG_LINES',
-  'APPLOG_ENABLED',
-  'APPLOG_LOG_NOISY_EVENTS',
-  'OPENROUTER_DIAGNOSTIC_MODELS',
-  'MIN_CAPITAL_AMOUNT',
-  'DEFAULT_ORDER_USD',
-  'BUMP_TO_MIN_EXCHANGE_LOT',
-  'DEFAULT_LEVERAGE_ENABLED',
-  'DEFAULT_LEVERAGE',
-  'FORCED_LEVERAGE',
-  'LEVERAGE_RANGE_MODE',
-  'MIN_ALLOWED_LEVERAGE',
-  'MAX_ALLOWED_LEVERAGE',
-  'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',
-  'POLLING_INTERVAL_MS',
-  'TP_SL_STEP_START',
-  'TP_SL_STEP_RANGE',
-]);
 
 @Injectable()
 export class SettingsService {

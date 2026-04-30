@@ -165,6 +165,7 @@ export default async function Home({
   const currentCabinet =
     (cabinetId ? cabinetItems.find((c) => c.id === cabinetId) : null) ??
     cabinetItems.find((c) => c.isDefault) ??
+    cabinetItems[0] ??
     null;
   let balanceHistory: BalancePoint[] = [];
   try {

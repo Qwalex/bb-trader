@@ -31,3 +31,16 @@
 - **Переменные API:** как локально + `DATABASE_URL`; `API_SWAGGER_SERVER` без nginx-прокси — часто `/` или полный публичный URL API.
 - **Web:** `NEXT_PUBLIC_API_URL=https://<api>.up.railway.app`, `API_INTERNAL_URL` — тот же или internal URL; корень домена — `NEXT_BASE_PATH` не задавать.
 - **Docker:** `Dockerfile.api` / `Dockerfile.web`, контекст — корень репозитория.
+
+## Audit Execution Memory
+
+- Базовая аудит-документация ведется в `docs/audit/*`:
+  - `00-system-map.md`
+  - `01-env-and-secrets-matrix.md`
+  - `02-deploy-and-rollback.md`
+  - `03-security-risks-register.md`
+  - `04-operational-runbooks.md`
+  - `05-agent-work-contract.md`
+  - `06-progress-tracker.md`
+- Любая заметная доработка должна синхронно обновлять минимум `06-progress-tracker.md`; при рисках/уязвимостях также обновлять `03-security-risks-register.md`.
+- Стандарт декомпозиции: утилиты, константы, хуки, типы, мапперы и адаптеры выносить в отдельные файлы (предпочтительно 1 сущность = 1 файл), но без искусственного дробления.

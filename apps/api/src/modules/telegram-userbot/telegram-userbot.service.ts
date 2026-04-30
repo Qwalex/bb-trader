@@ -42,6 +42,21 @@ import { TelegramService } from '../telegram/telegram.service';
 import { VkNotifyMirrorService } from '../vk/vk-notify-mirror.service';
 import { UserbotSignalHashService } from './userbot-signal-hash.service';
 import { parseSignalPriceArrayJson } from './userbot-signal-hash.util';
+import {
+  CLOSE_REOPEN_COOLDOWN_MS,
+  CRITICAL_NOTIFY_URL,
+  OPENROUTER_BALANCE_LOW_THRESHOLD_USD,
+  OPENROUTER_BALANCE_NOTIFY_COOLDOWN_MS,
+  USERBOT_BALANCE_CHECK_CACHE_MS,
+  USERBOT_FILTER_MATCH_THRESHOLD,
+  USERBOT_INLINE_TEXT_MAX_CHARS,
+  USERBOT_MAX_MESSAGE_AGE_MINUTES_DEFAULT,
+  USERBOT_MAX_QUEUE_DEFAULT,
+  USERBOT_MIN_BALANCE_USD_DEFAULT,
+  USERBOT_POLL_FETCH_LIMIT,
+  USERBOT_POLL_INTERVAL_MS,
+  USERBOT_PROCESSING_CONCURRENCY,
+} from './telegram-userbot.constants';
 
 type MessageKind = 'signal' | 'close' | 'reentry' | 'result' | 'other';
 type UserbotFilterKind = 'signal' | 'close' | 'result' | 'reentry' | 'ignore';
@@ -133,20 +148,6 @@ type ScopedChatOverride = {
   tpSlStepStart: string | null;
   tpSlStepRange: number | null;
 };
-
-const USERBOT_POLL_INTERVAL_MS = 2000;
-const USERBOT_POLL_FETCH_LIMIT = 20;
-const USERBOT_PROCESSING_CONCURRENCY = 4;
-const USERBOT_MAX_QUEUE_DEFAULT = 300;
-const USERBOT_INLINE_TEXT_MAX_CHARS = 4_000;
-const USERBOT_MAX_MESSAGE_AGE_MINUTES_DEFAULT = 10;
-const USERBOT_MIN_BALANCE_USD_DEFAULT = 3;
-const USERBOT_BALANCE_CHECK_CACHE_MS = 30_000;
-const USERBOT_FILTER_MATCH_THRESHOLD = 0.34;
-const CLOSE_REOPEN_COOLDOWN_MS = 30_000;
-const CRITICAL_NOTIFY_URL = 'https://qnotify.up.railway.app';
-const OPENROUTER_BALANCE_LOW_THRESHOLD_USD = 2;
-const OPENROUTER_BALANCE_NOTIFY_COOLDOWN_MS = 30 * 60_000;
 
 @Injectable()
 export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {

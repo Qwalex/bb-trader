@@ -1,23 +1,18 @@
 import { NextResponse } from 'next/server';
-
-const AUTH_COOKIE = 'sb_auth';
-const AUTH_TOKEN_COOKIE = 'sb_auth_token';
-const AUTH_MAX_AGE_SECONDS = 60 * 60 * 8;
+import { readCookieValue } from '../../../lib/api-auth.util';
+import {
+  AUTH_COOKIE,
+  AUTH_MAX_AGE_SECONDS,
+  AUTH_TOKEN_COOKIE,
+  DEFAULT_INTERNAL_API_BASE,
+} from '../../../lib/api.constants';
 
 function getApiBase(): string {
   return (
     process.env.API_INTERNAL_URL?.replace(/\/$/, '') ??
     process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ??
-    'http://api:3001'
+    DEFAULT_INTERNAL_API_BASE
   );
-}
-
-function readCookieValue(cookieHeader: string, key: string): string | undefined {
-  return cookieHeader
-    .split(';')
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(`${key}=`))
-    ?.slice(`${key}=`.length);
 }
 
 function clearAuthCookies(response: NextResponse): void {

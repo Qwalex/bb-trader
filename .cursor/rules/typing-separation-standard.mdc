@@ -1,0 +1,19 @@
+---
+description: Keep type declarations isolated from runtime logic
+alwaysApply: true
+---
+
+# Typing Separation Standard
+
+- Prefer moving non-trivial type declarations out of service/page files.
+- Use dedicated files for types:
+  - domain types -> `*.types.ts`
+  - request/response contracts -> `dto/*` or `contracts/*`
+  - shared cross-app types -> `packages/shared`
+- Keep inline types only when they are short, local, and used once.
+- Avoid large type blocks mixed with business logic in the same file.
+- Export named types (avoid default exports for types).
+
+## Naming
+- Runtime constants/functions and types must be clearly separable by filename and import path.
+- If a file grows many `type`/`interface` declarations, split by domain context.

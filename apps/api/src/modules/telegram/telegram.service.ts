@@ -27,6 +27,12 @@ import {
 import { TranscriptService } from '../transcript/transcript.service';
 import { BybitService } from '../bybit/bybit.service';
 import { OrdersService } from '../orders/orders.service';
+import {
+  DRAFT_TTL_MS,
+  EXTERNAL_CONFIRM_TTL_MS,
+  MAX_DRAFT_TURN_CHARS,
+  MAX_DRAFT_USER_TURNS,
+} from './telegram.constants';
 
 type DraftPhase = 'collecting' | 'ready' | 'awaiting_source';
 
@@ -62,11 +68,6 @@ type ExternalConfirmationRequest = {
   createdAt: number;
   onResult?: (result: ExternalConfirmationResult) => Promise<void> | void;
 };
-
-const DRAFT_TTL_MS = 30 * 60_000;
-const EXTERNAL_CONFIRM_TTL_MS = 20 * 60_000;
-const MAX_DRAFT_USER_TURNS = 30;
-const MAX_DRAFT_TURN_CHARS = 1500;
 
 @Injectable()
 export class TelegramService implements OnModuleInit, OnModuleDestroy {

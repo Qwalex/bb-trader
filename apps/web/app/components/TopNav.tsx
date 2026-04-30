@@ -17,7 +17,7 @@ export function TopNav(props: TopNavProps) {
   const { isAdmin, cabinetId, hiddenMenuIds } = props;
   const hiddenSet = useMemo(() => new Set(hiddenMenuIds), [hiddenMenuIds]);
   const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLElement | null>(null);
+  const menuRef = useRef<HTMLDetailsElement | null>(null);
 
   useEffect(() => {
     const handlePointerDown = (event: MouseEvent | TouchEvent) => {
