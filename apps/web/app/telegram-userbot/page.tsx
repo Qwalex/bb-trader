@@ -4,7 +4,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 
 import { EntrySizingControl } from '../components/EntrySizingControl';
 import { UserbotMessageCard } from '../components/UserbotMessageCard';
-import { getApiAuthHeaders, getApiBase } from '../../lib/api';
+import { getApiAuthHeaders, getApiBase, withCabinetQuery } from '../../lib/api';
 import type { EntrySizingMode } from '../../lib/entry-sizing';
 import { parseStoredEntry, serializeEntry } from '../../lib/entry-sizing';
 
@@ -98,8 +98,22 @@ type TraceModalState = {
 };
 
 export default function TelegramUserbotPage() {
+  const getActiveCabinetId = (): string => {
+    const fromQuery = new URLSearchParams(window.location.search).get('cabinetId')?.trim() ?? '';
+    if (fromQuery) return fromQuery;
+    const fromStorage = window.localStorage.getItem('active_cabinet_id')?.trim() ?? '';
+    if (fromStorage) return fromStorage;
+    const fromCookie = document.cookie
+      .split(';')
+      .map((p) => p.trim())
+      .find((p) => p.startsWith('cabinet_id='))
+      ?.split('=')[1];
+    return fromCookie ? decodeURIComponent(fromCookie).trim() : '';
+  };
+  const buildApiUrl = (path: string): string =>
+    `${getApiBase()}${withCabinetQuery(path, getActiveCabinetId())}`;
   const apiFetch = (path: string, init?: RequestInit) =>
-    fetch(`${getApiBase()}${path}`, {
+    fetch(buildApiUrl(path), {
       ...init,
       headers: getApiAuthHeaders(init?.headers),
       cache: 'no-store',
@@ -214,7 +228,7 @@ export default function TelegramUserbotPage() {
         const results = await Promise.all(
           missing.map(async (source) => {
             const res = await fetch(
-              `${getApiBase()}/orders/stats?source=${encodeURIComponent(source)}`,
+              buildApiUrl(`/orders/stats?source=${encodeURIComponent(source)}`),
             );
             if (!res.ok) {
               return { source, winrate: 0, totalPnl: 0 };
@@ -340,14 +354,11 @@ export default function TelegramUserbotPage() {
       (next === null && chat.defaultEntryUsd === null) || next === chat.defaultEntryUsd;
     if (same) return;
     await runAction(`ent-${chat.chatId}`, async () => {
-      const res = await fetch(
-        `${getApiBase()}/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
-        {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ defaultEntryUsd: next }),
-        },
-      );
+      const res = await apiFetch(`/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ defaultEntryUsd: next }),
+      });
       if (!res.ok) {
         throw new Error(`Ошибка сохранения (${res.status})`);
       }
@@ -839,10 +850,8 @@ export default function TelegramUserbotPage() {
                             }
                             onReread={() =>
                               void runAction(`reread-${row.id}`, async () => {
-                                const res = await fetch(
-                                  `${getApiBase()}/telegram-userbot/reread/${encodeURIComponent(
-                                    row.id,
-                                  )}`,
+                                const res = await apiFetch(
+                                  `/telegram-userbot/reread/${encodeURIComponent(row.id)}`,
                                   { method: 'POST' },
                                 );
                                 const j = (await res.json()) as {
@@ -923,8 +932,8 @@ export default function TelegramUserbotPage() {
                       }
                       onReread={() =>
                         void runAction(`reread-${row.id}`, async () => {
-                          const res = await fetch(
-                            `${getApiBase()}/telegram-userbot/reread/${encodeURIComponent(row.id)}`,
+                          const res = await apiFetch(
+                            `/telegram-userbot/reread/${encodeURIComponent(row.id)}`,
                             { method: 'POST' },
                           );
                           const j = (await res.json()) as {
@@ -1105,8 +1114,8 @@ export default function TelegramUserbotPage() {
                   onChange={(e) => {
                     const checked = e.target.checked;
                     void runAction(`toggle-${chat.chatId}`, async () => {
-                      const res = await fetch(
-                        `${getApiBase()}/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
+                      const res = await apiFetch(
+                        `/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
                         {
                           method: 'PUT',
                           headers: { 'Content-Type': 'application/json' },
@@ -1181,8 +1190,8 @@ export default function TelegramUserbotPage() {
                     const normalized = Math.floor(num);
                     if (normalized === (chat.sourcePriority ?? 0)) return;
                     void runAction(`prio-${chat.chatId}`, async () => {
-                      const res = await fetch(
-                        `${getApiBase()}/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
+                      const res = await apiFetch(
+                        `/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
                         {
                           method: 'PUT',
                           headers: { 'Content-Type': 'application/json' },
@@ -1233,8 +1242,8 @@ export default function TelegramUserbotPage() {
                       num === chat.defaultLeverage;
                     if (same) return;
                     void runAction(`lev-${chat.chatId}`, async () => {
-                      const res = await fetch(
-                        `${getApiBase()}/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
+                      const res = await apiFetch(
+                        `/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
                         {
                           method: 'PUT',
                           headers: { 'Content-Type': 'application/json' },
@@ -1270,8 +1279,8 @@ export default function TelegramUserbotPage() {
                       const same = (chat.leverageRangeMode ?? null) === next;
                       if (same) return;
                       void runAction(`lrm-${chat.chatId}`, async () => {
-                        const res = await fetch(
-                          `${getApiBase()}/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
+                        const res = await apiFetch(
+                          `/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
                           {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json' },
@@ -1330,8 +1339,8 @@ export default function TelegramUserbotPage() {
                         return;
                       }
                       void runAction(`minlev-${chat.chatId}`, async () => {
-                        const res = await fetch(
-                          `${getApiBase()}/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
+                        const res = await apiFetch(
+                          `/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
                           {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json' },
@@ -1385,8 +1394,8 @@ export default function TelegramUserbotPage() {
                         return;
                       }
                       void runAction(`maxlev-${chat.chatId}`, async () => {
-                        const res = await fetch(
-                          `${getApiBase()}/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
+                        const res = await apiFetch(
+                          `/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
                           {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json' },
@@ -1440,8 +1449,8 @@ export default function TelegramUserbotPage() {
                         (num === null && curForced === null) || num === curForced;
                       if (same) return;
                       void runAction(`flev-${chat.chatId}`, async () => {
-                        const res = await fetch(
-                          `${getApiBase()}/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
+                        const res = await apiFetch(
+                          `/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
                           {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json' },
@@ -1492,8 +1501,8 @@ export default function TelegramUserbotPage() {
                       num === chat.martingaleMultiplier;
                     if (same) return;
                     void runAction(`mrt-${chat.chatId}`, async () => {
-                      const res = await fetch(
-                        `${getApiBase()}/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
+                      const res = await apiFetch(
+                        `/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
                         {
                           method: 'PUT',
                           headers: { 'Content-Type': 'application/json' },
@@ -1537,8 +1546,8 @@ export default function TelegramUserbotPage() {
                       next === chat.minLotBump;
                     if (same) return;
                     void runAction(`bump-${chat.chatId}`, async () => {
-                      const res = await fetch(
-                        `${getApiBase()}/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
+                      const res = await apiFetch(
+                        `/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
                         {
                           method: 'PUT',
                           headers: { 'Content-Type': 'application/json' },
@@ -1582,8 +1591,8 @@ export default function TelegramUserbotPage() {
                         next === chat.tpSlStepStart;
                       if (same) return;
                       void runAction(`tpsl-${chat.chatId}`, async () => {
-                        const res = await fetch(
-                          `${getApiBase()}/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
+                        const res = await apiFetch(
+                          `/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
                           {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json' },
@@ -1636,8 +1645,8 @@ export default function TelegramUserbotPage() {
                         next === chat.tpSlStepRange;
                       if (same) return;
                       void runAction(`tpsl-range-${chat.chatId}`, async () => {
-                        const res = await fetch(
-                          `${getApiBase()}/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
+                        const res = await apiFetch(
+                          `/telegram-userbot/chats/${encodeURIComponent(chat.chatId)}`,
                           {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json' },

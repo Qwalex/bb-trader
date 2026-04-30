@@ -62,6 +62,10 @@ export class SettingsService {
   ) {}
   private static readonly CACHE_TTL_MS = 15_000;
   private readonly valueCache = new Map<string, { value?: string; expiresAt: number }>();
+  private readonly cabinetOwnerCache = new Map<
+    string,
+    { userId: string | null; expiresAt: number }
+  >();
 
   private currentCabinetId(): string | null {
     return this.cabinetContext.getCabinetId();
@@ -73,6 +77,27 @@ export class SettingsService {
 
   private cacheKey(cabinetId: string | null, key: string): string {
     return `${cabinetId ?? '__global__'}:${key}`;
+  }
+
+  private async resolveCurrentUserId(): Promise<string | null> {
+    const cabinetId = this.currentCabinetId();
+    if (!cabinetId) {
+      return null;
+    }
+    const cached = this.cabinetOwnerCache.get(cabinetId);
+    if (cached && Date.now() <= cached.expiresAt) {
+      return cached.userId;
+    }
+    const row = await this.prisma.cabinet.findUnique({
+      where: { id: cabinetId },
+      select: { ownerUserId: true },
+    });
+    const userId = String(row?.ownerUserId ?? '').trim() || null;
+    this.cabinetOwnerCache.set(cabinetId, {
+      userId,
+      expiresAt: Date.now() + SettingsService.CACHE_TTL_MS,
+    });
+    return userId;
   }
 
   private readCache(cabinetId: string | null, key: string): string | undefined | null {
@@ -103,6 +128,7 @@ export class SettingsService {
 
   async get(key: string): Promise<string | undefined> {
     const cabinetId = this.currentCabinetId();
+    const ownerUserId = await this.resolveCurrentUserId();
     const cached = this.readCache(cabinetId, key);
     if (cached !== null) {
       return cached;
@@ -117,10 +143,22 @@ export class SettingsService {
         return scoped.value;
       }
     }
-    const row = await this.prisma.setting.findUnique({ where: { key } });
-    if (row?.value !== undefined && row?.value !== '') {
-      this.writeCache(cabinetId, key, row.value);
-      return row.value;
+    if (ownerUserId) {
+      const userRow = await this.prisma.userSetting.findUnique({
+        where: { userId_key: { userId: ownerUserId, key } },
+        select: { value: true },
+      });
+      if (userRow?.value !== undefined && userRow.value !== '') {
+        this.writeCache(cabinetId, key, userRow.value);
+        return userRow.value;
+      }
+    }
+    if (!ownerUserId) {
+      const row = await this.prisma.setting.findUnique({ where: { key } });
+      if (row?.value !== undefined && row?.value !== '') {
+        this.writeCache(cabinetId, key, row.value);
+        return row.value;
+      }
     }
     const fromEnv = this.config.get<string>(key);
     if (fromEnv !== undefined && fromEnv !== '') {
@@ -249,10 +287,20 @@ export class SettingsService {
       }
     }
     const cabinetId = this.currentCabinetId();
+    const ownerUserId = await this.resolveCurrentUserId();
     if (cabinetId && this.isCabinetScopedKey(key)) {
       await this.prisma.cabinetSetting.upsert({
         where: { cabinetId_key: { cabinetId, key } },
         create: { cabinetId, key, value: normalized },
+        update: { value: normalized },
+      });
+      this.invalidateCacheForKey(key);
+      return;
+    }
+    if (ownerUserId) {
+      await this.prisma.userSetting.upsert({
+        where: { userId_key: { userId: ownerUserId, key } },
+        create: { userId: ownerUserId, key, value: normalized },
         update: { value: normalized },
       });
       this.invalidateCacheForKey(key);
@@ -272,6 +320,7 @@ export class SettingsService {
       string | undefined
     >;
     const cabinetId = this.currentCabinetId();
+    const ownerUserId = await this.resolveCurrentUserId();
     const uniqueKeys = Array.from(new Set(keys));
     const unresolved: string[] = [];
     for (const key of uniqueKeys) {
@@ -287,28 +336,44 @@ export class SettingsService {
     }
     const scopedKeys =
       cabinetId != null ? unresolved.filter((k) => this.isCabinetScopedKey(k)) : [];
-    const [globalRows, scopedRows]: [
+    const [globalRows, scopedRows, userRows]: [
+      Array<{ key: string; value: string }>,
       Array<{ key: string; value: string }>,
       Array<{ key: string; value: string }>,
     ] = await Promise.all([
-      this.prisma.setting.findMany({
-        where: { key: { in: unresolved } },
-        select: { key: true, value: true },
-      }),
+      ownerUserId
+        ? Promise.resolve([] as Array<{ key: string; value: string }>)
+        : this.prisma.setting.findMany({
+            where: { key: { in: unresolved } },
+            select: { key: true, value: true },
+          }),
       cabinetId && scopedKeys.length > 0
         ? this.prisma.cabinetSetting.findMany({
             where: { cabinetId, key: { in: scopedKeys } },
             select: { key: true, value: true },
           })
         : Promise.resolve([] as Array<{ key: string; value: string }>),
+      ownerUserId
+        ? this.prisma.userSetting.findMany({
+            where: { userId: ownerUserId, key: { in: unresolved } },
+            select: { key: true, value: true },
+          })
+        : Promise.resolve([] as Array<{ key: string; value: string }>),
     ]);
     const globalMap = new Map(globalRows.map((row) => [row.key, row.value]));
     const scopedMap = new Map(scopedRows.map((row) => [row.key, row.value]));
+    const userMap = new Map(userRows.map((row) => [row.key, row.value]));
     for (const key of unresolved) {
       const scoped = scopedMap.get(key);
       if (scoped !== undefined && scoped !== '') {
         out[key] = scoped;
         this.writeCache(cabinetId, key, scoped);
+        continue;
+      }
+      const userValue = userMap.get(key);
+      if (userValue !== undefined && userValue !== '') {
+        out[key] = userValue;
+        this.writeCache(cabinetId, key, userValue);
         continue;
       }
       const global = globalMap.get(key);
@@ -338,19 +403,31 @@ export class SettingsService {
 
   async list(): Promise<{ key: string; value: string }[]> {
     const cabinetId = this.currentCabinetId();
-    if (!cabinetId) {
-      return this.prisma.setting.findMany({ orderBy: { key: 'asc' } });
-    }
-    const [globalRows, scopedRows] = await Promise.all([
-      this.prisma.setting.findMany({ orderBy: { key: 'asc' } }),
-      this.prisma.cabinetSetting.findMany({
-        where: { cabinetId },
-        orderBy: { key: 'asc' },
-        select: { key: true, value: true },
-      }),
+    const ownerUserId = await this.resolveCurrentUserId();
+    const [globalRows, scopedRows, userRows] = await Promise.all([
+      ownerUserId
+        ? Promise.resolve([] as Array<{ key: string; value: string }>)
+        : this.prisma.setting.findMany({ orderBy: { key: 'asc' } }),
+      cabinetId
+        ? this.prisma.cabinetSetting.findMany({
+            where: { cabinetId },
+            orderBy: { key: 'asc' },
+            select: { key: true, value: true },
+          })
+        : Promise.resolve([] as Array<{ key: string; value: string }>),
+      ownerUserId
+        ? this.prisma.userSetting.findMany({
+            where: { userId: ownerUserId },
+            orderBy: { key: 'asc' },
+            select: { key: true, value: true },
+          })
+        : Promise.resolve([] as Array<{ key: string; value: string }>),
     ]);
     const map = new Map<string, string>();
     for (const row of globalRows) {
+      map.set(row.key, row.value);
+    }
+    for (const row of userRows) {
       map.set(row.key, row.value);
     }
     for (const row of scopedRows) {
@@ -363,10 +440,8 @@ export class SettingsService {
 
   /** Чтение только из БД (без подмешивания .env). */
   async getDashboardTodos(): Promise<DashboardTodoItemDto[]> {
-    const row = await this.prisma.setting.findUnique({
-      where: { key: DASHBOARD_TODOS_SETTING_KEY },
-    });
-    return this.parseDashboardTodosLoose(row?.value);
+    const raw = await this.get(DASHBOARD_TODOS_SETTING_KEY);
+    return this.parseDashboardTodosLoose(raw);
   }
 
   parseDashboardTodosLoose(raw: string | undefined | null): DashboardTodoItemDto[] {
@@ -455,6 +530,7 @@ export class SettingsService {
       await tx.order.deleteMany();
       await tx.signal.deleteMany();
       await tx.appLog.deleteMany();
+      await tx.userSetting.deleteMany();
       await tx.setting.deleteMany();
       await tx.cabinet.deleteMany();
     });
@@ -473,6 +549,11 @@ export class SettingsService {
         data: { value: '' },
       });
       updated += scoped.count;
+      const userScoped = await this.prisma.userSetting.updateMany({
+        where: { key },
+        data: { value: '' },
+      });
+      updated += userScoped.count;
     }
     return {
       updated,

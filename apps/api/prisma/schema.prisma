@@ -99,6 +99,19 @@ model Setting {
   updatedAt DateTime @updatedAt
 }
 
+model UserSetting {
+  id        String   @id @default(cuid())
+  userId    String
+  user      AuthUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  key       String
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, key])
+  @@index([userId, updatedAt])
+}
+
 /// Один снимок суммарного USDT-баланса (equity) в сутки — для графика на дашборде.
 model BalanceSnapshot {
   id        String   @id @default(cuid())
@@ -494,6 +507,7 @@ model AuthUser {
 
   resetCodes AuthPasswordReset[]
   cabinets  Cabinet[]
+  settings  UserSetting[]
 
   @@index([role, createdAt])
   @@index([telegramUserId])

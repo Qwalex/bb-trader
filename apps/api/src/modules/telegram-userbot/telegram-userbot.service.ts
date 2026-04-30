@@ -160,11 +160,13 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   private processingWorkersActive = 0;
 
   private client: TelegramClient | null = null;
+  private clientOwnerUserId: string | null = null;
   private messageHandlerRegistered = false;
   private enabledChatIds = new Set<string>();
 
   private qrClient: TelegramClient | null = null;
   private qrTask: Promise<void> | null = null;
+  private qrOwnerUserId: string | null = null;
   private qrState: QrState = { phase: 'idle' };
   private pollTimer: NodeJS.Timeout | null = null;
   private pollInFlight = false;
@@ -189,6 +191,26 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   private readonly sourceTpMapSkipLogged = new Set<string>();
   private static readonly SOURCE_MAP_SKIP_LOG_CAP = 400;
 
+  private async getCurrentOwnerUserId(): Promise<string | null> {
+    const cabinetId = this.cabinetContext.getCabinetId();
+    if (!cabinetId) {
+      return null;
+    }
+    const row = await this.prisma.cabinet.findUnique({
+      where: { id: cabinetId },
+      select: { ownerUserId: true },
+    });
+    return String(row?.ownerUserId ?? '').trim() || null;
+  }
+
+  private async isClientOwnedByCurrentUser(): Promise<boolean> {
+    const currentOwnerUserId = await this.getCurrentOwnerUserId();
+    if (!this.clientOwnerUserId) {
+      return !currentOwnerUserId;
+    }
+    return this.clientOwnerUserId === currentOwnerUserId;
+  }
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly settings: SettingsService,
@@ -207,15 +229,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   async onModuleInit(): Promise<void> {
     await this.refreshEnabledChatsCache();
     void this.startPollingLoop();
-    const enabled = await this.getBoolSetting('TELEGRAM_USERBOT_ENABLED', false);
-    if (!enabled) {
-      return;
-    }
-    // Не блокируем bootstrap API: userbot может долго подключаться/висеть по сети.
-    void this.connectFromStoredSession().catch((e) => {
-      const msg = formatError(e);
-      this.logger.warn(`Userbot auto-connect skipped: ${msg}`);
-    });
+    // В multi-user режиме автоподключение на старте небезопасно:
+    // нет пользовательского контекста, поэтому подключение должно инициироваться из HTTP-запроса конкретного пользователя.
   }
 
   async onModuleDestroy(): Promise<void> {
@@ -234,17 +249,32 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         this.settings.get('TELEGRAM_USERBOT_API_HASH'),
         this.settings.get('TELEGRAM_USERBOT_SESSION'),
       ]);
-    const [chatsTotal, chatsEnabled] = await Promise.all([
-      this.prisma.tgUserbotChat.count(),
+    const cabinetId = this.cabinetContext.getCabinetId() ?? undefined;
+    const [chatsTotal, chatsEnabled, sameUserClient, currentOwnerUserId] = await Promise.all([
+      this.prisma.tgUserbotChat.count({
+        where: cabinetId
+          ? {
+              cabinetSources: {
+                some: { cabinetId },
+              },
+            }
+          : undefined,
+      }),
       this.prisma.cabinetTelegramSource.count({
         where: {
-          cabinetId: this.cabinetContext.getCabinetId() ?? undefined,
+          cabinetId,
           enabled: true,
         },
       }),
+      this.isClientOwnedByCurrentUser(),
+      this.getCurrentOwnerUserId(),
     ]);
+    const qr =
+      this.qrOwnerUserId && this.qrOwnerUserId !== currentOwnerUserId
+        ? ({ phase: 'idle' } as const)
+        : this.qrState;
     return {
-      connected: await this.isClientAuthorized(this.client),
+      connected: sameUserClient && (await this.isClientAuthorized(this.client)),
       enabled,
       useAiClassifier,
       requireConfirmation,
@@ -259,41 +289,59 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       pollingInFlight: this.pollInFlight,
       processingQueueDepth: this.processingQueue.length,
       processingWorkersActive: this.processingWorkersActive,
-      qr: this.qrState,
+      qr,
       balanceGuard: await this.getBalanceGuardSnapshot(),
     };
   }
 
   async getTodayMetrics() {
     const start = this.startOfToday();
+    const cabinetId = this.cabinetContext.getCabinetId();
+    if (!cabinetId) {
+      return {
+        dayStart: start.toISOString(),
+        readMessages: 0,
+        signalsFound: 0,
+        signalsPlaced: 0,
+        noSignals: 0,
+        parseIncomplete: 0,
+        parseError: 0,
+        recent: [],
+      };
+    }
     const [readMessages, signalsFound, signalsPlaced, parseIncomplete, parseError] =
       await Promise.all([
-        this.prisma.tgUserbotIngest.count({
-          where: { createdAt: { gte: start } },
+        this.prisma.cabinetIngestRoute.count({
+          where: { cabinetId, createdAt: { gte: start } },
         }),
-        this.prisma.tgUserbotIngest.count({
-          where: { createdAt: { gte: start }, classification: 'signal' },
+        this.prisma.cabinetIngestRoute.count({
+          where: { cabinetId, createdAt: { gte: start }, classification: 'signal' },
         }),
-        this.prisma.tgUserbotIngest.count({
-          where: { createdAt: { gte: start }, status: 'placed' },
+        this.prisma.cabinetIngestRoute.count({
+          where: { cabinetId, createdAt: { gte: start }, status: 'placed' },
         }),
-        this.prisma.tgUserbotIngest.count({
-          where: { createdAt: { gte: start }, status: 'parse_incomplete' },
+        this.prisma.cabinetIngestRoute.count({
+          where: { cabinetId, createdAt: { gte: start }, status: 'parse_incomplete' },
         }),
-        this.prisma.tgUserbotIngest.count({
-          where: { createdAt: { gte: start }, status: 'parse_error' },
+        this.prisma.cabinetIngestRoute.count({
+          where: { cabinetId, createdAt: { gte: start }, status: 'parse_error' },
         }),
       ]);
-    const recent = await this.prisma.tgUserbotIngest.findMany({
+    const recent = await this.prisma.cabinetIngestRoute.findMany({
+      where: { cabinetId },
       orderBy: { createdAt: 'desc' },
       take: 120,
       select: {
-        id: true,
+        ingestId: true,
         chatId: true,
-        messageId: true,
-        text: true,
-        aiRequest: true,
-        aiResponse: true,
+        ingest: {
+          select: {
+            messageId: true,
+            text: true,
+            aiRequest: true,
+            aiResponse: true,
+          },
+        },
         classification: true,
         status: true,
         error: true,
@@ -309,13 +357,26 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       parseIncomplete,
       parseError,
       recent: recent.map((row) => ({
-        ...row,
+        id: row.ingestId,
+        chatId: row.chatId,
+        messageId: row.ingest.messageId,
+        text: row.ingest.text,
+        aiRequest: row.ingest.aiRequest,
+        aiResponse: row.ingest.aiResponse,
+        classification: row.classification,
+        status: row.status,
+        error: row.error,
+        createdAt: row.createdAt,
         isToday: row.createdAt.getTime() >= start.getTime(),
       })),
     };
   }
 
   async connectFromStoredSession() {
+    const currentOwnerUserId = await this.getCurrentOwnerUserId();
+    if (this.client && this.clientOwnerUserId !== currentOwnerUserId) {
+      await this.disconnect();
+    }
     const creds = await this.getApiCreds();
     const clientOptions = await this.getTelegramClientOptions();
     const session = (await this.settings.get('TELEGRAM_USERBOT_SESSION'))?.trim();
@@ -354,20 +415,22 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       await this.client.disconnect();
     } finally {
       this.client = null;
+      this.clientOwnerUserId = null;
       this.messageHandlerRegistered = false;
     }
     return { ok: true, connected: false };
   }
 
   async startQrLogin() {
-    if (await this.isClientAuthorized(this.client)) {
+    const ownerUserId = await this.getCurrentOwnerUserId();
+    if ((await this.isClientOwnedByCurrentUser()) && (await this.isClientAuthorized(this.client))) {
       return {
         ok: true,
         message: 'Userbot уже авторизован.',
         qr: this.qrState,
       };
     }
-    if (this.qrTask) {
+    if (this.qrTask && this.qrOwnerUserId === ownerUserId) {
       return { ok: true, message: 'QR-вход уже запущен.', qr: this.qrState };
     }
 
@@ -382,6 +445,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     );
     await qrClient.connect();
     this.qrClient = qrClient;
+    this.qrOwnerUserId = ownerUserId;
     this.setQrState({ phase: 'starting' });
 
     this.qrTask = (async () => {
@@ -431,6 +495,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         await this.stopQrClient();
       } finally {
         this.qrTask = null;
+        this.qrOwnerUserId = null;
       }
     })();
 
@@ -438,22 +503,44 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   }
 
   async getQrStatus() {
+    const ownerUserId = await this.getCurrentOwnerUserId();
+    if (this.qrOwnerUserId && this.qrOwnerUserId !== ownerUserId) {
+      return {
+        connected: false,
+        qr: { phase: 'idle' as const },
+        inProgress: false,
+      };
+    }
+    const sameUserClient = await this.isClientOwnedByCurrentUser();
     return {
-      connected: await this.isClientAuthorized(this.client),
+      connected: sameUserClient && (await this.isClientAuthorized(this.client)),
       qr: this.qrState,
       inProgress: Boolean(this.qrTask),
     };
   }
 
   async cancelQrLogin() {
+    const ownerUserId = await this.getCurrentOwnerUserId();
+    if (this.qrOwnerUserId && this.qrOwnerUserId !== ownerUserId) {
+      return { ok: true, qr: { phase: 'idle' as const } };
+    }
     await this.stopQrClient();
     this.qrTask = null;
+    this.qrOwnerUserId = null;
     this.setQrState({ phase: 'cancelled' });
     return { ok: true, qr: this.qrState };
   }
 
   async syncChats() {
-    if (!this.client || !(await this.isClientAuthorized(this.client))) {
+    const cabinetId = this.cabinetContext.getCabinetId();
+    if (!cabinetId) {
+      return { ok: false, error: 'Кабинет не выбран.' };
+    }
+    if (
+      !this.client ||
+      !(await this.isClientOwnedByCurrentUser()) ||
+      !(await this.isClientAuthorized(this.client))
+    ) {
       return { ok: false, error: 'Userbot не подключен.' };
     }
     const dialogs = (await this.client.getDialogs({
@@ -491,6 +578,11 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         create: { chatId, title, username, enabled: false },
         update: { title, username },
       });
+      await this.prisma.cabinetTelegramSource.upsert({
+        where: { cabinetId_chatId: { cabinetId, chatId } },
+        create: { cabinetId, chatId, enabled: false },
+        update: {},
+      });
       upserted += 1;
     }
 
@@ -503,6 +595,13 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     const [rows, scopedRowsRaw, bySource, tpSlBySource, tpSlRangeBySource, openrouterSpendTodayByChatId] =
       await Promise.all([
         this.prisma.tgUserbotChat.findMany({
+          where: cabinetId
+            ? {
+                cabinetSources: {
+                  some: { cabinetId },
+                },
+              }
+            : undefined,
           orderBy: [{ title: 'asc' }],
         }),
         cabinetId
@@ -1792,11 +1891,13 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async attachClient(client: TelegramClient): Promise<void> {
+    const ownerUserId = await this.getCurrentOwnerUserId();
     if (this.client && this.client !== client) {
       await this.client.disconnect();
       this.messageHandlerRegistered = false;
     }
     this.client = client;
+    this.clientOwnerUserId = ownerUserId;
     if (!this.messageHandlerRegistered) {
       this.client.addEventHandler(
         this.handleIncomingMessage,
@@ -4839,6 +4940,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       await this.qrClient.disconnect();
     } finally {
       this.qrClient = null;
+      this.qrOwnerUserId = null;
     }
   }
 
