@@ -18,6 +18,11 @@ export class ApiAuthGuard implements CanActivate {
   ) {}
 
   canActivate(context: ExecutionContext): boolean {
+    const httpRequest = context.switchToHttp().getRequest<{ method?: string }>();
+    if (httpRequest?.method?.toUpperCase() === 'OPTIONS') {
+      return true;
+    }
+
     const isPublic = this.reflector.getAllAndOverride<boolean>(
       IS_PUBLIC_ENDPOINT_KEY,
       [context.getHandler(), context.getClass()],
