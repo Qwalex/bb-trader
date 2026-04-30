@@ -109,6 +109,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleInit(): Promise<void> {
+    // Не блокируем bootstrap API: запуск Telegram-ботов и приветственная рассылка могут зависеть от внешней сети.
+    void this.initializeBots().catch((e) => {
+      this.logger.error(`Telegram init failed: ${formatError(e)}`);
+    });
+  }
+
+  private async initializeBots(): Promise<void> {
     const cabinets = await this.prisma.cabinet.findMany({
       select: { id: true, name: true },
       orderBy: { createdAt: 'asc' },
