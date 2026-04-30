@@ -128,10 +128,6 @@ export default function OpenrouterSpendPage() {
     })();
   }, [adminChecked, period]);
 
-  if (!adminChecked) {
-    return <p style={{ color: 'var(--muted)' }}>Проверка доступа…</p>;
-  }
-
   const timelineData = useMemo(() => {
     if (!data) return [];
     return data.timeline.map((p) => ({
@@ -141,6 +137,10 @@ export default function OpenrouterSpendPage() {
   }, [data]);
 
   const topSources = useMemo(() => (data?.bySource ?? []).slice(0, 12), [data]);
+
+  if (!adminChecked) {
+    return <p style={{ color: 'var(--muted)' }}>Проверка доступа…</p>;
+  }
 
   return (
     <>

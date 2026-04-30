@@ -159,15 +159,13 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   private readonly processingActiveIngestIds = new Set<string>();
   private processingWorkersActive = 0;
 
-  private client: TelegramClient | null = null;
-  private clientOwnerUserId: string | null = null;
-  private messageHandlerRegistered = false;
+  private readonly clientsByUserId = new Map<string, TelegramClient>();
+  private readonly messageHandlerRegisteredByUserId = new Set<string>();
   private enabledChatIds = new Set<string>();
 
-  private qrClient: TelegramClient | null = null;
-  private qrTask: Promise<void> | null = null;
-  private qrOwnerUserId: string | null = null;
-  private qrState: QrState = { phase: 'idle' };
+  private readonly qrClientByUserId = new Map<string, TelegramClient>();
+  private readonly qrTaskByUserId = new Map<string, Promise<void>>();
+  private readonly qrStateByUserId = new Map<string, QrState>();
   private pollTimer: NodeJS.Timeout | null = null;
   private pollInFlight = false;
   private reconnectInFlight = false;
@@ -205,10 +203,31 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
   private async isClientOwnedByCurrentUser(): Promise<boolean> {
     const currentOwnerUserId = await this.getCurrentOwnerUserId();
-    if (!this.clientOwnerUserId) {
-      return !currentOwnerUserId;
-    }
-    return this.clientOwnerUserId === currentOwnerUserId;
+    if (!currentOwnerUserId) return false;
+    return this.clientsByUserId.has(currentOwnerUserId);
+  }
+
+  private async getCurrentUserClient(): Promise<TelegramClient | null> {
+    const currentOwnerUserId = await this.getCurrentOwnerUserId();
+    if (!currentOwnerUserId) return null;
+    return this.clientsByUserId.get(currentOwnerUserId) ?? null;
+  }
+
+  private getQrStateForUser(userId: string | null): QrState {
+    if (!userId) return { phase: 'idle' };
+    return this.qrStateByUserId.get(userId) ?? { phase: 'idle' };
+  }
+
+  private setQrStateForUser(userId: string | null, next: Partial<QrState>) {
+    if (!userId) return;
+    const now = new Date().toISOString();
+    const prev = this.getQrStateForUser(userId);
+    this.qrStateByUserId.set(userId, {
+      ...prev,
+      ...next,
+      startedAt: prev.startedAt ?? now,
+      updatedAt: now,
+    });
   }
 
   constructor(
@@ -235,8 +254,20 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleDestroy(): Promise<void> {
     this.stopPollingLoop();
-    await this.disconnect();
-    await this.stopQrClient();
+    for (const userId of Array.from(this.clientsByUserId.keys())) {
+      const client = this.clientsByUserId.get(userId);
+      if (!client) continue;
+      try {
+        await client.disconnect();
+      } catch {}
+    }
+    for (const userId of Array.from(this.qrClientByUserId.keys())) {
+      const client = this.qrClientByUserId.get(userId);
+      if (!client) continue;
+      try {
+        await client.disconnect();
+      } catch {}
+    }
   }
 
   async getStatus() {
@@ -269,12 +300,10 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       this.isClientOwnedByCurrentUser(),
       this.getCurrentOwnerUserId(),
     ]);
-    const qr =
-      this.qrOwnerUserId && this.qrOwnerUserId !== currentOwnerUserId
-        ? ({ phase: 'idle' } as const)
-        : this.qrState;
+    const qr = this.getQrStateForUser(currentOwnerUserId);
+    const client = await this.getCurrentUserClient();
     return {
-      connected: sameUserClient && (await this.isClientAuthorized(this.client)),
+      connected: sameUserClient && (await this.isClientAuthorized(client)),
       enabled,
       useAiClassifier,
       requireConfirmation,
@@ -374,8 +403,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
   async connectFromStoredSession() {
     const currentOwnerUserId = await this.getCurrentOwnerUserId();
-    if (this.client && this.clientOwnerUserId !== currentOwnerUserId) {
-      await this.disconnect();
+    if (!currentOwnerUserId) {
+      return { ok: false, error: 'Пользователь не определен для кабинета' };
     }
     const creds = await this.getApiCreds();
     const clientOptions = await this.getTelegramClientOptions();
@@ -386,7 +415,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         error: 'Сессия userbot не найдена. Запустите вход по QR.',
       };
     }
-    await this.stopQrClient();
+    await this.stopQrClient(currentOwnerUserId);
     const client = new TelegramClient(
       new StringSession(session),
       creds.apiId,
@@ -408,35 +437,40 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   }
 
   async disconnect() {
-    if (!this.client) {
+    const currentOwnerUserId = await this.getCurrentOwnerUserId();
+    if (!currentOwnerUserId) {
+      return { ok: true, connected: false };
+    }
+    const client = this.clientsByUserId.get(currentOwnerUserId);
+    if (!client) {
       return { ok: true, connected: false };
     }
     try {
-      await this.client.disconnect();
+      await client.disconnect();
     } finally {
-      this.client = null;
-      this.clientOwnerUserId = null;
-      this.messageHandlerRegistered = false;
+      this.clientsByUserId.delete(currentOwnerUserId);
+      this.messageHandlerRegisteredByUserId.delete(currentOwnerUserId);
     }
     return { ok: true, connected: false };
   }
 
   async startQrLogin() {
     const ownerUserId = await this.getCurrentOwnerUserId();
-    if ((await this.isClientOwnedByCurrentUser()) && (await this.isClientAuthorized(this.client))) {
+    const currentClient = await this.getCurrentUserClient();
+    if ((await this.isClientOwnedByCurrentUser()) && (await this.isClientAuthorized(currentClient))) {
       return {
         ok: true,
         message: 'Userbot уже авторизован.',
-        qr: this.qrState,
+        qr: this.getQrStateForUser(ownerUserId),
       };
     }
-    if (this.qrTask && this.qrOwnerUserId === ownerUserId) {
-      return { ok: true, message: 'QR-вход уже запущен.', qr: this.qrState };
+    if (ownerUserId && this.qrTaskByUserId.get(ownerUserId)) {
+      return { ok: true, message: 'QR-вход уже запущен.', qr: this.getQrStateForUser(ownerUserId) };
     }
 
     const creds = await this.getApiCreds();
     const clientOptions = await this.getTelegramClientOptions();
-    await this.stopQrClient();
+    await this.stopQrClient(ownerUserId);
     const qrClient = new TelegramClient(
       new StringSession(''),
       creds.apiId,
@@ -444,11 +478,13 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       clientOptions,
     );
     await qrClient.connect();
-    this.qrClient = qrClient;
-    this.qrOwnerUserId = ownerUserId;
-    this.setQrState({ phase: 'starting' });
+    if (!ownerUserId) {
+      return { ok: false, error: 'Пользователь не определен для кабинета' };
+    }
+    this.qrClientByUserId.set(ownerUserId, qrClient);
+    this.setQrStateForUser(ownerUserId, { phase: 'starting' });
 
-    this.qrTask = (async () => {
+    const qrTask = (async () => {
       try {
         await qrClient.signInUserWithQrCode(
           { apiId: creds.apiId, apiHash: creds.apiHash },
@@ -456,13 +492,13 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
             onError: async (err: unknown) => {
               const msg = formatError(err);
               this.logger.warn(`Userbot QR onError: ${msg}`);
-              this.setQrState({ phase: 'error', error: msg });
+              this.setQrStateForUser(ownerUserId, { phase: 'error', error: msg });
               return false;
             },
             qrCode: async (code: { token: Buffer }) => {
               const loginUrl = `tg://login?token=${code.token.toString('base64url')}`;
               const qrDataUrl = await QRCode.toDataURL(loginUrl);
-              this.setQrState({
+              this.setQrStateForUser(ownerUserId, {
                 phase: 'waiting_scan',
                 loginUrl,
                 qrDataUrl,
@@ -474,7 +510,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         );
         const authorized = await this.isClientAuthorized(qrClient);
         if (!authorized) {
-          this.setQrState({
+          this.setQrStateForUser(ownerUserId, {
             phase: 'error',
             error: 'QR авторизация не завершена.',
           });
@@ -486,49 +522,41 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         await this.settings.set('TELEGRAM_USERBOT_SESSION', savedSession);
         await this.settings.set('TELEGRAM_USERBOT_ENABLED', 'true');
         await this.attachClient(qrClient);
-        this.qrClient = null;
-        this.setQrState({ phase: 'authorized' });
+        this.qrClientByUserId.delete(ownerUserId);
+        this.setQrStateForUser(ownerUserId, { phase: 'authorized' });
       } catch (e) {
         const msg = formatError(e);
         this.logger.error(`Userbot QR flow failed: ${msg}`);
-        this.setQrState({ phase: 'error', error: msg });
-        await this.stopQrClient();
+        this.setQrStateForUser(ownerUserId, { phase: 'error', error: msg });
+        await this.stopQrClient(ownerUserId);
       } finally {
-        this.qrTask = null;
-        this.qrOwnerUserId = null;
+        this.qrTaskByUserId.delete(ownerUserId);
       }
     })();
+    this.qrTaskByUserId.set(ownerUserId, qrTask);
 
-    return { ok: true, qr: this.qrState };
+    return { ok: true, qr: this.getQrStateForUser(ownerUserId) };
   }
 
   async getQrStatus() {
     const ownerUserId = await this.getCurrentOwnerUserId();
-    if (this.qrOwnerUserId && this.qrOwnerUserId !== ownerUserId) {
-      return {
-        connected: false,
-        qr: { phase: 'idle' as const },
-        inProgress: false,
-      };
-    }
     const sameUserClient = await this.isClientOwnedByCurrentUser();
+    const client = await this.getCurrentUserClient();
     return {
-      connected: sameUserClient && (await this.isClientAuthorized(this.client)),
-      qr: this.qrState,
-      inProgress: Boolean(this.qrTask),
+      connected: sameUserClient && (await this.isClientAuthorized(client)),
+      qr: this.getQrStateForUser(ownerUserId),
+      inProgress: Boolean(ownerUserId && this.qrTaskByUserId.get(ownerUserId)),
     };
   }
 
   async cancelQrLogin() {
     const ownerUserId = await this.getCurrentOwnerUserId();
-    if (this.qrOwnerUserId && this.qrOwnerUserId !== ownerUserId) {
-      return { ok: true, qr: { phase: 'idle' as const } };
+    await this.stopQrClient(ownerUserId);
+    if (ownerUserId) {
+      this.qrTaskByUserId.delete(ownerUserId);
+      this.setQrStateForUser(ownerUserId, { phase: 'cancelled' });
     }
-    await this.stopQrClient();
-    this.qrTask = null;
-    this.qrOwnerUserId = null;
-    this.setQrState({ phase: 'cancelled' });
-    return { ok: true, qr: this.qrState };
+    return { ok: true, qr: this.getQrStateForUser(ownerUserId) };
   }
 
   async syncChats() {
@@ -537,13 +565,15 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       return { ok: false, error: 'Кабинет не выбран.' };
     }
     if (
-      !this.client ||
-      !(await this.isClientOwnedByCurrentUser()) ||
-      !(await this.isClientAuthorized(this.client))
+      !(await this.isClientOwnedByCurrentUser())
     ) {
       return { ok: false, error: 'Userbot не подключен.' };
     }
-    const dialogs = (await this.client.getDialogs({
+    const client = await this.getCurrentUserClient();
+    if (!client || !(await this.isClientAuthorized(client))) {
+      return { ok: false, error: 'Userbot не подключен.' };
+    }
+    const dialogs = (await client.getDialogs({
       limit: 1000,
     })) as unknown as Array<Record<string, unknown>>;
     let upserted = 0;
@@ -1445,8 +1475,10 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   private async scanTodayMessagesCore(
     limitPerChatRaw?: number,
     includeTodayMetrics = false,
+    clientArg?: TelegramClient,
   ) {
-    if (!this.client || !(await this.isClientAuthorized(this.client))) {
+    const client = clientArg ?? (await this.getCurrentUserClient());
+    if (!client || !(await this.isClientAuthorized(client))) {
       return { ok: false, error: 'Userbot не подключен.' };
     }
     const enabledChats = await this.prisma.cabinetTelegramSource.findMany({
@@ -1468,7 +1500,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
     for (const chat of enabledChats) {
       try {
-        const list = (await this.client.getMessages(chat.chatId, {
+        const list = (await client.getMessages(chat.chatId, {
           limit: limitPerChat,
         })) as unknown as Array<Record<string, unknown>>;
         chatsProcessed += 1;
@@ -1578,21 +1610,27 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     if (this.pollInFlight) {
       return;
     }
-    if (!this.client || !(await this.isClientAuthorized(this.client))) {
-      // После деплоя/рестарта или сетевого обрыва не ждём ручного "Подключить":
-      // пытаемся восстановить userbot из сохранённой сессии с троттлингом.
-      const enabled = await this.getBoolSetting('TELEGRAM_USERBOT_ENABLED', false);
-      if (enabled) {
-        await this.tryReconnectFromStoredSession();
-      }
-      return;
-    }
-    if (this.enabledChatIds.size === 0) {
+    if (this.enabledChatIds.size === 0 || this.clientsByUserId.size === 0) {
       return;
     }
     this.pollInFlight = true;
     try {
-      await this.scanTodayMessagesCore(USERBOT_POLL_FETCH_LIMIT, false);
+      for (const [userId, client] of this.clientsByUserId.entries()) {
+        if (!(await this.isClientAuthorized(client))) {
+          continue;
+        }
+        const defaultCabinet = await this.prisma.cabinet.findFirst({
+          where: { ownerUserId: userId },
+          orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+          select: { id: true },
+        });
+        if (!defaultCabinet?.id) {
+          continue;
+        }
+        await this.cabinetContext.runWithCabinet(defaultCabinet.id, () =>
+          this.scanTodayMessagesCore(USERBOT_POLL_FETCH_LIMIT, false, client),
+        );
+      }
     } catch (e) {
       this.logger.warn(`Userbot pollTick failed: ${formatError(e)}`);
     } finally {
@@ -1892,18 +1930,21 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
   private async attachClient(client: TelegramClient): Promise<void> {
     const ownerUserId = await this.getCurrentOwnerUserId();
-    if (this.client && this.client !== client) {
-      await this.client.disconnect();
-      this.messageHandlerRegistered = false;
+    if (!ownerUserId) {
+      throw new BadRequestException('Пользователь не определен для кабинета');
     }
-    this.client = client;
-    this.clientOwnerUserId = ownerUserId;
-    if (!this.messageHandlerRegistered) {
-      this.client.addEventHandler(
+    const prev = this.clientsByUserId.get(ownerUserId);
+    if (prev && prev !== client) {
+      await prev.disconnect();
+      this.messageHandlerRegisteredByUserId.delete(ownerUserId);
+    }
+    this.clientsByUserId.set(ownerUserId, client);
+    if (!this.messageHandlerRegisteredByUserId.has(ownerUserId)) {
+      client.addEventHandler(
         this.handleIncomingMessage,
         new NewMessage({ incoming: true }),
       );
-      this.messageHandlerRegistered = true;
+      this.messageHandlerRegisteredByUserId.add(ownerUserId);
     }
     await this.refreshEnabledChatsCache();
   }
@@ -3945,11 +3986,12 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     chatId: string,
     messageId: string,
   ): Promise<{ text?: string; replyToMessageId?: string; error?: string }> {
-    if (!this.client || !(await this.isClientAuthorized(this.client))) {
+    const client = await this.getCurrentUserClient();
+    if (!client || !(await this.isClientAuthorized(client))) {
       return { error: 'telegram_client_unavailable' };
     }
     try {
-      const list = (await this.client.getMessages(chatId, {
+      const list = (await client.getMessages(chatId, {
         ids: [Number(messageId)],
         limit: 1,
       })) as unknown as Array<Record<string, unknown>>;
@@ -4736,11 +4778,12 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     text: string;
     replyToMessageId?: string;
   }): Promise<{ ok: true; messageId: string } | { ok: false; error: string }> {
-    if (!this.client || !(await this.isClientAuthorized(this.client))) {
+    const client = await this.getCurrentUserClient();
+    if (!client || !(await this.isClientAuthorized(client))) {
       return { ok: false, error: 'Telegram userbot не авторизован' };
     }
     try {
-      const sent = (await this.client.sendMessage(params.targetChatId, {
+      const sent = (await client.sendMessage(params.targetChatId, {
         message: params.text,
         ...(params.replyToMessageId
           ? { replyTo: Number(params.replyToMessageId) }
@@ -4932,26 +4975,17 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async stopQrClient(): Promise<void> {
-    if (!this.qrClient) {
+  private async stopQrClient(userId: string | null): Promise<void> {
+    if (!userId) {
       return;
     }
+    const client = this.qrClientByUserId.get(userId);
+    if (!client) return;
     try {
-      await this.qrClient.disconnect();
+      await client.disconnect();
     } finally {
-      this.qrClient = null;
-      this.qrOwnerUserId = null;
+      this.qrClientByUserId.delete(userId);
     }
-  }
-
-  private setQrState(next: Partial<QrState>) {
-    const now = new Date().toISOString();
-    this.qrState = {
-      ...this.qrState,
-      ...next,
-      startedAt: this.qrState.startedAt ?? now,
-      updatedAt: now,
-    };
   }
 
   private async getBoolSetting(key: string, fallback: boolean): Promise<boolean> {

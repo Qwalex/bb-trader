@@ -140,10 +140,6 @@ export default function DiagnosticsPage() {
     })();
   }, [router]);
 
-  if (!adminChecked) {
-    return <p style={{ color: 'var(--muted)' }}>Проверка доступа…</p>;
-  }
-
   const loadRuns = useCallback(async () => {
     setLoadingRuns(true);
     setError(null);
@@ -250,6 +246,10 @@ export default function DiagnosticsPage() {
     }
     return map;
   }, [details?.modelResults]);
+
+  if (!adminChecked) {
+    return <p style={{ color: 'var(--muted)' }}>Проверка доступа…</p>;
+  }
 
   return (
     <>
