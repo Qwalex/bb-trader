@@ -251,7 +251,6 @@ export default async function Home({
 
   return (
     <>
-      <h1 className="pageTitle">Дашборд Test 1</h1>
       <SessionInfoBar
         login={authMe?.login ?? null}
         userId={authMe?.userId ?? null}
