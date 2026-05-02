@@ -31,6 +31,10 @@ export type ProcessIngestOptions = {
   telegramReceivedAt?: Date;
   ingestCreatedAt?: Date;
   enqueuedAtMs?: number;
+  /** Повтор после правки: не слать whitelist/critical при повторной ошибке уровней. */
+  suppressPlacementFailureExternalNotify?: boolean;
+  /** Автоповтор после правки канала: не запрашивать TELEGRAM_USERBOT_REQUIRE_CONFIRMATION. */
+  bypassConfirmationForAutoRetry?: boolean;
 };
 
 export type IngestProcessJob = {

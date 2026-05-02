@@ -56,6 +56,8 @@ import {
   USERBOT_POLL_FETCH_LIMIT,
   USERBOT_POLL_INTERVAL_MS,
   USERBOT_PROCESSING_CONCURRENCY,
+  USERBOT_SIGNAL_LEVELS_EDIT_WATCH_POLL_MS,
+  USERBOT_SIGNAL_LEVELS_EDIT_WATCH_TTL_MS,
 } from './telegram-userbot.constants';
 import {
   parseSourceMartingaleMap,
@@ -114,6 +116,10 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   private lastCriticalNotifyAtByKey = new Map<string, number>();
   private readonly sourceTpMapSkipLogged = new Set<string>();
   private static readonly SOURCE_MAP_SKIP_LOG_CAP = 400;
+
+  private readonly signalLevelsValidationWatchTimers = new Map<string, NodeJS.Timeout>();
+  private readonly signalLevelsValidationWatchDeadlineMs = new Map<string, number>();
+  private readonly signalLevelsValidationWatchInflight = new Set<string>();
 
   private async getCurrentOwnerUserId(): Promise<string | null> {
     const cabinetId = this.cabinetContext.getCabinetId();
@@ -179,6 +185,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy(): Promise<void> {
+    this.clearAllSignalLevelsValidationWatches();
     this.stopPollingLoop();
     for (const userId of Array.from(this.clientsByUserId.keys())) {
       const client = this.clientsByUserId.get(userId);
@@ -1307,18 +1314,80 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         text: true,
         signalHash: true,
         status: true,
+        createdAt: true,
       },
     });
     if (!ingest) {
       return { ok: false, error: 'Сообщение не найдено' };
     }
-    const text = this.readString(ingest.text);
-    if (!text) {
+    const fresh = await this.fetchChatMessageMeta(ingest.chatId, ingest.messageId);
+    let text = this.readString(ingest.text) ?? '';
+    let meta: { replyToMessageId?: string; signalExternalId?: string } | undefined;
+
+    if (!fresh.error && fresh.text?.trim()) {
+      text = fresh.text.trim();
+      meta = {
+        replyToMessageId: fresh.replyToMessageId,
+        signalExternalId: this.extractSignalExternalId(text),
+      };
+      await this.prisma.tgUserbotIngest.update({
+        where: { id: ingest.id },
+        data: { text },
+      });
+    } else if (fresh.error) {
+      this.logger.warn(
+        `rereadIngestMessage: не удалось загрузить из Telegram (${fresh.error}), используется текст из БД`,
+      );
+    }
+
+    if (!text.trim()) {
       return { ok: false, error: 'В сообщении нет текстового содержимого для перечитывания' };
     }
-    await this.processIngestRecord(ingest, text, undefined, {
-      source: 'manual-reread',
-    });
+    const trimmed = text.trim();
+    if (!meta) {
+      meta = { signalExternalId: this.extractSignalExternalId(trimmed) };
+    }
+
+    const cabinetIds = await this.cabinets.listEnabledCabinetIdsForChat(ingest.chatId);
+    for (const cabinetId of cabinetIds) {
+      const route = await this.prisma.cabinetIngestRoute.upsert({
+        where: { cabinetId_ingestId: { cabinetId, ingestId: ingest.id } },
+        create: {
+          cabinetId,
+          ingestId: ingest.id,
+          chatId: ingest.chatId,
+          classification: 'other',
+          status: 'queued',
+        },
+        update: {
+          chatId: ingest.chatId,
+          classification: 'other',
+          status: 'queued',
+          error: null,
+          aiRequest: null,
+          aiResponse: null,
+        },
+        select: { id: true, cabinetId: true },
+      });
+      this.enqueueIngestJob({
+        ingest: {
+          id: ingest.id,
+          chatId: ingest.chatId,
+          messageId: ingest.messageId,
+          signalHash: null,
+          status: ingest.status,
+        },
+        text: trimmed.length > USERBOT_INLINE_TEXT_MAX_CHARS ? null : trimmed,
+        textLen: trimmed.length,
+        meta,
+        options: {
+          enforceBalanceGuard: true,
+          source: 'manual-reread',
+          ingestCreatedAt: ingest.createdAt,
+        },
+        route,
+      });
+    }
     return { ok: true };
   }
 
@@ -1337,6 +1406,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         text: true,
         signalHash: true,
         status: true,
+        createdAt: true,
       },
     });
     let processed = 0;
@@ -1345,15 +1415,75 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     const errors: Array<{ ingestId: string; error: string }> = [];
 
     for (const row of rows) {
-      const text = this.readString(row.text);
-      if (!text) {
+      const fresh = await this.fetchChatMessageMeta(row.chatId, row.messageId);
+      let text = this.readString(row.text) ?? '';
+      let meta: { replyToMessageId?: string; signalExternalId?: string } | undefined;
+
+      if (!fresh.error && fresh.text?.trim()) {
+        text = fresh.text.trim();
+        meta = {
+          replyToMessageId: fresh.replyToMessageId,
+          signalExternalId: this.extractSignalExternalId(text),
+        };
+        await this.prisma.tgUserbotIngest.update({
+          where: { id: row.id },
+          data: { text },
+        });
+      } else if (fresh.error) {
+        this.logger.warn(
+          `rereadAllIngestMessages: chat=${row.chatId} msg=${row.messageId} telegram=${fresh.error}, БД`,
+        );
+      }
+
+      if (!text.trim()) {
         skippedWithoutText += 1;
         continue;
       }
+      const trimmed = text.trim();
+      if (!meta) {
+        meta = { signalExternalId: this.extractSignalExternalId(trimmed) };
+      }
       try {
-        await this.processIngestRecord(row, text, undefined, {
-          source: 'manual-reread-all',
-        });
+        const cabinetIds = await this.cabinets.listEnabledCabinetIdsForChat(row.chatId);
+        for (const cabinetId of cabinetIds) {
+          const route = await this.prisma.cabinetIngestRoute.upsert({
+            where: { cabinetId_ingestId: { cabinetId, ingestId: row.id } },
+            create: {
+              cabinetId,
+              ingestId: row.id,
+              chatId: row.chatId,
+              classification: 'other',
+              status: 'queued',
+            },
+            update: {
+              chatId: row.chatId,
+              classification: 'other',
+              status: 'queued',
+              error: null,
+              aiRequest: null,
+              aiResponse: null,
+            },
+            select: { id: true, cabinetId: true },
+          });
+          this.enqueueIngestJob({
+            ingest: {
+              id: row.id,
+              chatId: row.chatId,
+              messageId: row.messageId,
+              signalHash: null,
+              status: row.status,
+            },
+            text: trimmed.length > USERBOT_INLINE_TEXT_MAX_CHARS ? null : trimmed,
+            textLen: trimmed.length,
+            meta,
+            options: {
+              enforceBalanceGuard: true,
+              source: 'manual-reread-all',
+              ingestCreatedAt: row.createdAt,
+            },
+            route,
+          });
+        }
         processed += 1;
       } catch (e) {
         failed += 1;
@@ -1910,11 +2040,88 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       status: 'ignored',
     });
     if (!ingest) {
-      void this.appLog.append('debug', 'telegram', 'Userbot: duplicate ingest skipped', {
+      const existing = await this.prisma.tgUserbotIngest.findUnique({
+        where: { dedupMessageKey },
+        select: {
+          id: true,
+          chatId: true,
+          messageId: true,
+          text: true,
+          signalHash: true,
+          status: true,
+          createdAt: true,
+        },
+      });
+      if (!existing) {
+        void this.appLog.append('debug', 'telegram', 'Userbot: duplicate ingest skipped (нет строки)', {
+          chatId,
+          messageId,
+          dedupMessageKey,
+        });
+        return;
+      }
+      const nextText = text.trim();
+      const prevText = (this.readString(existing.text) ?? '').trim();
+      if (prevText === nextText) {
+        void this.appLog.append('debug', 'telegram', 'Userbot: duplicate ingest без изменений текста', {
+          chatId,
+          messageId,
+          dedupMessageKey,
+        });
+        return;
+      }
+      await this.prisma.tgUserbotIngest.update({
+        where: { id: existing.id },
+        data: { text: nextText },
+      });
+      void this.appLog.append('info', 'telegram', 'Userbot: текст ingest обновлён из Telegram', {
         chatId,
         messageId,
         dedupMessageKey,
+        ingestId: existing.id,
+        prevLen: prevText.length,
+        nextLen: nextText.length,
       });
+      const cabinetIdsDup = await this.cabinets.listEnabledCabinetIdsForChat(chatId);
+      for (const cabinetId of cabinetIdsDup) {
+        const route = await this.prisma.cabinetIngestRoute.upsert({
+          where: { cabinetId_ingestId: { cabinetId, ingestId: existing.id } },
+          create: {
+            cabinetId,
+            ingestId: existing.id,
+            chatId,
+            classification: 'other',
+            status: 'queued',
+          },
+          update: {
+            chatId,
+            classification: 'other',
+            status: 'queued',
+            error: null,
+            aiRequest: null,
+            aiResponse: null,
+          },
+          select: { id: true, cabinetId: true },
+        });
+        this.enqueueIngestJob({
+          ingest: {
+            id: existing.id,
+            chatId: existing.chatId,
+            messageId: existing.messageId,
+            signalHash: null,
+            status: existing.status,
+          },
+          text: nextText.length > USERBOT_INLINE_TEXT_MAX_CHARS ? null : nextText,
+          textLen: nextText.length,
+          meta,
+          options: {
+            enforceBalanceGuard: true,
+            ...options,
+            ingestCreatedAt: existing.createdAt,
+          },
+          route,
+        });
+      }
       return;
     }
 
@@ -2041,22 +2248,17 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
   private async runIngestJob(job: IngestProcessJob): Promise<void> {
     try {
-      let text = job.text;
-      if (text == null) {
-        const row = await this.prisma.tgUserbotIngest.findUnique({
-          where: { id: job.ingest.id },
-          select: { text: true },
-        });
-        text = row?.text ?? '';
-      }
+      const row = await this.prisma.tgUserbotIngest.findUnique({
+        where: { id: job.ingest.id },
+        select: { text: true, createdAt: true },
+      });
+      const text = this.readString(row?.text) ?? '';
       const cabinetId = job.route?.cabinetId ?? (await this.cabinets.getDefaultCabinetId());
       await this.cabinetContext.runWithCabinet(cabinetId, async () => {
-        await this.processIngestRecord(
-          job.ingest,
-          text,
-          job.meta,
-          job.options,
-        );
+        await this.processIngestRecord(job.ingest, text, job.meta, {
+          ...job.options,
+          ingestCreatedAt: job.options?.ingestCreatedAt ?? row?.createdAt,
+        });
       });
       if (job.route?.id) {
         const ingestRow = await this.prisma.tgUserbotIngest.findUnique({
@@ -2684,10 +2886,19 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
-      const requireConfirmation = await this.getBoolSetting(
+      const requireConfirmationSetting = await this.getBoolSetting(
         'TELEGRAM_USERBOT_REQUIRE_CONFIRMATION',
         false,
       );
+      const requireConfirmation =
+        requireConfirmationSetting && options?.bypassConfirmationForAutoRetry !== true;
+      if (requireConfirmationSetting && options?.bypassConfirmationForAutoRetry === true) {
+        this.appendIngestStageLog(
+          'info',
+          'Userbot: подтверждение в боте пропущено (автоповтор после правки сообщения)',
+          ingest,
+        );
+      }
       if (requireConfirmation) {
         this.appendIngestStageLog('info', 'Userbot: waiting external confirmation', ingest, {
           signalHash,
@@ -2707,6 +2918,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           decision: 'confirmed' | 'rejected';
           ok: boolean;
           error?: string;
+          placeErrorCode?: string;
           signalId?: string;
           bybitOrderIds?: string[];
           actorUserId?: number;
@@ -2724,6 +2936,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           if (!result.ok) {
             this.appendIngestStageLog('error', 'Userbot: confirmation accepted but placement failed', ingest, {
               error: result.error ?? 'unknown',
+              placeErrorCode: result.placeErrorCode ?? null,
             });
             await this.updateIngest(ingest.id, {
               status: 'place_error',
@@ -2731,6 +2944,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
                 result.error ??
                 'Подтверждение получено, но ордер не удалось выставить',
             });
+            if (result.placeErrorCode === 'signal_levels_validation') {
+              this.scheduleSignalLevelsValidationEditWatch(ingest.id);
+            }
             return;
           }
           this.appendIngestStageLog('info', 'Userbot: confirmation accepted and placement succeeded', ingest, {
@@ -2797,19 +3013,27 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           aiRequest,
           aiResponse,
         });
-        await this.notifySignalFailureToBot({
-          ingestId: ingest.id,
-          chatId: ingest.chatId,
-          token: signal.pair,
-          stage: 'bybit',
-          error: placeError,
-        });
-        await this.notifyCriticalExternalApiUnavailable('bybit', {
-          ingestId: ingest.id,
-          chatId: ingest.chatId,
-          stage: 'bybit',
-          error: placeError,
-        });
+        const suppressNotify =
+          options?.suppressPlacementFailureExternalNotify === true &&
+          place.errorCode === 'signal_levels_validation';
+        if (!suppressNotify) {
+          await this.notifySignalFailureToBot({
+            ingestId: ingest.id,
+            chatId: ingest.chatId,
+            token: signal.pair,
+            stage: 'bybit',
+            error: placeError,
+          });
+          await this.notifyCriticalExternalApiUnavailable('bybit', {
+            ingestId: ingest.id,
+            chatId: ingest.chatId,
+            stage: 'bybit',
+            error: placeError,
+          });
+        }
+        if (place.errorCode === 'signal_levels_validation') {
+          this.scheduleSignalLevelsValidationEditWatch(ingest.id);
+        }
         return;
       }
 
@@ -3881,6 +4105,163 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       rootStatuses: rootSignals.map((row) => row.status),
       chainMatches: chainRows.filter((row) => row.total > 0),
     };
+  }
+
+  private clearSignalLevelsValidationWatch(ingestId: string): void {
+    const t = this.signalLevelsValidationWatchTimers.get(ingestId);
+    if (t) {
+      clearInterval(t);
+      this.signalLevelsValidationWatchTimers.delete(ingestId);
+    }
+    this.signalLevelsValidationWatchDeadlineMs.delete(ingestId);
+  }
+
+  private clearAllSignalLevelsValidationWatches(): void {
+    for (const id of this.signalLevelsValidationWatchTimers.keys()) {
+      this.clearSignalLevelsValidationWatch(id);
+    }
+  }
+
+  /**
+   * После ошибки validateSignalLevels: опрос Telegram; при смене текста — полный автоповтор
+   * (очередь по каждому кабинету, с обходом подтверждения).
+   */
+  private scheduleSignalLevelsValidationEditWatch(ingestId: string): void {
+    this.clearSignalLevelsValidationWatch(ingestId);
+    const deadlineMs = Date.now() + USERBOT_SIGNAL_LEVELS_EDIT_WATCH_TTL_MS;
+    this.signalLevelsValidationWatchDeadlineMs.set(ingestId, deadlineMs);
+    const timer = setInterval(() => {
+      void this.tickSignalLevelsValidationEditWatch(ingestId);
+    }, USERBOT_SIGNAL_LEVELS_EDIT_WATCH_POLL_MS);
+    this.signalLevelsValidationWatchTimers.set(ingestId, timer);
+    void this.appLog.append('info', 'telegram', 'Userbot: наблюдение за правкой сообщения после ошибки уровней', {
+      ingestId,
+      pollMs: USERBOT_SIGNAL_LEVELS_EDIT_WATCH_POLL_MS,
+      ttlMs: USERBOT_SIGNAL_LEVELS_EDIT_WATCH_TTL_MS,
+    });
+  }
+
+  private async tickSignalLevelsValidationEditWatch(ingestId: string): Promise<void> {
+    const deadlineMs = this.signalLevelsValidationWatchDeadlineMs.get(ingestId);
+    if (deadlineMs == null) {
+      this.clearSignalLevelsValidationWatch(ingestId);
+      return;
+    }
+    if (Date.now() > deadlineMs) {
+      this.clearSignalLevelsValidationWatch(ingestId);
+      void this.appLog.append('info', 'telegram', 'Userbot: истекло ожидание правки сообщения (уровни)', {
+        ingestId,
+      });
+      return;
+    }
+    if (this.signalLevelsValidationWatchInflight.has(ingestId)) {
+      return;
+    }
+    this.signalLevelsValidationWatchInflight.add(ingestId);
+    try {
+      const row = await this.prisma.tgUserbotIngest.findUnique({
+        where: { id: ingestId },
+        select: {
+          id: true,
+          chatId: true,
+          messageId: true,
+          text: true,
+          signalHash: true,
+          status: true,
+          createdAt: true,
+        },
+      });
+      if (!row) {
+        this.clearSignalLevelsValidationWatch(ingestId);
+        return;
+      }
+      if (row.status === 'placed' || row.status === 'cancelled_by_confirmation') {
+        this.clearSignalLevelsValidationWatch(ingestId);
+        return;
+      }
+      const meta = await this.fetchChatMessageMeta(row.chatId, row.messageId);
+      if (meta.error) {
+        return;
+      }
+      const fresh = (meta.text ?? '').trim();
+      if (!fresh) {
+        return;
+      }
+      const prev = (this.readString(row.text) ?? '').trim();
+      if (fresh === prev) {
+        return;
+      }
+
+      this.appendIngestStageLog(
+        'info',
+        'Userbot: текст сообщения в канале изменился (наблюдение уровней)',
+        { id: row.id, chatId: row.chatId, messageId: row.messageId },
+        { signalHash: row.signalHash, status: row.status },
+      );
+
+      const oldHash = row.signalHash?.trim() ?? '';
+      if (oldHash) {
+        await this.userbotSignalHash.release(oldHash);
+      }
+      await this.prisma.tgUserbotIngest.update({
+        where: { id: ingestId },
+        data: { text: fresh, signalHash: null },
+      });
+
+      const metaForJob = {
+        replyToMessageId: meta.replyToMessageId,
+        signalExternalId: this.extractSignalExternalId(fresh),
+      };
+      const cabinetIds = await this.cabinets.listEnabledCabinetIdsForChat(row.chatId);
+      for (const cabinetId of cabinetIds) {
+        const route = await this.prisma.cabinetIngestRoute.upsert({
+          where: { cabinetId_ingestId: { cabinetId, ingestId: row.id } },
+          create: {
+            cabinetId,
+            ingestId: row.id,
+            chatId: row.chatId,
+            classification: 'other',
+            status: 'queued',
+          },
+          update: {
+            chatId: row.chatId,
+            classification: 'other',
+            status: 'queued',
+            error: null,
+            aiRequest: null,
+            aiResponse: null,
+          },
+          select: { id: true, cabinetId: true },
+        });
+        this.enqueueIngestJob({
+          ingest: {
+            id: row.id,
+            chatId: row.chatId,
+            messageId: row.messageId,
+            signalHash: null,
+            status: 'ignored',
+          },
+          text: fresh.length > USERBOT_INLINE_TEXT_MAX_CHARS ? null : fresh,
+          textLen: fresh.length,
+          meta: metaForJob,
+          options: {
+            enforceBalanceGuard: true,
+            source: 'poll',
+            telegramReceivedAt: new Date(),
+            ingestCreatedAt: row.createdAt,
+            suppressPlacementFailureExternalNotify: true,
+            bypassConfirmationForAutoRetry: true,
+          },
+          route,
+        });
+      }
+    } catch (e) {
+      this.logger.warn(
+        `tickSignalLevelsValidationEditWatch ingest=${ingestId}: ${formatError(e)}`,
+      );
+    } finally {
+      this.signalLevelsValidationWatchInflight.delete(ingestId);
+    }
   }
 
   private async fetchChatMessageMeta(

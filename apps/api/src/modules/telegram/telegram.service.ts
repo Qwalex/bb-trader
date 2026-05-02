@@ -1723,6 +1723,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           decision: 'confirmed',
           ok: false,
           error: fallback.error,
+          placeErrorCode: fallback.placeErrorCode,
           actorUserId: uid,
         });
         await ctx.reply(`Подтверждение не выполнено: ${fallback.error}`);
@@ -2168,6 +2169,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private async confirmFromIngestId(ingestId: string): Promise<{
     ok: boolean;
     error?: string;
+    placeErrorCode?: string;
     signalId?: string;
     bybitOrderIds?: string[];
   }> {
@@ -2247,7 +2249,11 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       messageId: row?.messageId ?? undefined,
     });
     if (!place.ok) {
-      return { ok: false, error: formatError(place.error) };
+      return {
+        ok: false,
+        error: formatError(place.error),
+        placeErrorCode: place.errorCode,
+      };
     }
     await this.prisma.tgUserbotIngest
       .update({

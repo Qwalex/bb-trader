@@ -109,7 +109,11 @@ export class BybitSignalPlacementService {
           takeProfits: signal.takeProfits,
           validationErr,
         });
-        return { ok: false, error: validationErr };
+        return {
+          ok: false,
+          error: validationErr,
+          errorCode: 'signal_levels_validation',
+        };
       }
 
       void ports.appLog.append('info', 'bybit', 'placeSignalOrders: старт', {

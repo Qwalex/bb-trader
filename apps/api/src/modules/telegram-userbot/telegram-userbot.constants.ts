@@ -11,3 +11,6 @@ export const CLOSE_REOPEN_COOLDOWN_MS = 30_000;
 export const CRITICAL_NOTIFY_URL = 'https://qnotify.up.railway.app';
 export const OPENROUTER_BALANCE_LOW_THRESHOLD_USD = 2;
 export const OPENROUTER_BALANCE_NOTIFY_COOLDOWN_MS = 30 * 60_000;
+/** Опрос Telegram после ошибки уровней (validateSignalLevels). */
+export const USERBOT_SIGNAL_LEVELS_EDIT_WATCH_POLL_MS = 25_000;
+export const USERBOT_SIGNAL_LEVELS_EDIT_WATCH_TTL_MS = 90 * 60_000;

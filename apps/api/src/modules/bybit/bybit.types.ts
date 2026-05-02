@@ -1,6 +1,10 @@
+/** Ошибка проверки уровней до ордеров — можно повторить после правки текста в Telegram. */
+export type PlaceOrdersErrorCode = 'signal_levels_validation';
+
 export interface PlaceOrdersResult {
   ok: boolean;
   error?: string;
+  errorCode?: PlaceOrdersErrorCode;
   signalId?: string;
   bybitOrderIds?: string[];
 }

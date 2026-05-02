@@ -58,6 +58,7 @@ type ExternalConfirmationResult = {
   decision: 'confirmed' | 'rejected';
   ok: boolean;
   error?: string;
+  placeErrorCode?: string;
   signalId?: string;
   bybitOrderIds?: string[];
   actorUserId?: number;
@@ -872,6 +873,7 @@ export class VkBotService implements OnModuleInit, OnModuleDestroy {
         decision: 'confirmed',
         ok: false,
         error: fallback.error,
+        placeErrorCode: fallback.placeErrorCode,
         actorUserId: userId,
       });
       await this.sendPeer(peerId, `Подтверждение не выполнено: ${fallback.error}`);
@@ -1083,6 +1085,7 @@ export class VkBotService implements OnModuleInit, OnModuleDestroy {
   private async confirmFromIngestIdVk(ingestId: string): Promise<{
     ok: boolean;
     error?: string;
+    placeErrorCode?: string;
     signalId?: string;
     bybitOrderIds?: string[];
   }> {
@@ -1158,7 +1161,11 @@ export class VkBotService implements OnModuleInit, OnModuleDestroy {
       messageId: row?.messageId ?? undefined,
     });
     if (!place.ok) {
-      return { ok: false, error: formatError(place.error) };
+      return {
+        ok: false,
+        error: formatError(place.error),
+        placeErrorCode: place.errorCode,
+      };
     }
     await this.prisma.tgUserbotIngest
       .update({
