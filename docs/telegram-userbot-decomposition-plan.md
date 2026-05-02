@@ -1,6 +1,6 @@
 # План декомпозиции `telegram-userbot.service.ts`
 
-**Цель:** довести модуль до тонкого фасада + доменных сервисов по образцу `apps/api/src/modules/bybit/`, сохранив поведение и публичный API `TelegramUserbotService` (`TelegramUserbotController`). Актуальные размеры (`wc -l`): фасад `telegram-userbot.service.ts` **~875**, оркестратор ingest `ingest/telegram-userbot-ingest-pipeline.service.ts` **~1236**, рядом lookup/reply/levels-watch/pair-direction в `ingest/*-ingest-*.service.ts`, скан `scan/telegram-userbot-scan.service.ts` **~314** (ориентиры на дату обновления документа).
+**Цель:** довести модуль до тонкого фасада + доменных сервисов по образцу `apps/api/src/modules/bybit/`, сохранив поведение и публичный API `TelegramUserbotService` (`TelegramUserbotController`). Актуальные размеры (`wc -l`, ревизия после AUD-048): фасад `telegram-userbot.service.ts` **~635**, оркестратор ingest `ingest/telegram-userbot-ingest-pipeline.service.ts` **~1491** (включая ручной reread / список кандидатов для привязки), рядом lookup/reply/levels-watch/pair-direction в `ingest/*-ingest-*.service.ts`, скан `scan/telegram-userbot-scan.service.ts` **~314**.
 
 **Ограничения проекта:** behavior-preserving рефакторинг; типы в `*.types.ts`, утилиты в `*.util.ts`; без искусственного дробления; автотесты не добавляем — DoD: `npm run build` в `apps/api` + ручной smoke.
 
@@ -16,7 +16,7 @@
 - Сессия: `connectFromStoredSession`, `disconnect`, `startQrLogin`, `getQrStatus`, `cancelQrLogin`
 - Чаты: `syncChats`, `listChats`
 - OpenRouter: `getOpenrouterSpendAnalytics`, `getOpenrouterBalance`
-- Ingest: `listIngestLinkCandidates`, `scanTodayMessages`, `rereadIngestMessage`, `rereadAllIngestMessages`
+- Ingest: `listIngestLinkCandidates`, `scanTodayMessages`, `rereadIngestMessage`, `rereadAllIngestMessages` (реализация на **`TelegramUserbotIngestPipelineService`**, фасад только вызывает pipeline)
 - Фильтры: `listFilterGroups`, `listFilterExamples`, `listFilterPatterns`, `createFilterExample`, `deleteFilterExample`, `createFilterPattern`, `deleteFilterPattern`, `generateFilterPatterns`
 - Публикация: `listPublishGroups`, `createOrUpdatePublishGroup`, `deletePublishGroup`
 - Настройки чата: `updateChat`
@@ -33,7 +33,7 @@
 |---------|------------|
 | Фасад `TelegramUserbotService` | `telegram-userbot.service.ts` — lifecycle, HTTP-методы, делегаты в `settings` / `filters` / `mirror` / `scan`, `handleIncomingMessage`, polling hooks, `refreshEnabledChatsCache` |
 | Очередь ingest, `ingestChatMessage` | `ingest/telegram-userbot-ingest.service.ts` |
-| `processIngestRecord`, classify, balance guard, уведомления об ошибках, pair-cooldown wait | `ingest/telegram-userbot-ingest-pipeline.service.ts` + `ingest/telegram-userbot-ingest-pair-direction.service.ts` |
+| `processIngestRecord`, classify, balance guard, уведомления об ошибках, pair-cooldown wait, **`listIngestLinkCandidates`**, **`rereadIngestMessage`**, **`rereadAllIngestMessages`** | `ingest/telegram-userbot-ingest-pipeline.service.ts` + `ingest/telegram-userbot-ingest-pair-direction.service.ts` |
 | Reply (reentry/close/result без входа), `signalFromDb` | `ingest/telegram-userbot-ingest-signal-reply.service.ts` |
 | Lookup по reply / external id, цепочка root, `fetchChatMessageMeta` | `ingest/telegram-userbot-ingest-signal-lookup.service.ts` |
 | Edit-watch после `signal_levels_validation` | `ingest/telegram-userbot-ingest-levels-watch.service.ts` |
@@ -127,7 +127,7 @@ apps/api/src/modules/telegram-userbot/
 
 **Сделать:** `TelegramUserbotService` только делегирует в доменные сервисы; `onModuleInit`/`onModuleDestroy` координируют stop таймеров/дисконнект.
 
-**DoD:** полный короткий smoke из W1–W4; размер фасада ориентировочно <800 строк (целевой ориентир плана).
+**DoD:** полный короткий smoke из W1–W4; размер фасада **&lt; ~800 строк** — **достигнут** (~635 после выноса reread/link-кластера на pipeline, AUD-048).
 
 ---
 

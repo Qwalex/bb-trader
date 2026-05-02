@@ -21,12 +21,13 @@
 ## Priority Large Files
 
 - `apps/api/src/modules/bybit/bybit.service.ts`
-- `apps/api/src/modules/telegram-userbot/telegram-userbot.service.ts`
+- `apps/api/src/modules/telegram-userbot/telegram-userbot.service.ts` (фасад сжат; тяжёлый ingest — `ingest/telegram-userbot-ingest-pipeline.service.ts`)
 - `apps/api/src/modules/telegram/telegram.service.ts`
-- `apps/api/src/modules/transcript/transcript.service.ts`
-- `apps/api/src/modules/orders/orders.service.ts`
-- `apps/web/app/settings/page.tsx`
-- `apps/web/app/telegram-userbot/page.tsx`
+- `apps/api/src/modules/transcript/transcript.service.ts` (OpenRouter — отдельные `transcript-openrouter-*`, см. AUD-048)
+- `apps/api/src/modules/orders/orders.service.ts` (часть статистики — `orders-stats.util.ts`)
+- `apps/web/app/settings/page.tsx` (константы/утилиты — `settings-page.*.ts`)
+- `apps/web/app/telegram-userbot/page.tsx` (util URL — `telegram-userbot-page.util.ts`)
+- `apps/web/app/filters/page.tsx` (типы/константы/util — `filters-page.*.ts`)
 
 ## Coverage Rule
 

@@ -22,6 +22,9 @@
 - TP: только отдельные reduce-only лимитки после исполнения всех входов — **по одному ордеру на каждый уровень TP**, объём позиции делится поровну между уровнями; SL на позицию через `setTradingStop` Full; при слишком малом лоте число уровней уменьшается или один ордер на первый TP.
 - Логи ключевых этапов и обмена с OpenRouter (без утечки секретов) хранятся в БД и доступны на странице `/logs`.
 - **Модуль Telegram (API):** `apps/api/src/modules/telegram` — вложенные папки `services/` (Nest-сервисы), `utils/` (`*.util.ts`), `types/`, `constants/`; в каждой папке есть `index.ts` (barrel). Публичный вход: `telegram/index.ts` — снаружи импорт `TelegramModule` / `TelegramService` через `from '…/telegram'` или `from './modules/telegram'`, не через старые пути `telegram/telegram.service`. Подробности: `.cursor/rules/telegram-module-layout.mdc`.
+- **Модуль transcript (API):** снаружи только **`TranscriptService`**. OpenRouter вынесены в `transcript-openrouter-parse.util.ts`, `transcript-openrouter-model-chain.service.ts`, `transcript-openrouter-billing.service.ts`, `transcript-openrouter-client.service.ts`; в **`transcript.module.ts`** для биллинга generation cost подключён **`CabinetModule`** (см. AUD-048).
+- **Userbot (API):** фасад `telegram-userbot.service.ts` — координация; часть ingest (в т.ч. `listIngestLinkCandidates`, `rereadIngestMessage`, `rereadAllIngestMessages`) — в **`ingest/telegram-userbot-ingest-pipeline.service.ts`** (см. AUD-048, `docs/telegram-userbot-decomposition-plan.md`).
+- **Крупные страницы Web (App Router):** рядом с `page.tsx` допустимы **`settings-page.constants.ts` / `settings-page.util.ts`**, **`filters-page.*`**, **`telegram-userbot-page.util.ts`** — константы, чистые хелперы и типы без смешивания с JSX (см. `.cursor/rules/decomposition-and-file-boundaries.mdc`).
 
 ### Railway (деплой)
 

@@ -10,6 +10,7 @@ alwaysApply: true
   - domain types -> `*.types.ts`
   - request/response contracts -> `dto/*` or `contracts/*`
   - shared cross-app types -> `packages/shared`
+  - Next.js route-only UI types (крупная страница) -> `*-page.types.ts` рядом с `app/<segment>/page.tsx` в том же каталоге
 - Keep inline types only when they are short, local, and used once.
 - Avoid large type blocks mixed with business logic in the same file.
 - Export named types (avoid default exports for types).

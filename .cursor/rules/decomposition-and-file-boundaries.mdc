@@ -19,6 +19,15 @@ alwaysApply: true
 
 - Раскладка **`services/` / `utils/` / `types/` / `constants/`** и barrel-файлы — см. `.cursor/rules/telegram-module-layout.mdc` (правило подключается при работе с файлами `apps/api/src/modules/telegram/**`).
 
+## Web (Next.js App Router, `apps/web`)
+
+- Для **больших** `app/<route>/page.tsx` выносить в тот же каталог маршрута:
+  - константы и списки ключей → `*-page.constants.ts`
+  - чистые функции (URL API, diff черновика, превью) → `*-page.util.ts`
+  - типы UI-строки страницы → `*-page.types.ts`
+- Примеры: `app/settings/settings-page.{constants,util}.ts`, `app/filters/filters-page.{types,constants,util}.ts`, `app/telegram-userbot/telegram-userbot-page.util.ts`.
+- Не плодить дубли: общие вещи по-прежнему в `apps/web/lib/*` и `packages/shared`, если используются из нескольких страниц.
+
 ## PR/Task Check
 - State what was extracted and why.
 - Confirm behavior parity for the touched flow via manual verification notes.

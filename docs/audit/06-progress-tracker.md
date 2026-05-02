@@ -585,7 +585,7 @@
 - Changes: поведение API и публичные методы модулей без изменений контрактов (`TelegramUserbotService`, `TranscriptService`); web — только вынесение данных/хелперов.
 - Decomposition notes: OpenRouter — отдельные `@Injectable()` + чистый `transcript-openrouter-parse.util.ts`; web — `*.constants.ts` / `*.util.ts` / `*.types.ts` рядом со страницей.
 - Manual verification: `npm run build -w apps/api` и `npm run build -w apps/web` passed; смоук Telegram/VK/OpenRouter в среде агента не выполнялся.
-- Docs updated: перечисленные `docs/*`, этот трекер.
+- Docs updated: `docs/refactor-decomposition-large-files-plan.md`, `docs/telegram-userbot-decomposition-plan.md`, `docs/audit/00-system-map.md`, этот трекер; нормы агента: `AGENTS.md`, `.cursor/rules/decomposition-and-file-boundaries.mdc`, `.cursor/rules/typing-separation-standard.mdc`.
 - Linked risks (`SEC-###`): N/A
 
 ### AUD-042
