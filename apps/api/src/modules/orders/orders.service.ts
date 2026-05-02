@@ -15,7 +15,7 @@ import { CabinetService } from '../cabinet/cabinet.service';
 import { CabinetContextService } from '../cabinet/cabinet-context.service';
 import { BybitService } from '../bybit/bybit.service';
 import { SettingsService } from '../settings/settings.service';
-import { TelegramService } from '../telegram/telegram.service';
+import { TelegramService } from '../telegram';
 import { UserbotSignalHashService } from '../telegram-userbot/userbot-signal-hash.service';
 
 import { formatError } from '../../common/format-error';

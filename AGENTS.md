@@ -21,6 +21,7 @@
 - Проверка дубликата пары: при наличии ключей Bybit приоритет у состояния биржи по API; торговая пара нормализуется для БД и запросов; зависшие записи `ORDERS_PLACED` в БД снимаются при «чистой» бирже.
 - TP: только отдельные reduce-only лимитки после исполнения всех входов — **по одному ордеру на каждый уровень TP**, объём позиции делится поровну между уровнями; SL на позицию через `setTradingStop` Full; при слишком малом лоте число уровней уменьшается или один ордер на первый TP.
 - Логи ключевых этапов и обмена с OpenRouter (без утечки секретов) хранятся в БД и доступны на странице `/logs`.
+- **Модуль Telegram (API):** `apps/api/src/modules/telegram` — вложенные папки `services/` (Nest-сервисы), `utils/` (`*.util.ts`), `types/`, `constants/`; в каждой папке есть `index.ts` (barrel). Публичный вход: `telegram/index.ts` — снаружи импорт `TelegramModule` / `TelegramService` через `from '…/telegram'` или `from './modules/telegram'`, не через старые пути `telegram/telegram.service`. Подробности: `.cursor/rules/telegram-module-layout.mdc`.
 
 ### Railway (деплой)
 

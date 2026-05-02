@@ -12,7 +12,7 @@ import {
   verifySharedAuthToken,
 } from '../../common/shared-auth-token';
 import { PrismaService } from '../../prisma/prisma.service';
-import { TelegramService } from '../telegram/telegram.service';
+import { TelegramService } from '../telegram';
 
 @Injectable()
 export class AuthService {

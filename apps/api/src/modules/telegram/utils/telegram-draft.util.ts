@@ -1,4 +1,4 @@
-import { MAX_DRAFT_TURN_CHARS, MAX_DRAFT_USER_TURNS } from './telegram.constants';
+import { MAX_DRAFT_TURN_CHARS, MAX_DRAFT_USER_TURNS } from '../constants/telegram.constants';
 
 export function normalizeDraftTurns(turns: string[]): string[] {
   const clipped = turns

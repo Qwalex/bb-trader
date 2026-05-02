@@ -1,0 +1,30 @@
+---
+description: Раскладка Nest-модуля telegram (папки, barrel index, импорты)
+globs: apps/api/src/modules/telegram/**/*.ts
+alwaysApply: false
+---
+
+# Модуль `apps/api/src/modules/telegram`
+
+## Каталоги
+
+- **`services/`** — Nest `@Injectable()`: `telegram.service.ts` (фасад бота), `telegram-bot-registry.service.ts`, `telegram-chat-menu.service.ts`, `telegram-conversation-state.service.ts`, `telegram-signal-draft-flow.service.ts`. Barrel: `services/index.ts`.
+- **`utils/`** — только `telegram-*.util.ts` (HTML, клавиатуры, whitelist, draft, форматирование сигналов и т.д.). Barrel: `utils/index.ts`.
+- **`types/`** — `telegram.types.ts` + `types/index.ts`.
+- **`constants/`** — `telegram.constants.ts` + `constants/index.ts`.
+- **Корень модуля** — `telegram.module.ts` (Nest `Module`), публичный **`index.ts`**.
+
+## Публичный API (вне модуля)
+
+- Импортировать **`TelegramModule`** и **`TelegramService`** из корня пакета: `from '../telegram'` или `from './modules/telegram'` (в `app.module.ts`), **не** из устаревших путей `telegram/telegram.module` / `telegram/telegram.service`.
+- Основные типы модуля реэкспортируются из `telegram/index.ts` (черновик, external confirmation, `TelegramSourceRatingRow`).
+
+## Внутри модуля
+
+- Сервисы в `services/` импортируют утилиты как `../utils/...`, типы как `../types/...`, константы как `../constants/...`.
+- Утилиты в `utils/` импортируют друг друга из той же папки (`./...`); константы — `../constants/...`; типы при необходимости — `../types/...`.
+- Путь к общим слоям API (`common`, `prisma`, соседние модули `app-log`, `cabinet`, `bybit`, …) из файлов в **`services/`** — на один уровень `../` глубже, чем раньше из корня `telegram/` (обычно `../../имя-модуля`, для `src/common` и `src/prisma` — `../../../...`).
+
+## Документация
+
+- Актуальное описание волны декомпозиции и размера фасада: `docs/refactor-decomposition-large-files-plan.md` §2, `docs/audit/06-progress-tracker.md` (AUD-045, AUD-046).

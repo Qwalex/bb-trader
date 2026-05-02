@@ -11,44 +11,44 @@ import { Context, Telegraf } from 'telegraf';
 import type { SignalDto } from '@repo/shared';
 import { parseTradeSignalNotifyEventFilter } from '@repo/shared';
 
-import { formatError } from '../../common/format-error';
-import { PrismaService } from '../../prisma/prisma.service';
-import { AppLogService } from '../app-log/app-log.service';
-import { CabinetContextService } from '../cabinet/cabinet-context.service';
-import { CabinetService } from '../cabinet/cabinet.service';
-import { SettingsService } from '../settings/settings.service';
+import { formatError } from '../../../common/format-error';
+import { PrismaService } from '../../../prisma/prisma.service';
+import { AppLogService } from '../../app-log/app-log.service';
+import { CabinetContextService } from '../../cabinet/cabinet-context.service';
+import { CabinetService } from '../../cabinet/cabinet.service';
+import { SettingsService } from '../../settings/settings.service';
 /** До Bybit/Orders: иначе orders → telegram раньше transcript и TranscriptService в DI = undefined. */
-import { TranscriptService } from '../transcript/transcript.service';
-import { BybitService } from '../bybit/bybit.service';
-import { OrdersService } from '../orders/orders.service';
+import { TranscriptService } from '../../transcript/transcript.service';
+import { BybitService } from '../../bybit/bybit.service';
+import { OrdersService } from '../../orders/orders.service';
 import {
   formatApiTradeCancelledHtml,
   formatApiTradeLiquidationHtml,
   formatUserbotResultWithoutEntryHtml,
   formatUserbotSignalFailureMessage,
-} from './telegram-api-notify-html.util';
+} from '../utils/telegram-api-notify-html.util';
 import { TelegramBotRegistryService } from './telegram-bot-registry.service';
 import { TelegramChatMenuService } from './telegram-chat-menu.service';
 import { TelegramConversationStateService } from './telegram-conversation-state.service';
 import {
   makeExternalRequestKey,
   parseExternalRequestKey,
-} from './telegram-external-request-key.util';
-import { escapeTelegramHtml } from './telegram-html.util';
+} from '../utils/telegram-external-request-key.util';
+import { escapeTelegramHtml } from '../utils/telegram-html.util';
 import {
   confirmKeyboard,
   externalConfirmKeyboard,
   mainMenuKeyboard,
   staleResultCancelKeyboard,
-} from './telegram-keyboards.util';
+} from '../utils/telegram-keyboards.util';
 import {
   formatExternalSignalTable,
   formatSignalTable,
-} from './telegram-signal-message-format.util';
+} from '../utils/telegram-signal-message-format.util';
 import { TelegramSignalDraftFlowService } from './telegram-signal-draft-flow.service';
-import { tradeSignalEventTitleRu } from './telegram-trade-event-titles.util';
-import { parseTelegramWhitelistUserIds } from './telegram-whitelist.util';
-import type { ExternalConfirmationResult } from './telegram.types';
+import { tradeSignalEventTitleRu } from '../utils/telegram-trade-event-titles.util';
+import { parseTelegramWhitelistUserIds } from '../utils/telegram-whitelist.util';
+import type { ExternalConfirmationResult } from '../types/telegram.types';
 
 @Injectable()
 export class TelegramService implements OnModuleInit, OnModuleDestroy {

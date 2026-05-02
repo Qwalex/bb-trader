@@ -4,7 +4,7 @@ import { AppLogModule } from '../app-log/app-log.module';
 import { BybitModule } from '../bybit/bybit.module';
 import { OrdersModule } from '../orders/orders.module';
 import { SettingsModule } from '../settings/settings.module';
-import { TelegramModule } from '../telegram/telegram.module';
+import { TelegramModule } from '../telegram';
 import { VkModule } from '../vk/vk.module';
 import { TranscriptModule } from '../transcript/transcript.module';
 import { TelegramUserbotClientService } from './client/telegram-userbot-client.service';

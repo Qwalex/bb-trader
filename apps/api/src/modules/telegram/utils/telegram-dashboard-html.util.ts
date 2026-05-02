@@ -6,7 +6,7 @@ import {
   parseTakeProfitsForDisplay,
 } from './telegram-trade-parse.util';
 import { formatEntryLineText } from './telegram-signal-message-format.util';
-import type { TelegramSourceRatingRow } from './telegram.types';
+import type { TelegramSourceRatingRow } from '../types/telegram.types';
 
 export function formatRatingSection(
   emoji: string,

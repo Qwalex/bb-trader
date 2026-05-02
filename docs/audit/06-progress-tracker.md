@@ -555,13 +555,25 @@
 ### AUD-046
 
 - Status: `done`
-- Scope: Продолжение декомпозиции `apps/api/src/modules/telegram/telegram.service.ts` по плану (волны 2–6): утилиты whitelist/draft/HTML chunks, вынос состояния диалога и реестра ботов, меню чата, поток черновика/ingest confirm, структурное разбиение `registerHandlers`, без отдельного bootstrap-сервиса (достаточно `TelegramBotRegistryService`).
-- Files: `telegram.service.ts` (~1241 строк); `telegram-whitelist.util.ts`, `telegram-draft.util.ts`, `telegram-html.util.ts` (при необходимости chunks); `telegram-conversation-state.service.ts`, `telegram-bot-registry.service.ts`, `telegram-chat-menu.service.ts`, `telegram-signal-draft-flow.service.ts`, `telegram.module.ts`.
+- Scope: Продолжение декомпозиции `apps/api/src/modules/telegram/telegram.service.ts` по плану (волны 2–6): утилиты whitelist/draft/HTML chunks, вынос состояния диалога и реестра ботов, меню чата, поток черновика/ingest confirm, структурное разбиение `registerHandlers`, без отдельного bootstrap-сервиса (достаточно `TelegramBotRegistryService`). Структура каталога: `services/`, `utils/`, `types/`, `constants/` + barrel `index.ts` в каждой папке и публичный `telegram/index.ts` (`TelegramModule`, `TelegramService`, типы).
+- Files: `telegram/services/*`, `telegram/utils/*`, `telegram/types/*`, `telegram/constants/*`, `telegram/index.ts`, `telegram/telegram.module.ts`; потребители импортируют `from '../telegram'` / `from './modules/telegram'`; правило для агента: `.cursor/rules/telegram-module-layout.mdc`, ссылка в `decomposition-and-file-boundaries.mdc` и `AGENTS.md`.
 - Findings: дубли меню/черновика на фасаде после первого выноса устранены — делегирование в `chatMenu` / `draftFlow`; повторные `handleParseResult` / `confirmFromIngestId` удалены с фасада.
 - Changes: `registerHandlers` → `registerTelegramAccessMiddleware`, `registerTelegramMainMenuHandlers`, `registerTelegramDraftActionHandlers`, `registerTelegramUserbotActionHandlers`, `registerTelegramMediaHandlers`; `clearTelegramInlineKeyboard`; DI новых сервисов в модуле.
 - Decomposition notes (`utils/constants/hooks/types`): чистые функции в `*.util.ts`; состояние и сценарии — отдельные `@Injectable()` в том же модуле `telegram`.
 - Manual verification: `npm run build -w apps/api` passed; полный смоук Telegram в среде агента не выполнялся.
 - Docs updated: `06-progress-tracker.md`, `docs/refactor-decomposition-large-files-plan.md` §2 и строка инвентаря для `telegram.service.ts`.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-047
+
+- Status: `done`
+- Scope: Первая волна декомпозиции `apps/api/src/modules/transcript/transcript.service.ts` по плану §4 — вынос JSON Schema для structured output и длинных текстовых промптов в отдельные файлы без смены поведения.
+- Files: `transcript.service.ts` (~1742 → ~1524 строк); новые `transcript-model-json-schemas.ts`, `transcript-prompt-builders.util.ts`; `docs/refactor-decomposition-large-files-plan.md` §4, инвентарь.
+- Findings: схемы и промпты занимали сотни строк в начале сервиса; `callOpenRouter` и постобработка ответа остаются на фасаде.
+- Changes: импорт схем в `callOpenRouter`; промпты парсера, классификатора, фильтров и `normalizeOpenRouterAudioFormat` — из util.
+- Decomposition notes (`utils/constants/hooks/types`): чистые константы/функции в `*.ts` рядом с модулем; публичный API модуля — `TranscriptService` без изменений.
+- Manual verification: `npm run build -w apps/api` passed; полный LLM-смоук не выполнялся в среде агента.
+- Docs updated: `06-progress-tracker.md`, `docs/refactor-decomposition-large-files-plan.md`.
 - Linked risks (`SEC-###`): N/A
 
 ### AUD-042

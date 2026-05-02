@@ -15,6 +15,10 @@ alwaysApply: true
 - Do not split code artificially: stop decomposition when additional files reduce readability or add import noise.
 - For repeated logic in 2+ places, extract to a shared module near the domain.
 
+## Модуль Telegram (Nest, `apps/api`)
+
+- Раскладка **`services/` / `utils/` / `types/` / `constants/`** и barrel-файлы — см. `.cursor/rules/telegram-module-layout.mdc` (правило подключается при работе с файлами `apps/api/src/modules/telegram/**`).
+
 ## PR/Task Check
 - State what was extracted and why.
 - Confirm behavior parity for the touched flow via manual verification notes.

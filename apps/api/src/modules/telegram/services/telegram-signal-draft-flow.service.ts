@@ -7,27 +7,27 @@ import {
 import type { SignalDto, TranscriptResult } from '@repo/shared';
 import { Context } from 'telegraf';
 
-import { formatError } from '../../common/format-error';
-import { PrismaService } from '../../prisma/prisma.service';
-import { AppLogService } from '../app-log/app-log.service';
-import { CabinetContextService } from '../cabinet/cabinet-context.service';
-import { SettingsService } from '../settings/settings.service';
+import { formatError } from '../../../common/format-error';
+import { PrismaService } from '../../../prisma/prisma.service';
+import { AppLogService } from '../../app-log/app-log.service';
+import { CabinetContextService } from '../../cabinet/cabinet-context.service';
+import { SettingsService } from '../../settings/settings.service';
 import {
   mergePartialSignals,
   sanitizeSignalSource,
-} from '../transcript/partial-signal.util';
-import { TranscriptService } from '../transcript/transcript.service';
-import { BybitService } from '../bybit/bybit.service';
+} from '../../transcript/partial-signal.util';
+import { TranscriptService } from '../../transcript/transcript.service';
+import { BybitService } from '../../bybit/bybit.service';
 import {
   cancelOnlyKeyboard,
   confirmKeyboard,
   sourceSelectionKeyboard,
-} from './telegram-keyboards.util';
-import { normalizeDraftTurns } from './telegram-draft.util';
+} from '../utils/telegram-keyboards.util';
+import { normalizeDraftTurns } from '../utils/telegram-draft.util';
 import {
   formatPartialPreview,
   formatSignalTable,
-} from './telegram-signal-message-format.util';
+} from '../utils/telegram-signal-message-format.util';
 import { TelegramConversationStateService } from './telegram-conversation-state.service';
 
 @Injectable()

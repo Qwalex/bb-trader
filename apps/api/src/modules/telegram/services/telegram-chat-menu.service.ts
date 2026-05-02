@@ -1,17 +1,17 @@
 import { forwardRef, Inject, Injectable } from '@nestjs/common';
 import { Context, Markup } from 'telegraf';
 
-import { PrismaService } from '../../prisma/prisma.service';
-import { AppLogService } from '../app-log/app-log.service';
-import { CabinetContextService } from '../cabinet/cabinet-context.service';
-import { BybitService } from '../bybit/bybit.service';
-import { OrdersService } from '../orders/orders.service';
-import { SettingsService } from '../settings/settings.service';
+import { PrismaService } from '../../../prisma/prisma.service';
+import { AppLogService } from '../../app-log/app-log.service';
+import { CabinetContextService } from '../../cabinet/cabinet-context.service';
+import { BybitService } from '../../bybit/bybit.service';
+import { OrdersService } from '../../orders/orders.service';
+import { SettingsService } from '../../settings/settings.service';
 import {
   formatRatingSection,
   formatTradesListHtml,
   formatTradeDetailHtml,
-} from './telegram-dashboard-html.util';
+} from '../utils/telegram-dashboard-html.util';
 import {
   escapeTelegramHtml,
   formatRuDate,
@@ -19,12 +19,12 @@ import {
   splitTelegramHtml,
   startOfToday,
   todayDateKey,
-} from './telegram-html.util';
+} from '../utils/telegram-html.util';
 import {
   buildTradesNumberKeyboard,
-} from './telegram-keyboards.util';
-import { tradeCanCancelFromTelegram } from './telegram-trade-status.util';
-import type { TelegramSourceRatingRow } from './telegram.types';
+} from '../utils/telegram-keyboards.util';
+import { tradeCanCancelFromTelegram } from '../utils/telegram-trade-status.util';
+import type { TelegramSourceRatingRow } from '../types/telegram.types';
 
 @Injectable()
 export class TelegramChatMenuService {

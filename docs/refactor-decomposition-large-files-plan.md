@@ -23,8 +23,8 @@
 |------:|-------------|------|------|
 | ~875 | P0 | `apps/api/src/modules/telegram-userbot/telegram-userbot.service.ts` | API (фасад: wiring, HTTP-делегаты, inbound, polling hooks) |
 | ~1236 | P1 | `apps/api/src/modules/telegram-userbot/ingest/telegram-userbot-ingest-pipeline.service.ts` | API (оркестратор `processIngestRecord` + classify/balance/notify; lookup/reply/watch/pair-cooldown — отдельные `ingest/*-service.ts`, см. AUD-044) |
-| ~1241 | P1 | `apps/api/src/modules/telegram/telegram.service.ts` | API (фасад после волн W1–W6 по плану декомпозиции; см. AUD-045, AUD-046, §2) |
-| 1741 | P1 | `apps/api/src/modules/transcript/transcript.service.ts` | API |
+| ~1241 | P1 | `apps/api/src/modules/telegram/services/telegram.service.ts` (+ `telegram/index.ts`, см. §2) | API (фасад после волн W1–W6; см. AUD-045, AUD-046, §2) |
+| ~1524 | P1 | `apps/api/src/modules/transcript/transcript.service.ts` | API (часть промптов/JSON-схем вынесена в `transcript-prompt-builders.util.ts`, `transcript-model-json-schemas.ts`; см. AUD-047, §4) |
 | 1663 | P1 | `apps/web/app/settings/page.tsx` | Web |
 | 1626 | P1 | `apps/web/app/telegram-userbot/page.tsx` | Web |
 | ~540 | — | `apps/api/src/modules/bybit/bybit.service.ts` | API (фасад после декомпозиции; см. §3) |
@@ -68,11 +68,13 @@
 
 ---
 
-## 2. `telegram.service.ts` (P1, ~1241 строк)
+## 2. `telegram` (P1; фасад `services/telegram.service.ts`, ~1241 строк)
 
-**Уже есть (утилиты и UI, AUD-045):** `telegram.constants.ts`, `telegram.types.ts`, `telegram-trade-parse.util.ts`, `telegram-html.util.ts` (в т.ч. `splitTelegramHtml`, `replyTelegramHtmlChunks`), `telegram-keyboards.util.ts`, `telegram-dashboard-html.util.ts`, `telegram-signal-message-format.util.ts`, `telegram-api-notify-html.util.ts`, `telegram-external-request-key.util.ts`, `telegram-trade-event-titles.util.ts`, `telegram-trade-status.util.ts`.
+**Раскладка каталога:** `telegram/telegram.module.ts`; публичный barrel `telegram/index.ts` (`TelegramModule`, `TelegramService`, основные типы) — внешние модули импортируют `from '…/telegram'`; внутри модуля — `services/` (Nest-сервисы + `services/index.ts`), `utils/` (`*.util.ts` + `utils/index.ts`), `types/`, `constants/`.
 
-**Уже есть (волны 2–6, AUD-046):** `telegram-whitelist.util.ts` (`parseTelegramWhitelistUserIds`), `telegram-draft.util.ts` (`normalizeDraftTurns`), `telegram-conversation-state.service.ts` (in-memory `drafts` / `sourceOverrideByUser` / `externalConfirmations`, TTL, cleanup), `telegram-bot-registry.service.ts` (запущенные `Telegraf`, primary, lookup по кабинету), `telegram-chat-menu.service.ts` (сводка, рейтинги, сделки, диагностика, логи, события, карточка сделки), `telegram-signal-draft-flow.service.ts` (`handleParseResult`, `confirmFromIngestId`, `applySourceToSignal`, overrides для transcript). На фасаде `registerHandlers` разбит на приватные `registerTelegramAccessMiddleware` / `registerTelegramMainMenuHandlers` / `registerTelegramDraftActionHandlers` / `registerTelegramUserbotActionHandlers` / `registerTelegramMediaHandlers` + `clearTelegramInlineKeyboard`. Отдельный `TelegramBotBootstrapService` не введён: запуск и карта ботов сосредоточены в `TelegramBotRegistryService` + `initializeBots` на фасаде (достаточно для текущего размера).
+**Уже есть (утилиты и UI, AUD-045):** в `utils/`: `telegram-trade-parse.util.ts`, `telegram-html.util.ts`, `telegram-keyboards.util.ts`, `telegram-dashboard-html.util.ts`, `telegram-signal-message-format.util.ts`, `telegram-api-notify-html.util.ts`, `telegram-external-request-key.util.ts`, `telegram-trade-event-titles.util.ts`, `telegram-trade-status.util.ts`; в `types/` — `telegram.types.ts`; в `constants/` — `telegram.constants.ts`.
+
+**Уже есть (волны 2–6, AUD-046):** в `utils/` — `telegram-whitelist.util.ts`, `telegram-draft.util.ts`; в `services/` — `telegram-conversation-state.service.ts`, `telegram-bot-registry.service.ts`, `telegram-chat-menu.service.ts`, `telegram-signal-draft-flow.service.ts`. На фасаде `registerHandlers` разбит на приватные `registerTelegramAccessMiddleware` / `registerTelegramMainMenuHandlers` / `registerTelegramDraftActionHandlers` / `registerTelegramUserbotActionHandlers` / `registerTelegramMediaHandlers` + `clearTelegramInlineKeyboard`. Отдельный `TelegramBotBootstrapService` не введён: запуск и карта ботов сосредоточены в `TelegramBotRegistryService` + `initializeBots` на фасаде (достаточно для текущего размера).
 
 **Остаётся на фасаде:** bootstrap (`initializeBots`, retry, приветствие, cleanup-таймеры), whitelist/cabinet wiring, `registerHandlers` как точка сборки, уведомления по событиям сделок, `requestExternalSignalConfirmation` и связка с userbot-коллбеками.
 
@@ -101,7 +103,9 @@
 
 ## 4. `transcript.service.ts` (P1)
 
-Крупный сервис расшифровки/LLM. **Направления:** вынести промпты и шаблоны в `transcript-prompts.constants.ts` или `transcript/*.util.ts`; отдельный слой для вызовов OpenRouter и нормализации ответов; типы ответов — в `transcript.types.ts` или расширение существующего файла типов. Сохранить единую точку входа для остальных модулей.
+Крупный сервис расшифровки/LLM. **Сделано (AUD-047, первая волна):** строгие JSON-схемы для OpenRouter — `transcript-model-json-schemas.ts`; текстовые промпты и правила разбора/классификатора/паттернов — `transcript-prompt-builders.util.ts` (`buildJsonSchemaRules`, `buildSystemPrompt`, `normalizeOpenRouterAudioFormat`, `buildTradingMessageClassifierPrompt`, `buildFilterPatternGenerationPrompt`). Фасад по-прежнему `TranscriptService`.
+
+**Остаётся:** слой вызовов OpenRouter (`callOpenRouter`, ретраи, логирование) и нормализация ответов (`parseModelContent`, `tryParseModelContent`, …) — кандидаты на `transcript-openrouter-*.service.ts` или узкие `*.util.ts` без смены публичного API; при необходимости расширить `transcript.types.ts`.
 
 **DoD:** `npm run -w apps/api build`; смоук: один проход расшифровки тестового сообщения.
 

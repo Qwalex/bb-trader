@@ -15,7 +15,7 @@ import { CabinetModule } from './modules/cabinet/cabinet.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { DiagnosticsModule } from './modules/diagnostics/diagnostics.module';
 import { SettingsModule } from './modules/settings/settings.module';
-import { TelegramModule } from './modules/telegram/telegram.module';
+import { TelegramModule } from './modules/telegram';
 import { TelegramUserbotModule } from './modules/telegram-userbot/telegram-userbot.module';
 import { TranscriptModule } from './modules/transcript/transcript.module';
 import { WorkerQueueModule } from './modules/worker-queue/worker-queue.module';

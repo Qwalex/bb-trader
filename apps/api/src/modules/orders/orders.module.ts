@@ -2,7 +2,7 @@ import { forwardRef, Module } from '@nestjs/common';
 
 import { BybitModule } from '../bybit/bybit.module';
 import { SettingsModule } from '../settings/settings.module';
-import { TelegramModule } from '../telegram/telegram.module';
+import { TelegramModule } from '../telegram';
 import { UserbotSignalHashModule } from '../telegram-userbot/userbot-signal-hash.module';
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';

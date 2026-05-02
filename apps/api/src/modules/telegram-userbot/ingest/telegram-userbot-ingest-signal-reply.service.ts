@@ -8,7 +8,7 @@ import { BybitService } from '../../bybit/bybit.service';
 import { OrdersService } from '../../orders/orders.service';
 import { SettingsService } from '../../settings/settings.service';
 import { TranscriptService } from '../../transcript/transcript.service';
-import { TelegramService } from '../../telegram/telegram.service';
+import { TelegramService } from '../../telegram';
 import { VkNotifyMirrorService } from '../../vk/vk-notify-mirror.service';
 import { parseSignalPriceArrayJson } from '../userbot-signal-hash.util';
 import { TelegramUserbotSettingsService } from '../settings/telegram-userbot-settings.service';

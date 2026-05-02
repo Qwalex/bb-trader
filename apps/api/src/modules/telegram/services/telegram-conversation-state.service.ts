@@ -3,11 +3,11 @@ import { Injectable } from '@nestjs/common';
 import {
   DRAFT_TTL_MS,
   EXTERNAL_CONFIRM_TTL_MS,
-} from './telegram.constants';
+} from '../constants/telegram.constants';
 import type {
   DraftSession,
   ExternalConfirmationRequest,
-} from './telegram.types';
+} from '../types/telegram.types';
 
 /**
  * In-memory состояние диалогов Telegram (черновики, override источника, внешние подтверждения userbot).

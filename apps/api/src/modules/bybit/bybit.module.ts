@@ -4,7 +4,7 @@ import { AppLogModule } from '../app-log/app-log.module';
 import { OrdersModule } from '../orders/orders.module';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { SettingsModule } from '../settings/settings.module';
-import { TelegramModule } from '../telegram/telegram.module';
+import { TelegramModule } from '../telegram';
 import { VkModule } from '../vk/vk.module';
 import { WorkerQueueModule } from '../worker-queue/worker-queue.module';
 import { BalanceSnapshotService } from './balance-snapshot.service';
