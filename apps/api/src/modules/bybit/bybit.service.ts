@@ -10,28 +10,28 @@ import { CabinetContextService } from '../cabinet/cabinet-context.service';
 import { OrdersService } from '../orders/orders.service';
 import { SettingsService } from '../settings/settings.service';
 import { WorkerQueueService } from '../worker-queue/worker-queue.service';
-import { stalePairDirectionKey as stalePairDirectionKeyUtil } from './bybit-exposure.util';
-import { BybitBalanceInstrumentService } from './bybit-balance-instrument.service';
-import { BybitClientService } from './bybit-client.service';
-import { BybitExchangeCleanupService } from './bybit-exchange-cleanup.service';
-import { BybitExposureService } from './bybit-exposure.service';
-import { BybitLiveSnapshotService } from './bybit-live-snapshot.service';
-import { BybitNotifyService } from './bybit-notify.service';
-import { BybitOrderExchangeQueryService } from './bybit-order-exchange-query.service';
-import { BybitOrderLifecyclePollService } from './bybit-order-lifecycle-poll.service';
+import { stalePairDirectionKey as stalePairDirectionKeyUtil } from './exposure/bybit-exposure.util';
+import { BybitBalanceInstrumentService } from './instrument/bybit-balance-instrument.service';
+import { BybitClientService } from './instrument/bybit-client.service';
+import { BybitExchangeCleanupService } from './position/bybit-exchange-cleanup.service';
+import { BybitExposureService } from './exposure/bybit-exposure.service';
+import { BybitLiveSnapshotService } from './exposure/bybit-live-snapshot.service';
+import { BybitNotifyService } from './notify/bybit-notify.service';
+import { BybitOrderExchangeQueryService } from './orders/bybit-order-exchange-query.service';
+import { BybitOrderLifecyclePollService } from './orders/bybit-order-lifecycle-poll.service';
 import {
   isFilledOrderStatus,
   isInsufficientBalanceError,
-} from './bybit-order-status.util';
-import { BybitPlacementValidationService } from './bybit-placement-validation.service';
-import { pickPositionRowForSignalDirection } from './bybit-position-pick.util';
-import { BybitPollFinalizeService } from './bybit-poll-finalize.service';
-import { BybitPnlService } from './bybit-pnl.service';
-import { BybitPositionCloseService } from './bybit-position-close.service';
-import { BybitRecalcService } from './bybit-recalc.service';
-import { BybitSignalOverridesService } from './bybit-signal-overrides.service';
-import { BybitSignalPlacementService } from './bybit-signal-placement.service';
-import { BybitTpSlService } from './bybit-tpsl.service';
+} from './orders/bybit-order-status.util';
+import { BybitPlacementValidationService } from './orders/bybit-placement-validation.service';
+import { pickPositionRowForSignalDirection } from './position/bybit-position-pick.util';
+import { BybitPollFinalizeService } from './poll/bybit-poll-finalize.service';
+import { BybitPnlService } from './pnl/bybit-pnl.service';
+import { BybitPositionCloseService } from './position/bybit-position-close.service';
+import { BybitRecalcService } from './pnl/bybit-recalc.service';
+import { BybitSignalOverridesService } from './overrides/bybit-signal-overrides.service';
+import { BybitSignalPlacementService } from './orders/bybit-signal-placement.service';
+import { BybitTpSlService } from './tpsl/bybit-tpsl.service';
 import type {
   CloseSignalResult,
   PlaceOrdersResult,
@@ -39,7 +39,7 @@ import type {
   RecalcClosedPnlResult,
   SignalExecutionDebugSnapshot,
   TradePnlBreakdownResult,
-} from './bybit.types';
+} from './types/bybit.types';
 
 @Injectable()
 export class BybitService implements OnModuleInit {

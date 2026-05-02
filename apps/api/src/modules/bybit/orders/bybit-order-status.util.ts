@@ -1,4 +1,4 @@
-import { BYBIT_OPEN_ORDER_STATUSES } from './bybit.constants';
+import { BYBIT_OPEN_ORDER_STATUSES } from '../bybit.constants';
 
 /** Bybit отдаёт статус с фиксированным регистром; на всякий случай нормализуем. */
 export function isFilledOrderStatus(status: string | null | undefined): boolean {

@@ -3,10 +3,10 @@ import { RestClientV5 } from 'bybit-api';
 
 import { normalizeTradingPair } from '@repo/shared';
 
-import { formatError } from '../../common/format-error';
-import { BYBIT_OPEN_ORDER_STATUSES } from './bybit.constants';
+import { formatError } from '../../../common/format-error';
+import { BYBIT_OPEN_ORDER_STATUSES } from '../bybit.constants';
 import { isReduceOnlyOrClosingOrder } from './bybit-exposure.util';
-import type { LiveExposureOrder, LiveExposurePosition } from './bybit.types';
+import type { LiveExposureOrder, LiveExposurePosition } from '../types/bybit.types';
 
 @Injectable()
 export class BybitExposureService {

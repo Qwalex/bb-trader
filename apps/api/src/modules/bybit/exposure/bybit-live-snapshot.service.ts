@@ -2,17 +2,17 @@ import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 
 import { normalizeTradingPair } from '@repo/shared';
 
-import { formatError } from '../../common/format-error';
-import { OrdersService } from '../orders/orders.service';
-import { BybitBalanceInstrumentService } from './bybit-balance-instrument.service';
+import { formatError } from '../../../common/format-error';
+import { OrdersService } from '../../orders/orders.service';
+import { BybitBalanceInstrumentService } from '../instrument/bybit-balance-instrument.service';
 import { BybitExposureService } from './bybit-exposure.service';
-import { BybitOrderExchangeQueryService } from './bybit-order-exchange-query.service';
+import { BybitOrderExchangeQueryService } from '../orders/bybit-order-exchange-query.service';
 import type {
   LiveExposureItem,
   LiveExposureOrder,
   LiveExposurePosition,
   SignalExecutionDebugSnapshot,
-} from './bybit.types';
+} from '../types/bybit.types';
 
 @Injectable()
 export class BybitLiveSnapshotService {

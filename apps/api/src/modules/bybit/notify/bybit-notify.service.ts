@@ -1,12 +1,12 @@
 import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 
-import { formatError } from '../../common/format-error';
-import { CabinetContextService } from '../cabinet/cabinet-context.service';
-import { OrdersService } from '../orders/orders.service';
-import { TelegramService } from '../telegram/telegram.service';
-import { VkNotifyMirrorService } from '../vk/vk-notify-mirror.service';
-import { WorkerQueueService } from '../worker-queue/worker-queue.service';
-import { parseNumberArrayFromJson } from './bybit-json.util';
+import { formatError } from '../../../common/format-error';
+import { CabinetContextService } from '../../cabinet/cabinet-context.service';
+import { OrdersService } from '../../orders/orders.service';
+import { TelegramService } from '../../telegram/telegram.service';
+import { VkNotifyMirrorService } from '../../vk/vk-notify-mirror.service';
+import { WorkerQueueService } from '../../worker-queue/worker-queue.service';
+import { parseNumberArrayFromJson } from '../instrument/bybit-json.util';
 
 @Injectable()
 export class BybitNotifyService {

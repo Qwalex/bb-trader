@@ -1,9 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { RestClientV5 } from 'bybit-api';
 
-import { formatError } from '../../common/format-error';
-import type { BybitPositionClosePorts } from './bybit-ports.types';
-import type { CloseSignalResult } from './bybit.types';
+import { formatError } from '../../../common/format-error';
+import type { BybitPositionClosePorts } from '../types/bybit-ports.types';
+import type { CloseSignalResult } from '../types/bybit.types';
 
 type FlattenResult =
   | { ok: true; cancelledOrders: number; closedPositions: number }

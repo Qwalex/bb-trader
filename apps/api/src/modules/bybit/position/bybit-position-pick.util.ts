@@ -1,4 +1,4 @@
-import type { LiveExposurePosition } from './bybit.types';
+import type { LiveExposurePosition } from '../types/bybit.types';
 
 /**
  * Hedge: по символу две строки позиции (Buy / Sell). Берём ту, что соответствует сигналу.

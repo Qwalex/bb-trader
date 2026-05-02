@@ -3,9 +3,9 @@ import { RestClientV5 } from 'bybit-api';
 
 import { normalizeTradingPair, type SignalDto } from '@repo/shared';
 
-import { formatError } from '../../common/format-error';
-import type { BybitSignalPlacementPorts } from './bybit-ports.types';
-import type { PlaceOrdersResult } from './bybit.types';
+import { formatError } from '../../../common/format-error';
+import type { BybitSignalPlacementPorts } from '../types/bybit-ports.types';
+import type { PlaceOrdersResult } from '../types/bybit.types';
 
 @Injectable()
 export class BybitSignalPlacementService {

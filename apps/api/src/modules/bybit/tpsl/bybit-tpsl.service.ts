@@ -3,8 +3,8 @@ import { RestClientV5 } from 'bybit-api';
 
 import { normalizeTradingPair } from '@repo/shared';
 
-import { formatError } from '../../common/format-error';
-import { AppLogService } from '../app-log/app-log.service';
+import { formatError } from '../../../common/format-error';
+import { AppLogService } from '../../app-log/app-log.service';
 import {
   parseSourceTpSlStepMap,
   parseSourceTpSlStepRangeMap,
@@ -13,11 +13,11 @@ import {
   resolveEffectiveTpSlRange,
   tpSlStepStartToTpNumber,
   type TpSlStepStartMode,
-} from '../settings/tp-sl-step.util';
+} from '../../settings/tp-sl-step.util';
 import {
   BYBIT_LADDER_SOURCE_FALLBACK_LOG_CAP,
   BYBIT_SOURCE_MAP_SKIP_LOG_CAP,
-} from './bybit.constants';
+} from '../bybit.constants';
 import { positionHasStopLoss } from './bybit-tpsl.util';
 
 @Injectable()

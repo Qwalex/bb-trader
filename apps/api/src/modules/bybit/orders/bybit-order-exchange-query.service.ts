@@ -3,7 +3,7 @@ import { RestClientV5 } from 'bybit-api';
 
 import { normalizeTradingPair } from '@repo/shared';
 
-import { formatError } from '../../common/format-error';
+import { formatError } from '../../../common/format-error';
 
 @Injectable()
 export class BybitOrderExchangeQueryService {

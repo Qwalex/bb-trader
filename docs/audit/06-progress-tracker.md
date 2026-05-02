@@ -478,3 +478,15 @@
 - Manual verification: `npm run -w apps/api build` passed.
 - Docs updated: `06-progress-tracker.md`.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-039
+
+- Status: `done`
+- Scope: Структурирование `apps/api/src/modules/bybit` по подпапкам без смены поведения (только пути импортов).
+- Files: корень модуля (`bybit.module.ts`, `bybit.service.ts`, `bybit.controller.ts`, `bybit.constants.ts`, `balance-snapshot.service.ts`); подпапки `instrument/`, `exposure/`, `orders/`, `position/`, `tpsl/`, `pnl/`, `poll/`, `notify/`, `overrides/`, `types/`.
+- Findings: плоский список из 20+ файлов затруднял навигацию; публичные точки входа остаются в корне.
+- Changes: `git mv` сервисов/утилит в доменные подпапки; относительные импорты к `common`, `prisma`, соседним модулям скорректированы на +1 уровень вглубь; импорты между подпапками — через явные относительные пути.
+- Decomposition notes (`utils/constants/hooks/types`): типы в `types/`; константы — `bybit.constants.ts` в корне модуля.
+- Manual verification: `npm run build` в `apps/api` passed.
+- Docs updated: `06-progress-tracker.md`.
+- Linked risks (`SEC-###`): N/A

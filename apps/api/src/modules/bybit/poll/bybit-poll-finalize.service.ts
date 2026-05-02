@@ -3,14 +3,14 @@ import { RestClientV5 } from 'bybit-api';
 
 import { normalizeTradingPair } from '@repo/shared';
 
-import { AppLogService } from '../app-log/app-log.service';
-import { OrdersService } from '../orders/orders.service';
-import { isClosedPnlLiquidationRow as isClosedPnlLiquidationRowUtil } from './bybit-pnl.util';
-import { BybitExposureService } from './bybit-exposure.service';
-import { BybitNotifyService } from './bybit-notify.service';
-import { BybitPnlService } from './bybit-pnl.service';
-import { hasOpenEntryOrders, isFilledOrderStatus } from './bybit-order-status.util';
-import { pickLiveExposurePositionForDirection } from './bybit-position-pick.util';
+import { AppLogService } from '../../app-log/app-log.service';
+import { OrdersService } from '../../orders/orders.service';
+import { isClosedPnlLiquidationRow as isClosedPnlLiquidationRowUtil } from '../pnl/bybit-pnl.util';
+import { BybitExposureService } from '../exposure/bybit-exposure.service';
+import { BybitNotifyService } from '../notify/bybit-notify.service';
+import { BybitPnlService } from '../pnl/bybit-pnl.service';
+import { hasOpenEntryOrders, isFilledOrderStatus } from '../orders/bybit-order-status.util';
+import { pickLiveExposurePositionForDirection } from '../position/bybit-position-pick.util';
 
 @Injectable()
 export class BybitPollFinalizeService {

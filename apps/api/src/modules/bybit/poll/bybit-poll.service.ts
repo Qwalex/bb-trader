@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 
-import { SettingsService } from '../settings/settings.service';
-import { WorkerQueueService } from '../worker-queue/worker-queue.service';
+import { SettingsService } from '../../settings/settings.service';
+import { WorkerQueueService } from '../../worker-queue/worker-queue.service';
 
 @Injectable()
 export class BybitPollService {

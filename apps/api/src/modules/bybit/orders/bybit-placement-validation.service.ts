@@ -3,7 +3,7 @@ import { RestClientV5 } from 'bybit-api';
 
 import { normalizeTradingPair, type SignalDto } from '@repo/shared';
 
-import { AppLogService } from '../app-log/app-log.service';
+import { AppLogService } from '../../app-log/app-log.service';
 import {
   buildTpSplitDiagnostics as buildTpSplitDiagnosticsUtil,
   entryNotionalWeights as entryNotionalWeightsUtil,
@@ -13,7 +13,7 @@ import {
   snapPriceToTickNum as snapPriceToTickNumUtil,
   splitPositionQtyForTps as splitPositionQtyForTpsUtil,
   splitQtyForChildOrders as splitQtyForChildOrdersUtil,
-} from './bybit-qty.util';
+} from '../instrument/bybit-qty.util';
 
 @Injectable()
 export class BybitPlacementValidationService {

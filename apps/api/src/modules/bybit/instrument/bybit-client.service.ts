@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { RestClientV5, WebsocketClient } from 'bybit-api';
 
-import { formatError } from '../../common/format-error';
-import { SettingsService } from '../settings/settings.service';
+import { formatError } from '../../../common/format-error';
+import { SettingsService } from '../../settings/settings.service';
 
 @Injectable()
 export class BybitClientService {

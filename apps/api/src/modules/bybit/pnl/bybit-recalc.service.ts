@@ -3,11 +3,11 @@ import { RestClientV5 } from 'bybit-api';
 
 import { normalizeTradingPair } from '@repo/shared';
 
-import { formatError } from '../../common/format-error';
-import { PrismaService } from '../../prisma/prisma.service';
-import { AppLogService } from '../app-log/app-log.service';
-import { OrdersService } from '../orders/orders.service';
-import type { RecalcClosedPnlJobStatus, RecalcClosedPnlResult } from './bybit.types';
+import { formatError } from '../../../common/format-error';
+import { PrismaService } from '../../../prisma/prisma.service';
+import { AppLogService } from '../../app-log/app-log.service';
+import { OrdersService } from '../../orders/orders.service';
+import type { RecalcClosedPnlJobStatus, RecalcClosedPnlResult } from '../types/bybit.types';
 
 @Injectable()
 export class BybitRecalcService {

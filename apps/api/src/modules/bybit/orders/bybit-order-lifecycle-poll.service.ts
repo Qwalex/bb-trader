@@ -2,9 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 
 import { normalizeTradingPair } from '@repo/shared';
 
-import { formatError } from '../../common/format-error';
-import { BYBIT_STALE_RECONCILE_REQUIRED_CLEAN_POLLS } from './bybit.constants';
-import type { BybitOrderLifecyclePollPorts } from './bybit-ports.types';
+import { formatError } from '../../../common/format-error';
+import { BYBIT_STALE_RECONCILE_REQUIRED_CLEAN_POLLS } from '../bybit.constants';
+import type { BybitOrderLifecyclePollPorts } from '../types/bybit-ports.types';
 
 @Injectable()
 export class BybitOrderLifecyclePollService {

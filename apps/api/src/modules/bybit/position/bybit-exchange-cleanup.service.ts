@@ -3,15 +3,15 @@ import { RestClientV5 } from 'bybit-api';
 
 import { normalizeTradingPair } from '@repo/shared';
 
-import { AppLogService } from '../app-log/app-log.service';
-import { OrdersService } from '../orders/orders.service';
-import { BybitBalanceInstrumentService } from './bybit-balance-instrument.service';
-import { BybitExposureService } from './bybit-exposure.service';
-import { BybitNotifyService } from './bybit-notify.service';
-import { BybitPlacementValidationService } from './bybit-placement-validation.service';
+import { AppLogService } from '../../app-log/app-log.service';
+import { OrdersService } from '../../orders/orders.service';
+import { BybitBalanceInstrumentService } from '../instrument/bybit-balance-instrument.service';
+import { BybitExposureService } from '../exposure/bybit-exposure.service';
+import { BybitNotifyService } from '../notify/bybit-notify.service';
+import { BybitPlacementValidationService } from '../orders/bybit-placement-validation.service';
 import { BybitPositionCloseService } from './bybit-position-close.service';
-import { isFilledOrderStatus } from './bybit-order-status.util';
-import type { CloseSignalResult } from './bybit.types';
+import { isFilledOrderStatus } from '../orders/bybit-order-status.util';
+import type { CloseSignalResult } from '../types/bybit.types';
 
 @Injectable()
 export class BybitExchangeCleanupService {

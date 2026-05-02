@@ -2,12 +2,12 @@ import { Injectable } from '@nestjs/common';
 import { RestClientV5 } from 'bybit-api';
 import { normalizeTradingPair } from '@repo/shared';
 
-import { formatError } from '../../common/format-error';
+import { formatError } from '../../../common/format-error';
 import {
   buildClosedPnlWindow,
   isLiquidationExecutionRow,
 } from './bybit-pnl.util';
-import type { TradePnlBreakdownResult } from './bybit.types';
+import type { TradePnlBreakdownResult } from '../types/bybit.types';
 
 @Injectable()
 export class BybitPnlService {
