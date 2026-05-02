@@ -262,3 +262,183 @@
 - Manual verification: `npm run -w apps/api build` passed; `npm run -w apps/web build` passed.
 - Docs updated: `06-progress-tracker.md`.
 - Linked risks (`SEC-###`): `SEC-004`, `SEC-010`
+
+### AUD-021
+
+- Status: `done`
+- Scope: Safe decomposition slice for `BybitService` (types/constants + pure util extractions) with behavior-preserving delegation.
+- Files: `apps/api/src/modules/bybit/bybit.service.ts`, `apps/api/src/modules/bybit/bybit.types.ts`, `apps/api/src/modules/bybit/bybit.constants.ts`, `apps/api/src/modules/bybit/bybit-qty.util.ts`, `apps/api/src/modules/bybit/bybit-exposure.util.ts`, `apps/api/src/modules/bybit/bybit-tpsl.util.ts`, `apps/api/src/modules/bybit/bybit-pnl.util.ts`.
+- Findings: `bybit.service.ts` concentrated domain orchestration and low-level helpers; extraction can proceed safely by first moving stable pure blocks and constants/types, while preserving method contracts and call order.
+- Changes: moved public/internal Bybit domain types into `bybit.types.ts`; moved status/log/reconcile constants into `bybit.constants.ts`; extracted qty/price/split helpers into `bybit-qty.util.ts`; extracted exposure/tpsl/pnl pure helpers to dedicated util files and rewired service methods to delegate.
+- Decomposition notes (`utils/constants/hooks/types`): orchestration remains in `BybitService`; low-level deterministic logic is now separated in dedicated util/type/constant files for safer next-stage service extraction.
+- Manual verification: `npm run -w apps/api build` passed.
+- Docs updated: `06-progress-tracker.md`.
+- Linked risks (`SEC-###`): N/A (behavior-preserving refactor slice, no new runtime permissions/secrets surface).
+
+### AUD-022
+
+- Status: `done`
+- Scope: Stage-3 decomposition continuation — dedicated exposure service with DI delegation.
+- Files: `apps/api/src/modules/bybit/bybit-exposure.service.ts`, `apps/api/src/modules/bybit/bybit.module.ts`, `apps/api/src/modules/bybit/bybit.service.ts`.
+- Findings: duplicate/exposure read-model logic was tightly coupled to `BybitService`, but can be moved safely as method-for-method delegation without flow changes.
+- Changes: added `BybitExposureService`; moved exchange exposure/active orders/positions retrieval logic there; switched `BybitService` methods to DI delegation; registered new provider in module.
+- Decomposition notes (`utils/constants/hooks/types`): orchestration and outward API remain in `BybitService`; exchange exposure internals are now isolated in dedicated service.
+- Manual verification: `npm run -w apps/api build` passed.
+- Docs updated: `06-progress-tracker.md`.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-023
+
+- Status: `done`
+- Scope: Stage-4/5 safe continuation for Bybit decomposition (TP/SL + PnL service boundaries with behavior-preserving delegation).
+- Files: `apps/api/src/modules/bybit/bybit-tpsl.service.ts`, `apps/api/src/modules/bybit/bybit-pnl.service.ts`, `apps/api/src/modules/bybit/bybit.service.ts`, `apps/api/src/modules/bybit/bybit.module.ts`.
+- Findings: high-risk trading flows remain orchestration-heavy, so extraction proceeded in method-for-method delegation slices to avoid reordering side effects.
+- Changes: introduced `BybitTpSlService` and delegated `applyPositionStopLossFull` + `ensureStopLossForMultiTpOpenPosition`; introduced `BybitPnlService` and delegated `fetchClosedPnlRowsForSymbol` + `buildClosedPnlWindow`; registered both providers in Bybit module.
+- Decomposition notes (`utils/constants/hooks/types`): orchestration stays in `BybitService`; reusable TP/SL and PnL fetch/window logic now isolated behind dedicated services for subsequent incremental extraction.
+- Manual verification: `npm run -w apps/api build` passed.
+- Docs updated: `06-progress-tracker.md`.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-024
+
+- Status: `done`
+- Scope: Additional file-size reduction in `BybitService` by moving closed-pnl parsing/aggregation logic to `BybitPnlService`.
+- Files: `apps/api/src/modules/bybit/bybit.service.ts`, `apps/api/src/modules/bybit/bybit-pnl.service.ts`.
+- Findings: closed-pnl mapping helpers were self-contained and safe to isolate without changing poll/close behavior.
+- Changes: moved `extractClosedPnlOrderId`, `parseFiniteNumber`, `extractClosedPnlTimestampMs`, `sumClosedPnlForSignal` implementation into `BybitPnlService`; `BybitService` now delegates via `bybitPnl.sumClosedPnlForSignal(...)`.
+- Decomposition notes (`utils/constants/hooks/types`): deterministic data-mapping/aggregation moved from orchestration service into domain helper service.
+- Manual verification: `npm run -w apps/api build` passed.
+- Docs updated: `06-progress-tracker.md`.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-025
+
+- Status: `done`
+- Scope: Additional PnL decomposition to reduce `BybitService` size (execution fallback and liquidation detection).
+- Files: `apps/api/src/modules/bybit/bybit.service.ts`, `apps/api/src/modules/bybit/bybit-pnl.service.ts`.
+- Findings: execution-based fallback and liquidation scan are isolated from orchestration and can be delegated safely.
+- Changes: moved `estimateClosedPnlFromExecutions` and `detectLiquidationByExecutions` implementations into `BybitPnlService`; `BybitService` now delegates both methods.
+- Decomposition notes (`utils/constants/hooks/types`): PnL execution analytics is now concentrated in one service, reducing orchestration-file surface.
+- Manual verification: `npm run -w apps/api build` passed.
+- Docs updated: `06-progress-tracker.md`.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-026
+
+- Status: `done`
+- Scope: Continued PnL decomposition by moving trade breakdown orchestration from `BybitService` to `BybitPnlService`.
+- Files: `apps/api/src/modules/bybit/bybit.service.ts`, `apps/api/src/modules/bybit/bybit-pnl.service.ts`.
+- Findings: `getTradePnlBreakdown` used only PnL-domain operations and could be moved with callback-based dependencies while preserving contracts.
+- Changes: added `BybitPnlService.getTradePnlBreakdown(...)`; `BybitService.getTradePnlBreakdown(...)` now delegates via callbacks to `orders.getSignalWithOrders` and `getClient`.
+- Decomposition notes (`utils/constants/hooks/types`): PnL-specific request handling is now concentrated in `BybitPnlService`, reducing orchestration density of `BybitService`.
+- Manual verification: `npm run -w apps/api build` passed.
+- Docs updated: `06-progress-tracker.md`.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-027
+
+- Status: `done`
+- Scope: Large decomposition wave `AUD-BYBIT-DECOMP-06..10` for `BybitService` orchestration boundaries.
+- Files: `apps/api/src/modules/bybit/bybit.service.ts`, `apps/api/src/modules/bybit/bybit-tpsl.service.ts`, `apps/api/src/modules/bybit/bybit-pnl.service.ts`, `apps/api/src/modules/bybit/bybit-signal-placement.service.ts`, `apps/api/src/modules/bybit/bybit-order-lifecycle-poll.service.ts`, `apps/api/src/modules/bybit/bybit-position-close.service.ts`, `apps/api/src/modules/bybit/bybit.module.ts`.
+- Findings: major orchestration hotspots (placement, poll lifecycle, manual close/flatten, TP/SL heavy paths) can be split into dedicated services while preserving public contracts and side-effect order.
+- Changes: introduced `BybitSignalPlacementService`, `BybitOrderLifecyclePollService`, `BybitPositionCloseService`; moved large execution flows from `BybitService` into dedicated services with callback/port delegation; expanded `BybitTpSlService`/`BybitPnlService` usage; registered all new providers in `BybitModule`.
+- Decomposition notes (`utils/constants/hooks/types`): `BybitService` reduced toward facade role; domain flows now grouped by concern (placement, lifecycle poll, close, TP/SL, PnL).
+- Manual verification: `npm run -w apps/api build` passed.
+- Docs updated: `06-progress-tracker.md`.
+- Linked risks (`SEC-###`): N/A (behavior-preserving refactor; monitor runtime logs for edge cases in delegated callback paths).
+
+### AUD-028
+
+- Status: `done`
+- Scope: `AUD-BYBIT-DECOMP-11` — poll hard split with façade-only `pollOpenOrders` in `BybitService`.
+- Files: `apps/api/src/modules/bybit/bybit.service.ts`, `apps/api/src/modules/bybit/bybit-order-lifecycle-poll.service.ts`.
+- Findings: poll lifecycle already existed in dedicated service but core orchestration was still duplicated in `BybitService`.
+- Changes: removed inlined poll flow from `BybitService.pollOpenOrders`; switched to full delegation into `BybitOrderLifecyclePollService` via explicit callback ports; extracted close-classification branch into `finalizeSignalCloseIfNeeded(...)`.
+- Decomposition notes (`utils/constants/hooks/types`): orchestration boundary tightened; `BybitService` acts as façade for poll scenario.
+- Manual verification: `npm run -w apps/api build` passed.
+- Docs updated: `06-progress-tracker.md`.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-029
+
+- Status: `done`
+- Scope: `AUD-BYBIT-DECOMP-12` — typed callback ports and `any` reduction in cross-service contracts.
+- Files: `apps/api/src/modules/bybit/bybit-ports.types.ts`, `apps/api/src/modules/bybit/bybit-signal-placement.service.ts`, `apps/api/src/modules/bybit/bybit-order-lifecycle-poll.service.ts`, `apps/api/src/modules/bybit/bybit-position-close.service.ts`.
+- Findings: key decomposition services still accepted untyped `ports: any`, which weakened refactor safety.
+- Changes: introduced `bybit-ports.types.ts` with typed contracts for placement/poll/manual-close ports; migrated service signatures to typed port interfaces.
+- Decomposition notes (`utils/constants/hooks/types`): callback contracts centralized in dedicated types file to reduce drift.
+- Manual verification: `npm run -w apps/api build` passed.
+- Docs updated: `06-progress-tracker.md`.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-030
+
+- Status: `done`
+- Scope: `AUD-BYBIT-DECOMP-13` — TP/SL boundary cleanup in `BybitService`.
+- Files: `apps/api/src/modules/bybit/bybit.service.ts`.
+- Findings: leftover legacy TP split glue (`placeTpSplitIfNeededLegacy`) remained despite extracted TP/SL service ownership.
+- Changes: removed legacy no-op helper and simplified TP split port fallback to inline no-op callback; kept behavior and logging flow unchanged.
+- Decomposition notes (`utils/constants/hooks/types`): removed obsolete glue layer; TP/SL flow remains owned by `BybitTpSlService`.
+- Manual verification: `npm run -w apps/api build` passed.
+- Docs updated: `06-progress-tracker.md`.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-031
+
+- Status: `done`
+- Scope: `AUD-BYBIT-DECOMP-14` — helper dedup pass between façade and extracted services.
+- Files: `apps/api/src/modules/bybit/bybit.service.ts`.
+- Findings: stale import-level helper duplicates from pre-extraction TP/SL configuration parsing remained unused.
+- Changes: removed unused TP/SL parser imports and unused constants import to align helper ownership with extracted services.
+- Decomposition notes (`utils/constants/hooks/types`): duplicate helper surfaces reduced; imports now reflect active boundaries.
+- Manual verification: `npm run -w apps/api build` passed.
+- Docs updated: `06-progress-tracker.md`.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-032
+
+- Status: `done`
+- Scope: `AUD-BYBIT-DECOMP-15` — façade finalization and module-boundary validation.
+- Files: `apps/api/src/modules/bybit/bybit.service.ts`, `apps/api/src/modules/bybit/bybit.module.ts`.
+- Findings: with poll split and typed ports completed, `BybitService` boundary is now orchestration façade over dedicated domain services.
+- Changes: finalized façade delegation paths and validated module/provider graph by successful API build.
+- Decomposition notes (`utils/constants/hooks/types`): `BybitService` remains entry façade; placement/poll/close/TP-SL/PnL execution details stay in extracted services.
+- Manual verification: `npm run -w apps/api build` passed.
+- Docs updated: `06-progress-tracker.md`.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-033
+
+- Status: `done`
+- Scope: Bybit client/session split from façade (`getBybitCredentials`, `getClient`, private WS bootstrap/handlers).
+- Files: `apps/api/src/modules/bybit/bybit-client.service.ts`, `apps/api/src/modules/bybit/bybit.service.ts`, `apps/api/src/modules/bybit/bybit.module.ts`.
+- Findings: Bybit credentials + WS sync lifecycle were still embedded in `BybitService`, increasing orchestration-file size and mixing transport/runtime concerns.
+- Changes: introduced `BybitClientService`; moved credentials normalization/selection and private WS startup/update handling into dedicated service; `BybitService` now delegates client creation and WS start.
+- Decomposition notes (`utils/constants/hooks/types`): transport/client concern moved to dedicated service boundary; façade kept behavior-preserving delegation.
+- Manual verification: `npm run -w apps/api build` passed.
+- Docs updated: `06-progress-tracker.md`.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-034
+
+- Status: `done`
+- Scope: Notification boundary split from `BybitService` (`trade cancelled`, `liquidation`, stale reconcile notify job).
+- Files: `apps/api/src/modules/bybit/bybit-notify.service.ts`, `apps/api/src/modules/bybit/bybit.service.ts`, `apps/api/src/modules/bybit/bybit.module.ts`.
+- Findings: notification orchestration (Telegram/VK + queue trigger for stale reconcile) remained coupled to trading façade and duplicated dependency surface.
+- Changes: introduced `BybitNotifyService`; moved notification workflows (`notifyApiTradeCancelled`, `notifyApiTradeLiquidation`, `processTradeCancelledNotificationJob`, `notifyStaleReconcileTradeCancelled`) into dedicated service; `BybitService` now delegates these flows.
+- Decomposition notes (`utils/constants/hooks/types`): side-effect notification concern isolated from trading orchestration; callback expectations preserved.
+- Manual verification: `npm run -w apps/api build` passed.
+- Docs updated: `06-progress-tracker.md`.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-035
+
+- Status: `done`
+- Scope: Recalc closed PnL workflow split from `BybitService`.
+- Files: `apps/api/src/modules/bybit/bybit-recalc.service.ts`, `apps/api/src/modules/bybit/bybit.service.ts`, `apps/api/src/modules/bybit/bybit.module.ts`.
+- Findings: queue-driven recalculation state machine (`queued/running/completed/failed`) and bulk recalc execution were still inside façade service.
+- Changes: introduced `BybitRecalcService`; moved in-memory job registry/retention, queue-job processing, job status retrieval and recalc loop into dedicated service; `BybitService` now delegates via explicit callback ports for Bybit/PnL-specific operations.
+- Decomposition notes (`utils/constants/hooks/types`): long-running recalculation concern isolated from trading orchestration; façade role in `BybitService` strengthened.
+- Manual verification: `npm run -w apps/api build` passed.
+- Docs updated: `06-progress-tracker.md`.
+- Linked risks (`SEC-###`): N/A
