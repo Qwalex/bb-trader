@@ -5,7 +5,7 @@ import { normalizeTradingPair, type SignalDto } from '@repo/shared';
 
 import { formatError } from '../../../common/format-error';
 import type { BybitSignalPlacementPorts } from '../types/bybit-ports.types';
-import type { PlaceOrdersResult } from '../types/bybit.types';
+import type { PlaceOrdersResult, SignalOrderOrigin } from '../types/bybit.types';
 
 @Injectable()
 export class BybitSignalPlacementService {
@@ -14,7 +14,7 @@ export class BybitSignalPlacementService {
   async placeSignalOrders(
     signal: SignalDto,
     rawMessage: string | undefined,
-    origin: { chatId?: string; messageId?: string; signalExternalId?: string } | undefined,
+    origin: SignalOrderOrigin | undefined,
     ports: BybitSignalPlacementPorts,
   ): Promise<PlaceOrdersResult> {
     signal = await ports.applySourceMartingaleSizing(signal);

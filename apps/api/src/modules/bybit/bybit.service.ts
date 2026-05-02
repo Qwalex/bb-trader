@@ -18,12 +18,12 @@ import { BybitExposureService } from './exposure/bybit-exposure.service';
 import { BybitLiveSnapshotService } from './exposure/bybit-live-snapshot.service';
 import { BybitNotifyService } from './notify/bybit-notify.service';
 import { BybitOrderExchangeQueryService } from './orders/bybit-order-exchange-query.service';
+import { BybitPlacementValidationService } from './orders/bybit-placement-validation.service';
 import { BybitOrderLifecyclePollService } from './orders/bybit-order-lifecycle-poll.service';
 import {
   isFilledOrderStatus,
   isInsufficientBalanceError,
 } from './orders/bybit-order-status.util';
-import { BybitPlacementValidationService } from './orders/bybit-placement-validation.service';
 import { pickPositionRowForSignalDirection } from './position/bybit-position-pick.util';
 import { BybitPollFinalizeService } from './poll/bybit-poll-finalize.service';
 import { BybitPnlService } from './pnl/bybit-pnl.service';
@@ -33,11 +33,17 @@ import { BybitSignalOverridesService } from './overrides/bybit-signal-overrides.
 import { BybitSignalPlacementService } from './orders/bybit-signal-placement.service';
 import { BybitTpSlService } from './tpsl/bybit-tpsl.service';
 import type {
+  BybitOrderLifecyclePollPorts,
+  BybitPositionClosePorts,
+  BybitSignalPlacementPorts,
+} from './types/bybit-ports.types';
+import type {
   CloseSignalResult,
   PlaceOrdersResult,
   RecalcClosedPnlJobStatus,
   RecalcClosedPnlResult,
   SignalExecutionDebugSnapshot,
+  SignalOrderOrigin,
   TradePnlBreakdownResult,
 } from './types/bybit.types';
 
@@ -85,6 +91,8 @@ export class BybitService implements OnModuleInit {
     return this.cabinetContext.getCabinetId();
   }
 
+  // --- Public API: balance / snapshots / exchange cleanup ---
+
   async getUnifiedUsdtBalance(): Promise<number | undefined> {
     return this.balanceInstrument.getUnifiedUsdtBalance();
   }
@@ -118,18 +126,13 @@ export class BybitService implements OnModuleInit {
   }
 
   async closeSignalManually(signalId: string): Promise<CloseSignalResult> {
-    return this.bybitPositionClose.closeSignalManually(signalId, {
-      normalizeTradingPair,
-      orders: this.orders,
-      getClient: () => this.balanceInstrument.getClient(),
-      flattenLinearSymbolOnExchange: (client, symbol) =>
-        this.exchangeCleanup.flattenLinearSymbolOnExchange(client, symbol),
-      appLog: this.appLog,
-      isFilledOrderStatus: (status) => isFilledOrderStatus(status),
-      notifyApiTradeCancelled: (signal, reason) =>
-        this.bybitNotify.notifyApiTradeCancelled(signal, reason),
-    });
+    return this.bybitPositionClose.closeSignalManually(
+      signalId,
+      this.createPositionClosePorts(),
+    );
   }
+
+  // --- Notifications ---
 
   async processTradeCancelledNotificationJob(params: {
     signalIds: string[];
@@ -138,53 +141,19 @@ export class BybitService implements OnModuleInit {
     await this.bybitNotify.processTradeCancelledNotificationJob(params);
   }
 
+  // --- Placement & duplicate guard ---
+
   async placeSignalOrders(
     signal: SignalDto,
     rawMessage: string | undefined,
-    origin?: { chatId?: string; messageId?: string; signalExternalId?: string },
+    origin?: SignalOrderOrigin,
   ): Promise<PlaceOrdersResult> {
-    const pv = this.placementValidation;
-    const bal = this.balanceInstrument;
-    const ov = this.signalOverrides;
-    return this.bybitSignalPlacement.placeSignalOrders(signal, rawMessage, origin, {
-      settings: this.settings,
-      appLog: this.appLog,
-      orders: this.orders,
-      placementLocks: this.placementLocks,
-      getClient: () => this.balanceInstrument.getClient(),
-      applySourceMartingaleSizing: (s: SignalDto) => ov.applySourceMartingaleSizing(s),
-      applyForcedLeverage: (s: SignalDto, o?: { chatId?: string; messageId?: string; signalExternalId?: string }) =>
-        ov.applyForcedLeverage(s, o),
-      hasExchangeExposureForDirection: (client: RestClientV5, symbol: string, direction: 'long' | 'short') =>
-        this.bybitExposure.hasExchangeExposureForDirection(client, symbol, direction),
-      clearImmediateStaleDbBlockerIfExchangeFlat: (
-        pair: string,
-        direction: 'long' | 'short',
-        client: RestClientV5,
-        reason: string,
-      ) => this.clearImmediateStaleDbBlockerIfExchangeFlat(pair, direction, client, reason),
-      buildPlacementLockKey: (pair: string, direction: 'long' | 'short') =>
-        pv.buildPlacementLockKey(pair, direction),
-      getLastPrice: (client: RestClientV5, symbol: string) => bal.getLastPrice(client, symbol),
-      validateSignalLevels: (s: SignalDto, lastPrice?: number) => pv.validateSignalLevels(s, lastPrice),
-      getUsdtBalanceDetails: (client: RestClientV5) => bal.getUsdtBalanceDetails(client),
-      getLinearInstrumentFilters: (client: RestClientV5, symbol: string) =>
-        bal.getLinearInstrumentFilters(client, symbol),
-      applyEntryRangeResolution: (s: SignalDto, lastPrice: number | undefined, tickSize: string) =>
-        pv.applyEntryRangeResolution(s, lastPrice, tickSize),
-      resolveBumpToMinExchangeLot: (chatId?: string) => ov.resolveBumpToMinExchangeLot(chatId),
-      validateLeveragedNotionalVsMinQty: (input: Parameters<
-        BybitPlacementValidationService['validateLeveragedNotionalVsMinQty']
-      >[0]) => pv.validateLeveragedNotionalVsMinQty(input),
-      resolveEntryPositionIdx: (client: RestClientV5, symbol: string, side: 'Buy' | 'Sell') =>
-        pv.resolveEntryPositionIdx(client, symbol, side),
-      roundQty: (qtyNum: number, qtyStep: string, minQty: string) =>
-        pv.roundQty(qtyNum, qtyStep, minQty),
-      snapPriceToTickNum: (price: number, tickSize: string) =>
-        pv.snapPriceToTickNum(price, tickSize),
-      isInsufficientBalanceError: (msg: string | null | undefined) =>
-        isInsufficientBalanceError(msg),
-    });
+    return this.bybitSignalPlacement.placeSignalOrders(
+      signal,
+      rawMessage,
+      origin,
+      this.createSignalPlacementPorts(),
+    );
   }
 
   async wouldDuplicateActivePairDirection(
@@ -212,6 +181,8 @@ export class BybitService implements OnModuleInit {
     return this.orders.hasActiveSignalForPairAndDirection(pair, direction);
   }
 
+  // --- PnL read ---
+
   async getTradePnlBreakdown(signalId: string): Promise<TradePnlBreakdownResult> {
     return this.bybitPnl.getTradePnlBreakdown({
       signalId,
@@ -219,6 +190,8 @@ export class BybitService implements OnModuleInit {
       getClient: () => this.balanceInstrument.getClient(),
     });
   }
+
+  // --- Recalc closed PnL jobs ---
 
   startRecalcClosedSignalsPnlJob(params?: {
     limit?: number;
@@ -306,45 +279,86 @@ export class BybitService implements OnModuleInit {
     });
   }
 
+  // --- Poll open orders & TP/SL hooks ---
+
   async pollOpenOrders(): Promise<void> {
-    await this.bybitOrderLifecyclePoll.pollOpenOrders({
+    await this.bybitOrderLifecyclePoll.pollOpenOrders(this.createOrderLifecyclePollPorts());
+  }
+
+  private createPositionClosePorts(): BybitPositionClosePorts {
+    return {
+      normalizeTradingPair,
+      orders: this.orders,
+      getClient: () => this.balanceInstrument.getClient(),
+      flattenLinearSymbolOnExchange: (client, symbol) =>
+        this.exchangeCleanup.flattenLinearSymbolOnExchange(client, symbol),
+      appLog: this.appLog,
+      isFilledOrderStatus: (status) => isFilledOrderStatus(status),
+      notifyApiTradeCancelled: (signal, reason) =>
+        this.bybitNotify.notifyApiTradeCancelled(signal, reason),
+    };
+  }
+
+  private createSignalPlacementPorts(): BybitSignalPlacementPorts {
+    const pv = this.placementValidation;
+    const bal = this.balanceInstrument;
+    const ov = this.signalOverrides;
+    return {
+      settings: this.settings,
+      appLog: this.appLog,
+      orders: this.orders,
+      placementLocks: this.placementLocks,
+      getClient: () => this.balanceInstrument.getClient(),
+      applySourceMartingaleSizing: (s: SignalDto) => ov.applySourceMartingaleSizing(s),
+      applyForcedLeverage: (s, o) => ov.applyForcedLeverage(s, o),
+      hasExchangeExposureForDirection: (client, symbol, direction) =>
+        this.bybitExposure.hasExchangeExposureForDirection(client, symbol, direction),
+      clearImmediateStaleDbBlockerIfExchangeFlat: (pair, direction, client, reason) =>
+        this.clearImmediateStaleDbBlockerIfExchangeFlat(pair, direction, client, reason),
+      buildPlacementLockKey: (pair, direction) => pv.buildPlacementLockKey(pair, direction),
+      getLastPrice: (client, symbol) => bal.getLastPrice(client, symbol),
+      validateSignalLevels: (s, lastPrice) => pv.validateSignalLevels(s, lastPrice),
+      getUsdtBalanceDetails: (client) => bal.getUsdtBalanceDetails(client),
+      getLinearInstrumentFilters: (client, symbol) => bal.getLinearInstrumentFilters(client, symbol),
+      applyEntryRangeResolution: (s, lastPrice, tickSize) =>
+        pv.applyEntryRangeResolution(s, lastPrice, tickSize),
+      resolveBumpToMinExchangeLot: (chatId) => ov.resolveBumpToMinExchangeLot(chatId),
+      validateLeveragedNotionalVsMinQty: (input) => pv.validateLeveragedNotionalVsMinQty(input),
+      resolveEntryPositionIdx: (client, symbol, side) =>
+        pv.resolveEntryPositionIdx(client, symbol, side),
+      roundQty: (qtyNum, qtyStep, minQty) => pv.roundQty(qtyNum, qtyStep, minQty),
+      snapPriceToTickNum: (price, tickSize) => pv.snapPriceToTickNum(price, tickSize),
+      isInsufficientBalanceError: (msg) => isInsufficientBalanceError(msg),
+    };
+  }
+
+  private createOrderLifecyclePollPorts(): BybitOrderLifecyclePollPorts {
+    return {
       getClient: () => this.balanceInstrument.getClient(),
       orders: this.orders,
-      stalePairDirectionKey: (pair: string, direction: 'long' | 'short') =>
-        this.stalePairDirectionKey(pair, direction),
+      stalePairDirectionKey: (pair, direction) => this.stalePairDirectionKey(pair, direction),
       staleFlatPollCounts: this.staleFlatPollCounts,
       staleReconcileSuspensions: this.staleReconcileSuspensions,
       appLog: this.appLog,
-      hasExchangeExposureForDirection: (
-        client: RestClientV5,
-        symbol: string,
-        direction: 'long' | 'short',
-      ) => this.bybitExposure.hasExchangeExposureForDirection(client, symbol, direction),
-      notifyStaleReconcileTradeCancelled: (signalIds: string[], reason: string) =>
+      hasExchangeExposureForDirection: (client, symbol, direction) =>
+        this.bybitExposure.hasExchangeExposureForDirection(client, symbol, direction),
+      notifyStaleReconcileTradeCancelled: (signalIds, reason) =>
         this.bybitNotify.notifyStaleReconcileTradeCancelled(signalIds, reason),
-      fetchOrderStatusFromExchange: (
-        client: RestClientV5,
-        pair: string,
-        orderId: string,
-        expectedQty?: number,
-      ) =>
+      fetchOrderStatusFromExchange: (client, pair, orderId, expectedQty) =>
         this.orderExchangeQuery.fetchOrderStatusFromExchange(
           client,
           pair,
           orderId,
           expectedQty,
         ),
-      isFilledOrderStatus: (status: string | null | undefined) =>
-        isFilledOrderStatus(status),
-      ensureStopLossForMultiTpOpenPosition: (client: RestClientV5, fresh: any) =>
+      isFilledOrderStatus: (status) => isFilledOrderStatus(status),
+      ensureStopLossForMultiTpOpenPosition: (client, fresh) =>
         this.ensureStopLossForMultiTpOpenPosition(client, fresh),
-      placeTpSplitIfNeeded: (client: RestClientV5, fresh: any) =>
-        this.placeTpSplitIfNeeded(client, fresh),
-      stepStopLossIfTpFilled: (client: RestClientV5, fresh: any) =>
-        this.stepStopLossIfTpFilled(client, fresh),
-      finalizeSignalCloseIfNeeded: (client: RestClientV5, fresh: any) =>
+      placeTpSplitIfNeeded: (client, fresh) => this.placeTpSplitIfNeeded(client, fresh),
+      stepStopLossIfTpFilled: (client, fresh) => this.stepStopLossIfTpFilled(client, fresh),
+      finalizeSignalCloseIfNeeded: (client, fresh) =>
         this.pollFinalize.finalizeSignalCloseIfNeeded(client, fresh),
-    });
+    };
   }
 
   private async ensureStopLossForMultiTpOpenPosition(
@@ -489,6 +503,8 @@ export class BybitService implements OnModuleInit {
     }
     return reconciledIds.length;
   }
+
+  // --- Stale reconcile suspend / resume (public for callers outside poll) ---
 
   suspendStaleReconcile(
     pair: string,

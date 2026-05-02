@@ -76,7 +76,7 @@
 - Status: `done`
 - Scope: Full coverage of remaining files.
 - Files: repository-wide.
-- Findings: reviewed core API, Web, compose/deploy scripts, and agent documentation surfaces; remaining decomposition should continue in subsequent waves for very large files (`bybit.service.ts`, `transcript.service.ts`, `orders.service.ts`, `settings/page.tsx`, `telegram-userbot/page.tsx`).
+- Findings: reviewed core API, Web, compose/deploy scripts, and agent documentation surfaces; remaining decomposition should continue in subsequent waves for very large files (`transcript.service.ts`, `orders.service.ts`, `settings/page.tsx`, `telegram-userbot/page.tsx`, `telegram.service.ts`); `bybit.service.ts` is a small facade after module split (see AUD-038/039, `docs/refactor-decomposition-large-files-plan.md` §3).
 - Changes: established persistent audit framework and completed first cross-cutting decomposition/security-hardening pass across all major layers.
 - Decomposition notes (`utils/constants/hooks/types`): baseline extracted; next tasks should continue one-entity-per-file strategy with pragmatic boundaries.
 - Manual verification: `apps/api` build OK, `apps/web` build OK, lint diagnostics for touched files clean.
@@ -91,6 +91,7 @@
 - Findings: Repeated JSON parsing logic in orchestration service increased file size/noise and raised maintenance risk; key giant-file candidates confirmed for wave order.
 - Changes: Added `07-full-audit-backlog.md`; extracted JSON parse helpers to `bybit-json.util.ts` and reused them in `BybitService` (behavior-preserving); synced agent workflow rules for context retention.
 - Decomposition notes (`utils/constants/hooks/types`): First extraction done (`bybit-json.util.ts`); next slices should continue moving pure parsers/mappers/constants out of `bybit.service.ts`.
+- **Current state (post AUD-038/039):** domain logic lives in `instrument/`, `exposure/`, `orders/`, `position/`, `tpsl/`, `pnl/`, `poll/`, `notify/`, `overrides/`, `types/`; `bybit.service.ts` is orchestration-only (~540 lines). Further work is optional readability or new domains if the facade grows.
 - Manual verification: `npm run -w apps/api build` passed.
 - Docs updated: `05-agent-work-contract.md`, `06-progress-tracker.md`, `07-full-audit-backlog.md`, `AGENTS.md`.
 - Linked risks (`SEC-###`): `SEC-004`
@@ -490,3 +491,51 @@
 - Manual verification: `npm run build` в `apps/api` passed.
 - Docs updated: `06-progress-tracker.md`.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-040
+
+- Status: `done`
+- Scope: Актуализация `docs/refactor-decomposition-large-files-plan.md` под текущий статус (Bybit-фасад ~540 строк, структура модуля по подпапкам); отдельный детальный план декомпозиции `telegram-userbot.service.ts`.
+- Files: `docs/refactor-decomposition-large-files-plan.md`, `docs/telegram-userbot-decomposition-plan.md`, `06-progress-tracker.md`.
+- Findings: инвентарь >800 обновлён; секция Bybit отражает завершённую декомпозицию фасада и раскладку `bybit/*`; P0 для userbot остаётся; подмножество >2000 строк — `telegram-userbot` + `telegram.service`.
+- Changes: таблица строк/приоритетов; §3 переименован и описывает целевое состояние модуля Bybit; §1 ссылается на новый план; добавлен `telegram-userbot-decomposition-plan.md` (кластеры методов, риски, волны W1–W5, структура каталогов, чеклист).
+- Decomposition notes (`utils/constants/hooks/types`): N/A (только документация).
+- Manual verification: согласованность путей и ссылок между документами.
+- Docs updated: перечисленные файлы.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-041
+
+- Status: `done`
+- Scope: Декомпозиция `telegram-userbot.service.ts` по волнам W1–W5 (план `docs/telegram-userbot-decomposition-plan.md` / `.cursor/plans`, без правки файла плана).
+- Files: `apps/api/src/modules/telegram-userbot/utils/*`, `openrouter/*`, `mirror/*.util.ts` + `mirror/telegram-userbot-mirror.service.ts`, `client/telegram-userbot-client.service.ts`, `ingest/telegram-userbot-ingest.service.ts`, `polling/telegram-userbot-polling.service.ts`, `filters/telegram-userbot-filters.service.ts`, `settings/telegram-userbot-settings.service.ts`, `telegram-userbot.module.ts`, `telegram-userbot.service.ts` (фасад ~3960 строк), `docs/refactor-decomposition-large-files-plan.md`.
+- Findings: публичный API контроллера и `exports` модуля без изменений; `processIngestRecord` и связанный reply/lookup/watch-пайплайн остаются на фасаде, очередь и `ingestChatMessage` — в `TelegramUserbotIngestService` с `setProcessIngestRecord` в `onModuleInit`.
+- Changes: W1 утилиты; W4 `TelegramUserbotOpenrouterService`; W2 `TelegramUserbotClientService` (MTProto/QR, inbound через setter); W3 очередь + ingest entry; W5 `Polling`/`Mirror`/`Filters`/`Settings` сервисы + тонкое делегирование.
+- Decomposition notes: без автотестов; избегание циклов Nest — ingest вызывает фасад только через callback, клиент — через `setInboundHandler` / `setAfterAttachHook`.
+- Manual verification: `npm run build` в `apps/api` passed.
+- Docs updated: `06-progress-tracker.md`, `docs/refactor-decomposition-large-files-plan.md`.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-043
+
+- Status: `done`
+- Scope: Волны userbot после W1–W5: фаза 1 (CRUD фильтров / publish / `updateChat` и карты источников в `settings`/`filters`/`mirror`, делегаты на фасаде), фаза 2 (`TelegramUserbotScanService`: poll-тик, `scanTodayMessagesCore`, метрики дня, recency/last-seen), фаза 3 (`TelegramUserbotIngestPipelineService`: `processIngestRecord` и цепочка; wiring через `setProcessIngestRecord` → pipeline, без импорта фасада из ingest), фаза 4 (актуализация `docs/telegram-userbot-decomposition-plan.md`, `docs/refactor-decomposition-large-files-plan.md`, трекер).
+- Files: `apps/api/src/modules/telegram-userbot/telegram-userbot.service.ts`, `telegram-userbot.module.ts`, `settings/telegram-userbot-settings.service.ts`, `filters/telegram-userbot-filters.service.ts`, `mirror/telegram-userbot-mirror.service.ts`, `scan/telegram-userbot-scan.service.ts`, `ingest/telegram-userbot-ingest-pipeline.service.ts`, `apps/api/src/modules/bybit/bybit.service.ts` (дубликат импорта устранён при сборке), `docs/telegram-userbot-decomposition-plan.md`, `docs/refactor-decomposition-large-files-plan.md`, `docs/audit/06-progress-tracker.md`.
+- Findings: цель «фасад &lt; ~800» почти достигнута (~875); основной объём перенесён в pipeline (**~2420 строк**) — остаточный риск навигации; цикла Nest фасад↔ingest нет (callback на метод pipeline).
+- Changes: делегаты фазы 1; scan-сервис; генерация pipeline из бывшего тела фасада + публичные `getBalanceGuardSnapshot` / `fetchChatMessageMeta` для `getStatus` и reread; восстановлены на фасаде `refreshEnabledChatsCache`, `getBoolSetting`, `isClientAuthorized` после узкого удаления диапазона.
+- Decomposition notes: ingest queue остаётся в `TelegramUserbotIngestService`; pipeline зависит от `TelegramUserbotIngestService` односторонне.
+- Manual verification: `npm run build` в `apps/api` passed; смоук ingest/polling по чеклисту decomposition-plan — не запускался в среде агента (нет живого Telegram).
+- Docs updated: перечисленные `docs/*`, этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-042
+
+- Status: `done`
+- Scope: Читаемость фасада `BybitService` + актуализация аудита по Bybit (SEC-004, AUD-005/006, план декомпозиции).
+- Files: `apps/api/src/modules/bybit/bybit.service.ts`, `apps/api/src/modules/bybit/types/bybit.types.ts`, `apps/api/src/modules/bybit/types/bybit-ports.types.ts`, `apps/api/src/modules/bybit/orders/bybit-signal-placement.service.ts`, `docs/audit/03-security-risks-register.md`, `docs/audit/06-progress-tracker.md`, `docs/refactor-decomposition-large-files-plan.md`.
+- Findings: SEC-004 и AUD-005 описывали устаревший размер монолита Bybit; фасад собирал крупные литералы портов inline.
+- Changes: `SEC-004` → `mitigated` с актуальной формулировкой; правки Findings AUD-005 и хвоста AUD-006; строка в §3 плана декомпозиции; тип `SignalOrderOrigin`; фабрики `createSignalPlacementPorts` / `createOrderLifecyclePollPorts` / `createPositionClosePorts`; секционные комментарии в фасаде.
+- Decomposition notes (`utils/constants/hooks/types`): именованный тип происхождения ордера в `bybit.types.ts`; порты по-прежнему в `bybit-ports.types.ts`.
+- Manual verification: `npm run -w apps/api build` passed.
+- Docs updated: перечисленные файлы.
+- Linked risks (`SEC-###`): `SEC-004`

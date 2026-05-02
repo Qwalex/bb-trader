@@ -7,6 +7,15 @@ import { SettingsModule } from '../settings/settings.module';
 import { TelegramModule } from '../telegram/telegram.module';
 import { VkModule } from '../vk/vk.module';
 import { TranscriptModule } from '../transcript/transcript.module';
+import { TelegramUserbotClientService } from './client/telegram-userbot-client.service';
+import { TelegramUserbotFiltersService } from './filters/telegram-userbot-filters.service';
+import { TelegramUserbotIngestService } from './ingest/telegram-userbot-ingest.service';
+import { TelegramUserbotIngestPipelineService } from './ingest/telegram-userbot-ingest-pipeline.service';
+import { TelegramUserbotPollingService } from './polling/telegram-userbot-polling.service';
+import { TelegramUserbotScanService } from './scan/telegram-userbot-scan.service';
+import { TelegramUserbotSettingsService } from './settings/telegram-userbot-settings.service';
+import { TelegramUserbotMirrorService } from './mirror/telegram-userbot-mirror.service';
+import { TelegramUserbotOpenrouterService } from './openrouter/telegram-userbot-openrouter.service';
 import { TelegramUserbotController } from './telegram-userbot.controller';
 import { TelegramUserbotService } from './telegram-userbot.service';
 import { UserbotSignalHashModule } from './userbot-signal-hash.module';
@@ -23,7 +32,18 @@ import { UserbotSignalHashModule } from './userbot-signal-hash.module';
     UserbotSignalHashModule,
   ],
   controllers: [TelegramUserbotController],
-  providers: [TelegramUserbotService],
+  providers: [
+    TelegramUserbotOpenrouterService,
+    TelegramUserbotClientService,
+    TelegramUserbotIngestPipelineService,
+    TelegramUserbotIngestService,
+    TelegramUserbotPollingService,
+    TelegramUserbotScanService,
+    TelegramUserbotSettingsService,
+    TelegramUserbotFiltersService,
+    TelegramUserbotMirrorService,
+    TelegramUserbotService,
+  ],
   exports: [TelegramUserbotService],
 })
 export class TelegramUserbotModule {}

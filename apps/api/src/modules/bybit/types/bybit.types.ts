@@ -1,3 +1,10 @@
+/** Контекст происхождения сигнала при постановке (Telegram / userbot). */
+export type SignalOrderOrigin = {
+  chatId?: string;
+  messageId?: string;
+  signalExternalId?: string;
+};
+
 /** Ошибка проверки уровней до ордеров — можно повторить после правки текста в Telegram. */
 export type PlaceOrdersErrorCode = 'signal_levels_validation';
 

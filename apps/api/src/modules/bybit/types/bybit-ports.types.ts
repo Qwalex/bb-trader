@@ -2,7 +2,7 @@ import { RestClientV5 } from 'bybit-api';
 
 import type { SignalDto } from '@repo/shared';
 
-import type { CloseSignalResult, PlaceOrdersResult } from './bybit.types';
+import type { CloseSignalResult, PlaceOrdersResult, SignalOrderOrigin } from './bybit.types';
 
 export interface BybitSignalPlacementPorts {
   settings: {
@@ -22,10 +22,7 @@ export interface BybitSignalPlacementPorts {
   placementLocks: Set<string>;
   getClient: () => Promise<RestClientV5 | null>;
   applySourceMartingaleSizing: (signal: SignalDto) => Promise<SignalDto>;
-  applyForcedLeverage: (
-    signal: SignalDto,
-    origin?: { chatId?: string; messageId?: string; signalExternalId?: string },
-  ) => Promise<SignalDto>;
+  applyForcedLeverage: (signal: SignalDto, origin?: SignalOrderOrigin) => Promise<SignalDto>;
   hasExchangeExposureForDirection: (
     client: RestClientV5,
     symbol: string,
@@ -121,6 +118,6 @@ export type BybitCloseSignalFn = (
 export type BybitPlaceOrdersFn = (
   signal: SignalDto,
   rawMessage: string | undefined,
-  origin: { chatId?: string; messageId?: string; signalExternalId?: string } | undefined,
+  origin: SignalOrderOrigin | undefined,
   ports: BybitSignalPlacementPorts,
 ) => Promise<PlaceOrdersResult>;

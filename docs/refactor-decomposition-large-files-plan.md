@@ -21,25 +21,28 @@
 
 | Строк | Приоритет | Файл | Слой |
 |------:|-------------|------|------|
-| 5508 | P0 | `apps/api/src/modules/telegram-userbot/telegram-userbot.service.ts` | API |
+| ~875 | P0 | `apps/api/src/modules/telegram-userbot/telegram-userbot.service.ts` | API (фасад: wiring, HTTP-делегаты, inbound, polling hooks) |
+| ~2420 | P0 | `apps/api/src/modules/telegram-userbot/ingest/telegram-userbot-ingest-pipeline.service.ts` | API (ingest-пайплайн: `processIngestRecord` + reply/lookup/classify/watch; без цикла с фасадом) |
 | 2270 | P0 | `apps/api/src/modules/telegram/telegram.service.ts` | API |
-| 2211 | P0 | `apps/api/src/modules/bybit/bybit.service.ts` | API |
 | 1741 | P1 | `apps/api/src/modules/transcript/transcript.service.ts` | API |
 | 1663 | P1 | `apps/web/app/settings/page.tsx` | Web |
 | 1626 | P1 | `apps/web/app/telegram-userbot/page.tsx` | Web |
+| ~540 | — | `apps/api/src/modules/bybit/bybit.service.ts` | API (фасад после декомпозиции; см. §3) |
 | 1388 | P2 | `apps/api/src/modules/vk/vk-bot.service.ts` | API |
 | 1346 | P2 | `apps/api/src/modules/orders/orders.service.ts` | API |
 | 962 | P3 | `apps/web/app/filters/page.tsx` | Web |
 
 **В `packages/shared` и остальных путях** при том же сканировании файлов >800 **не обнаружено** (если появятся — добавить строкой в таблицу при следующем аудите).
 
-Подмножество **>2000 строк** — первые три строки таблицы; для них ниже развёрнутые секции 1–3.
+Подмножество **>2000 строк** — сейчас **`telegram-userbot-ingest-pipeline.service.ts`** и **`telegram.service.ts`** (фасад userbot ~875 строк; Bybit-фасад из инвентаря >800 исключён как уже приведённый к целевому размеру). Для них — развёрнутые секции 1–2; §3 — статус Bybit-модуля.
 
 ---
 
 ## 1. `telegram-userbot.service.ts` (P0)
 
-**Уже есть рядом:** `telegram-userbot.constants.ts`, `telegram-userbot.types.ts`, `telegram-userbot-source.util.ts`, `userbot-signal-hash.*`.
+**Статус (код):** фасад `telegram-userbot.service.ts` **~875 строк** (`wc -l`, 2026-05); цель «&lt; ~800 строк» для фасада **почти достигнута**. Основной объём ingest-пайплайна перенесён в `ingest/telegram-userbot-ingest-pipeline.service.ts` (**~2420 строк**); сканирование/poll-тик и метрики дня — в `scan/telegram-userbot-scan.service.ts` (**~314 строк**). **Остаточный риск:** крупный pipeline-файл — при росте нарезать по `docs/telegram-userbot-decomposition-plan.md` (reply/lookup/watch отдельными сервисами).
+
+**Рядом с фасадом (после волн):** `utils/`, `openrouter/`, `client/`, `ingest/` (`TelegramUserbotIngestService` + очередь; `TelegramUserbotIngestPipelineService` — `processIngestRecord` и цепочка), `scan/` (`TelegramUserbotScanService`), `polling/`, `filters/`, `settings/`, `mirror/`; плюс `telegram-userbot.constants.ts`, `telegram-userbot.types.ts`, `telegram-userbot-source.util.ts`, `userbot-signal-hash.*`.
 
 **Наблюдаемые домены внутри монолита (ориентиры для нарезки):**
 
@@ -88,19 +91,13 @@
 
 ---
 
-## 3. `bybit.service.ts` (P0)
+## 3. Модуль `bybit` и `bybit.service.ts` (целевое состояние)
 
-**Уже вынесено (фрагменты):** `bybit-client.service`, `bybit-poll`, `bybit-tpsl`, `bybit-pnl`, `bybit-notify`, `bybit-recalc`, `bybit-signal-placement`, `bybit-position-close`, `bybit-order-lifecycle-poll`, `balance-snapshot`, `bybit-exposure`, утилиты и `bybit-ports.types`.
+**Сделано:** доменная логика вынесена в отдельные сервисы (`instrument`, `exposure`, `orders`, `position`, `tpsl`, `pnl`, `poll`, `notify`, `overrides`, `types`); фасад `bybit.service.ts` — **~540 строк**, оркестрация и делегирование. Публичный API для остальных модулей по-прежнему **`BybitService`** (см. `docs/audit/06-progress-tracker.md`, AUD-038/AUD-039).
 
-**Оставшаяся цель:** довести фасад до **тонкой оркестрации** — по возможности группировать оставшиеся методы по сценариям и вынести следующие крупные блоки в отдельные сервисы только после явного аудита зависимостей (избегать новых циклов с `TelegramService` / `OrdersService`).
+**Оставшаяся цель (низкий приоритет):** при росте фасада снова пройти файл сверху вниз; крупные оставшиеся регионы — кандидаты на новый `bybit-*.service.ts` только после проверки циклов с `TelegramService` / `OrdersService`. Риск `SEC-004` в реестре отражает это состояние как `mitigated` (остаточная внимательность к оркестрации на фасаде).
 
-**Предлагаемая стратегия:**
-
-1. Пройти файл **сверху вниз** и пометить оставшиеся регионы (комментарии или внутренний чеклист в задаче).
-2. Для каждого региона >~200–300 строк: кандидат на новый `bybit-*.service.ts` + делегирование из `BybitService`.
-3. Сохранить **единую точку входа** для других модулей (`BybitService`), чтобы не плодить импорты десятка сервисов снаружи модуля.
-
-**DoD:** сборка; регрессионная ручная проверка торгового сценария (testnet): размещение, TP/SL, закрытие по минимальному happy-path из операционного ранбука.
+**DoD при дальнейших правках:** `npm run build` в `apps/api`; смоук торгового сценария (testnet) по операционному ранбуку.
 
 ---
 
@@ -148,6 +145,7 @@
 
 - `docs/audit/06-progress-tracker.md` — карточки выполненных волн по Bybit/Telegram.
 - `docs/audit/07-full-audit-backlog.md` — общий бэклог аудита.
+- `docs/telegram-userbot-decomposition-plan.md` — поэтапный план декомпозиции `telegram-userbot.service.ts` (ведётся по мере реализации).
 
 ---
 
