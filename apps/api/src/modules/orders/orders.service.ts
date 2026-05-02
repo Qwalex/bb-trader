@@ -20,6 +20,10 @@ import { UserbotSignalHashService } from '../telegram-userbot/userbot-signal-has
 
 import { formatError } from '../../common/format-error';
 import { parseStringList } from './orders-source.util';
+import {
+  computeWinratePercent,
+  isClosedLossOutcome,
+} from './orders-stats.util';
 
 export interface TradesFilter {
   signalId?: string;
@@ -842,15 +846,6 @@ export class OrdersService {
     return Array.from(map.entries()).map(([date, pnl]) => ({ date, pnl }));
   }
 
-  private computeWinrate(wins: number, losses: number): number {
-    const total = wins + losses;
-    return total === 0 ? 0 : (wins / total) * 100;
-  }
-
-  private isLossOutcome(status: string, realizedPnl: number | null): boolean {
-    return status === 'CLOSED_LOSS' || (typeof realizedPnl === 'number' && realizedPnl < 0);
-  }
-
   private async buildMartingaleStepBySignalId(
     items: Array<{ id: string; source: string | null; createdAt: Date }>,
   ): Promise<Map<string, number>> {
@@ -911,7 +906,7 @@ export class OrdersService {
         for (const trade of tradesAsc) {
           while (idx < history.length && history[idx]!.ts <= trade.createdAt) {
             const ev = history[idx]!;
-            streak = this.isLossOutcome(ev.status, ev.realizedPnl) ? streak + 1 : 0;
+            streak = isClosedLossOutcome(ev.status, ev.realizedPnl) ? streak + 1 : 0;
             idx += 1;
           }
           stepBySignalId.set(trade.id, streak);
@@ -1063,7 +1058,7 @@ export class OrdersService {
         const statsPeriodDays = Math.max(1, Math.ceil((nowMs - startMs) / dayMs));
         return {
           source: acc.source,
-          winrate: this.computeWinrate(acc.wins, acc.losses),
+          winrate: computeWinratePercent(acc.wins, acc.losses),
           wins: acc.wins,
           losses: acc.losses,
           wL: `${acc.wins} / ${acc.losses}`,

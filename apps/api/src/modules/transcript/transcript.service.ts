@@ -2,8 +2,6 @@ import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
-import { OpenRouter } from '@openrouter/sdk';
-
 import {
   normalizeTradingPair,
   type ContentKind,
@@ -12,11 +10,7 @@ import {
   type TranscriptResult,
 } from '@repo/shared';
 
-import { AppLogService } from '../app-log/app-log.service';
-import { sanitizeForOpenRouterLog } from '../app-log/log-sanitize';
 import { BybitService } from '../bybit/bybit.service';
-import { CabinetContextService } from '../cabinet/cabinet-context.service';
-import { PrismaService } from '../../prisma/prisma.service';
 import { resolveForcedLeverageWithChatOverride } from '../settings/forced-leverage.util';
 import {
   parseLeverageRangeMode,
@@ -25,18 +19,13 @@ import {
 } from '../settings/leverage-policy.util';
 import { SettingsService } from '../settings/settings.service';
 import { SignalParseDto } from './dto/signal-parse.dto';
+import { TranscriptOpenRouterBillingService } from './transcript-openrouter-billing.service';
+import { TranscriptOpenRouterClientService } from './transcript-openrouter-client.service';
+import { TranscriptOpenRouterModelChainService } from './transcript-openrouter-model-chain.service';
 import {
-  OPENROUTER_APP_TITLE,
-  OPENROUTER_CREDITS_URL,
-  OPENROUTER_GENERATION_LOOKUP_DELAY_MS,
-  OPENROUTER_GENERATION_LOOKUP_MAX_ATTEMPTS,
-  OPENROUTER_GENERATION_URL,
-  OPENROUTER_GENERATION_WORKER_BATCH,
-  OPENROUTER_MAX_RETRIES,
-  OPENROUTER_RETRY_DELAY_MS,
-  OPENROUTER_SITE_URL,
-  OPENROUTER_URL,
-} from './transcript.constants';
+  formatOpenRouterError,
+  tryParseModelContent,
+} from './transcript-openrouter-parse.util';
 import type {
   OpenRouterLogContext,
   TranscriptMessage,
@@ -52,11 +41,6 @@ import {
   sanitizeSignalSource,
 } from './partial-signal.util';
 import {
-  CLASSIFIER_RESPONSE_JSON_SCHEMA,
-  FILTER_PATTERN_GENERATION_JSON_SCHEMA,
-  TRANSCRIPT_RESPONSE_JSON_SCHEMA,
-} from './transcript-model-json-schemas';
-import {
   buildFilterPatternGenerationPrompt,
   buildJsonSchemaRules,
   buildSystemPrompt,
@@ -70,11 +54,11 @@ export class TranscriptService {
 
   constructor(
     private readonly settings: SettingsService,
-    private readonly appLog: AppLogService,
-    private readonly prisma: PrismaService,
-    private readonly cabinetContext: CabinetContextService,
     @Inject(forwardRef(() => BybitService))
     private readonly bybit: BybitService,
+    private readonly openRouterModelChain: TranscriptOpenRouterModelChainService,
+    private readonly openRouterBilling: TranscriptOpenRouterBillingService,
+    private readonly openRouterClient: TranscriptOpenRouterClientService,
   ) {}
 
   async getOpenrouterBalance(): Promise<{
@@ -84,61 +68,7 @@ export class TranscriptService {
     totalUsageUsd: number | null;
     error?: string;
   }> {
-    const apiKey = (await this.settings.get('OPENROUTER_API_KEY'))?.trim();
-    if (!apiKey) {
-      return {
-        ok: false,
-        balanceUsd: null,
-        totalCreditsUsd: null,
-        totalUsageUsd: null,
-        error: 'OPENROUTER_API_KEY is not configured',
-      };
-    }
-    const parseNum = (value: unknown): number | null => {
-      const n = Number(value);
-      return Number.isFinite(n) ? n : null;
-    };
-    try {
-      const res = await fetch(OPENROUTER_CREDITS_URL, {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': OPENROUTER_SITE_URL,
-          'X-Title': OPENROUTER_APP_TITLE,
-        },
-      });
-      if (!res.ok) {
-        const body = await res.text();
-        throw new Error(`HTTP ${res.status}: ${body.slice(0, 400)}`);
-      }
-      const json = (await res.json()) as {
-        data?: {
-          total_credits?: unknown;
-          total_usage?: unknown;
-        };
-      };
-      const totalCreditsUsd = parseNum(json?.data?.total_credits);
-      const totalUsageUsd = parseNum(json?.data?.total_usage);
-      const balanceUsd =
-        totalCreditsUsd != null && totalUsageUsd != null
-          ? Number((totalCreditsUsd - totalUsageUsd).toFixed(8))
-          : null;
-      return {
-        ok: true,
-        balanceUsd,
-        totalCreditsUsd,
-        totalUsageUsd,
-      };
-    } catch (e) {
-      return {
-        ok: false,
-        balanceUsd: null,
-        totalCreditsUsd: null,
-        totalUsageUsd: null,
-        error: this.formatOpenRouterError(e),
-      };
-    }
+    return this.openRouterBilling.getOpenrouterBalance();
   }
 
   private async resolveDefaultOrderUsdForParse(
@@ -155,208 +85,9 @@ export class TranscriptService {
     return this.settings.getDefaultOrderUsd(details?.totalUsd);
   }
 
-  private parseNumberOrNull(value: unknown): number | null {
-    if (typeof value === 'number') {
-      return Number.isFinite(value) ? value : null;
-    }
-    if (typeof value === 'string') {
-      const n = Number(value.trim());
-      return Number.isFinite(n) ? n : null;
-    }
-    return null;
-  }
-
-  private async fetchGenerationCostUsd(
-    apiKey: string,
-    generationId: string | undefined,
-    meta?: { operation?: string; logContext?: OpenRouterLogContext },
-    options?: { maxAttempts?: number; delayMs?: number },
-  ): Promise<number | null> {
-    const id = String(generationId ?? '').trim();
-    if (!id) return null;
-    const maxAttempts = Math.max(1, options?.maxAttempts ?? OPENROUTER_GENERATION_LOOKUP_MAX_ATTEMPTS);
-    const delayMs = Math.max(0, options?.delayMs ?? OPENROUTER_GENERATION_LOOKUP_DELAY_MS);
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      try {
-        const res = await fetch(
-          `${OPENROUTER_GENERATION_URL}?id=${encodeURIComponent(id)}`,
-          {
-            method: 'GET',
-            headers: {
-              Authorization: `Bearer ${apiKey}`,
-              'Content-Type': 'application/json',
-            },
-          },
-        );
-        if (!res.ok) {
-          const shouldRetry =
-            (res.status === 404 || res.status === 429 || res.status >= 500) &&
-            attempt < maxAttempts;
-          if (!shouldRetry) {
-            await this.appLog.append('error', 'openrouter', '↔ generation lookup failed', {
-              operation: meta?.operation,
-              generationId: id,
-              attempt,
-              maxAttempts,
-              httpStatus: res.status,
-              statusText: res.statusText,
-              logContext: meta?.logContext,
-            });
-          }
-          if (shouldRetry) {
-            await new Promise((resolve) =>
-              setTimeout(resolve, delayMs * attempt),
-            );
-            continue;
-          }
-          return null;
-        }
-        const json = (await res.json()) as {
-          data?: { total_cost?: unknown; usage?: unknown; cost?: unknown };
-        };
-        const data = json.data ?? {};
-        const cost =
-          this.parseNumberOrNull(data.total_cost) ??
-          this.parseNumberOrNull(data.cost) ??
-          this.parseNumberOrNull(data.usage);
-        if (cost != null) {
-          await this.appLog.append('info', 'openrouter', '↔ generation lookup completed', {
-            operation: meta?.operation,
-            generationId: id,
-            attempt,
-            maxAttempts,
-            httpStatus: res.status,
-            resolvedCostUsd: cost,
-            logContext: meta?.logContext,
-          });
-        }
-        return cost != null && cost >= 0 ? cost : null;
-      } catch (e) {
-        const shouldRetry = attempt < maxAttempts;
-        if (!shouldRetry) {
-          await this.appLog.append('error', 'openrouter', '↔ generation lookup exception', {
-            operation: meta?.operation,
-            generationId: id,
-            attempt,
-            maxAttempts,
-            error: this.formatOpenRouterError(e),
-            logContext: meta?.logContext,
-          });
-        }
-        if (shouldRetry) {
-          await new Promise((resolve) =>
-            setTimeout(resolve, delayMs * attempt),
-          );
-          continue;
-        }
-        return null;
-      }
-    }
-    return null;
-  }
-
-  private async upsertGenerationCostEntry(params: {
-    generationId: string;
-    operation?: string;
-    logContext?: OpenRouterLogContext;
-    costUsd?: number | null;
-    status?: 'pending' | 'resolved' | 'failed';
-    attemptsDelta?: number;
-    nextRetryAt?: Date | null;
-    lastError?: string | null;
-  }): Promise<void> {
-    const cabinetId = this.cabinetContext.getCabinetId();
-    const id = params.generationId.trim();
-    if (!id) return;
-    const existing = await this.prisma.openrouterGenerationCost.findUnique({
-      where: { generationId: id },
-      select: { attempts: true },
-    });
-    const nextAttempts =
-      (existing?.attempts ?? 0) + Math.max(0, params.attemptsDelta ?? 0);
-    await this.prisma.openrouterGenerationCost.upsert({
-      where: { generationId: id },
-      create: {
-        cabinetId,
-        generationId: id,
-        operation: params.operation ?? null,
-        chatId: params.logContext?.chatId ?? null,
-        source: params.logContext?.source ?? null,
-        ingestId: params.logContext?.ingestId ?? null,
-        costUsd: params.costUsd ?? null,
-        status: params.status ?? (params.costUsd != null ? 'resolved' : 'pending'),
-        attempts: nextAttempts,
-        nextRetryAt: params.nextRetryAt ?? null,
-        lastError: params.lastError ?? null,
-      },
-      update: {
-        ...(cabinetId ? { cabinetId } : {}),
-        operation: params.operation ?? undefined,
-        chatId: params.logContext?.chatId ?? undefined,
-        source: params.logContext?.source ?? undefined,
-        ingestId: params.logContext?.ingestId ?? undefined,
-        costUsd: params.costUsd ?? undefined,
-        status: params.status ?? undefined,
-        attempts: nextAttempts,
-        nextRetryAt: params.nextRetryAt ?? undefined,
-        lastError: params.lastError ?? undefined,
-      },
-    });
-  }
-
   @Cron(CronExpression.EVERY_MINUTE)
   async backfillOpenrouterGenerationCosts(): Promise<void> {
-    const apiKey = (await this.settings.get('OPENROUTER_API_KEY'))?.trim();
-    if (!apiKey) return;
-    const now = new Date();
-    const pending = await this.prisma.openrouterGenerationCost.findMany({
-      where: {
-        status: 'pending',
-        OR: [{ nextRetryAt: null }, { nextRetryAt: { lte: now } }],
-      },
-      orderBy: { createdAt: 'asc' },
-      take: OPENROUTER_GENERATION_WORKER_BATCH,
-    });
-    for (const row of pending) {
-      const generationId = String(row.generationId ?? '').trim();
-      if (!generationId) {
-        continue;
-      }
-      const cost = await this.fetchGenerationCostUsd(
-        apiKey,
-        generationId,
-        {
-          operation: typeof row.operation === 'string' ? row.operation : undefined,
-          logContext: {
-            chatId: typeof row.chatId === 'string' ? row.chatId : undefined,
-            source: typeof row.source === 'string' ? row.source : undefined,
-            ingestId: typeof row.ingestId === 'string' ? row.ingestId : undefined,
-            stage: 'generation-worker',
-          },
-        },
-        { maxAttempts: 1, delayMs: 0 },
-      );
-      if (cost != null) {
-        await this.upsertGenerationCostEntry({
-          generationId,
-          costUsd: cost,
-          status: 'resolved',
-          attemptsDelta: 1,
-          nextRetryAt: null,
-          lastError: null,
-        });
-        continue;
-      }
-      const attempts = Number(row.attempts ?? 0) + 1;
-      const delay = Math.min(60 * 60_000, 15_000 * 2 ** Math.min(attempts, 8));
-      await this.upsertGenerationCostEntry({
-        generationId,
-        status: attempts >= 30 ? 'failed' : 'pending',
-        attemptsDelta: 1,
-        nextRetryAt: attempts >= 30 ? null : new Date(Date.now() + delay),
-        lastError: 'generation_cost_unavailable',
-      });
-    }
+    return this.openRouterBilling.backfillOpenrouterGenerationCosts();
   }
 
   async classifyTradingMessage(
@@ -392,7 +123,7 @@ export class TranscriptService {
       throw new Error('OpenRouter недоступен: OPENROUTER_API_KEY is missing');
     }
     const model =
-      (await this.resolveModelKeyWithDefault('OPENROUTER_MODEL_TEXT')) ??
+      (await this.openRouterModelChain.resolveModelKeyWithDefault('OPENROUTER_MODEL_TEXT')) ??
       (await this.settings.get('OPENROUTER_MODEL_DEFAULT'));
     if (!model) {
       throw new Error('OpenRouter недоступен: model is missing');
@@ -411,7 +142,7 @@ export class TranscriptService {
         { role: 'system', content: classifierPrompt },
         { role: 'user', content: userInput },
       ];
-      const content = await this.callOpenRouter(
+      const content = await this.openRouterClient.callOpenRouter(
         apiKey,
         model,
         messages,
@@ -423,7 +154,7 @@ export class TranscriptService {
       );
       const responseRaw =
         typeof content === 'string' ? content : JSON.stringify(content);
-      const parsed = this.tryParseModelContent(content);
+      const parsed = tryParseModelContent(content);
       if (!parsed.ok) {
         const reason =
           parsed.result.ok === false
@@ -452,7 +183,7 @@ export class TranscriptService {
       }
       throw new Error('Classifier returned unknown kind');
     } catch (e) {
-      throw new Error(`OpenRouter classifyTradingMessage failed: ${this.formatOpenRouterError(e)}`);
+      throw new Error(`OpenRouter classifyTradingMessage failed: ${formatOpenRouterError(e)}`);
     }
   }
 
@@ -480,7 +211,7 @@ export class TranscriptService {
     }
 
     const model =
-      (await this.resolveModelKeyWithDefault('OPENROUTER_MODEL_TEXT')) ??
+      (await this.openRouterModelChain.resolveModelKeyWithDefault('OPENROUTER_MODEL_TEXT')) ??
       (await this.settings.get('OPENROUTER_MODEL_DEFAULT'));
     if (!model) {
       return { ok: false, error: 'OPENROUTER model is not configured' };
@@ -494,12 +225,12 @@ export class TranscriptService {
       { role: 'user', content: userInput },
     ];
     try {
-      const content = await this.callOpenRouter(apiKey, model, messages, {
+      const content = await this.openRouterClient.callOpenRouter(apiKey, model, messages, {
         operation: 'generateFilterPatterns',
       });
       const responseRaw =
         typeof content === 'string' ? content : JSON.stringify(content);
-      const parsed = this.tryParseModelContent(content);
+      const parsed = tryParseModelContent(content);
       if (!parsed.ok) {
         return {
           ok: false,
@@ -544,11 +275,11 @@ export class TranscriptService {
     } catch (e) {
       return {
         ok: false,
-        error: this.formatOpenRouterError(e),
+        error: formatOpenRouterError(e),
         debug: {
           model,
           request: JSON.stringify({ model, messages }),
-          response: this.formatOpenRouterError(e),
+          response: formatOpenRouterError(e),
         },
       };
     }
@@ -568,7 +299,7 @@ export class TranscriptService {
       return { ok: false, error: 'OPENROUTER_API_KEY is not configured' };
     }
 
-    const model = await this.resolveModelKeyWithDefault('OPENROUTER_MODEL_TEXT');
+    const model = await this.openRouterModelChain.resolveModelKeyWithDefault('OPENROUTER_MODEL_TEXT');
     if (!model) {
       this.logger.warn('applyCorrection: OPENROUTER model is missing');
       return {
@@ -598,7 +329,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       `applyCorrection: model=${model} commentLen=${userComment.length}`,
     );
     try {
-      const content = await this.callOpenRouter(apiKey, model, messages, {
+      const content = await this.openRouterClient.callOpenRouter(apiKey, model, messages, {
         operation: 'applyCorrection',
       });
       const ms = Date.now() - t0;
@@ -636,7 +367,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       return { ok: false, error: 'OPENROUTER_API_KEY is not configured' };
     }
 
-    const model = await this.resolveModelKeyWithDefault('OPENROUTER_MODEL_TEXT');
+    const model = await this.openRouterModelChain.resolveModelKeyWithDefault('OPENROUTER_MODEL_TEXT');
     if (!model) {
       this.logger.warn('continueSignalDraft: OPENROUTER model is missing');
       return {
@@ -670,7 +401,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       `continueSignalDraft: model=${model} turns=${userTurns.length} newLen=${newMessage.length}`,
     );
     try {
-      const content = await this.callOpenRouter(apiKey, model, messages, {
+      const content = await this.openRouterClient.callOpenRouter(apiKey, model, messages, {
         operation: 'continueSignalDraft',
       });
       const ms = Date.now() - t0;
@@ -728,7 +459,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
         : kind === 'image'
           ? 'OPENROUTER_MODEL_IMAGE'
           : 'OPENROUTER_MODEL_AUDIO';
-    const model = await this.resolveModelKeyWithDefault(modelKey);
+    const model = await this.openRouterModelChain.resolveModelKeyWithDefault(modelKey);
     if (!model) {
       this.logger.warn(`parse: ${modelKey} and OPENROUTER_MODEL_DEFAULT are missing`);
       return {
@@ -745,11 +476,11 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     this.logger.log(
       `parse: kind=${kind} model=${model} (textLen=${payload.text?.length ?? 0})`,
     );
-    const modelChain = await this.getModelChainForKind(kind, model);
+    const modelChain = await this.openRouterModelChain.getModelChainForKind(kind, model);
     const fallbackModels = modelChain.slice(1);
 
     try {
-      const content = await this.callOpenRouter(apiKey, model, messages, {
+      const content = await this.openRouterClient.callOpenRouter(apiKey, model, messages, {
         operation: 'parse',
         kind,
         fallbackModels,
@@ -773,7 +504,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       return parsed;
     } catch (e) {
       const ms = Date.now() - t0;
-      const msg = this.formatOpenRouterError(e);
+      const msg = formatOpenRouterError(e);
       this.logger.error(
         `parse: OpenRouter failed after ${ms}ms: ${msg}`,
         e instanceof Error ? e.stack : undefined,
@@ -902,182 +633,6 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
       { role: 'system', content: buildSystemPrompt(defaultOrderUsd) },
       { role: 'user', content: userContent },
     ];
-  }
-
-  private async callOpenRouter(
-    apiKey: string,
-    model: string,
-    messages: { role: string; content: unknown }[],
-    ctx: {
-      operation: string;
-      kind?: ContentKind;
-      fallbackModels?: string[];
-      logContext?: OpenRouterLogContext;
-    },
-  ): Promise<unknown> {
-    const client = new OpenRouter({
-      apiKey,
-      httpReferer: OPENROUTER_SITE_URL,
-      xTitle: OPENROUTER_APP_TITLE,
-      timeoutMs: 180_000,
-    });
-
-    const schemaName =
-      ctx.operation === 'classifyTradingMessage'
-        ? 'transcript_classifier_result'
-        : ctx.operation === 'generateFilterPatterns'
-          ? 'transcript_filter_pattern_generation_result'
-          : 'transcript_signal_result';
-    const schema =
-      ctx.operation === 'classifyTradingMessage'
-        ? CLASSIFIER_RESPONSE_JSON_SCHEMA
-        : ctx.operation === 'generateFilterPatterns'
-          ? FILTER_PATTERN_GENERATION_JSON_SCHEMA
-          : TRANSCRIPT_RESPONSE_JSON_SCHEMA;
-    const responseFormat = {
-      type: 'json_schema' as const,
-      jsonSchema: {
-        name: schemaName,
-        strict: true,
-        schema,
-      },
-    };
-
-    const requestBody = {
-      model,
-      models:
-        ctx.fallbackModels && ctx.fallbackModels.length > 0
-          ? [model, ...ctx.fallbackModels]
-          : undefined,
-      messages: sanitizeForOpenRouterLog(messages) as unknown[],
-      responseFormat,
-    };
-    await this.appLog.append('info', 'openrouter', `→ ${ctx.operation}`, {
-      url: OPENROUTER_URL,
-      method: 'POST',
-      operation: ctx.operation,
-      contentKind: ctx.kind,
-      /** Тело запроса (как уходит к OpenRouter, без секрета — ключ только в заголовке Authorization, не логируем) */
-      requestBody,
-      logContext: ctx.logContext,
-    });
-
-    try {
-      let res: unknown;
-      let lastError: unknown;
-      for (let attempt = 1; attempt <= OPENROUTER_MAX_RETRIES; attempt += 1) {
-        try {
-          res = await client.chat.send({
-            httpReferer: OPENROUTER_SITE_URL,
-            xTitle: OPENROUTER_APP_TITLE,
-            chatGenerationParams: {
-              model,
-              models:
-                ctx.fallbackModels && ctx.fallbackModels.length > 0
-                  ? [model, ...ctx.fallbackModels]
-                  : undefined,
-              messages: messages as never,
-              responseFormat,
-              stream: false,
-            },
-          });
-          break;
-        } catch (attemptError) {
-          lastError = attemptError;
-          const errText = this.formatOpenRouterError(attemptError);
-          this.logger.warn(
-            `OpenRouter ${ctx.operation} attempt ${attempt}/${OPENROUTER_MAX_RETRIES} failed: ${errText}`,
-          );
-          if (attempt < OPENROUTER_MAX_RETRIES) {
-            await new Promise((resolve) =>
-              setTimeout(resolve, OPENROUTER_RETRY_DELAY_MS),
-            );
-          }
-        }
-      }
-      if (res == null) {
-        throw (
-          lastError ??
-          new Error(
-            `OpenRouter request failed after ${OPENROUTER_MAX_RETRIES} attempts`,
-          )
-        );
-      }
-      const typedRes = res as {
-        id?: string;
-        model?: string;
-        usage?: unknown;
-        choices?: Array<{ message?: { content?: unknown } }>;
-      };
-      const usageRecord =
-        typedRes.usage && typeof typedRes.usage === 'object' && !Array.isArray(typedRes.usage)
-          ? (typedRes.usage as Record<string, unknown>)
-          : undefined;
-      const generationId = String(typedRes.id ?? '').trim();
-      if (generationId) {
-        await this.upsertGenerationCostEntry({
-          generationId,
-          operation: ctx.operation,
-          logContext: ctx.logContext,
-          status: 'pending',
-          attemptsDelta: 0,
-          nextRetryAt: new Date(),
-        });
-      }
-      const resolvedCostUsd = null;
-
-      const rawContent = typedRes.choices?.[0]?.message?.content;
-      const responseContent =
-        typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent);
-
-      await this.appLog.append('info', 'openrouter', `← ${ctx.operation}`, {
-        operation: ctx.operation,
-        httpStatus: 200,
-        /** Полный текст ответа ассистента (без обрезки) */
-        assistantContent: responseContent,
-        /** Полный объект ответа OpenRouter после sanitize (без секретов) */
-        openrouterResponse: sanitizeForOpenRouterLog(res),
-        /** Метаданные ответа OpenRouter (без дублирования полного текста) */
-        responseMeta: {
-          id: typedRes.id,
-          model: typedRes.model,
-          usage: usageRecord,
-          costUsd: resolvedCostUsd ?? undefined,
-          costSource: undefined,
-          generationCostUsd: undefined,
-          choicesCount: typedRes.choices?.length ?? 0,
-        },
-        logContext: ctx.logContext,
-      });
-
-      if (rawContent == null) {
-        throw new Error('Empty response from OpenRouter');
-      }
-      return rawContent;
-    } catch (e) {
-      const errObj = e as {
-        status?: number;
-        statusCode?: number;
-        error?: unknown;
-        cause?: unknown;
-        body?: string;
-      };
-      await this.appLog.append(
-        'error',
-        'openrouter',
-        `✗ ${ctx.operation} failed`,
-        {
-          operation: ctx.operation,
-          error: this.formatOpenRouterError(e),
-          retries: OPENROUTER_MAX_RETRIES,
-          status: errObj.status ?? errObj.statusCode,
-          responseBody: sanitizeForOpenRouterLog(
-            errObj.error ?? errObj.cause ?? errObj.body,
-          ),
-        },
-      );
-      throw e;
-    }
   }
 
   /**
@@ -1351,7 +906,7 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     leverageOpts: LeverageFieldOptions,
     defaultOrderUsd: number,
   ): Promise<TranscriptResult> {
-    const parsed = this.tryParseModelContent(content);
+    const parsed = tryParseModelContent(content);
     if (!parsed.ok) {
       return parsed.result;
     }
@@ -1405,120 +960,6 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     }
     const partial = normalizePartialSignal(root.signal);
     return this.toIncomplete(partial, leverageOpts);
-  }
-
-  private tryParseModelContent(
-    content: unknown,
-  ): { ok: true; value: unknown } | { ok: false; result: TranscriptResult } {
-    if (content != null && typeof content === 'object' && !Array.isArray(content)) {
-      return { ok: true, value: content };
-    }
-
-    if (Array.isArray(content)) {
-      const text = content
-        .map((part) => {
-          if (typeof part === 'string') return part;
-          if (!part || typeof part !== 'object') return '';
-          const p = part as Record<string, unknown>;
-          return typeof p.text === 'string' ? p.text : '';
-        })
-        .join('\n')
-        .trim();
-      if (text.length === 0) {
-        return { ok: false, result: { ok: false, error: 'Model returned empty array content' } };
-      }
-      return this.tryParseModelContent(text);
-    }
-
-    if (typeof content !== 'string') {
-      return {
-        ok: false,
-        result: {
-          ok: false,
-          error: 'Model returned unsupported content type',
-          details: String(content),
-        },
-      };
-    }
-
-    const jsonStr = this.extractJson(content);
-    try {
-      const json = JSON.parse(jsonStr) as unknown;
-      return { ok: true, value: json };
-    } catch {
-      return {
-        ok: false,
-        result: { ok: false, error: 'Model did not return valid JSON', details: content },
-      };
-    }
-  }
-
-  private extractJson(content: string): string {
-    const fence = content.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    if (fence?.[1]) {
-      return fence[1].trim();
-    }
-    const start = content.indexOf('{');
-    const end = content.lastIndexOf('}');
-    if (start >= 0 && end > start) {
-      return content.slice(start, end + 1);
-    }
-    return content.trim();
-  }
-
-  private async getModelChainForKind(
-    kind: ContentKind,
-    primaryModel: string,
-  ): Promise<string[]> {
-    const chain: string[] = [primaryModel];
-    const fallbackKey =
-      kind === 'image'
-        ? 'OPENROUTER_MODEL_IMAGE_FALLBACK_1'
-        : kind === 'audio'
-          ? 'OPENROUTER_MODEL_AUDIO_FALLBACK_1'
-          : 'OPENROUTER_MODEL_TEXT_FALLBACK_1';
-    const fallbackModel = this.normalizeModelName(await this.settings.get(fallbackKey));
-    if (fallbackModel) {
-      chain.push(fallbackModel);
-    }
-    const deduped: string[] = [];
-    for (const m of chain) {
-      if (!deduped.includes(m)) {
-        deduped.push(m);
-      }
-    }
-    return deduped;
-  }
-
-  private normalizeModelName(value: string | undefined): string | undefined {
-    if (!value) return undefined;
-    const trimmed = value.trim();
-    return trimmed.length > 0 ? trimmed : undefined;
-  }
-
-  private async resolveModelKeyWithDefault(
-    modelKey: string,
-  ): Promise<string | undefined> {
-    const specific = this.normalizeModelName(await this.settings.get(modelKey));
-    if (specific) {
-      return specific;
-    }
-    return this.normalizeModelName(await this.settings.get('OPENROUTER_MODEL_DEFAULT'));
-  }
-
-  private formatOpenRouterError(error: unknown): string {
-    if (error == null) {
-      return 'Unknown OpenRouter error';
-    }
-    if (error instanceof Error) {
-      const body = (error as { body?: unknown }).body;
-      if (typeof body === 'string' && body.trim().length > 0) {
-        const trimmed = body.trim();
-        return `${error.message} | body: ${trimmed.length > 1200 ? `${trimmed.slice(0, 1200)}...` : trimmed}`;
-      }
-      return error.message;
-    }
-    return String(error);
   }
 
 }

@@ -576,6 +576,18 @@
 - Docs updated: `06-progress-tracker.md`, `docs/refactor-decomposition-large-files-plan.md`.
 - Linked risks (`SEC-###`): N/A
 
+### AUD-048
+
+- Status: `done`
+- Scope: Пакет по плану декомпозиции (бэклог): ре-аудит строк в плане; userbot — перенос ingest link/reread на pipeline; transcript — волна 2 OpenRouter (parse util, model chain, billing, client); web — константы/утилиты settings и filters, util для URL userbot/filters; P2 — `orders-stats.util`, `vk-bot.constants`.
+- Files: `telegram-userbot.service.ts`, `telegram-userbot-ingest-pipeline.service.ts`, `transcript.service.ts`, `transcript.module.ts`, `transcript-openrouter-parse.util.ts`, `transcript-openrouter-model-chain.service.ts`, `transcript-openrouter-billing.service.ts`, `transcript-openrouter-client.service.ts`, `apps/web/app/settings/settings-page.constants.ts`, `settings-page.util.ts`, `page.tsx`, `telegram-userbot-page.util.ts`, `telegram-userbot/page.tsx`, `filters-page.types.ts`, `filters-page.constants.ts`, `filters-page.util.ts`, `filters/page.tsx`, `orders.service.ts`, `orders-stats.util.ts`, `vk-bot.service.ts`, `vk-bot.constants.ts`, `docs/refactor-decomposition-large-files-plan.md`, `06-progress-tracker.md`.
+- Findings: фасад userbot снижен ниже ~800 строк; pipeline вырос за счёт переноса ручного reread; `TranscriptModule` импортирует `CabinetModule` для биллинга generation cost.
+- Changes: поведение API и публичные методы модулей без изменений контрактов (`TelegramUserbotService`, `TranscriptService`); web — только вынесение данных/хелперов.
+- Decomposition notes: OpenRouter — отдельные `@Injectable()` + чистый `transcript-openrouter-parse.util.ts`; web — `*.constants.ts` / `*.util.ts` / `*.types.ts` рядом со страницей.
+- Manual verification: `npm run build -w apps/api` и `npm run build -w apps/web` passed; смоук Telegram/VK/OpenRouter в среде агента не выполнялся.
+- Docs updated: перечисленные `docs/*`, этот трекер.
+- Linked risks (`SEC-###`): N/A
+
 ### AUD-042
 
 - Status: `done`

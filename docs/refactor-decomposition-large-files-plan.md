@@ -21,26 +21,26 @@
 
 | Строк | Приоритет | Файл | Слой |
 |------:|-------------|------|------|
-| ~875 | P0 | `apps/api/src/modules/telegram-userbot/telegram-userbot.service.ts` | API (фасад: wiring, HTTP-делегаты, inbound, polling hooks) |
-| ~1236 | P1 | `apps/api/src/modules/telegram-userbot/ingest/telegram-userbot-ingest-pipeline.service.ts` | API (оркестратор `processIngestRecord` + classify/balance/notify; lookup/reply/watch/pair-cooldown — отдельные `ingest/*-service.ts`, см. AUD-044) |
-| ~1241 | P1 | `apps/api/src/modules/telegram/services/telegram.service.ts` (+ `telegram/index.ts`, см. §2) | API (фасад после волн W1–W6; см. AUD-045, AUD-046, §2) |
-| ~1524 | P1 | `apps/api/src/modules/transcript/transcript.service.ts` | API (часть промптов/JSON-схем вынесена в `transcript-prompt-builders.util.ts`, `transcript-model-json-schemas.ts`; см. AUD-047, §4) |
-| 1663 | P1 | `apps/web/app/settings/page.tsx` | Web |
-| 1626 | P1 | `apps/web/app/telegram-userbot/page.tsx` | Web |
+| ~635 | P0 | `apps/api/src/modules/telegram-userbot/telegram-userbot.service.ts` | API (фасад; ingest link/reread → pipeline, см. AUD-048) |
+| ~1491 | P1 | `apps/api/src/modules/telegram-userbot/ingest/telegram-userbot-ingest-pipeline.service.ts` | API (оркестратор `processIngestRecord` + classify/balance/notify; lookup/reply/watch/pair-cooldown — отдельные `ingest/*-service.ts`, см. AUD-044) |
+| ~1235 | P1 | `apps/api/src/modules/telegram/services/telegram.service.ts` (+ `telegram/index.ts`, см. §2) | API (фасад после волн W1–W6; см. AUD-045, AUD-046, §2) |
+| ~965 | P1 | `apps/api/src/modules/transcript/transcript.service.ts` | API (промпты/схемы — util; OpenRouter chain/billing/client — см. AUD-048, §4) |
+| ~1185 | P1 | `apps/web/app/settings/page.tsx` | Web (`settings-page.constants.ts`, `settings-page.util.ts`) |
+| ~1622 | P1 | `apps/web/app/telegram-userbot/page.tsx` | Web (`telegram-userbot-page.util.ts` — URL/fetch) |
 | ~540 | — | `apps/api/src/modules/bybit/bybit.service.ts` | API (фасад после декомпозиции; см. §3) |
-| 1388 | P2 | `apps/api/src/modules/vk/vk-bot.service.ts` | API |
-| 1346 | P2 | `apps/api/src/modules/orders/orders.service.ts` | API |
-| 962 | P3 | `apps/web/app/filters/page.tsx` | Web |
+| ~1386 | P2 | `apps/api/src/modules/vk/vk-bot.service.ts` | API (`vk-bot.constants.ts` — TTL внешнего confirm) |
+| ~1341 | P2 | `apps/api/src/modules/orders/orders.service.ts` | API (`orders-stats.util.ts` — winrate/loss) |
+| ~863 | P3 | `apps/web/app/filters/page.tsx` | Web (`filters-page.types.ts`, `filters-page.constants.ts`, `filters-page.util.ts`) |
 
 **В `packages/shared` и остальных путях** при том же сканировании файлов >800 **не обнаружено** (если появятся — добавить строкой в таблицу при следующем аудите).
 
-Подмножество **>2000 строк** в `apps/api` на момент обновления — **ingest-pipeline** (`telegram-userbot-ingest-pipeline.service.ts`, **~1236** строк, 2026-05); фасад userbot ~875 строк; `telegram.service.ts` после AUD-046 — **~1241** строк (ниже порога 2000). Bybit-фасад из инвентаря >800 исключён как уже приведённый к целевому размеру. Для крупных кандидатов — развёрнутые секции 1–2; §3 — статус Bybit-модуля.
+Подмножество **>2000 строк** в `apps/api/src` на момент ре-аудита (2026-05): **нет** — крупнейшие файлы ниже 2000 (`ingest-pipeline` ~1491, `telegram.service` ~1235, `transcript.service` ~965). Фасад userbot **~635** строк (цель &lt;~800 достигнута). Bybit-фасад из инвентаря >800 исключён как уже приведённый к целевому размеру. Для кандидатов >800 — развёрнутые секции 1–2; §3 — статус Bybit-модуля.
 
 ---
 
 ## 1. `telegram-userbot.service.ts` (P0)
 
-**Статус (код):** фасад `telegram-userbot.service.ts` **~875 строк** (`wc -l`, 2026-05); цель «&lt; ~800 строк» для фасада **почти достигнута**. Оркестратор ingest — `ingest/telegram-userbot-ingest-pipeline.service.ts` (**~1236 строк**); рядом `ingest/telegram-userbot-ingest-signal-lookup.service.ts`, `ingest/telegram-userbot-ingest-signal-reply.service.ts`, `ingest/telegram-userbot-ingest-levels-watch.service.ts`, `ingest/telegram-userbot-ingest-pair-direction.service.ts` (AUD-044). Сканирование/poll-тик и метрики дня — в `scan/telegram-userbot-scan.service.ts` (**~314 строк**).
+**Статус (код):** фасад `telegram-userbot.service.ts` **~635 строк** (AUD-048); цель «&lt; ~800 строк» для фасада **достигнута**. Оркестратор ingest — `ingest/telegram-userbot-ingest-pipeline.service.ts` (**~1491 строка**; туда перенесены `listIngestLinkCandidates` / `rereadIngestMessage` / `rereadAllIngestMessages`); рядом `ingest/telegram-userbot-ingest-signal-lookup.service.ts`, `ingest/telegram-userbot-ingest-signal-reply.service.ts`, `ingest/telegram-userbot-ingest-levels-watch.service.ts`, `ingest/telegram-userbot-ingest-pair-direction.service.ts` (AUD-044). Сканирование/poll-тик и метрики дня — в `scan/telegram-userbot-scan.service.ts` (**~314 строк**).
 
 **Рядом с фасадом (после волн):** `utils/`, `openrouter/`, `client/`, `ingest/` (`TelegramUserbotIngestService` + очередь; `TelegramUserbotIngestPipelineService` — `processIngestRecord` и цепочка), `scan/` (`TelegramUserbotScanService`), `polling/`, `filters/`, `settings/`, `mirror/`; плюс `telegram-userbot.constants.ts`, `telegram-userbot.types.ts`, `telegram-userbot-source.util.ts`, `userbot-signal-hash.*`.
 
@@ -105,7 +105,9 @@
 
 Крупный сервис расшифровки/LLM. **Сделано (AUD-047, первая волна):** строгие JSON-схемы для OpenRouter — `transcript-model-json-schemas.ts`; текстовые промпты и правила разбора/классификатора/паттернов — `transcript-prompt-builders.util.ts` (`buildJsonSchemaRules`, `buildSystemPrompt`, `normalizeOpenRouterAudioFormat`, `buildTradingMessageClassifierPrompt`, `buildFilterPatternGenerationPrompt`). Фасад по-прежнему `TranscriptService`.
 
-**Остаётся:** слой вызовов OpenRouter (`callOpenRouter`, ретраи, логирование) и нормализация ответов (`parseModelContent`, `tryParseModelContent`, …) — кандидаты на `transcript-openrouter-*.service.ts` или узкие `*.util.ts` без смены публичного API; при необходимости расширить `transcript.types.ts`.
+**Сделано (AUD-048, вторая волна):** `transcript-openrouter-parse.util.ts` (парсинг/ошибки), `transcript-openrouter-model-chain.service.ts`, `transcript-openrouter-billing.service.ts` (баланс, generation cost, backfill), `transcript-openrouter-client.service.ts` (`callOpenRouter`); фасад **~965 строк**, публичный API — по-прежнему `TranscriptService`.
+
+**Остаётся (низкий приоритет):** дальнейшее сжатие фасада вокруг `parse` / `parseModelContent` / leverage без дублирования DI.
 
 **DoD:** `npm run -w apps/api build`; смоук: один проход расшифровки тестового сообщения.
 
@@ -113,7 +115,7 @@
 
 ## 5. `settings/page.tsx` и 6. `telegram-userbot/page.tsx` (P1)
 
-Страницы настроек с большим количеством секций и форм. **Направления:** разбить на компоненты `app/settings/*` или `components/settings/*` по секциям; вынести типы форм и константы ключей; общие куски (карточки, поля, вызовы API) — в переиспользуемые компоненты/hooks.
+Страницы настроек с большим количеством секций и форм. **Сделано (AUD-048):** константы ключей/секций и утилиты сохранения — `settings-page.constants.ts`, `settings-page.util.ts`; на странице остаётся JSX и состояние. **Дальше:** при росте — компоненты секций в `app/settings/_components/*`.
 
 **DoD:** `npm run -w apps/web build`; ручная проверка: сохранение настроек и отображение ошибок API.
 

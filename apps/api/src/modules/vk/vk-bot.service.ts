@@ -43,6 +43,7 @@ import {
 } from './vk-bot-format.util';
 import { VkApiClient } from './vk-api.client';
 import { vkInlineKeyboard, vkPayload } from './vk-keyboard.util';
+import { VK_BOT_EXTERNAL_CONFIRM_TTL_MS } from './vk-bot.constants';
 
 type DraftPhase = 'collecting' | 'ready' | 'awaiting_source';
 
@@ -71,9 +72,6 @@ type ExternalConfirmationRequest = {
   createdAt: number;
   onResult?: (result: ExternalConfirmationResult) => Promise<void> | void;
 };
-
-const DRAFT_TTL_MS = 45 * 60_000;
-const EXTERNAL_CONFIRM_TTL_MS = 20 * 60_000;
 
 @Injectable()
 export class VkBotService implements OnModuleInit, OnModuleDestroy {
@@ -128,7 +126,7 @@ export class VkBotService implements OnModuleInit, OnModuleDestroy {
         }
         let removed = 0;
         for (const [id, req] of this.vkExternalConfirmations.entries()) {
-          if (now - (req.createdAt ?? 0) > EXTERNAL_CONFIRM_TTL_MS) {
+          if (now - (req.createdAt ?? 0) > VK_BOT_EXTERNAL_CONFIRM_TTL_MS) {
             this.vkExternalConfirmations.delete(id);
             removed += 1;
           }

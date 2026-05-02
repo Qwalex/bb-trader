@@ -4,8 +4,10 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 
 import { EntrySizingControl } from '../components/EntrySizingControl';
 import { UserbotMessageCard } from '../components/UserbotMessageCard';
-import { getApiAuthHeaders, getApiBase, withCabinetQuery } from '../../lib/api';
-import { readActiveCabinetIdClient } from '../../lib/cabinet-client.util';
+import {
+  buildTelegramUserbotApiUrl,
+  telegramUserbotApiFetch,
+} from './telegram-userbot-page.util';
 import type { EntrySizingMode } from '../../lib/entry-sizing';
 import { parseStoredEntry, serializeEntry } from '../../lib/entry-sizing';
 import type {
@@ -16,14 +18,8 @@ import type {
 } from './telegram-userbot.types';
 
 export default function TelegramUserbotPage() {
-  const buildApiUrl = (path: string): string =>
-    `${getApiBase()}${withCabinetQuery(path, readActiveCabinetIdClient())}`;
-  const apiFetch = (path: string, init?: RequestInit) =>
-    fetch(buildApiUrl(path), {
-      ...init,
-      headers: getApiAuthHeaders(init?.headers),
-      cache: 'no-store',
-    });
+  const buildApiUrl = buildTelegramUserbotApiUrl;
+  const apiFetch = telegramUserbotApiFetch;
   const [status, setStatus] = useState<BotStatus | null>(null);
   const [chats, setChats] = useState<UserbotChat[]>([]);
   const [metrics, setMetrics] = useState<TodayMetrics | null>(null);

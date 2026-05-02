@@ -29,7 +29,6 @@ import { parseSignalPriceArrayJson } from './userbot-signal-hash.util';
 import {
   CLOSE_REOPEN_COOLDOWN_MS,
   CRITICAL_NOTIFY_URL,
-  USERBOT_INLINE_TEXT_MAX_CHARS,
   USERBOT_MIN_BALANCE_USD_DEFAULT,
   USERBOT_POLL_INTERVAL_MS,
   USERBOT_SIGNAL_LEVELS_EDIT_WATCH_POLL_MS,
@@ -402,49 +401,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       createdAt: string;
     }>;
   }> {
-    const limit = Math.min(Math.max(options.limit ?? 50, 1), 500);
-    const chatIdFilter = options.chatId?.trim();
-
-    const rows = await this.prisma.tgUserbotIngest.findMany({
-      where: chatIdFilter ? { chatId: chatIdFilter } : {},
-      orderBy: { createdAt: 'desc' },
-      take: limit,
-      select: {
-        id: true,
-        chatId: true,
-        messageId: true,
-        text: true,
-        classification: true,
-        status: true,
-        createdAt: true,
-      },
-    });
-
-    const chatIds = Array.from(new Set(rows.map((r) => r.chatId)));
-    const chats = await this.prisma.tgUserbotChat.findMany({
-      where: { chatId: { in: chatIds } },
-      select: { chatId: true, title: true },
-    });
-    const titleByChat = new Map(chats.map((c) => [c.chatId, c.title]));
-
-    const preview = (t: string | null | undefined): string => {
-      const s = (t ?? '').replace(/\s+/g, ' ').trim();
-      if (s.length <= 220) return s;
-      return `${s.slice(0, 220)}…`;
-    };
-
-    return {
-      items: rows.map((r) => ({
-        ingestId: r.id,
-        chatId: r.chatId,
-        messageId: r.messageId,
-        chatTitle: titleByChat.get(r.chatId) ?? r.chatId,
-        textPreview: preview(r.text),
-        classification: r.classification,
-        status: r.status,
-        createdAt: r.createdAt.toISOString(),
-      })),
-    };
+    return this.userbotPipeline.listIngestLinkCandidates(options);
   }
 
   async listFilterGroups() {
@@ -497,202 +454,11 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   }
 
   async rereadIngestMessage(ingestId: string) {
-    const ingest = await this.prisma.tgUserbotIngest.findUnique({
-      where: { id: ingestId },
-      select: {
-        id: true,
-        chatId: true,
-        messageId: true,
-        text: true,
-        signalHash: true,
-        status: true,
-        createdAt: true,
-      },
-    });
-    if (!ingest) {
-      return { ok: false, error: 'Сообщение не найдено' };
-    }
-    const fresh = await this.userbotPipeline.fetchChatMessageMeta(ingest.chatId, ingest.messageId);
-    let text = readString(ingest.text) ?? '';
-    let meta: { replyToMessageId?: string; signalExternalId?: string } | undefined;
-
-    if (!fresh.error && fresh.text?.trim()) {
-      text = fresh.text.trim();
-      meta = {
-        replyToMessageId: fresh.replyToMessageId,
-        signalExternalId: extractSignalExternalId(text),
-      };
-      await this.prisma.tgUserbotIngest.update({
-        where: { id: ingest.id },
-        data: { text },
-      });
-    } else if (fresh.error) {
-      this.logger.warn(
-        `rereadIngestMessage: не удалось загрузить из Telegram (${fresh.error}), используется текст из БД`,
-      );
-    }
-
-    if (!text.trim()) {
-      return { ok: false, error: 'В сообщении нет текстового содержимого для перечитывания' };
-    }
-    const trimmed = text.trim();
-    if (!meta) {
-      meta = { signalExternalId: extractSignalExternalId(trimmed) };
-    }
-
-    const cabinetIds = await this.cabinets.listEnabledCabinetIdsForChat(ingest.chatId);
-    for (const cabinetId of cabinetIds) {
-      const route = await this.prisma.cabinetIngestRoute.upsert({
-        where: { cabinetId_ingestId: { cabinetId, ingestId: ingest.id } },
-        create: {
-          cabinetId,
-          ingestId: ingest.id,
-          chatId: ingest.chatId,
-          classification: 'other',
-          status: 'queued',
-        },
-        update: {
-          chatId: ingest.chatId,
-          classification: 'other',
-          status: 'queued',
-          error: null,
-          aiRequest: null,
-          aiResponse: null,
-        },
-        select: { id: true, cabinetId: true },
-      });
-      this.ingest.enqueueIngestJob({
-        ingest: {
-          id: ingest.id,
-          chatId: ingest.chatId,
-          messageId: ingest.messageId,
-          signalHash: null,
-          status: ingest.status,
-        },
-        text: trimmed.length > USERBOT_INLINE_TEXT_MAX_CHARS ? null : trimmed,
-        textLen: trimmed.length,
-        meta,
-        options: {
-          enforceBalanceGuard: true,
-          source: 'manual-reread',
-          ingestCreatedAt: ingest.createdAt,
-        },
-        route,
-      });
-    }
-    return { ok: true };
+    return this.userbotPipeline.rereadIngestMessage(ingestId);
   }
 
   async rereadAllIngestMessages(limitRaw?: number) {
-    const limit =
-      typeof limitRaw === 'number' && Number.isFinite(limitRaw)
-        ? Math.max(1, Math.min(500, Math.floor(limitRaw)))
-        : 80;
-    const rows = await this.prisma.tgUserbotIngest.findMany({
-      orderBy: { createdAt: 'desc' },
-      take: limit,
-      select: {
-        id: true,
-        chatId: true,
-        messageId: true,
-        text: true,
-        signalHash: true,
-        status: true,
-        createdAt: true,
-      },
-    });
-    let processed = 0;
-    let skippedWithoutText = 0;
-    let failed = 0;
-    const errors: Array<{ ingestId: string; error: string }> = [];
-
-    for (const row of rows) {
-      const fresh = await this.userbotPipeline.fetchChatMessageMeta(row.chatId, row.messageId);
-      let text = readString(row.text) ?? '';
-      let meta: { replyToMessageId?: string; signalExternalId?: string } | undefined;
-
-      if (!fresh.error && fresh.text?.trim()) {
-        text = fresh.text.trim();
-        meta = {
-          replyToMessageId: fresh.replyToMessageId,
-          signalExternalId: extractSignalExternalId(text),
-        };
-        await this.prisma.tgUserbotIngest.update({
-          where: { id: row.id },
-          data: { text },
-        });
-      } else if (fresh.error) {
-        this.logger.warn(
-          `rereadAllIngestMessages: chat=${row.chatId} msg=${row.messageId} telegram=${fresh.error}, БД`,
-        );
-      }
-
-      if (!text.trim()) {
-        skippedWithoutText += 1;
-        continue;
-      }
-      const trimmed = text.trim();
-      if (!meta) {
-        meta = { signalExternalId: extractSignalExternalId(trimmed) };
-      }
-      try {
-        const cabinetIds = await this.cabinets.listEnabledCabinetIdsForChat(row.chatId);
-        for (const cabinetId of cabinetIds) {
-          const route = await this.prisma.cabinetIngestRoute.upsert({
-            where: { cabinetId_ingestId: { cabinetId, ingestId: row.id } },
-            create: {
-              cabinetId,
-              ingestId: row.id,
-              chatId: row.chatId,
-              classification: 'other',
-              status: 'queued',
-            },
-            update: {
-              chatId: row.chatId,
-              classification: 'other',
-              status: 'queued',
-              error: null,
-              aiRequest: null,
-              aiResponse: null,
-            },
-            select: { id: true, cabinetId: true },
-          });
-          this.ingest.enqueueIngestJob({
-            ingest: {
-              id: row.id,
-              chatId: row.chatId,
-              messageId: row.messageId,
-              signalHash: null,
-              status: row.status,
-            },
-            text: trimmed.length > USERBOT_INLINE_TEXT_MAX_CHARS ? null : trimmed,
-            textLen: trimmed.length,
-            meta,
-            options: {
-              enforceBalanceGuard: true,
-              source: 'manual-reread-all',
-              ingestCreatedAt: row.createdAt,
-            },
-            route,
-          });
-        }
-        processed += 1;
-      } catch (e) {
-        failed += 1;
-        errors.push({ ingestId: row.id, error: formatError(e) });
-      }
-    }
-
-    return {
-      ok: true,
-      total: rows.length,
-      limit,
-      processed,
-      skippedWithoutText,
-      failed,
-      errors: errors.slice(0, 20),
-      hasMore: rows.length >= limit,
-    };
+    return this.userbotPipeline.rereadAllIngestMessages(limitRaw);
   }
 
   private async startPollingLoop() {
