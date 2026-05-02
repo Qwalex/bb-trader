@@ -1,6 +1,6 @@
 # План декомпозиции `telegram-userbot.service.ts`
 
-**Цель:** довести модуль до тонкого фасада + доменных сервисов по образцу `apps/api/src/modules/bybit/`, сохранив поведение и публичный API `TelegramUserbotService` (`TelegramUserbotController`). Актуальные размеры (`wc -l`): фасад `telegram-userbot.service.ts` **~875**, ingest-пайплайн `ingest/telegram-userbot-ingest-pipeline.service.ts` **~2420**, скан `scan/telegram-userbot-scan.service.ts` **~314** (ориентиры на дату обновления документа).
+**Цель:** довести модуль до тонкого фасада + доменных сервисов по образцу `apps/api/src/modules/bybit/`, сохранив поведение и публичный API `TelegramUserbotService` (`TelegramUserbotController`). Актуальные размеры (`wc -l`): фасад `telegram-userbot.service.ts` **~875**, оркестратор ingest `ingest/telegram-userbot-ingest-pipeline.service.ts` **~1236**, рядом lookup/reply/levels-watch/pair-direction в `ingest/*-ingest-*.service.ts`, скан `scan/telegram-userbot-scan.service.ts` **~314** (ориентиры на дату обновления документа).
 
 **Ограничения проекта:** behavior-preserving рефакторинг; типы в `*.types.ts`, утилиты в `*.util.ts`; без искусственного дробления; автотесты не добавляем — DoD: `npm run build` в `apps/api` + ручной smoke.
 
@@ -33,7 +33,10 @@
 |---------|------------|
 | Фасад `TelegramUserbotService` | `telegram-userbot.service.ts` — lifecycle, HTTP-методы, делегаты в `settings` / `filters` / `mirror` / `scan`, `handleIncomingMessage`, polling hooks, `refreshEnabledChatsCache` |
 | Очередь ingest, `ingestChatMessage` | `ingest/telegram-userbot-ingest.service.ts` |
-| `processIngestRecord`, reply/close/reentry/result, lookup, classify, balance guard snapshot, edit-watch | `ingest/telegram-userbot-ingest-pipeline.service.ts` |
+| `processIngestRecord`, classify, balance guard, уведомления об ошибках, pair-cooldown wait | `ingest/telegram-userbot-ingest-pipeline.service.ts` + `ingest/telegram-userbot-ingest-pair-direction.service.ts` |
+| Reply (reentry/close/result без входа), `signalFromDb` | `ingest/telegram-userbot-ingest-signal-reply.service.ts` |
+| Lookup по reply / external id, цепочка root, `fetchChatMessageMeta` | `ingest/telegram-userbot-ingest-signal-lookup.service.ts` |
+| Edit-watch после `signal_levels_validation` | `ingest/telegram-userbot-ingest-levels-watch.service.ts` |
 | `scanTodayMessagesCore`, `pollTick`, `getTodayMetrics`, курсор last-seen, окно recency | `scan/telegram-userbot-scan.service.ts` |
 | MTProto / QR / сессия | `client/telegram-userbot-client.service.ts` |
 | OpenRouter spend | `openrouter/telegram-userbot-openrouter.service.ts` |

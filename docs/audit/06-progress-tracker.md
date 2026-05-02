@@ -528,6 +528,18 @@
 - Docs updated: перечисленные `docs/*`, этот трекер.
 - Linked risks (`SEC-###`): N/A
 
+### AUD-044
+
+- Status: `done`
+- Scope: Декомпозиция `TelegramUserbotIngestPipelineService` по плану ingest (levels-watch → signal-lookup → signal-reply; общее состояние pair/cooldown в отдельном сервисе без циклов с фасадом).
+- Files: `apps/api/src/modules/telegram-userbot/ingest/telegram-userbot-ingest-levels-watch.service.ts`, `telegram-userbot-ingest-signal-lookup.service.ts`, `telegram-userbot-ingest-signal-reply.service.ts`, `telegram-userbot-ingest-pair-direction.service.ts`, `telegram-userbot-ingest-pipeline.service.ts`, `telegram-userbot.module.ts`, `docs/refactor-decomposition-large-files-plan.md`, `docs/telegram-userbot-decomposition-plan.md`, `docs/audit/06-progress-tracker.md`.
+- Findings: публичный контракт фасада не менялся (`processIngestRecord`, `getBalanceGuardSnapshot`, `fetchChatMessageMeta`, `clearAllSignalLevelsValidationWatches` остаются на pipeline с делегированием где нужно); `resolveRootSignalSourceMessageId` публичен на lookup для зеркала close/result.
+- Changes: вынесены watch / lookup+fetch / reply-ветки / pair-direction; выровнены отступы `private` у методов оркестратора (колонка 0 → два пробела).
+- Decomposition notes: `TelegramUserbotIngestPairDirectionService` добавлен для общих мап transition/cooldown между pipeline и reply (поведение как до выноса методов из одного класса).
+- Manual verification: `npm run build` в `apps/api` passed; смоук ingest/reply/watch в живом Telegram не выполнялся в среде агента.
+- Docs updated: перечисленные `docs/*`, этот трекер.
+- Linked risks (`SEC-###`): N/A
+
 ### AUD-042
 
 - Status: `done`

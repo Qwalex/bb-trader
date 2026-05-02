@@ -22,7 +22,7 @@
 | Строк | Приоритет | Файл | Слой |
 |------:|-------------|------|------|
 | ~875 | P0 | `apps/api/src/modules/telegram-userbot/telegram-userbot.service.ts` | API (фасад: wiring, HTTP-делегаты, inbound, polling hooks) |
-| ~2420 | P0 | `apps/api/src/modules/telegram-userbot/ingest/telegram-userbot-ingest-pipeline.service.ts` | API (ingest-пайплайн: `processIngestRecord` + reply/lookup/classify/watch; без цикла с фасадом) |
+| ~1236 | P1 | `apps/api/src/modules/telegram-userbot/ingest/telegram-userbot-ingest-pipeline.service.ts` | API (оркестратор `processIngestRecord` + classify/balance/notify; lookup/reply/watch/pair-cooldown — отдельные `ingest/*-service.ts`, см. AUD-044) |
 | 2270 | P0 | `apps/api/src/modules/telegram/telegram.service.ts` | API |
 | 1741 | P1 | `apps/api/src/modules/transcript/transcript.service.ts` | API |
 | 1663 | P1 | `apps/web/app/settings/page.tsx` | Web |
@@ -34,13 +34,13 @@
 
 **В `packages/shared` и остальных путях** при том же сканировании файлов >800 **не обнаружено** (если появятся — добавить строкой в таблицу при следующем аудите).
 
-Подмножество **>2000 строк** — сейчас **`telegram-userbot-ingest-pipeline.service.ts`** и **`telegram.service.ts`** (фасад userbot ~875 строк; Bybit-фасад из инвентаря >800 исключён как уже приведённый к целевому размеру). Для них — развёрнутые секции 1–2; §3 — статус Bybit-модуля.
+Подмножество **>2000 строк** — сейчас **`telegram.service.ts`** (ingest-pipeline после вынесения levels-watch / signal-lookup / signal-reply / pair-direction — **~1236** строк, 2026-05; фасад userbot ~875 строк; Bybit-фасад из инвентаря >800 исключён как уже приведённый к целевому размеру). Для них — развёрнутые секции 1–2; §3 — статус Bybit-модуля.
 
 ---
 
 ## 1. `telegram-userbot.service.ts` (P0)
 
-**Статус (код):** фасад `telegram-userbot.service.ts` **~875 строк** (`wc -l`, 2026-05); цель «&lt; ~800 строк» для фасада **почти достигнута**. Основной объём ingest-пайплайна перенесён в `ingest/telegram-userbot-ingest-pipeline.service.ts` (**~2420 строк**); сканирование/poll-тик и метрики дня — в `scan/telegram-userbot-scan.service.ts` (**~314 строк**). **Остаточный риск:** крупный pipeline-файл — при росте нарезать по `docs/telegram-userbot-decomposition-plan.md` (reply/lookup/watch отдельными сервисами).
+**Статус (код):** фасад `telegram-userbot.service.ts` **~875 строк** (`wc -l`, 2026-05); цель «&lt; ~800 строк» для фасада **почти достигнута**. Оркестратор ingest — `ingest/telegram-userbot-ingest-pipeline.service.ts` (**~1236 строк**); рядом `ingest/telegram-userbot-ingest-signal-lookup.service.ts`, `ingest/telegram-userbot-ingest-signal-reply.service.ts`, `ingest/telegram-userbot-ingest-levels-watch.service.ts`, `ingest/telegram-userbot-ingest-pair-direction.service.ts` (AUD-044). Сканирование/poll-тик и метрики дня — в `scan/telegram-userbot-scan.service.ts` (**~314 строк**).
 
 **Рядом с фасадом (после волн):** `utils/`, `openrouter/`, `client/`, `ingest/` (`TelegramUserbotIngestService` + очередь; `TelegramUserbotIngestPipelineService` — `processIngestRecord` и цепочка), `scan/` (`TelegramUserbotScanService`), `polling/`, `filters/`, `settings/`, `mirror/`; плюс `telegram-userbot.constants.ts`, `telegram-userbot.types.ts`, `telegram-userbot-source.util.ts`, `userbot-signal-hash.*`.
 

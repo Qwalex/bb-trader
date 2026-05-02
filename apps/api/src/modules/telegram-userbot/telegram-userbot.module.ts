@@ -10,7 +10,11 @@ import { TranscriptModule } from '../transcript/transcript.module';
 import { TelegramUserbotClientService } from './client/telegram-userbot-client.service';
 import { TelegramUserbotFiltersService } from './filters/telegram-userbot-filters.service';
 import { TelegramUserbotIngestService } from './ingest/telegram-userbot-ingest.service';
+import { TelegramUserbotIngestLevelsWatchService } from './ingest/telegram-userbot-ingest-levels-watch.service';
+import { TelegramUserbotIngestPairDirectionService } from './ingest/telegram-userbot-ingest-pair-direction.service';
 import { TelegramUserbotIngestPipelineService } from './ingest/telegram-userbot-ingest-pipeline.service';
+import { TelegramUserbotIngestSignalLookupService } from './ingest/telegram-userbot-ingest-signal-lookup.service';
+import { TelegramUserbotIngestSignalReplyService } from './ingest/telegram-userbot-ingest-signal-reply.service';
 import { TelegramUserbotPollingService } from './polling/telegram-userbot-polling.service';
 import { TelegramUserbotScanService } from './scan/telegram-userbot-scan.service';
 import { TelegramUserbotSettingsService } from './settings/telegram-userbot-settings.service';
@@ -35,8 +39,12 @@ import { UserbotSignalHashModule } from './userbot-signal-hash.module';
   providers: [
     TelegramUserbotOpenrouterService,
     TelegramUserbotClientService,
-    TelegramUserbotIngestPipelineService,
     TelegramUserbotIngestService,
+    TelegramUserbotIngestPairDirectionService,
+    TelegramUserbotIngestSignalLookupService,
+    TelegramUserbotIngestLevelsWatchService,
+    TelegramUserbotIngestSignalReplyService,
+    TelegramUserbotIngestPipelineService,
     TelegramUserbotPollingService,
     TelegramUserbotScanService,
     TelegramUserbotSettingsService,
