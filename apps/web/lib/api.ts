@@ -61,7 +61,10 @@ export function getApiAuthHeaders(init?: HeadersInit): Headers {
       headers.set('Origin', origin);
     }
   }
-  const token = isServer ? process.env.API_ACCESS_TOKEN?.trim() : getClientTokenFromCookie();
+  // На сервере JWT из cookie подставляется в `enrichAuthHeaderForServer` (async).
+  // Нельзя брать `API_ACCESS_TOKEN` здесь: иначе он перекрывает сессию пользователя и
+  // ApiAuthGuard отвечает 401, если env-токен устарел или не совпадает с `AUTH_JWT_SECRET` на API.
+  const token = isServer ? undefined : getClientTokenFromCookie();
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
   }
@@ -69,12 +72,19 @@ export function getApiAuthHeaders(init?: HeadersInit): Headers {
 }
 
 async function enrichAuthHeaderForServer(headers: Headers): Promise<void> {
-  if (typeof window !== 'undefined' || headers.has('Authorization')) {
+  if (typeof window !== 'undefined') {
     return;
   }
   const serverToken = await getServerTokenFromCookies();
   if (serverToken) {
     headers.set('Authorization', `Bearer ${serverToken}`);
+    return;
+  }
+  if (!headers.has('Authorization')) {
+    const envToken = process.env.API_ACCESS_TOKEN?.trim();
+    if (envToken) {
+      headers.set('Authorization', `Bearer ${envToken}`);
+    }
   }
 }
 

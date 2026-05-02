@@ -599,3 +599,15 @@
 - Manual verification: `npm run -w apps/api build` passed.
 - Docs updated: перечисленные файлы.
 - Linked risks (`SEC-###`): `SEC-004`
+
+### AUD-049
+
+- Status: `done`
+- Scope: Исправление 401 на SSR при наличии `API_ACCESS_TOKEN` в окружении Web.
+- Files: `apps/web/lib/api.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: `getApiAuthHeaders` на сервере выставлял `Authorization` из `API_ACCESS_TOKEN` до чтения cookie; `enrichAuthHeaderForServer` не подменял заголовок, если он уже был — в запрос уходил неверный токен относительно `AUTH_JWT_SECRET` на API.
+- Changes: на сервере Bearer из env перенесён в enrich после попытки `sb_auth`; при наличии cookie всегда используется сессия пользователя.
+- Decomposition notes (`utils/constants/hooks/types`): N/A
+- Manual verification: `npm run build -w apps/web` (ожидается pass).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
