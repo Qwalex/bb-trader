@@ -442,3 +442,15 @@
 - Manual verification: `npm run -w apps/api build` passed.
 - Docs updated: `06-progress-tracker.md`.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-036
+
+- Status: `done`
+- Scope: Отдельный план декомпозиции для файлов >2000 строк (исключая `package-lock.json` и `scripts/**`).
+- Files: `docs/refactor-decomposition-large-files-plan.md`, `06-progress-tracker.md`
+- Findings: в инвентарь попали три TS-сервиса (`telegram-userbot`, `telegram`, `bybit`); для Bybit значительная часть логики уже вынесена, фасад остаётся крупным.
+- Changes: добавлен структурированный MD-план с приоритетами P0–P2, волнами вынесения и DoD; зафиксированы исключения lock/scripts.
+- Decomposition notes (`utils/constants/hooks/types`): план ссылается на существующие `*.util.ts` / `*.types.ts` / отдельные сервисы в `bybit/*`.
+- Manual verification: пути и `wc -l` согласованы с репозиторием.
+- Docs updated: `refactor-decomposition-large-files-plan.md`, `06-progress-tracker.md`.
+- Linked risks (`SEC-###`): N/A
