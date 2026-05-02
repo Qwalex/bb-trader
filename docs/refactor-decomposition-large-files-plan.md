@@ -23,7 +23,7 @@
 |------:|-------------|------|------|
 | ~875 | P0 | `apps/api/src/modules/telegram-userbot/telegram-userbot.service.ts` | API (фасад: wiring, HTTP-делегаты, inbound, polling hooks) |
 | ~1236 | P1 | `apps/api/src/modules/telegram-userbot/ingest/telegram-userbot-ingest-pipeline.service.ts` | API (оркестратор `processIngestRecord` + classify/balance/notify; lookup/reply/watch/pair-cooldown — отдельные `ingest/*-service.ts`, см. AUD-044) |
-| 2270 | P0 | `apps/api/src/modules/telegram/telegram.service.ts` | API |
+| ~1241 | P1 | `apps/api/src/modules/telegram/telegram.service.ts` | API (фасад после волн W1–W6 по плану декомпозиции; см. AUD-045, AUD-046, §2) |
 | 1741 | P1 | `apps/api/src/modules/transcript/transcript.service.ts` | API |
 | 1663 | P1 | `apps/web/app/settings/page.tsx` | Web |
 | 1626 | P1 | `apps/web/app/telegram-userbot/page.tsx` | Web |
@@ -34,7 +34,7 @@
 
 **В `packages/shared` и остальных путях** при том же сканировании файлов >800 **не обнаружено** (если появятся — добавить строкой в таблицу при следующем аудите).
 
-Подмножество **>2000 строк** — сейчас **`telegram.service.ts`** (ingest-pipeline после вынесения levels-watch / signal-lookup / signal-reply / pair-direction — **~1236** строк, 2026-05; фасад userbot ~875 строк; Bybit-фасад из инвентаря >800 исключён как уже приведённый к целевому размеру). Для них — развёрнутые секции 1–2; §3 — статус Bybit-модуля.
+Подмножество **>2000 строк** в `apps/api` на момент обновления — **ingest-pipeline** (`telegram-userbot-ingest-pipeline.service.ts`, **~1236** строк, 2026-05); фасад userbot ~875 строк; `telegram.service.ts` после AUD-046 — **~1241** строк (ниже порога 2000). Bybit-фасад из инвентаря >800 исключён как уже приведённый к целевому размеру. Для крупных кандидатов — развёрнутые секции 1–2; §3 — статус Bybit-модуля.
 
 ---
 
@@ -68,24 +68,22 @@
 
 ---
 
-## 2. `telegram.service.ts` (P0)
+## 2. `telegram.service.ts` (P1, ~1241 строк)
 
-**Уже есть:** `telegram.constants.ts`, `telegram.types.ts`, `telegram-trade-parse.util.ts`.
+**Уже есть (утилиты и UI, AUD-045):** `telegram.constants.ts`, `telegram.types.ts`, `telegram-trade-parse.util.ts`, `telegram-html.util.ts` (в т.ч. `splitTelegramHtml`, `replyTelegramHtmlChunks`), `telegram-keyboards.util.ts`, `telegram-dashboard-html.util.ts`, `telegram-signal-message-format.util.ts`, `telegram-api-notify-html.util.ts`, `telegram-external-request-key.util.ts`, `telegram-trade-event-titles.util.ts`, `telegram-trade-status.util.ts`.
 
-**Наблюдаемые кластеры:**
+**Уже есть (волны 2–6, AUD-046):** `telegram-whitelist.util.ts` (`parseTelegramWhitelistUserIds`), `telegram-draft.util.ts` (`normalizeDraftTurns`), `telegram-conversation-state.service.ts` (in-memory `drafts` / `sourceOverrideByUser` / `externalConfirmations`, TTL, cleanup), `telegram-bot-registry.service.ts` (запущенные `Telegraf`, primary, lookup по кабинету), `telegram-chat-menu.service.ts` (сводка, рейтинги, сделки, диагностика, логи, события, карточка сделки), `telegram-signal-draft-flow.service.ts` (`handleParseResult`, `confirmFromIngestId`, `applySourceToSignal`, overrides для transcript). На фасаде `registerHandlers` разбит на приватные `registerTelegramAccessMiddleware` / `registerTelegramMainMenuHandlers` / `registerTelegramDraftActionHandlers` / `registerTelegramUserbotActionHandlers` / `registerTelegramMediaHandlers` + `clearTelegramInlineKeyboard`. Отдельный `TelegramBotBootstrapService` не введён: запуск и карта ботов сосредоточены в `TelegramBotRegistryService` + `initializeBots` на фасаде (достаточно для текущего размера).
 
-1. Запуск/ретраи бота, мульти-кабинетные `Telegraf`, приветствие при старте, очистка памяти.
-2. Whitelist, `runWithUserCabinet`, разрешение `source`, внешние подтверждения (`externalConfirmations`, клавиатуры).
-3. Форматирование HTML/таблиц сигналов, клавиатуры (`confirmKeyboard`, меню, `splitTelegramHtml`).
-4. Обработчики меню (summary, ratings, diagnostics, …) и сценарии черновиков (`drafts`).
+**Остаётся на фасаде:** bootstrap (`initializeBots`, retry, приветствие, cleanup-таймеры), whitelist/cabinet wiring, `registerHandlers` как точка сборки, уведомления по событиям сделок, `requestExternalSignalConfirmation` и связка с userbot-коллбеками.
 
-**Предлагаемая стратегия:**
+**Предлагаемая стратегия (остаток):**
 
-| Волна | Действие |
-|-------|----------|
-| W1 | Вынести **форматирование и клавиатуры** в `telegram-format.util.ts` / `telegram-keyboards.util.ts` (или один `telegram-ui.util.ts`, если не раздуется). |
-| W2 | Вынести **external confirm** в `telegram-external-confirm.service.ts` или узкий helper + минимальный сервис. |
-| W3 | Группировать **хендлеры по областям** (меню / диалоги / торговые команды) в подмодули `telegram/handlers/*` с регистрацией из фасада — только если границы ясны и нет циклических импортов. |
+| Волна | Статус / действие |
+|-------|---------------------|
+| W1 | **Сделано:** форматирование и клавиатуры в перечисленных `*.util.ts` (см. выше). |
+| W2 | **Сделано:** whitelist parse в `telegram-whitelist.util.ts`; ключи external — `telegram-external-request-key.util.ts`; состояние подтверждений — в `TelegramConversationStateService`. |
+| W3 | **Сделано:** меню/диагностика — `TelegramChatMenuService` (Nest-провайдер), без подпапки `handlers/` (граница по файлу сервиса). |
+| Дальше | По росту фасада: опционально `TelegramBotBootstrapService` или дальнейший перенос notify/bootstrap при >~1000 строк на фасаде. |
 
 **DoD:** сборка API; смоук: старт бота, команда из whitelist, сценарий подтверждения сигнала (если используется).
 

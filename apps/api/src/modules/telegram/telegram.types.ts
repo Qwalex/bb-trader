@@ -30,3 +30,13 @@ export type ExternalConfirmationRequest = {
   createdAt: number;
   onResult?: (result: ExternalConfirmationResult) => Promise<void> | void;
 };
+
+/** Строка рейтинга источников (как элементы `getTopSources().byPnl` в OrdersService). */
+export type TelegramSourceRatingRow = {
+  source?: string | null;
+  totalPnl: number;
+  winrate: number;
+  wL: string;
+  totalClosed: number;
+  openSignals: number;
+};

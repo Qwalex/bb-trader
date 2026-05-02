@@ -540,6 +540,30 @@
 - Docs updated: перечисленные `docs/*`, этот трекер.
 - Linked risks (`SEC-###`): N/A
 
+### AUD-045
+
+- Status: `done`
+- Scope: Первая волна декомпозиции `apps/api/src/modules/telegram/telegram.service.ts` — вынос чистых утилит без изменения поведения бота и уведомлений.
+- Files: `telegram.service.ts` (~2271 → ~1880 строк); новые `telegram-html.util.ts`, `telegram-external-request-key.util.ts`, `telegram-trade-event-titles.util.ts`, `telegram-signal-message-format.util.ts`, `telegram-keyboards.util.ts`, `telegram-trade-status.util.ts`, `telegram-dashboard-html.util.ts`, `telegram-api-notify-html.util.ts`; тип `TelegramSourceRatingRow` в `telegram.types.ts`.
+- Findings: в одном файле смешаны HTML/formatting, callback-клавиатуры, ключи external confirm и тяжёлые хендлеры — сложно сопровождать.
+- Changes: форматирование сигналов/сводок/сделок, escape/split HTML, заголовки событий, клавиатуры, ключи `cabinetId|ingestId`, тексты API/userbot-уведомлений и проверка статуса отмены вынесены в `*.util.ts`; сервис импортирует функции и сохраняет оркестрацию (`registerHandlers`, черновики, Bybit, Prisma).
+- Decomposition notes (`utils/constants/hooks/types`): именованный тип строки рейтинга в `telegram.types.ts`; без новых автотестов (политика репозитория).
+- Manual verification: `npm run build -w apps/api` passed; полный смоук Telegram в среде агента не выполнялся.
+- Docs updated: `06-progress-tracker.md`.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-046
+
+- Status: `done`
+- Scope: Продолжение декомпозиции `apps/api/src/modules/telegram/telegram.service.ts` по плану (волны 2–6): утилиты whitelist/draft/HTML chunks, вынос состояния диалога и реестра ботов, меню чата, поток черновика/ingest confirm, структурное разбиение `registerHandlers`, без отдельного bootstrap-сервиса (достаточно `TelegramBotRegistryService`).
+- Files: `telegram.service.ts` (~1241 строк); `telegram-whitelist.util.ts`, `telegram-draft.util.ts`, `telegram-html.util.ts` (при необходимости chunks); `telegram-conversation-state.service.ts`, `telegram-bot-registry.service.ts`, `telegram-chat-menu.service.ts`, `telegram-signal-draft-flow.service.ts`, `telegram.module.ts`.
+- Findings: дубли меню/черновика на фасаде после первого выноса устранены — делегирование в `chatMenu` / `draftFlow`; повторные `handleParseResult` / `confirmFromIngestId` удалены с фасада.
+- Changes: `registerHandlers` → `registerTelegramAccessMiddleware`, `registerTelegramMainMenuHandlers`, `registerTelegramDraftActionHandlers`, `registerTelegramUserbotActionHandlers`, `registerTelegramMediaHandlers`; `clearTelegramInlineKeyboard`; DI новых сервисов в модуле.
+- Decomposition notes (`utils/constants/hooks/types`): чистые функции в `*.util.ts`; состояние и сценарии — отдельные `@Injectable()` в том же модуле `telegram`.
+- Manual verification: `npm run build -w apps/api` passed; полный смоук Telegram в среде агента не выполнялся.
+- Docs updated: `06-progress-tracker.md`, `docs/refactor-decomposition-large-files-plan.md` §2 и строка инвентаря для `telegram.service.ts`.
+- Linked risks (`SEC-###`): N/A
+
 ### AUD-042
 
 - Status: `done`
