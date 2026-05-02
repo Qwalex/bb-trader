@@ -2,7 +2,7 @@ import { forwardRef, Inject, Injectable, Logger, OnModuleInit } from '@nestjs/co
 
 import { formatError } from '../../common/format-error';
 import { PrismaService } from '../../prisma/prisma.service';
-import { BybitService } from '../bybit/bybit.service';
+import type { BybitService } from '../bybit/bybit.service';
 import { CabinetContextService } from '../cabinet/cabinet-context.service';
 import { CabinetService } from '../cabinet/cabinet.service';
 import {
@@ -24,7 +24,12 @@ export class WorkerQueueService implements OnModuleInit {
     private readonly prisma: PrismaService,
     private readonly cabinets: CabinetService,
     private readonly cabinetContext: CabinetContextService,
-    @Inject(forwardRef(() => BybitService))
+    @Inject(
+      forwardRef(() => {
+        // Lazy resolve: цикл require worker-queue ↔ bybit (иначе Nest: undefined-провайдер / «CircularDependency»).
+        return require('../bybit/bybit.service').BybitService;
+      }),
+    )
     private readonly bybit: BybitService,
   ) {}
 

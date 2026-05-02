@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { forwardRef, Inject, Injectable } from '@nestjs/common';
 import { RestClientV5 } from 'bybit-api';
 
 import { normalizeTradingPair } from '@repo/shared';
@@ -16,6 +16,7 @@ export class BybitRecalcService {
 
   constructor(
     private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => OrdersService))
     private readonly orders: OrdersService,
     private readonly appLog: AppLogService,
   ) {}

@@ -13,7 +13,7 @@ import { normalizeTradingPair, type SignalDto } from '@repo/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CabinetService } from '../cabinet/cabinet.service';
 import { CabinetContextService } from '../cabinet/cabinet-context.service';
-import { BybitService } from '../bybit/bybit.service';
+import type { BybitService } from '../bybit/bybit.service';
 import { SettingsService } from '../settings/settings.service';
 import { TelegramService } from '../telegram';
 import { UserbotSignalHashService } from '../telegram-userbot/userbot-signal-hash.service';
@@ -57,7 +57,12 @@ export class OrdersService {
     private readonly settings: SettingsService,
     private readonly cabinets: CabinetService,
     private readonly cabinetContext: CabinetContextService,
-    @Inject(forwardRef(() => BybitService))
+    @Inject(
+      forwardRef(() => {
+        // Lazy resolve: избегаем циклического require() bybit.service ↔ orders.service (Nest иначе видит undefined-провайдер).
+        return require('../bybit/bybit.service').BybitService;
+      }),
+    )
     private readonly bybit: BybitService,
     @Inject(forwardRef(() => TelegramService))
     private readonly telegram: TelegramService,

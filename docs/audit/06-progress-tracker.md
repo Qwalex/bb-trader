@@ -611,3 +611,15 @@
 - Manual verification: `npm run build -w apps/web` (ожидается pass).
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-050
+
+- Status: `done`
+- Scope: Падение API на старте (Railway 502): Nest `CircularDependencyException` в `BybitModule` / соседних модулях.
+- Files: `apps/api/src/modules/orders/orders.service.ts`, `apps/api/src/modules/worker-queue/worker-queue.service.ts`, `apps/api/src/modules/bybit/pnl/bybit-recalc.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: в Nest 10 `CircularDependencyException` при сканировании срабатывает и при **falsy-провайдере** (часто из‑за циклического `require()` в CommonJS): `BybitService` оказывался `undefined` в момент объявения `BybitModule`; дополнительно `BybitRecalcService` тянул `OrdersService` без `forwardRef` при цепочке на `BybitService`.
+- Changes: `import type` + ленивый `require('../bybit/bybit.service').BybitService` внутри `@Inject(forwardRef(() => …))` для `OrdersService` и `WorkerQueueService`; `@Inject(forwardRef(() => OrdersService))` в `BybitRecalcService`.
+- Decomposition notes (`utils/constants/hooks/types`): N/A
+- Manual verification: `npx nest build` в `apps/api`; `node dist/main.js` — модули и маршруты инициализируются; далее ожидаемая ошибка Prisma без локального `DATABASE_URL` (не относится к DI).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
