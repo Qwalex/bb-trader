@@ -77,6 +77,10 @@ type ProcessIngestOptions = {
   telegramReceivedAt?: Date;
   ingestCreatedAt?: Date;
   enqueuedAtMs?: number;
+  /** Повтор после правки сообщения: не слать whitelist/critical при снова неуспешном place. */
+  suppressPlacementFailureExternalNotify?: boolean;
+  /** Автоповтор после правки канала: не запрашивать TELEGRAM_USERBOT_REQUIRE_CONFIRMATION, сразу на Bybit. */
+  bypassConfirmationForAutoRetry?: boolean;
 };
 
 type IngestProcessJob = {
@@ -129,6 +133,10 @@ const CLOSE_REOPEN_COOLDOWN_MS = 30_000;
 const CRITICAL_NOTIFY_URL = 'https://qnotify.up.railway.app';
 const OPENROUTER_BALANCE_LOW_THRESHOLD_USD = 2;
 const OPENROUTER_BALANCE_NOTIFY_COOLDOWN_MS = 30 * 60_000;
+/** Опрос Telegram на предмет правки сообщения после ошибки уровней (validateSignalLevels). */
+const USERBOT_SIGNAL_LEVELS_EDIT_WATCH_POLL_MS = 25_000;
+/** Сколько ждать правку до остановки наблюдения. */
+const USERBOT_SIGNAL_LEVELS_EDIT_WATCH_TTL_MS = 90 * 60_000;
 
 @Injectable()
 export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
@@ -169,6 +177,10 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   private readonly sourceTpMapSkipLogged = new Set<string>();
   private static readonly SOURCE_MAP_SKIP_LOG_CAP = 400;
 
+  private readonly signalLevelsValidationWatchTimers = new Map<string, NodeJS.Timeout>();
+  private readonly signalLevelsValidationWatchDeadlineMs = new Map<string, number>();
+  private readonly signalLevelsValidationWatchInflight = new Set<string>();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly settings: SettingsService,
@@ -198,6 +210,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy(): Promise<void> {
+    this.clearAllSignalLevelsValidationWatches();
     this.stopPollingLoop();
     await this.disconnect();
     await this.stopQrClient();
@@ -2542,10 +2555,19 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
-      const requireConfirmation = await this.getBoolSetting(
+      const requireConfirmationSetting = await this.getBoolSetting(
         'TELEGRAM_USERBOT_REQUIRE_CONFIRMATION',
         false,
       );
+      const requireConfirmation =
+        requireConfirmationSetting && options?.bypassConfirmationForAutoRetry !== true;
+      if (requireConfirmationSetting && options?.bypassConfirmationForAutoRetry === true) {
+        this.appendIngestStageLog(
+          'info',
+          'Userbot: подтверждение в боте пропущено (автоповтор после правки сообщения)',
+          ingest,
+        );
+      }
       if (requireConfirmation) {
         this.appendIngestStageLog('info', 'Userbot: waiting external confirmation', ingest, {
           signalHash,
@@ -2565,6 +2587,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           decision: 'confirmed' | 'rejected';
           ok: boolean;
           error?: string;
+          placeErrorCode?: string;
           signalId?: string;
           bybitOrderIds?: string[];
           actorUserId?: number;
@@ -2582,6 +2605,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           if (!result.ok) {
             this.appendIngestStageLog('error', 'Userbot: confirmation accepted but placement failed', ingest, {
               error: result.error ?? 'unknown',
+              placeErrorCode: result.placeErrorCode ?? null,
             });
             await this.updateIngest(ingest.id, {
               status: 'place_error',
@@ -2589,6 +2613,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
                 result.error ??
                 'Подтверждение получено, но ордер не удалось выставить',
             });
+            if (result.placeErrorCode === 'signal_levels_validation') {
+              this.scheduleSignalLevelsValidationEditWatch(ingest.id);
+            }
             return;
           }
           this.appendIngestStageLog('info', 'Userbot: confirmation accepted and placement succeeded', ingest, {
@@ -2655,19 +2682,27 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
           aiRequest,
           aiResponse,
         });
-        await this.notifySignalFailureToBot({
-          ingestId: ingest.id,
-          chatId: ingest.chatId,
-          token: signal.pair,
-          stage: 'bybit',
-          error: placeError,
-        });
-        await this.notifyCriticalExternalApiUnavailable('bybit', {
-          ingestId: ingest.id,
-          chatId: ingest.chatId,
-          stage: 'bybit',
-          error: placeError,
-        });
+        const suppressNotify =
+          options?.suppressPlacementFailureExternalNotify === true &&
+          place.errorCode === 'signal_levels_validation';
+        if (!suppressNotify) {
+          await this.notifySignalFailureToBot({
+            ingestId: ingest.id,
+            chatId: ingest.chatId,
+            token: signal.pair,
+            stage: 'bybit',
+            error: placeError,
+          });
+          await this.notifyCriticalExternalApiUnavailable('bybit', {
+            ingestId: ingest.id,
+            chatId: ingest.chatId,
+            stage: 'bybit',
+            error: placeError,
+          });
+        }
+        if (place.errorCode === 'signal_levels_validation') {
+          this.scheduleSignalLevelsValidationEditWatch(ingest.id);
+        }
         return;
       }
 
@@ -3742,6 +3777,152 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       rootStatuses: rootSignals.map((row) => row.status),
       chainMatches: chainRows.filter((row) => row.total > 0),
     };
+  }
+
+  private clearSignalLevelsValidationWatch(ingestId: string): void {
+    const t = this.signalLevelsValidationWatchTimers.get(ingestId);
+    if (t) {
+      clearInterval(t);
+      this.signalLevelsValidationWatchTimers.delete(ingestId);
+    }
+    this.signalLevelsValidationWatchDeadlineMs.delete(ingestId);
+  }
+
+  private clearAllSignalLevelsValidationWatches(): void {
+    for (const id of this.signalLevelsValidationWatchTimers.keys()) {
+      this.clearSignalLevelsValidationWatch(id);
+    }
+  }
+
+  /**
+   * После ошибки validateSignalLevels: периодически сравниваем текст в Telegram с БД;
+   * при изменении — полный автоматический повтор пайплайна (без отдельного шага подтверждения).
+   */
+  private scheduleSignalLevelsValidationEditWatch(ingestId: string): void {
+    this.clearSignalLevelsValidationWatch(ingestId);
+    const deadlineMs = Date.now() + USERBOT_SIGNAL_LEVELS_EDIT_WATCH_TTL_MS;
+    this.signalLevelsValidationWatchDeadlineMs.set(ingestId, deadlineMs);
+    const timer = setInterval(() => {
+      void this.tickSignalLevelsValidationEditWatch(ingestId);
+    }, USERBOT_SIGNAL_LEVELS_EDIT_WATCH_POLL_MS);
+    this.signalLevelsValidationWatchTimers.set(ingestId, timer);
+    void this.appLog.append('info', 'telegram', 'Userbot: наблюдение за правкой сообщения после ошибки уровней', {
+      ingestId,
+      pollMs: USERBOT_SIGNAL_LEVELS_EDIT_WATCH_POLL_MS,
+      ttlMs: USERBOT_SIGNAL_LEVELS_EDIT_WATCH_TTL_MS,
+    });
+  }
+
+  private async tickSignalLevelsValidationEditWatch(ingestId: string): Promise<void> {
+    const deadlineMs = this.signalLevelsValidationWatchDeadlineMs.get(ingestId);
+    if (deadlineMs == null) {
+      this.clearSignalLevelsValidationWatch(ingestId);
+      return;
+    }
+    if (Date.now() > deadlineMs) {
+      this.clearSignalLevelsValidationWatch(ingestId);
+      void this.appLog.append('info', 'telegram', 'Userbot: истекло ожидание правки сообщения (уровни)', {
+        ingestId,
+      });
+      return;
+    }
+    if (this.signalLevelsValidationWatchInflight.has(ingestId)) {
+      return;
+    }
+    this.signalLevelsValidationWatchInflight.add(ingestId);
+    try {
+      const row = await this.prisma.tgUserbotIngest.findUnique({
+        where: { id: ingestId },
+        select: {
+          id: true,
+          chatId: true,
+          messageId: true,
+          text: true,
+          signalHash: true,
+          status: true,
+          createdAt: true,
+        },
+      });
+      if (!row) {
+        this.clearSignalLevelsValidationWatch(ingestId);
+        return;
+      }
+      if (row.status === 'placed' || row.status === 'cancelled_by_confirmation') {
+        this.clearSignalLevelsValidationWatch(ingestId);
+        return;
+      }
+      const meta = await this.fetchChatMessageMeta(row.chatId, row.messageId);
+      if (meta.error) {
+        return;
+      }
+      const fresh = (meta.text ?? '').trim();
+      if (!fresh) {
+        return;
+      }
+      const prev = (this.readString(row.text) ?? '').trim();
+      if (fresh === prev) {
+        return;
+      }
+
+      this.appendIngestStageLog(
+        'info',
+        'Userbot: текст сообщения в канале изменился (наблюдение уровней)',
+        { id: row.id, chatId: row.chatId, messageId: row.messageId },
+        { signalHash: row.signalHash, status: row.status },
+      );
+
+      const oldHash = row.signalHash?.trim() ?? '';
+      if (oldHash) {
+        await this.userbotSignalHash.release(oldHash);
+      }
+      await this.prisma.tgUserbotIngest.update({
+        where: { id: ingestId },
+        data: { text: fresh, signalHash: null },
+      });
+
+      await this.processIngestRecord(
+        {
+          id: row.id,
+          chatId: row.chatId,
+          messageId: row.messageId,
+          signalHash: null,
+          status: 'ignored',
+        },
+        fresh,
+        {
+          replyToMessageId: meta.replyToMessageId,
+          signalExternalId: this.extractSignalExternalId(fresh),
+        },
+        {
+          source: 'poll',
+          telegramReceivedAt: new Date(),
+          ingestCreatedAt: row.createdAt,
+          enforceBalanceGuard: true,
+          suppressPlacementFailureExternalNotify: true,
+          bypassConfirmationForAutoRetry: true,
+        },
+      );
+
+      const after = await this.prisma.tgUserbotIngest.findUnique({
+        where: { id: ingestId },
+        select: { status: true },
+      });
+      if (
+        after?.status === 'placed' ||
+        after?.status === 'duplicate_signal' ||
+        after?.status === 'cancelled_by_confirmation' ||
+        after?.status === 'parse_error' ||
+        after?.status === 'ignored'
+      ) {
+        this.clearSignalLevelsValidationWatch(ingestId);
+      }
+    } catch (e) {
+      this.logger.warn(
+        `tickSignalLevelsValidationEditWatch ingest=${ingestId}: ${formatError(e)}`,
+      );
+    } finally {
+      this.signalLevelsValidationWatchInflight.delete(ingestId);
+    }
   }
 
   private async fetchChatMessageMeta(

@@ -46,6 +46,8 @@ type ExternalConfirmationResult = {
   decision: 'confirmed' | 'rejected';
   ok: boolean;
   error?: string;
+  /** Код ошибки Bybit при подтверждении (например неверные TP/SL до ордеров). */
+  placeErrorCode?: string;
   signalId?: string;
   bybitOrderIds?: string[];
   actorUserId?: number;
@@ -1628,6 +1630,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           decision: 'confirmed',
           ok: false,
           error: fallback.error,
+          placeErrorCode: fallback.placeErrorCode,
           actorUserId: uid,
         });
         await ctx.reply(`Подтверждение не выполнено: ${fallback.error}`);
@@ -2071,6 +2074,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private async confirmFromIngestId(ingestId: string): Promise<{
     ok: boolean;
     error?: string;
+    placeErrorCode?: string;
     signalId?: string;
     bybitOrderIds?: string[];
   }> {
@@ -2130,7 +2134,11 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       messageId: row?.messageId ?? undefined,
     });
     if (!place.ok) {
-      return { ok: false, error: formatError(place.error) };
+      return {
+        ok: false,
+        error: formatError(place.error),
+        placeErrorCode: place.errorCode,
+      };
     }
     await this.prisma.tgUserbotIngest
       .update({

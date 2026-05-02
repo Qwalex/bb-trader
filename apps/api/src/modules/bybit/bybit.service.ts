@@ -21,9 +21,13 @@ import { SettingsService } from '../settings/settings.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { VkNotifyMirrorService } from '../vk/vk-notify-mirror.service';
 
+/** Ошибка `validateSignalLevels` до выставления ордеров — можно повторить после правки текста в Telegram. */
+export type PlaceOrdersErrorCode = 'signal_levels_validation';
+
 export interface PlaceOrdersResult {
   ok: boolean;
   error?: string;
+  errorCode?: PlaceOrdersErrorCode;
   signalId?: string;
   bybitOrderIds?: string[];
 }
@@ -2061,7 +2065,11 @@ export class BybitService {
           takeProfits: signal.takeProfits,
           validationErr,
         });
-        return { ok: false, error: validationErr };
+        return {
+          ok: false,
+          error: validationErr,
+          errorCode: 'signal_levels_validation',
+        };
       }
 
       void this.appLog.append('info', 'bybit', 'placeSignalOrders: старт', {
