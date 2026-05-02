@@ -1187,11 +1187,30 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     if (!ingest) {
       return { ok: false, error: 'Сообщение не найдено' };
     }
-    const text = this.readString(ingest.text);
-    if (!text) {
+    const fresh = await this.fetchChatMessageMeta(ingest.chatId, ingest.messageId);
+    let text = this.readString(ingest.text) ?? '';
+    let meta: { replyToMessageId?: string; signalExternalId?: string } | undefined;
+
+    if (!fresh.error && fresh.text?.trim()) {
+      text = fresh.text.trim();
+      meta = {
+        replyToMessageId: fresh.replyToMessageId,
+        signalExternalId: this.extractSignalExternalId(text),
+      };
+      await this.prisma.tgUserbotIngest.update({
+        where: { id: ingest.id },
+        data: { text },
+      });
+    } else if (fresh.error) {
+      this.logger.warn(
+        `rereadIngestMessage: не удалось загрузить из Telegram (${fresh.error}), используется текст из БД`,
+      );
+    }
+
+    if (!text.trim()) {
       return { ok: false, error: 'В сообщении нет текстового содержимого для перечитывания' };
     }
-    await this.processIngestRecord(ingest, text, undefined, {
+    await this.processIngestRecord(ingest, text.trim(), meta, {
       source: 'manual-reread',
     });
     return { ok: true };
@@ -1220,13 +1239,32 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     const errors: Array<{ ingestId: string; error: string }> = [];
 
     for (const row of rows) {
-      const text = this.readString(row.text);
-      if (!text) {
+      const fresh = await this.fetchChatMessageMeta(row.chatId, row.messageId);
+      let text = this.readString(row.text) ?? '';
+      let meta: { replyToMessageId?: string; signalExternalId?: string } | undefined;
+
+      if (!fresh.error && fresh.text?.trim()) {
+        text = fresh.text.trim();
+        meta = {
+          replyToMessageId: fresh.replyToMessageId,
+          signalExternalId: this.extractSignalExternalId(text),
+        };
+        await this.prisma.tgUserbotIngest.update({
+          where: { id: row.id },
+          data: { text },
+        });
+      } else if (fresh.error) {
+        this.logger.warn(
+          `rereadAllIngestMessages: chat=${row.chatId} msg=${row.messageId} telegram=${fresh.error}, БД`,
+        );
+      }
+
+      if (!text.trim()) {
         skippedWithoutText += 1;
         continue;
       }
       try {
-        await this.processIngestRecord(row, text, undefined, {
+        await this.processIngestRecord(row, text.trim(), meta, {
           source: 'manual-reread-all',
         });
         processed += 1;
@@ -1744,10 +1782,64 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       status: 'ignored',
     });
     if (!ingest) {
-      void this.appLog.append('debug', 'telegram', 'Userbot: duplicate ingest skipped', {
+      const existing = await this.prisma.tgUserbotIngest.findUnique({
+        where: { dedupMessageKey },
+        select: {
+          id: true,
+          chatId: true,
+          messageId: true,
+          text: true,
+          signalHash: true,
+          status: true,
+          createdAt: true,
+        },
+      });
+      if (!existing) {
+        void this.appLog.append('debug', 'telegram', 'Userbot: duplicate ingest skipped (нет строки)', {
+          chatId,
+          messageId,
+          dedupMessageKey,
+        });
+        return;
+      }
+      const nextText = text.trim();
+      const prevText = (this.readString(existing.text) ?? '').trim();
+      if (prevText === nextText) {
+        void this.appLog.append('debug', 'telegram', 'Userbot: duplicate ingest без изменений текста', {
+          chatId,
+          messageId,
+          dedupMessageKey,
+        });
+        return;
+      }
+      await this.prisma.tgUserbotIngest.update({
+        where: { id: existing.id },
+        data: { text: nextText },
+      });
+      void this.appLog.append('info', 'telegram', 'Userbot: текст ingest обновлён из Telegram', {
         chatId,
         messageId,
         dedupMessageKey,
+        ingestId: existing.id,
+        prevLen: prevText.length,
+        nextLen: nextText.length,
+      });
+      this.enqueueIngestJob({
+        ingest: {
+          id: existing.id,
+          chatId: existing.chatId,
+          messageId: existing.messageId,
+          signalHash: existing.signalHash,
+          status: existing.status,
+        },
+        text: nextText.length > USERBOT_INLINE_TEXT_MAX_CHARS ? null : nextText,
+        textLen: nextText.length,
+        meta,
+        options: {
+          enforceBalanceGuard: true,
+          ...options,
+          ingestCreatedAt: existing.createdAt,
+        },
       });
       return;
     }
@@ -1843,20 +1935,15 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
   private async runIngestJob(job: IngestProcessJob): Promise<void> {
     try {
-      let text = job.text;
-      if (text == null) {
-        const row = await this.prisma.tgUserbotIngest.findUnique({
-          where: { id: job.ingest.id },
-          select: { text: true },
-        });
-        text = row?.text ?? '';
-      }
-      await this.processIngestRecord(
-        job.ingest,
-        text,
-        job.meta,
-        job.options,
-      );
+      const row = await this.prisma.tgUserbotIngest.findUnique({
+        where: { id: job.ingest.id },
+        select: { text: true, createdAt: true },
+      });
+      const text = this.readString(row?.text) ?? '';
+      await this.processIngestRecord(job.ingest, text, job.meta, {
+        ...job.options,
+        ingestCreatedAt: job.options?.ingestCreatedAt ?? row?.createdAt,
+      });
     } catch (e) {
       const error = formatError(e);
       this.logger.error(`runIngestJob failed ingest=${job.ingest.id}: ${error}`);
