@@ -454,3 +454,27 @@
 - Manual verification: пути и `wc -l` согласованы с репозиторием.
 - Docs updated: `refactor-decomposition-large-files-plan.md`, `06-progress-tracker.md`.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-037
+
+- Status: `done`
+- Scope: Расширение плана декомпозиции: инвентарь файлов **>800 строк** (TS/TSX в `apps/` и `packages/`), обновление секций и команд пересчёта.
+- Files: `docs/refactor-decomposition-large-files-plan.md`, `06-progress-tracker.md`
+- Findings: 9 файлов >800 (в т.ч. `transcript`, `vk`, `orders`, три страницы `apps/web`); в `packages/shared` при сканировании >800 не найдено.
+- Changes: сводная таблица с приоритетами P0–P3, краткие направления для новых кандидатов, ориентир ~800 строк для AI/навигации; два скрипта аудита (пороги 800 и 2000).
+- Decomposition notes (`utils/constants/hooks/types`): для web — вынос компонентов/hooks; для API — утилиты и узкие сервисы по доменам.
+- Manual verification: `find` + `wc -l` по перечисленным путям.
+- Docs updated: `refactor-decomposition-large-files-plan.md`, `06-progress-tracker.md`.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-038
+
+- Status: `done`
+- Scope: Декомпозиция `BybitService` до целевого размера фасада (~800–1000 строк; фактически ~540 после выноса логики).
+- Files: `apps/api/src/modules/bybit/bybit.service.ts`, `bybit.module.ts`, новые `bybit-balance-instrument.service.ts`, `bybit-order-exchange-query.service.ts`, `bybit-placement-validation.service.ts`, `bybit-signal-overrides.service.ts`, `bybit-live-snapshot.service.ts`, `bybit-poll-finalize.service.ts`, `bybit-exchange-cleanup.service.ts`, `bybit-order-status.util.ts`, `bybit-position-pick.util.ts`.
+- Findings: фасад сочетал баланс/инструмент, запросы статусов ордеров, валидацию постановки, оверрайды сигнала, live/debug снимки, финализацию poll и cleanup удаления; часть — дублирующие обёртки к `BybitPnl`/`BybitTpSl`.
+- Changes: публичный API `BybitService` сохранён (делегирование); вынесены перечисленные сервисы и утилиты; `recalcClosedSignalsPnl` вызывает `BybitPnlService` напрямую через порты; `finalizeSignalCloseIfNeeded` — в `BybitPollFinalizeService`; удаление сделки с биржи — в `BybitExchangeCleanupService`.
+- Decomposition notes (`utils/constants/hooks/types`): чистые функции статусов ордеров и выбора строки позиции — в `*.util.ts`; узкие сервисы по зонам ответственности.
+- Manual verification: `npm run -w apps/api build` passed.
+- Docs updated: `06-progress-tracker.md`.
+- Linked risks (`SEC-###`): N/A

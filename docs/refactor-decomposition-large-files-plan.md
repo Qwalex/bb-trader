@@ -1,25 +1,39 @@
-# План рефакторинга и декомпозиции (крупные файлы API)
+# План рефакторинга и декомпозиции (крупные файлы монорепо)
 
-Документ фиксирует **отдельную очередь** работ по уменьшению «god-файлов» в `apps/api`. Правила декомпозиции: `.cursor/rules/decomposition-and-file-boundaries.mdc`, типы — `.cursor/rules/typing-separation-standard.mdc`, шаги без смены поведения там, где возможно.
+Документ фиксирует **очередь** работ по уменьшению «god-файлов» в `apps/api` и `apps/web`. Правила декомпозиции: `.cursor/rules/decomposition-and-file-boundaries.mdc`, типы — `.cursor/rules/typing-separation-standard.mdc`, шаги без смены поведения там, где возможно.
+
+**Ориентиры по размеру:** до **~800 строк** на файл — комфортная зона для навигации и работы с AI-агентом; **800+** — кандидаты на постепенную нарезку; **2000+** — высокий приоритет.
 
 ## Что не входит в инвентарь
 
-Следующие пути **намеренно исключены** из поиска «больших файлов» для этого плана:
+Следующие пути **намеренно исключены** из поиска:
 
 - `package-lock.json` и прочие lock-файлы (генерируемые артефакты).
-- `scripts/**` (операционные скрипты, не прикладной код API).
+- `scripts/**` (операционные скрипты, не прикладной код приложений).
 
-Сборки и кэши (`dist/`, `.next/`, `.turbo/cache/`) также не считаются исходниками.
+Сборки и кэши (`dist/`, `.next/`, `.turbo/cache/`) не считаются исходниками.
 
-## Инвентарь (порог: >2000 строк, TypeScript в `apps/api`)
+---
 
-| Приоритет | Файл | Строк (оценка на момент составления) | Примечание |
-|-----------|------|--------------------------------------|------------|
-| P0 | `apps/api/src/modules/telegram-userbot/telegram-userbot.service.ts` | ~5508 | Основной долг; один сервис тянет MTProto, очередь ingest, парсинг, настройки источников, уведомления. |
-| P1 | `apps/api/src/modules/telegram/telegram.service.ts` | ~2270 | Telegraf: жизненный цикл бота, хендлеры, меню, подтверждения, форматирование. |
-| P2 | `apps/api/src/modules/bybit/bybit.service.ts` | ~2211 | Фасад после многих вынесенных сервисов; остаётся толстым слоем оркестрации. |
+## Инвентарь: >800 строк (TS/TSX в `apps/` и `packages/`)
 
-Пересчёт: `wc -l` по перечисленным путям (без lock и `scripts/`).
+Снимок на момент обновления документа (`wc -l`, без `node_modules` / `dist` / `.next`). Порог **>800**.
+
+| Строк | Приоритет | Файл | Слой |
+|------:|-------------|------|------|
+| 5508 | P0 | `apps/api/src/modules/telegram-userbot/telegram-userbot.service.ts` | API |
+| 2270 | P0 | `apps/api/src/modules/telegram/telegram.service.ts` | API |
+| 2211 | P0 | `apps/api/src/modules/bybit/bybit.service.ts` | API |
+| 1741 | P1 | `apps/api/src/modules/transcript/transcript.service.ts` | API |
+| 1663 | P1 | `apps/web/app/settings/page.tsx` | Web |
+| 1626 | P1 | `apps/web/app/telegram-userbot/page.tsx` | Web |
+| 1388 | P2 | `apps/api/src/modules/vk/vk-bot.service.ts` | API |
+| 1346 | P2 | `apps/api/src/modules/orders/orders.service.ts` | API |
+| 962 | P3 | `apps/web/app/filters/page.tsx` | Web |
+
+**В `packages/shared` и остальных путях** при том же сканировании файлов >800 **не обнаружено** (если появятся — добавить строкой в таблицу при следующем аудите).
+
+Подмножество **>2000 строк** — первые три строки таблицы; для них ниже развёрнутые секции 1–3.
 
 ---
 
@@ -51,7 +65,7 @@
 
 ---
 
-## 2. `telegram.service.ts` (P1)
+## 2. `telegram.service.ts` (P0)
 
 **Уже есть:** `telegram.constants.ts`, `telegram.types.ts`, `telegram-trade-parse.util.ts`.
 
@@ -74,7 +88,7 @@
 
 ---
 
-## 3. `bybit.service.ts` (P2)
+## 3. `bybit.service.ts` (P0)
 
 **Уже вынесено (фрагменты):** `bybit-client.service`, `bybit-poll`, `bybit-tpsl`, `bybit-pnl`, `bybit-notify`, `bybit-recalc`, `bybit-signal-placement`, `bybit-position-close`, `bybit-order-lifecycle-poll`, `balance-snapshot`, `bybit-exposure`, утилиты и `bybit-ports.types`.
 
@@ -90,6 +104,46 @@
 
 ---
 
+## 4. `transcript.service.ts` (P1)
+
+Крупный сервис расшифровки/LLM. **Направления:** вынести промпты и шаблоны в `transcript-prompts.constants.ts` или `transcript/*.util.ts`; отдельный слой для вызовов OpenRouter и нормализации ответов; типы ответов — в `transcript.types.ts` или расширение существующего файла типов. Сохранить единую точку входа для остальных модулей.
+
+**DoD:** `npm run -w apps/api build`; смоук: один проход расшифровки тестового сообщения.
+
+---
+
+## 5. `settings/page.tsx` и 6. `telegram-userbot/page.tsx` (P1)
+
+Страницы настроек с большим количеством секций и форм. **Направления:** разбить на компоненты `app/settings/*` или `components/settings/*` по секциям; вынести типы форм и константы ключей; общие куски (карточки, поля, вызовы API) — в переиспользуемые компоненты/hooks.
+
+**DoD:** `npm run -w apps/web build`; ручная проверка: сохранение настроек и отображение ошибок API.
+
+---
+
+## 7. `vk-bot.service.ts` (P2)
+
+По структуре сопоставим с Telegram-ботом: жизненный цикл, хендлеры, форматирование. **Направления:** зеркалировать подход из секции 2 — `vk-*.util.ts` для текста/клавиатур, опционально подпапка `vk/handlers/*`, общие вещи с Telegram только через `packages/shared`, если появится реальное дублирование.
+
+**DoD:** сборка API; смоук отправки/ответа в VK (если среда подключена).
+
+---
+
+## 8. `orders.service.ts` (P2)
+
+Оркестрация заказов и состояний в БД. **Направления:** вынести маппинг DTO и чистую логику статусов в `orders-*.util.ts`; тяжёлые сценарии (reconcile, дубликаты пар) — в отдельные сервисы при повторном дублировании с Bybit.
+
+**DoD:** сборка API; смоук списка ордеров в UI или через API.
+
+---
+
+## 9. `filters/page.tsx` (P3)
+
+**Направления:** таблицы/модалки вынести в `components/filters/*`; состояние фильтров — в hook `useFiltersPage.ts` при росте логики.
+
+**DoD:** `npm run -w apps/web build`; открытие страницы и применение фильтра.
+
+---
+
 ## Связанные документы
 
 - `docs/audit/06-progress-tracker.md` — карточки выполненных волн по Bybit/Telegram.
@@ -99,7 +153,16 @@
 
 ## Повторный аудит размера
 
-После серии волн полезно перезапустить:
+Порог **800** (полный список кандидатов):
+
+```bash
+find apps packages -type f \( -name "*.ts" -o -name "*.tsx" \) \
+  ! -path "*/node_modules/*" ! -path "*/dist/*" ! -path "*/.next/*" | while read -r f; do
+  n=$(wc -l < "$f"); [ "$n" -gt 800 ] && echo "$n $f"
+done | sort -rn
+```
+
+Порог **2000** (тяжёлые монолиты API):
 
 ```bash
 find apps/api/src -type f \( -name "*.ts" -o -name "*.tsx" \) \
@@ -108,4 +171,4 @@ find apps/api/src -type f \( -name "*.ts" -o -name "*.tsx" \) \
 done | sort -rn
 ```
 
-Исключения этого плана (`package-lock.json`, `scripts/**`) к команде не добавляются — они не лежат под `apps/api/src`.
+Исключения плана (`package-lock.json`, `scripts/**`) в перечисление не входят — они вне `apps/` / `packages/` или не являются TS/TSX.
