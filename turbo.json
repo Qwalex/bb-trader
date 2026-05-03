@@ -1,7 +1,15 @@
 {
   "$schema": "https://turborepo.dev/schema.json",
   "globalDependencies": ["**/.env.*local"],
-  "globalEnv": ["NODE_ENV", "SETTINGS_PAGE_PASSWORD"],
+  "globalEnv": [
+    "NODE_ENV",
+    "SETTINGS_PAGE_PASSWORD",
+    "WEB_APP_ORIGIN",
+    "API_INTERNAL_URL",
+    "NEXT_PUBLIC_API_URL",
+    "API_ACCESS_TOKEN",
+    "NEXT_BASE_PATH"
+  ],
   "tasks": {
     "dev": {
       "cache": false,

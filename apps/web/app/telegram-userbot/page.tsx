@@ -24,7 +24,7 @@ export default function TelegramUserbotPage() {
   const [chats, setChats] = useState<UserbotChat[]>([]);
   const [metrics, setMetrics] = useState<TodayMetrics | null>(null);
   const [sourceStatsBySource, setSourceStatsBySource] = useState<
-    Record<string, { winrate: number; totalPnl: number }>
+    Record<string, { winrate: number; totalPnl: number } | null>
   >({});
   const sourceStatsInFlightRef = useRef<Set<string>>(new Set());
   const [search, setSearch] = useState('');
@@ -119,7 +119,9 @@ export default function TelegramUserbotPage() {
     );
     if (sources.length === 0) return;
 
-    const missing = sources.filter((s) => sourceStatsBySource[s] == null).filter((s) => !sourceStatsInFlightRef.current.has(s));
+    const missing = sources
+      .filter((s) => sourceStatsBySource[s] === undefined)
+      .filter((s) => !sourceStatsInFlightRef.current.has(s));
     if (missing.length === 0) return;
 
     for (const s of missing) sourceStatsInFlightRef.current.add(s);
@@ -131,13 +133,15 @@ export default function TelegramUserbotPage() {
           missing.map(async (source) => {
             const res = await apiFetch(`/orders/stats?source=${encodeURIComponent(source)}`);
             if (!res.ok) {
-              return { source, winrate: 0, totalPnl: 0 };
+              return { source, stats: null };
             }
             const j = (await res.json()) as { winrate?: number; totalPnl?: number };
             return {
               source,
-              winrate: typeof j.winrate === 'number' ? j.winrate : 0,
-              totalPnl: typeof j.totalPnl === 'number' ? j.totalPnl : 0,
+              stats: {
+                winrate: typeof j.winrate === 'number' ? j.winrate : 0,
+                totalPnl: typeof j.totalPnl === 'number' ? j.totalPnl : 0,
+              },
             };
           }),
         );
@@ -145,9 +149,7 @@ export default function TelegramUserbotPage() {
         if (cancelled) return;
         setSourceStatsBySource((prev) => ({
           ...prev,
-          ...Object.fromEntries(
-            results.map((r) => [r.source, { winrate: r.winrate, totalPnl: r.totalPnl }]),
-          ),
+          ...Object.fromEntries(results.map((r) => [r.source, r.stats])),
         }));
       } finally {
         for (const s of missing) sourceStatsInFlightRef.current.delete(s);
@@ -159,18 +161,34 @@ export default function TelegramUserbotPage() {
     };
   }, [groupByChat, recentByChatAccordion, chatTitleById, sourceStatsBySource]);
 
+  async function parseJsonIfOk<T>(res: Response, action: string): Promise<T> {
+    if (!res.ok) {
+      throw new Error(`${action} (${res.status})`);
+    }
+    return (await res.json()) as T;
+  }
+
   async function loadAll() {
+    const [statusRes, chatsRes, metricsRes, settingsRes] = await Promise.all([
+      apiFetch('/telegram-userbot/status'),
+      apiFetch('/telegram-userbot/chats'),
+      apiFetch('/telegram-userbot/metrics/today'),
+      apiFetch('/settings/effective'),
+    ]);
     const [s, c, m, raw] = await Promise.all([
-      apiFetch('/telegram-userbot/status').then((r) => r.json()),
-      apiFetch('/telegram-userbot/chats').then((r) => r.json()),
-      apiFetch('/telegram-userbot/metrics/today').then((r) => r.json()),
-      apiFetch('/settings/raw').then((r) => r.json()),
+      parseJsonIfOk<BotStatus>(statusRes, 'Не удалось загрузить статус userbot'),
+      parseJsonIfOk<UserbotChat[]>(chatsRes, 'Не удалось загрузить список чатов'),
+      parseJsonIfOk<TodayMetrics>(metricsRes, 'Не удалось загрузить метрики'),
+      parseJsonIfOk<{ settings?: { key: string; value: string }[] }>(
+        settingsRes,
+        'Не удалось загрузить настройки',
+      ),
     ]);
     setStatus(s as BotStatus);
     const chatsList = c as UserbotChat[];
     setChats(chatsList);
     setMetrics(m as TodayMetrics);
-    const rows = (raw as { settings?: { key: string; value: string }[] })?.settings ?? [];
+    const rows = raw?.settings ?? [];
     const byKey = new Map(rows.map((r) => [r.key, r.value]));
     const ge = parseStoredEntry(byKey.get('DEFAULT_ORDER_USD'));
     setGlobalEntryMode(ge.mode);
@@ -208,6 +226,9 @@ export default function TelegramUserbotPage() {
             apiFetch('/telegram-userbot/qr/status'),
             apiFetch('/telegram-userbot/metrics/today'),
           ]);
+          if (!qrRes.ok || !metricsRes.ok) {
+            return;
+          }
           const j = (await qrRes.json()) as { qr?: BotStatus['qr']; connected?: boolean };
           const m = (await metricsRes.json()) as TodayMetrics;
           setStatus((prev) =>
@@ -704,10 +725,11 @@ export default function TelegramUserbotPage() {
               const rows = group.rows;
               const st = sourceStatsBySource[chatTitleKey];
               const pnlStr =
-                st?.totalPnl != null
+                st != null && Number.isFinite(st.totalPnl)
                   ? `${st.totalPnl >= 0 ? '+' : ''}${st.totalPnl.toFixed(2)}`
                   : '—';
-              const winrateStr = st ? `${st.winrate.toFixed(1)}%` : '—';
+              const winrateStr =
+                st != null && Number.isFinite(st.winrate) ? `${st.winrate.toFixed(1)}%` : '—';
               return (
                 <details key={group.chatId} className="userbotRecentGroup">
                   <summary title={group.chatId}>

@@ -1,4 +1,9 @@
-import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  Logger,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   createHash,
@@ -16,9 +21,12 @@ import { TelegramService } from '../telegram';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   private readonly lockThreshold = 3;
   private readonly firstLockHours = 24;
   private readonly resetCodeMinutes = 10;
+  private readonly resetCodeMaxAttempts = 5;
+  private readonly resetCodeLockMinutes = 15;
 
   constructor(
     private readonly config: ConfigService,
@@ -276,12 +284,11 @@ export class AuthService {
 
   async requestPasswordReset(params: { login: string }): Promise<{ ok: true }> {
     const login = String(params.login ?? '').trim().toLowerCase();
-    if (!login) {
-      throw new UnauthorizedException('Login is required');
-    }
+    // Не раскрываем существование аккаунта: всегда возвращаем одинаковый ok-ответ.
+    if (!login) return { ok: true };
     const user = await this.prisma.authUser.findUnique({ where: { login } });
     if (!user || !user.telegramUserId) {
-      throw new UnauthorizedException('Password reset is unavailable for this account');
+      return { ok: true };
     }
     await this.prisma.authPasswordReset.updateMany({
       where: {
@@ -292,7 +299,7 @@ export class AuthService {
     });
     const code = this.createResetCode();
     const expiresAt = new Date(Date.now() + this.resetCodeMinutes * 60 * 1000);
-    await this.prisma.authPasswordReset.create({
+    const resetRow = await this.prisma.authPasswordReset.create({
       data: {
         userId: user.id,
         codeHash: this.hashResetCode(code),
@@ -306,7 +313,14 @@ export class AuthService {
       expiresInMinutes: this.resetCodeMinutes,
     });
     if (!sent.ok) {
-      throw new UnauthorizedException(sent.error ?? 'Failed to send reset code');
+      await this.prisma.authPasswordReset.update({
+        where: { id: resetRow.id },
+        data: { consumedAt: new Date() },
+      });
+      this.logger.warn(
+        `password reset code send failed for login=${user.login}: ${sent.error ?? 'unknown'}`,
+      );
+      return { ok: true };
     }
     return { ok: true };
   }
@@ -329,18 +343,34 @@ export class AuthService {
     if (!user) {
       throw new UnauthorizedException('Reset code is invalid');
     }
+    const now = new Date();
     const candidate = await this.prisma.authPasswordReset.findFirst({
       where: {
         userId: user.id,
         consumedAt: null,
-        expiresAt: { gt: new Date() },
+        expiresAt: { gt: now },
       },
       orderBy: { createdAt: 'desc' },
     });
     if (!candidate) {
       throw new UnauthorizedException('Reset code is invalid');
     }
+    if (candidate.lockedUntil && candidate.lockedUntil > now) {
+      throw new UnauthorizedException('Reset code is invalid');
+    }
     if (!this.safeEqual(candidate.codeHash, this.hashResetCode(code))) {
+      const nextAttempts = candidate.attempts + 1;
+      const lockUntil =
+        nextAttempts >= this.resetCodeMaxAttempts
+          ? new Date(now.getTime() + this.resetCodeLockMinutes * 60 * 1000)
+          : null;
+      await this.prisma.authPasswordReset.update({
+        where: { id: candidate.id },
+        data: {
+          attempts: nextAttempts,
+          lockedUntil: lockUntil,
+        },
+      });
       throw new UnauthorizedException('Reset code is invalid');
     }
     await this.prisma.$transaction([
@@ -350,11 +380,12 @@ export class AuthService {
           passwordHash: this.hashPassword(newPassword),
           failedLoginCount: 0,
           firstLockUntil: null,
+          manualLock: false,
         },
       }),
-      this.prisma.authPasswordReset.update({
-        where: { id: candidate.id },
-        data: { consumedAt: new Date() },
+      this.prisma.authPasswordReset.updateMany({
+        where: { userId: user.id, consumedAt: null },
+        data: { consumedAt: now, lockedUntil: null },
       }),
     ]);
     return { ok: true };

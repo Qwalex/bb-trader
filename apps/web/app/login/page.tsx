@@ -3,19 +3,9 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
+import { withAppBasePath } from '../../lib/base-path';
+
 type AuthMode = 'login' | 'register' | 'reset';
-
-function normalizeBasePath(raw: string | undefined): string {
-  const t = (raw ?? '').trim();
-  if (!t || t === '/') return '';
-  return (t.startsWith('/') ? t : `/${t}`).replace(/\/+$/, '');
-}
-
-const appBasePath = normalizeBasePath(process.env.NEXT_PUBLIC_BASE_PATH);
-function withAppBasePath(url: string): string {
-  if (!url.startsWith('/')) return url;
-  return `${appBasePath}${url}`;
-}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -34,7 +24,7 @@ export default function LoginPage() {
     setError(null);
     setOk(null);
     try {
-      const res = await fetch('/api/auth', {
+      const res = await fetch(withAppBasePath('/api/auth'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
@@ -74,7 +64,7 @@ export default function LoginPage() {
     setError(null);
     setOk(null);
     try {
-      const res = await fetch('/api/auth', {
+      const res = await fetch(withAppBasePath('/api/auth'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'request-reset', login }),
@@ -97,7 +87,7 @@ export default function LoginPage() {
     setError(null);
     setOk(null);
     try {
-      const res = await fetch('/api/auth', {
+      const res = await fetch(withAppBasePath('/api/auth'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

@@ -55,6 +55,10 @@ export class SettingsController {
     return String(req.auth?.role ?? '').trim().toLowerCase() === 'admin';
   }
 
+  private filterNonAdminSettings(rows: Array<{ key: string; value: string }>) {
+    return rows.filter((row) => !ADMIN_ONLY_GLOBAL_KEYS.has(row.key));
+  }
+
   @ApiOperation({ summary: 'Список настроек (секреты замаскированы)' })
   @ApiOkResponse({ description: 'Настройки получены' })
   @Get()
@@ -85,6 +89,22 @@ export class SettingsController {
     }
     const settings = await this.runWithCabinet(req, cabinetId, () => this.settings.list());
     return { settings };
+  }
+
+  @ApiOperation({
+    summary: 'Список настроек для web-клиента (без admin-only global ключей для не-админа)',
+  })
+  @ApiOkResponse({ description: 'Настройки для web-клиента получены' })
+  @Get('effective')
+  async listEffective(
+    @Req() req: AuthReq,
+    @Query('cabinetId') cabinetId?: string,
+  ) {
+    const settings = await this.runWithCabinet(req, cabinetId, () => this.settings.list());
+    if (this.isAdmin(req)) {
+      return { settings };
+    }
+    return { settings: this.filterNonAdminSettings(settings) };
   }
 
   @ApiOperation({ summary: 'Заметки / todo дашборда (из БД)' })

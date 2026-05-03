@@ -10,7 +10,13 @@
 
 ## Быстрый старт
 
-1. Скопируйте `.env.example` в `apps/api/.env` и заполните ключи (или задайте их позже в UI `/settings`).
+1. Скопируйте `.env.example` в `.env` (или в `apps/api/.env`) и заполните ключи:
+
+```bash
+cp .env.example .env
+```
+
+Базовая матрица переменных и классов секретов: `docs/audit/01-env-and-secrets-matrix.md`.
 
 2. Установка и БД: поднимите PostgreSQL и задайте `DATABASE_URL` (например `postgresql://user:pass@localhost:5432/signals?schema=public` в `apps/api/.env` или в корневом `.env`).
 

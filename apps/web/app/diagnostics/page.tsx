@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'r
 import { useRouter } from 'next/navigation';
 
 import { fetchApiResponse } from '../../lib/api';
+import { withAppBasePath } from '../../lib/base-path';
 import { formatDateTimeRu } from '../../lib/datetime';
 
 type RunRow = {
@@ -120,7 +121,7 @@ export default function DiagnosticsPage() {
   useEffect(() => {
     void (async () => {
       try {
-        const res = await fetch('/api/auth', { cache: 'no-store' });
+        const res = await fetch(withAppBasePath('/api/auth'), { cache: 'no-store' });
         const json = (await res.json().catch(() => null)) as
           | { authenticated?: boolean; role?: string }
           | null;

@@ -322,7 +322,16 @@ export class BybitService implements OnModuleInit {
     return {
       settings: this.settings,
       appLog: this.appLog,
-      orders: this.orders,
+      orders: {
+        hasActiveSignalForPairAndDirection: (pair, direction) =>
+          this.orders.hasActiveSignalForPairAndDirection(pair, direction),
+        createSignalRecord: (signal, rawMessage, status, origin) =>
+          this.orders.createSignalRecord(signal, rawMessage, status, origin),
+        createOrderRecord: (data) => this.orders.createOrderRecord(data),
+        updateSignalStatus: (signalId, data) => this.orders.updateSignalStatus(signalId, data),
+        createSignalEvent: (signalId, type, payload) =>
+          this.orders.createSignalEvent(signalId, type, payload),
+      },
       placementLocks: this.placementLocks,
       getClient: () => this.balanceInstrument.getClient(),
       applySourceMartingaleSizing: (s: SignalDto) => ov.applySourceMartingaleSizing(s),

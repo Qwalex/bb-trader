@@ -52,12 +52,14 @@ export function CabinetSwitcher({ compact = false }: { compact?: boolean }) {
   const effectiveSelected = useMemo(() => {
     if (!items.length) return selected;
     if (items.some((x) => x.id === selected)) return selected;
-    const fallback = items.find((x) => x.isDefault)?.id ?? items[0]?.id ?? '';
-    if (fallback && fallback !== selected) {
-      setSelected(fallback);
-    }
-    return fallback;
+    return items.find((x) => x.isDefault)?.id ?? items[0]?.id ?? '';
   }, [items, selected]);
+
+  useEffect(() => {
+    if (!effectiveSelected) return;
+    if (effectiveSelected === selected) return;
+    setSelected(effectiveSelected);
+  }, [effectiveSelected, selected]);
 
   if (items.length === 0) {
     return null;

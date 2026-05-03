@@ -1,4 +1,5 @@
 import type { PendingChange, Row } from './settings.types';
+import { normalizeBasePath } from '../../lib/base-path';
 import {
   DIAGNOSTIC_MODELS_KEY,
   EXTRA_LABELS,
@@ -8,12 +9,6 @@ import {
   MODEL_KEYS,
   PUT_ORDER,
 } from './settings-page.constants';
-
-export function normalizeBasePath(raw: string | undefined): string {
-  const t = (raw ?? '').trim();
-  if (!t || t === '/') return '';
-  return (t.startsWith('/') ? t : `/${t}`).replace(/\/+$/, '');
-}
 
 export function withAppBasePath(url: string): string {
   if (!url.startsWith('/')) return url;

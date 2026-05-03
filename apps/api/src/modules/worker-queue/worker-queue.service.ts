@@ -18,6 +18,7 @@ export class WorkerQueueService implements OnModuleInit {
   private readonly logger = new Logger(WorkerQueueService.name);
   private readonly pollMs = 900;
   private readonly maxAttempts = 8;
+  private readonly staleLockMs = 10 * 60 * 1000;
   private running = false;
 
   constructor(
@@ -38,10 +39,65 @@ export class WorkerQueueService implements OnModuleInit {
       this.logger.warn('worker queue disabled via WORKER_QUEUE_ENABLED=false');
       return;
     }
-    setTimeout(() => {
+    setTimeout(async () => {
+      await this.recoverStaleRunningJobs();
       this.running = true;
       void this.loop();
     }, 200);
+  }
+
+  private async recoverStaleRunningJobs(): Promise<void> {
+    const staleBefore = new Date(Date.now() - this.staleLockMs);
+    const staleJobs = await this.prisma.workerQueueJob.findMany({
+      where: {
+        status: 'running',
+        lockedAt: { lte: staleBefore },
+      },
+      select: {
+        id: true,
+        attempts: true,
+        queue: true,
+        jobKey: true,
+        lockedAt: true,
+      },
+      orderBy: { lockedAt: 'asc' },
+    });
+    if (staleJobs.length === 0) {
+      return;
+    }
+    let requeued = 0;
+    let failed = 0;
+    for (const job of staleJobs) {
+      const attempts = job.attempts + 1;
+      const finalFailure = attempts >= this.maxAttempts;
+      const lock = await this.prisma.workerQueueJob.updateMany({
+        where: { id: job.id, status: 'running' },
+        data: finalFailure
+          ? {
+              status: 'failed',
+              attempts,
+              error: `Recovered stale running job (lockedAt=${job.lockedAt?.toISOString() ?? 'n/a'})`,
+              finishedAt: new Date(),
+              lockedAt: null,
+            }
+          : {
+              status: 'pending',
+              attempts,
+              error: `Recovered stale running job (lockedAt=${job.lockedAt?.toISOString() ?? 'n/a'})`,
+              runAfter: new Date(Date.now() + attempts * 1_500),
+              lockedAt: null,
+            },
+      });
+      if (lock.count === 0) continue;
+      if (finalFailure) {
+        failed += 1;
+      } else {
+        requeued += 1;
+      }
+    }
+    this.logger.warn(
+      `stale worker recovery done: total=${staleJobs.length}, requeued=${requeued}, failed=${failed}`,
+    );
   }
 
   async enqueue(
@@ -213,6 +269,7 @@ export class WorkerQueueService implements OnModuleInit {
           status: 'completed',
           finishedAt: new Date(),
           error: null,
+          lockedAt: null,
         },
       });
     } catch (e) {
@@ -226,12 +283,14 @@ export class WorkerQueueService implements OnModuleInit {
               attempts,
               error: formatError(e),
               finishedAt: new Date(),
+              lockedAt: null,
             }
           : {
               status: 'pending',
               attempts,
               error: formatError(e),
               runAfter: new Date(Date.now() + attempts * 1_500),
+              lockedAt: null,
             },
       });
       if (finalFailure) {

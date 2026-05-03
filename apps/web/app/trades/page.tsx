@@ -116,7 +116,7 @@ export default async function TradesPage({
         fetchJson<string[]>(`/orders/sources`, undefined, cabinetId),
         fetchJson<{
           settings: { key: string; value: string }[];
-        }>(`/settings/raw`, undefined, cabinetId),
+        }>(`/settings/effective`, undefined, cabinetId),
       ]);
 
       const raw = settingsRaw.settings.find((r) => r.key === 'SOURCE_LIST')

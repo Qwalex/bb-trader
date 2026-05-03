@@ -518,6 +518,8 @@ model AuthPasswordReset {
   userId     String
   user       AuthUser @relation(fields: [userId], references: [id], onDelete: Cascade)
   codeHash   String
+  attempts   Int      @default(0)
+  lockedUntil DateTime?
   expiresAt  DateTime
   consumedAt DateTime?
   createdAt  DateTime @default(now())

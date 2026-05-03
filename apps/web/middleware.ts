@@ -1,11 +1,28 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
+import { normalizeBasePath } from './lib/base-path';
+
 const AUTH_COOKIE = 'sb_auth';
+const configuredBasePath = normalizeBasePath(process.env.NEXT_PUBLIC_BASE_PATH);
+
+function stripBasePath(pathname: string): string {
+  if (!configuredBasePath) {
+    return pathname;
+  }
+  if (pathname === configuredBasePath) {
+    return '/';
+  }
+  if (pathname.startsWith(`${configuredBasePath}/`)) {
+    return pathname.slice(configuredBasePath.length) || '/';
+  }
+  return pathname;
+}
 
 function isPublicPath(pathname: string): boolean {
   if (pathname === '/login') return true;
   if (pathname.startsWith('/api/auth')) return true;
+  if (pathname.startsWith('/api/backend')) return true;
   if (pathname.startsWith('/api/settings-auth')) return true;
   if (pathname === '/health') return true;
   if (pathname === '/robots.txt') return true;
@@ -16,7 +33,8 @@ function isPublicPath(pathname: string): boolean {
 }
 
 export function middleware(req: NextRequest) {
-  if (isPublicPath(req.nextUrl.pathname)) {
+  const normalizedPath = stripBasePath(req.nextUrl.pathname);
+  if (isPublicPath(normalizedPath)) {
     return NextResponse.next();
   }
   const token = req.cookies.get(AUTH_COOKIE)?.value?.trim();
@@ -24,7 +42,7 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
   const url = req.nextUrl.clone();
-  url.pathname = '/login';
+  url.pathname = configuredBasePath ? `${configuredBasePath}/login` : '/login';
   return NextResponse.redirect(url);
 }
 

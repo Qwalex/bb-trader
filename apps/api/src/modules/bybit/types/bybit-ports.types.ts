@@ -23,6 +23,7 @@ export interface BybitSignalPlacementPorts {
     createSignalRecord: (...args: any[]) => Promise<any>;
     createOrderRecord: (...args: any[]) => Promise<any>;
     updateSignalStatus: (signalId: string, data: any) => Promise<any>;
+    createSignalEvent: (signalId: string, type: string, payload?: unknown) => Promise<any>;
   };
   placementLocks: Set<string>;
   getClient: () => Promise<RestClientV5 | null>;

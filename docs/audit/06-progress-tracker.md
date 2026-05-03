@@ -623,3 +623,75 @@
 - Manual verification: `npx nest build` в `apps/api`; `node dist/main.js` — модули и маршруты инициализируются; далее ожидаемая ошибка Prisma без локального `DATABASE_URL` (не относится к DI).
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-051
+
+- Status: `done`
+- Scope: 401 на клиентских Web-запросах к API после перехода на httpOnly auth cookie.
+- Files: `apps/web/app/api/backend/[...path]/route.ts`, `apps/web/lib/base-path.ts`, `apps/web/lib/api.ts`, `apps/web/middleware.ts`, `apps/web/app/login/page.tsx`, `apps/web/app/diagnostics/page.tsx`, `apps/web/app/openrouter-spend/page.tsx`, `apps/web/app/my-group/page.tsx`, `apps/web/app/settings/settings-page.util.ts`, `turbo.json`, `docs/audit/03-security-risks-register.md`, `docs/audit/06-progress-tracker.md`
+- Findings: в production Web выставляет JWT только в httpOnly `sb_auth`, а browser-side `fetchApiResponse` не мог прочитать эту cookie и отправлял запросы к API без Bearer.
+- Changes: добавлен same-origin BFF-прокси `/api/backend/*`, который на сервере читает `sb_auth` и проксирует запросы в API с `Authorization`; клиентский `getApiBase()` направлен на этот прокси; вынесен общий `withAppBasePath` helper в `lib/base-path.ts`; прямые вызовы `fetch('/api/auth')` переведены на basePath-aware helper; middleware нормализует path относительно `NEXT_PUBLIC_BASE_PATH` и пропускает proxy route без HTML-redirect; runtime env для Web/API внесены в `turbo.json`.
+- Decomposition notes (`utils/constants/hooks/types`): новый route handler изолирует server-side auth proxy от общего API-клиента.
+- Manual verification: `npm run lint -w web` (pass, только исторические warning), `npm run check-types -w web` (pass), `npm run build -w web` (pass); требуется browser check после запуска web/api: клиентские запросы должны идти на `/api/backend/*` и больше не получать 401 при валидной сессии.
+- Docs updated: этот трекер, `03-security-risks-register.md`.
+- Linked risks (`SEC-###`): `SEC-013`
+
+### AUD-052
+
+- Status: `done`
+- Scope: Разделение settings endpoints для admin/raw и user/cabinet-safe чтения + устранение точки входа в `/logs` из навигации.
+- Files: `apps/api/src/modules/settings/settings.controller.ts`, `apps/web/app/settings/page.tsx`, `apps/web/app/layout.tsx`, `apps/web/app/page.tsx`, `apps/web/app/trades/page.tsx`, `apps/web/app/telegram-userbot/page.tsx`, `packages/shared/src/nav-menu.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: Web-страницы читали только `/settings/raw` (admin-only), из-за чего пользовательские/кабинетные сценарии теряли доступ к безопасным незамаскированным ключам; в навигации оставался пункт `/logs` при отсутствии согласованного публичного UX на эту страницу.
+- Changes: добавлен `GET /settings/effective` (для admin — полный набор как `raw`, для non-admin — фильтр без `ADMIN_ONLY_GLOBAL_KEYS`); все web-read path для настроек переведены на `/settings/effective`; пункт `logs` убран из `NAV_MENU_ITEMS`.
+- Decomposition notes (`utils/constants/hooks/types`): endpoint-логика разделена по ролям в контроллере без изменения бизнес-логики `SettingsService`.
+- Manual verification: `npm run lint -w api` (pass, только исторические warning), `npx tsc -p apps/api/tsconfig.json --noEmit` (pass), `npm run lint -w web` (pass, только исторические warning), `npm run check-types -w web` (pass), `npm run build -w web` (pass).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): `SEC-005`, `SEC-006`
+
+### AUD-053
+
+- Status: `done`
+- Scope: Усиление торговых инвариантов по активным сигналам и безопасный rollback/reconcile при partial placement Bybit.
+- Files: `apps/api/src/modules/orders/orders.service.ts`, `apps/api/src/modules/bybit/orders/bybit-signal-placement.service.ts`, `apps/api/src/modules/bybit/types/bybit-ports.types.ts`, `apps/api/src/modules/bybit/bybit.service.ts`, `apps/api/prisma/migrations/20260503095000_signal_active_unique_open_parsed/migration.sql`, `docs/audit/06-progress-tracker.md`
+- Findings: дубли активной сделки могли пройти при legacy-формате пары в БД и/или после перехода сигнала в `OPEN`/`PARSED`; при фейле размещения после частичного успеха часть ордеров могла остаться на бирже при `FAILED` в БД.
+- Changes: `createSignalRecord` получил pre-guard с нормализацией пары по `cabinetId + pair + direction + active statuses`; `hasActiveSignalForPairAndDirection` и stale-reconcile переведены на полный active lifecycle (`PENDING`, `ORDERS_PLACED`, `OPEN`, `PARSED`); добавлена SQL-миграция для partial unique индекса по полному набору active статусов; в `BybitSignalPlacementService` добавлен rollback созданных bybitOrderIds при ошибках и fallback в `ORDERS_PLACED` + событие reconcile-required, если отмена ордеров неполная.
+- Decomposition notes (`utils/constants/hooks/types`): ports-контракт для placement расширен `createSignalEvent` для фиксации rollback/reconcile состояния без утечки деталей фасада.
+- Manual verification: `npm run lint -w api` (pass, только исторические warning), `npx tsc -p apps/api/tsconfig.json --noEmit` (pass), `npm run build -w api` (pass).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-054
+
+- Status: `done`
+- Scope: Recovery зависших `running` worker jobs + усиление безопасности password reset.
+- Files: `apps/api/src/modules/worker-queue/worker-queue.service.ts`, `apps/api/src/modules/auth/auth.service.ts`, `apps/api/prisma/schema.prisma`, `apps/api/prisma/migrations/20260503102000_auth_reset_attempts_lockout/migration.sql`, `docs/audit/03-security-risks-register.md`, `docs/audit/06-progress-tracker.md`
+- Findings: worker-очередь не восстанавливала stale `running` jobs после падения процесса; reset flow раскрывал существование аккаунта на request и не ограничивал brute-force подтверждения кода.
+- Changes: при старте worker добавлен recovery stale `running` jobs (`lockedAt` старше TTL) с переводом в `pending`/`failed` и увеличением `attempts`; в run loop очищается `lockedAt` при завершении/ретрае; в reset flow request всегда возвращает одинаковый `ok` без user enumeration, введены `attempts` + `lockedUntil` для кода восстановления, при успешном подтверждении consume всех активных reset-кодов пользователя.
+- Decomposition notes (`utils/constants/hooks/types`): безопасность reset-кода вынесена в явные поля модели `AuthPasswordReset` (`attempts`, `lockedUntil`) и DB-миграцию.
+- Manual verification: `npm run lint -w api` (pass, только исторические warning), `npm run build -w api` (pass, включая `prisma generate`), `npx tsc -p apps/api/tsconfig.json --noEmit` (pass).
+- Docs updated: этот трекер, `03-security-risks-register.md`.
+- Linked risks (`SEC-###`): `SEC-014`
+
+### AUD-055
+
+- Status: `done`
+- Scope: Web UX/error hardening для userbot, dashboard и `CabinetSwitcher`.
+- Files: `apps/web/app/telegram-userbot/page.tsx`, `apps/web/app/components/CabinetSwitcher.tsx`, `apps/web/app/page.tsx`, `docs/audit/06-progress-tracker.md`
+- Findings: `telegram-userbot` парсил JSON без проверки `res.ok` и маскировал ошибки source stats значением `0`; `CabinetSwitcher` вызывал `setState` внутри `useMemo`; дашборд падал целиком при ошибке одного из критичных endpoint в `Promise.all`.
+- Changes: в userbot добавлен `res.ok`-gate перед `json()` и null-state для недоступных source stats (без подстановки `0`); синхронизация fallback-кабинета перенесена из `useMemo` в `useEffect`; загрузка дашборда переведена на `Promise.allSettled` с частичной деградацией и сохранением доступных блоков.
+- Decomposition notes (`utils/constants/hooks/types`): N/A
+- Manual verification: `npm run lint -w web` (pass, только исторические warning), `npm run check-types -w web` (pass), `npm run build -w web` (pass).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-056
+
+- Status: `done`
+- Scope: Ops hygiene — `.env.example`, npm-only scripts, параметризация Postgres healthcheck, синхронизация Railway web healthcheck/basePath в docs-config.
+- Files: `.env.example`, `package.json`, `packages/api/package.json`, `docker-compose.yml`, `docker-compose.dev.yml`, `docker-compose.test.yml`, `railway.web.toml`, `README.md`, `docs/audit/01-env-and-secrets-matrix.md`, `AGENTS.md`, `docs/audit/06-progress-tracker.md`
+- Findings: отсутствовал репозиторный env-template; в npm-монорепо оставались `pnpm`-скрипты; compose healthcheck Postgres был захардкожен под один DB/user; `railway.web.toml` требовал явной фиксации соответствия `NEXT_BASE_PATH`.
+- Changes: добавлен безопасный `.env.example` с placeholder-значениями; корневые/пакетные scripts переведены на npm-эквиваленты; `pg_isready` в compose-файлах параметризован через `POSTGRES_USER`/`POSTGRES_DB`; в `railway.web.toml` уточнены правила синхронизации `healthcheckPath` с `NEXT_BASE_PATH`; добавлены ссылки на env-template в README и audit env-matrix.
+- Decomposition notes (`utils/constants/hooks/types`): N/A
+- Manual verification: `npm run lint -w api` (pass, только исторические warning), `npm run lint -w web` (pass, только исторические warning), `npm run build -w api` (pass), `npm run build -w web` (pass).
+- Docs updated: этот трекер, `01-env-and-secrets-matrix.md`, `README.md`, `AGENTS.md`.
+- Linked risks (`SEC-###`): N/A

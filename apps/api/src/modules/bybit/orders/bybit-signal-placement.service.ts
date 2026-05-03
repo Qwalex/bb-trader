@@ -11,6 +11,102 @@ import type { PlaceOrdersResult, SignalOrderOrigin } from '../types/bybit.types'
 export class BybitSignalPlacementService {
   private readonly logger = new Logger(BybitSignalPlacementService.name);
 
+  private async cancelCreatedEntryOrders(
+    client: RestClientV5,
+    symbol: string,
+    orderIds: string[],
+  ): Promise<{ cancelledOrderIds: string[]; failedOrderIds: string[]; errors: string[] }> {
+    const cancelledOrderIds: string[] = [];
+    const failedOrderIds: string[] = [];
+    const errors: string[] = [];
+    const uniqueIds = Array.from(new Set(orderIds.map((id) => id.trim()).filter(Boolean)));
+    for (const orderId of uniqueIds) {
+      let cancelled = false;
+      for (const orderFilter of ['Order', 'StopOrder'] as const) {
+        try {
+          const res = await client.cancelOrder({
+            category: 'linear',
+            symbol,
+            orderId,
+            orderFilter,
+          });
+          if (res.retCode === 0 || res.retCode === 110008 || res.retCode === 110001) {
+            cancelled = true;
+            if (res.retCode === 0) {
+              cancelledOrderIds.push(orderId);
+            }
+            break;
+          }
+          if (orderFilter === 'StopOrder') {
+            errors.push(
+              `cancelOrder(${orderId}) retCode=${res.retCode} ${String(res.retMsg ?? '')}`,
+            );
+          }
+        } catch (e) {
+          if (orderFilter === 'StopOrder') {
+            errors.push(`cancelOrder(${orderId}) ${formatError(e)}`);
+          }
+        }
+      }
+      if (!cancelled) {
+        failedOrderIds.push(orderId);
+      }
+    }
+    return { cancelledOrderIds, failedOrderIds, errors };
+  }
+
+  private async finalizeFailedPlacement(params: {
+    signalId: string;
+    error: string;
+    stage: string;
+    symbol: string;
+    client: RestClientV5;
+    bybitOrderIds: string[];
+    ports: BybitSignalPlacementPorts;
+  }): Promise<PlaceOrdersResult> {
+    const { signalId, error, stage, symbol, client, bybitOrderIds, ports } = params;
+    const createdIds = Array.from(new Set(bybitOrderIds));
+    if (createdIds.length === 0) {
+      await ports.orders.updateSignalStatus(signalId, { status: 'FAILED' });
+      await ports.orders.createSignalEvent(signalId, 'BYBIT_PLACEMENT_FAILED', {
+        stage,
+        error,
+      });
+      return { ok: false, error, signalId };
+    }
+
+    const rollback = await this.cancelCreatedEntryOrders(client, symbol, createdIds);
+    const payload = {
+      stage,
+      error,
+      createdOrderIds: createdIds,
+      cancelledOrderIds: rollback.cancelledOrderIds,
+      failedOrderIds: rollback.failedOrderIds,
+      rollbackErrors: rollback.errors,
+    };
+
+    if (rollback.failedOrderIds.length === 0) {
+      await ports.orders.updateSignalStatus(signalId, { status: 'FAILED' });
+      await ports.orders.createSignalEvent(signalId, 'BYBIT_PLACEMENT_ROLLBACK_OK', payload);
+      void ports.appLog.append('warn', 'bybit', 'placement failed, rollback successful', {
+        signalId,
+        symbol,
+        ...payload,
+      });
+      return { ok: false, error, signalId };
+    }
+
+    await ports.orders.updateSignalStatus(signalId, { status: 'ORDERS_PLACED' });
+    await ports.orders.createSignalEvent(signalId, 'BYBIT_PLACEMENT_RECONCILE_REQUIRED', payload);
+    void ports.appLog.append('error', 'bybit', 'placement failed, reconcile required', {
+      signalId,
+      symbol,
+      ...payload,
+    });
+    const reconcileError = `${error} (часть ордеров уже размещена на бирже; запущен reconcile через статус ORDERS_PLACED)`;
+    return { ok: false, error: reconcileError, signalId, bybitOrderIds: createdIds };
+  }
+
   async placeSignalOrders(
     signal: SignalDto,
     rawMessage: string | undefined,
@@ -108,6 +204,8 @@ export class BybitSignalPlacementService {
       };
     }
     ports.placementLocks.add(lockKey);
+    let signalId: string | null = null;
+    const bybitIds: string[] = [];
 
     try {
       const lastPrice = await ports.getLastPrice(client, symbol);
@@ -298,13 +396,20 @@ export class BybitSignalPlacementService {
         'PENDING',
         origin,
       );
+      signalId = signalRow.id;
       const entryPositionIdx = await ports.resolveEntryPositionIdx(client, symbol, side);
 
-      const bybitIds: string[] = [];
       if (effectiveEntries.length === 0) {
         if (!lastPrice) {
-          await ports.orders.updateSignalStatus(signalRow.id, { status: 'FAILED' });
-          return { ok: false, error: 'Не удалось получить текущую цену для рыночного входа', signalId: signalRow.id };
+          return this.finalizeFailedPlacement({
+            signalId: signalRow.id,
+            error: 'Не удалось получить текущую цену для рыночного входа',
+            stage: 'market-entry-last-price',
+            symbol,
+            client,
+            bybitOrderIds: bybitIds,
+            ports,
+          });
         }
         const qtyNum = leveragedNotional / lastPrice;
         const qty = ports.roundQty(qtyNum, qtyStep, minQty);
@@ -334,8 +439,15 @@ export class BybitSignalPlacementService {
             retCode: orderRes.retCode,
             retMsg: errText,
           });
-          await ports.orders.updateSignalStatus(signalRow.id, { status: 'FAILED' });
-          return { ok: false, error: errText, signalId: signalRow.id };
+          return this.finalizeFailedPlacement({
+            signalId: signalRow.id,
+            error: errText,
+            stage: 'market-entry-submit',
+            symbol,
+            client,
+            bybitOrderIds: bybitIds,
+            ports,
+          });
         }
       } else {
         for (let i = 0; i < effectiveEntries.length; i++) {
@@ -405,8 +517,15 @@ export class BybitSignalPlacementService {
               retCode: orderRes.retCode,
               retMsg: errText,
             });
-            await ports.orders.updateSignalStatus(signalRow.id, { status: 'FAILED' });
-            return { ok: false, error: errText, signalId: signalRow.id };
+            return this.finalizeFailedPlacement({
+              signalId: signalRow.id,
+              error: errText,
+              stage: `limit-entry-submit-${i}`,
+              symbol,
+              client,
+              bybitOrderIds: bybitIds,
+              ports,
+            });
           }
         }
       }
@@ -422,8 +541,20 @@ export class BybitSignalPlacementService {
       this.logger.error(`placeSignalOrders: ${msg}`);
       void ports.appLog.append('error', 'bybit', 'placeSignalOrders: исключение', {
         symbol,
+        signalId,
         error: msg,
       });
+      if (signalId) {
+        return this.finalizeFailedPlacement({
+          signalId,
+          error: msg,
+          stage: 'unexpected-exception',
+          symbol,
+          client,
+          bybitOrderIds: bybitIds,
+          ports,
+        });
+      }
       return { ok: false, error: msg };
     } finally {
       ports.placementLocks.delete(lockKey);

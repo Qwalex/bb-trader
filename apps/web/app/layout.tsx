@@ -116,7 +116,7 @@ export default async function RootLayout({
         const me = (await res.json()) as { role?: string };
         isAdmin = String(me.role ?? '').trim().toLowerCase() === 'admin';
       }
-      const settingsRes = await fetch(`${getApiBaseForServer()}/settings/raw`, {
+      const settingsRes = await fetch(`${getApiBaseForServer()}/settings/effective`, {
         cache: 'no-store',
         headers: {
           Authorization: `Bearer ${authToken}`,

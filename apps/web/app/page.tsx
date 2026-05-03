@@ -92,64 +92,84 @@ export default async function Home({
   let authMe: AuthMe | null = null;
   let cabinetItems: CabinetItem[] = [];
   let err: string | null = null;
-  try {
-    const q = new URLSearchParams();
-    if (source) q.set('source', source);
-    const qs = q.toString();
-    [stats, pnl, top, sourceOptions] = await Promise.all([
-      fetchJson<Stats>(`/orders/stats${qs ? `?${qs}` : ''}`, undefined, cabinetId),
-      fetchJson<PnlPoint[]>(
-        `/orders/pnl-series?bucket=day${source ? `&source=${encodeURIComponent(source)}` : ''}`,
-        undefined,
-        cabinetId,
-      ),
-      fetchJson<TopSources>('/orders/top-sources?limit=5', undefined, cabinetId),
-      (async () => {
-        try {
-          const [sourcesFromDb, settingsRaw] = await Promise.all([
-            fetchJson<string[]>('/orders/sources', undefined, cabinetId),
-            fetchJson<SettingsRaw>('/settings/raw', undefined, cabinetId),
-          ]);
-          const raw = settingsRaw.settings.find((r) => r.key === 'SOURCE_LIST')?.value;
-          const rawExcluded = settingsRaw.settings.find((r) => r.key === 'SOURCE_EXCLUDE_LIST')
-            ?.value;
-          let sourcesFromSettings: string[] = [];
-          let excludedSources: string[] = [];
-          if (raw && raw.trim()) {
-            try {
-              const parsed = JSON.parse(raw) as unknown;
-              if (Array.isArray(parsed)) {
-                sourcesFromSettings = parsed
-                  .map((v) => (typeof v === 'string' ? v.trim() : ''))
-                  .filter((v) => v.length > 0);
-              }
-            } catch {
-              // ignore malformed SOURCE_LIST
+  const q = new URLSearchParams();
+  if (source) q.set('source', source);
+  const qs = q.toString();
+  const [statsRes, pnlRes, topRes, sourceOptionsRes] = await Promise.allSettled([
+    fetchJson<Stats>(`/orders/stats${qs ? `?${qs}` : ''}`, undefined, cabinetId),
+    fetchJson<PnlPoint[]>(
+      `/orders/pnl-series?bucket=day${source ? `&source=${encodeURIComponent(source)}` : ''}`,
+      undefined,
+      cabinetId,
+    ),
+    fetchJson<TopSources>('/orders/top-sources?limit=5', undefined, cabinetId),
+    (async () => {
+      try {
+        const [sourcesFromDb, settingsRaw] = await Promise.all([
+          fetchJson<string[]>('/orders/sources', undefined, cabinetId),
+          fetchJson<SettingsRaw>('/settings/effective', undefined, cabinetId),
+        ]);
+        const raw = settingsRaw.settings.find((r) => r.key === 'SOURCE_LIST')?.value;
+        const rawExcluded = settingsRaw.settings.find((r) => r.key === 'SOURCE_EXCLUDE_LIST')
+          ?.value;
+        let sourcesFromSettings: string[] = [];
+        let excludedSources: string[] = [];
+        if (raw && raw.trim()) {
+          try {
+            const parsed = JSON.parse(raw) as unknown;
+            if (Array.isArray(parsed)) {
+              sourcesFromSettings = parsed
+                .map((v) => (typeof v === 'string' ? v.trim() : ''))
+                .filter((v) => v.length > 0);
             }
+          } catch {
+            // ignore malformed SOURCE_LIST
           }
-          if (rawExcluded && rawExcluded.trim()) {
-            try {
-              const parsed = JSON.parse(rawExcluded) as unknown;
-              if (Array.isArray(parsed)) {
-                excludedSources = parsed
-                  .map((v) => (typeof v === 'string' ? v.trim() : ''))
-                  .filter((v) => v.length > 0);
-              }
-            } catch {
-              // ignore malformed SOURCE_EXCLUDE_LIST
-            }
-          }
-          const excludedSet = new Set(excludedSources);
-          return Array.from(new Set([...sourcesFromDb, ...sourcesFromSettings])).sort((a, b) =>
-            a.localeCompare(b, 'ru'),
-          ).filter((s) => !excludedSet.has(s));
-        } catch {
-          return [];
         }
-      })(),
-    ]);
-  } catch (e) {
-    err = e instanceof Error ? e.message : 'Ошибка API';
+        if (rawExcluded && rawExcluded.trim()) {
+          try {
+            const parsed = JSON.parse(rawExcluded) as unknown;
+            if (Array.isArray(parsed)) {
+              excludedSources = parsed
+                .map((v) => (typeof v === 'string' ? v.trim() : ''))
+                .filter((v) => v.length > 0);
+            }
+          } catch {
+            // ignore malformed SOURCE_EXCLUDE_LIST
+          }
+        }
+        const excludedSet = new Set(excludedSources);
+        return Array.from(new Set([...sourcesFromDb, ...sourcesFromSettings]))
+          .sort((a, b) => a.localeCompare(b, 'ru'))
+          .filter((s) => !excludedSet.has(s));
+      } catch {
+        return [];
+      }
+    })(),
+  ]);
+  const loadErrors: string[] = [];
+  if (statsRes.status === 'fulfilled') {
+    stats = statsRes.value;
+  } else {
+    loadErrors.push('stats');
+  }
+  if (pnlRes.status === 'fulfilled') {
+    pnl = pnlRes.value;
+  } else {
+    loadErrors.push('pnl-series');
+  }
+  if (topRes.status === 'fulfilled') {
+    top = topRes.value;
+  } else {
+    loadErrors.push('top-sources');
+  }
+  if (sourceOptionsRes.status === 'fulfilled') {
+    sourceOptions = sourceOptionsRes.value;
+  } else {
+    loadErrors.push('sources');
+  }
+  if (loadErrors.length > 0) {
+    err = `Часть данных не загружена: ${loadErrors.join(', ')}`;
   }
   try {
     authMe = await fetchJson<AuthMe>('/auth/me', undefined, cabinetId);

@@ -3,8 +3,9 @@
 # Плюс RAILPACK_CONFIG_FILE=railpack.web.json (если используете отдельный railpack для web).
 #
 # Порт: Next.js использует переменную PORT (Railway задаёт автоматически).
-# Если задан NEXT_BASE_PATH (например /trade), healthcheckPath должен быть с префиксом:
-#   healthcheckPath = "/trade/health"
+# По умолчанию (NEXT_BASE_PATH пустой) healthcheckPath = "/health".
+# Если в Railway зададите NEXT_BASE_PATH (например "/trade"), синхронно поменяйте
+# healthcheckPath на "/trade/health".
 
 [build]
 builder = "RAILPACK"

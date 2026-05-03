@@ -75,6 +75,9 @@ export class OrdersService {
     'OPEN',
     'PARSED',
   ]);
+  private static readonly ACTIVE_SIGNAL_STATUS_LIST = Array.from(
+    OrdersService.ACTIVE_SIGNAL_STATUSES,
+  );
 
   private static readonly CLOSED_SIGNAL_STATUSES = new Set([
     'CLOSED_WIN',
@@ -99,6 +102,29 @@ export class OrdersService {
     return this.cabinetContext.getCabinetId();
   }
 
+  private async findActiveSignalConflictByPairAndDirection(params: {
+    cabinetId: string;
+    pair: string;
+    direction: 'long' | 'short';
+  }): Promise<{ id: string; status: string } | null> {
+    const rows = await this.prisma.signal.findMany({
+      where: {
+        cabinetId: params.cabinetId,
+        deletedAt: null,
+        status: { in: OrdersService.ACTIVE_SIGNAL_STATUS_LIST },
+        direction: params.direction,
+      },
+      select: { id: true, pair: true, status: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    const wantedPair = normalizeTradingPair(params.pair);
+    const found = rows.find((row) => normalizeTradingPair(row.pair) === wantedPair);
+    if (!found) {
+      return null;
+    }
+    return { id: found.id, status: found.status };
+  }
+
   private withCabinetScope(where: Prisma.SignalWhereInput): Prisma.SignalWhereInput {
     const cabinetId = this.currentCabinetId();
     if (!cabinetId) {
@@ -116,9 +142,21 @@ export class OrdersService {
     origin?: { chatId?: string; messageId?: string; signalExternalId?: string },
   ) {
     const cabinetId = this.currentCabinetId() ?? (await this.cabinets.getDefaultCabinetId());
+    const normalizedPair = normalizeTradingPair(signal.pair);
     const sourceChatId = origin?.chatId?.trim() || null;
     const sourceMessageId = origin?.messageId?.trim() || null;
     const signalExternalId = origin?.signalExternalId?.trim() || null;
+
+    const conflict = await this.findActiveSignalConflictByPairAndDirection({
+      cabinetId,
+      pair: normalizedPair,
+      direction: signal.direction,
+    });
+    if (conflict) {
+      throw new BadRequestException(
+        `По паре ${normalizedPair} уже есть активный сигнал ${signal.direction.toUpperCase()} (${conflict.id.slice(0, 8)}…, статус ${conflict.status})`,
+      );
+    }
 
     if (sourceChatId && sourceMessageId) {
       const existing = await this.prisma.signal.findFirst({
@@ -127,7 +165,7 @@ export class OrdersService {
           deletedAt: null,
           sourceChatId,
           sourceMessageId,
-          status: { in: Array.from(OrdersService.ACTIVE_SIGNAL_STATUSES) },
+          status: { in: OrdersService.ACTIVE_SIGNAL_STATUS_LIST },
         },
         select: { id: true },
       });
@@ -142,7 +180,7 @@ export class OrdersService {
       return await this.prisma.signal.create({
         data: {
           cabinetId,
-          pair: normalizeTradingPair(signal.pair),
+          pair: normalizedPair,
           direction: signal.direction,
           entries: JSON.stringify(signal.entries),
           entryIsRange: signal.entryIsRange === true,
@@ -163,7 +201,7 @@ export class OrdersService {
       const msg = formatError(e);
       if (msg.includes('Signal_active_pair_direction_unique')) {
         throw new BadRequestException(
-          `По паре ${normalizeTradingPair(signal.pair)} уже есть активный сигнал ${signal.direction.toUpperCase()}`,
+          `По паре ${normalizedPair} уже есть активный сигнал ${signal.direction.toUpperCase()}`,
         );
       }
       throw e;
@@ -588,7 +626,7 @@ export class OrdersService {
     return this.prisma.signal.findMany({
       where: this.withCabinetScope({
         deletedAt: null,
-        status: { in: ['PENDING', 'ORDERS_PLACED', 'OPEN'] },
+        status: { in: ['PENDING', 'ORDERS_PLACED', 'OPEN', 'PARSED'] },
       }),
       include: { orders: true },
       orderBy: { createdAt: 'asc' },
@@ -657,16 +695,13 @@ export class OrdersService {
     pair: string,
     direction: 'long' | 'short',
   ): Promise<boolean> {
-    const want = normalizeTradingPair(pair);
-    const open = await this.prisma.signal.findMany({
-      where: this.withCabinetScope({
-        deletedAt: null,
-        status: { in: ['PENDING', 'ORDERS_PLACED'] },
-        direction,
-      }),
-      select: { pair: true },
+    const cabinetId = this.currentCabinetId() ?? (await this.cabinets.getDefaultCabinetId());
+    const hit = await this.findActiveSignalConflictByPairAndDirection({
+      cabinetId,
+      pair,
+      direction,
     });
-    return open.some((r) => normalizeTradingPair(r.pair) === want);
+    return hit !== null;
   }
 
   /**
@@ -681,7 +716,7 @@ export class OrdersService {
     const open = await this.prisma.signal.findMany({
       where: this.withCabinetScope({
         deletedAt: null,
-        status: { in: ['PENDING', 'ORDERS_PLACED'] },
+        status: { in: OrdersService.ACTIVE_SIGNAL_STATUS_LIST },
         direction,
       }),
       select: { id: true, pair: true },

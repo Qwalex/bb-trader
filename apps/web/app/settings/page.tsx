@@ -100,7 +100,7 @@ export default function SettingsPage() {
 
   const loadSettings = useCallback(async () => {
     try {
-      const res = await apiFetchScoped('/settings/raw');
+      const res = await apiFetchScoped('/settings/effective');
       if (!res.ok) throw new Error(String(res.status));
       const j = (await res.json()) as {
         settings: Row[];

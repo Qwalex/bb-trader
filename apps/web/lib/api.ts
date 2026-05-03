@@ -1,7 +1,7 @@
 import { getClientTokenFromCookie, getServerTokenFromCookies } from './api-auth.util';
+import { normalizeBasePath } from './base-path';
 import {
   ACTIVE_CABINET_STORAGE_KEY,
-  DEFAULT_CLIENT_API_BASE_SUFFIX,
   DEFAULT_INTERNAL_API_BASE,
 } from './api.constants';
 
@@ -28,10 +28,8 @@ export function getApiBase(): string {
       DEFAULT_INTERNAL_API_BASE
     );
   }
-  return (
-    process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ??
-    `${window.location.origin}${DEFAULT_CLIENT_API_BASE_SUFFIX}`
-  );
+  const basePath = normalizeBasePath(process.env.NEXT_PUBLIC_BASE_PATH);
+  return `${window.location.origin}${basePath}/api/backend`;
 }
 
 function getClientCabinetId(): string | undefined {

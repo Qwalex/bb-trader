@@ -8,6 +8,7 @@
 
 ## Environments
 
+- Baseline template: `.env.example` (safe placeholders, no real secrets).
 - Local Docker: compose-managed env + `.env` values.
 - Development/Test: dedicated compose files and restart scripts.
 - Railway: service variables + managed PostgreSQL (`DATABASE_URL`).
