@@ -815,3 +815,14 @@
 - Manual verification: `npm run build -w apps/api`, `npm run check-types -w apps/web` (pass); вручную открыть `/` после входа — карточки и группы при наличии данных.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-066
+
+- Status: `done`
+- Scope: Изоляция торговых и кабинетных настроек между кабинетами.
+- Files: `apps/api/src/modules/settings/settings.constants.ts`, `apps/api/src/modules/settings/settings.service.ts`, `packages/shared/src/cabinet-settings.ts`, `apps/web/app/settings/settings-page.constants.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: ключи из `CABINET_SCOPED` одновременно были в `GLOBAL_SHARED_SETTING_KEYS` → `get`/`set` обходили `cabinetSetting` и писали в глобальную таблицу `Setting` (одно значение на всё приложение); плюс fallback на `userSetting` для кабинетных ключей давал общий слой между кабинетами одного пользователя.
+- Changes: убрано пересечение кабинетных ключей с `GLOBAL_SHARED_SETTING_KEYS`; `POLLING_INTERVAL_MS` и `BYBIT_ACCOUNT_MAX_CONCURRENCY` добавлены в `CABINET_SCOPED_SETTING_KEYS`; при активном кабинете для кабинетных ключей не подмешиваются `userSetting`/глобальная `Setting` в `get`/`getMany`/`list` (и `set` не пишет в `userSetting` для этой комбинации); в web `ADMIN_GLOBAL_KEYS` убраны те же торговые ключи, чтобы не скрывать их не-админу в режиме кабинета.
+- Manual verification: `npm run build -w apps/api`, `npm run check-types -w apps/web` (pass); смена активного кабинета и `/settings` — разные значения после отдельного сохранения; старые значения в глобальной `Setting` для этих ключей больше не подставляются в кабинет без строки в `CabinetSetting` (см. `.env`/дефолты).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

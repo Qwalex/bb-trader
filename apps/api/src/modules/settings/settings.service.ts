@@ -134,7 +134,11 @@ export class SettingsService {
         return scoped.value;
       }
     }
-    if (ownerUserId && !this.isGlobalSharedKey(key)) {
+    if (
+      ownerUserId &&
+      !this.isGlobalSharedKey(key) &&
+      !(cabinetId && this.isCabinetScopedKey(key))
+    ) {
       const userRow = await this.prisma.userSetting.findUnique({
         where: { userId_key: { userId: ownerUserId, key } },
         select: { value: true },
@@ -306,7 +310,11 @@ export class SettingsService {
       this.invalidateCacheForKey(key);
       return;
     }
-    if (ownerUserId && !this.isGlobalSharedKey(key)) {
+    if (
+      ownerUserId &&
+      !this.isGlobalSharedKey(key) &&
+      !(cabinetId && this.isCabinetScopedKey(key))
+    ) {
       await this.prisma.userSetting.upsert({
         where: { userId_key: { userId: ownerUserId, key } },
         create: { userId: ownerUserId, key, value: normalized },
@@ -384,13 +392,15 @@ export class SettingsService {
         this.writeCache(cabinetId, key, scoped);
         continue;
       }
-      const userValue = userMap.get(key);
+      const scopedCabinetIsolation =
+        Boolean(cabinetId) && this.isCabinetScopedKey(key) && !this.isGlobalSharedKey(key);
+      const userValue = scopedCabinetIsolation ? undefined : userMap.get(key);
       if (userValue !== undefined && userValue !== '') {
         out[key] = userValue;
         this.writeCache(cabinetId, key, userValue);
         continue;
       }
-      const global = globalMap.get(key);
+      const global = scopedCabinetIsolation ? undefined : globalMap.get(key);
       if (global !== undefined && global !== '') {
         out[key] = global;
         this.writeCache(cabinetId, key, global);
@@ -437,9 +447,23 @@ export class SettingsService {
     ]);
     const map = new Map<string, string>();
     for (const row of globalRows) {
+      if (
+        cabinetId &&
+        this.isCabinetScopedKey(row.key) &&
+        !this.isGlobalSharedKey(row.key)
+      ) {
+        continue;
+      }
       map.set(row.key, row.value);
     }
     for (const row of userRows) {
+      if (
+        cabinetId &&
+        this.isCabinetScopedKey(row.key) &&
+        !this.isGlobalSharedKey(row.key)
+      ) {
+        continue;
+      }
       map.set(row.key, row.value);
     }
     for (const row of scopedRows) {
