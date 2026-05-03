@@ -7,6 +7,7 @@ import { formatError } from '../../common/format-error';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppLogService } from '../app-log/app-log.service';
 import { CabinetContextService } from '../cabinet/cabinet-context.service';
+import { CabinetService } from '../cabinet/cabinet.service';
 import { OrdersService } from '../orders/orders.service';
 import { SettingsService } from '../settings/settings.service';
 import { WorkerQueueService } from '../worker-queue/worker-queue.service';
@@ -59,6 +60,7 @@ export class BybitService implements OnModuleInit {
     private readonly prisma: PrismaService,
     private readonly settings: SettingsService,
     private readonly cabinetContext: CabinetContextService,
+    private readonly cabinets: CabinetService,
     @Inject(forwardRef(() => OrdersService))
     private readonly orders: OrdersService,
     private readonly appLog: AppLogService,
@@ -153,7 +155,7 @@ export class BybitService implements OnModuleInit {
       signal,
       rawMessage,
       origin,
-      this.createSignalPlacementPorts(),
+      await this.createSignalPlacementPorts(),
     );
   }
 
@@ -283,7 +285,9 @@ export class BybitService implements OnModuleInit {
   // --- Poll open orders & TP/SL hooks ---
 
   async pollOpenOrders(): Promise<void> {
-    await this.bybitOrderLifecyclePoll.pollOpenOrders(this.createOrderLifecyclePollPorts());
+    await this.bybitOrderLifecyclePoll.pollOpenOrders(
+      await this.createOrderLifecyclePollPorts(),
+    );
   }
 
   private createPositionClosePorts(): BybitPositionClosePorts {
@@ -315,7 +319,12 @@ export class BybitService implements OnModuleInit {
     };
   }
 
-  private createSignalPlacementPorts(): BybitSignalPlacementPorts {
+  private async resolveCabinetSegmentForKeys(): Promise<string> {
+    return this.currentCabinetId() ?? (await this.cabinets.getDefaultCabinetId());
+  }
+
+  private async createSignalPlacementPorts(): Promise<BybitSignalPlacementPorts> {
+    const cabinetSegment = await this.resolveCabinetSegmentForKeys();
     const pv = this.placementValidation;
     const bal = this.balanceInstrument;
     const ov = this.signalOverrides;
@@ -354,7 +363,8 @@ export class BybitService implements OnModuleInit {
       },
       clearImmediateStaleDbBlockerIfExchangeFlat: (pair, direction, client, reason) =>
         this.clearImmediateStaleDbBlockerIfExchangeFlat(pair, direction, client, reason),
-      buildPlacementLockKey: (pair, direction) => pv.buildPlacementLockKey(pair, direction),
+      buildPlacementLockKey: (pair, direction) =>
+        pv.buildPlacementLockKey(cabinetSegment, pair, direction),
       getLastPrice: (client, symbol) => bal.getLastPrice(client, symbol),
       validateSignalLevels: (s, lastPrice) => pv.validateSignalLevels(s, lastPrice),
       getUsdtBalanceDetails: (client) => bal.getUsdtBalanceDetails(client),
@@ -371,11 +381,13 @@ export class BybitService implements OnModuleInit {
     };
   }
 
-  private createOrderLifecyclePollPorts(): BybitOrderLifecyclePollPorts {
+  private async createOrderLifecyclePollPorts(): Promise<BybitOrderLifecyclePollPorts> {
+    const cabinetSegment = await this.resolveCabinetSegmentForKeys();
     return {
       getClient: () => this.balanceInstrument.getClient(),
       orders: this.orders,
-      stalePairDirectionKey: (pair, direction) => this.stalePairDirectionKey(pair, direction),
+      stalePairDirectionKey: (pair, direction) =>
+        stalePairDirectionKeyUtil(cabinetSegment, pair, direction),
       staleFlatPollCounts: this.staleFlatPollCounts,
       staleReconcileSuspensions: this.staleReconcileSuspensions,
       appLog: this.appLog,
@@ -471,13 +483,6 @@ export class BybitService implements OnModuleInit {
     });
   }
 
-  private stalePairDirectionKey(
-    pair: string,
-    direction: 'long' | 'short',
-  ): string {
-    return stalePairDirectionKeyUtil(pair, direction);
-  }
-
   private async clearImmediateStaleDbBlockerIfExchangeFlat(
     pair: string,
     direction: 'long' | 'short',
@@ -485,7 +490,8 @@ export class BybitService implements OnModuleInit {
     reason: string,
   ): Promise<number> {
     const symbol = normalizeTradingPair(pair);
-    const reconcileKey = this.stalePairDirectionKey(symbol, direction);
+    const cabinetSegment = await this.resolveCabinetSegmentForKeys();
+    const reconcileKey = stalePairDirectionKeyUtil(cabinetSegment, symbol, direction);
     if (this.staleReconcileSuspensions.has(reconcileKey)) {
       return 0;
     }
@@ -545,12 +551,17 @@ export class BybitService implements OnModuleInit {
 
   // --- Stale reconcile suspend / resume (public for callers outside poll) ---
 
-  suspendStaleReconcile(
+  async suspendStaleReconcile(
     pair: string,
     direction: 'long' | 'short',
     reason?: string,
-  ): void {
-    const key = this.stalePairDirectionKey(pair, direction);
+    cabinetId?: string | null,
+  ): Promise<void> {
+    const seg =
+      cabinetId != null && cabinetId.trim() !== ''
+        ? cabinetId.trim()
+        : this.currentCabinetId() ?? (await this.cabinets.getDefaultCabinetId());
+    const key = stalePairDirectionKeyUtil(seg, normalizeTradingPair(pair), direction);
     const prev = this.staleReconcileSuspensions.get(key);
     this.staleFlatPollCounts.delete(key);
     this.staleReconcileSuspensions.set(key, {
@@ -565,11 +576,16 @@ export class BybitService implements OnModuleInit {
     });
   }
 
-  resumeStaleReconcile(
+  async resumeStaleReconcile(
     pair: string,
     direction: 'long' | 'short',
-  ): void {
-    const key = this.stalePairDirectionKey(pair, direction);
+    cabinetId?: string | null,
+  ): Promise<void> {
+    const seg =
+      cabinetId != null && cabinetId.trim() !== ''
+        ? cabinetId.trim()
+        : this.currentCabinetId() ?? (await this.cabinets.getDefaultCabinetId());
+    const key = stalePairDirectionKeyUtil(seg, normalizeTradingPair(pair), direction);
     const prev = this.staleReconcileSuspensions.get(key);
     if (!prev) {
       return;

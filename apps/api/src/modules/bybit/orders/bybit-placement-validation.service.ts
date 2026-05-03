@@ -133,8 +133,13 @@ export class BybitPlacementValidationService {
     return undefined;
   }
 
-  buildPlacementLockKey(pair: string, direction: 'long' | 'short'): string {
-    return `${normalizeTradingPair(pair)}:${direction}`;
+  buildPlacementLockKey(
+    cabinetId: string,
+    pair: string,
+    direction: 'long' | 'short',
+  ): string {
+    const seg = cabinetId.trim() || 'default';
+    return `${seg}:${normalizeTradingPair(pair)}:${direction}`;
   }
 
   async resolveEntryPositionIdx(

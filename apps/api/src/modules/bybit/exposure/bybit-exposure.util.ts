@@ -1,10 +1,16 @@
 import { normalizeTradingPair } from '@repo/shared';
 
+/**
+ * Ключ для in-memory stale-reconcile / suspension maps: всегда включает cabinet,
+ * чтобы кабинеты с одной парой и направлением не делили состояние.
+ */
 export function stalePairDirectionKey(
+  cabinetId: string,
   pair: string,
   direction: 'long' | 'short',
 ): string {
-  return `${normalizeTradingPair(pair)}:${direction}`;
+  const seg = cabinetId.trim() || 'default';
+  return `${seg}:${normalizeTradingPair(pair)}:${direction}`;
 }
 
 export function isReduceOnlyOrClosingOrder(o: {

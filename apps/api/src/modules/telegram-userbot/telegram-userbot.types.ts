@@ -54,6 +54,8 @@ export type IngestProcessJob = {
 
 export type ActiveSignalLookup = {
   id: string;
+  /** Кабинет сигнала — для ключей stale-reconcile при отсутствии ALS. */
+  cabinetId: string | null;
   pair: string;
   direction: string;
   entries: string;

@@ -75,7 +75,12 @@ export class TelegramUserbotIngestSignalReplyService {
         error: `Перезаход временно заблокирован после close (${Math.ceil(closeCooldownMs / 1000)}s)`,
       };
     }
-    this.bybit.suspendStaleReconcile(base.pair, base.direction, 'reentry flow');
+    await this.bybit.suspendStaleReconcile(
+      base.pair,
+      base.direction,
+      'reentry flow',
+      prev.cabinetId ?? null,
+    );
     try {
       void this.appLog.append('debug', 'telegram', 'Reentry: resolved root source message', {
         sourceChatId: params.chatId,
@@ -274,7 +279,11 @@ export class TelegramUserbotIngestSignalReplyService {
 
       return { ok: true, mode: 'replaced' };
     } finally {
-      this.bybit.resumeStaleReconcile(base.pair, base.direction);
+      await this.bybit.resumeStaleReconcile(
+        base.pair,
+        base.direction,
+        prev.cabinetId ?? null,
+      );
     }
   }
 

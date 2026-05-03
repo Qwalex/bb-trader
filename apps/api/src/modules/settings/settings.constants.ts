@@ -10,6 +10,17 @@ export const ENV_FALLBACK: Record<string, string> = {
   BUMP_TO_MIN_EXCHANGE_LOT: 'false',
   APPLOG_LOG_NOISY_EVENTS: 'false',
   TP_SL_STEP_RANGE: '',
+  /** Минимальный интервал между REST-вызовами Bybit на один кабинет (мс). */
+  BYBIT_ACCOUNT_REQUEST_INTERVAL_MS: '80',
+  /** Параллелизм REST-вызовов Bybit на кабинет (безопасный дефолт = 1). */
+  BYBIT_ACCOUNT_MAX_CONCURRENCY: '1',
+  /** Базовая задержка при признаках rate limit (мс), умножается на номер попытки. */
+  BYBIT_RATE_LIMIT_BACKOFF_MS: '2000',
+  /**
+   * Private WS: при нескольких кабинетах один глобальный WS некорректен.
+   * `auto` — не поднимать WS, если кабинетов > 1; `force` — как раньше (один ключ).
+   */
+  BYBIT_WS_MULTI_CABINET: 'auto',
 };
 
 export const GLOBAL_SHARED_SETTING_KEYS = new Set<string>([
@@ -42,6 +53,7 @@ export const GLOBAL_SHARED_SETTING_KEYS = new Set<string>([
   'MAX_ALLOWED_LEVERAGE',
   'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',
   'POLLING_INTERVAL_MS',
+  'BYBIT_ACCOUNT_MAX_CONCURRENCY',
   'TP_SL_STEP_START',
   'TP_SL_STEP_RANGE',
 ]);

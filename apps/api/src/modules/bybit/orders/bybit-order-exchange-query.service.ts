@@ -4,10 +4,13 @@ import { RestClientV5 } from 'bybit-api';
 import { normalizeTradingPair } from '@repo/shared';
 
 import { formatError } from '../../../common/format-error';
+import { BybitRateLimitService } from '../instrument/bybit-rate-limit.service';
 
 @Injectable()
 export class BybitOrderExchangeQueryService {
   private readonly logger = new Logger(BybitOrderExchangeQueryService.name);
+
+  constructor(private readonly rateLimit: BybitRateLimitService) {}
 
   /**
    * Если история не отдаёт статус, смотрим исполнения: набрался ли объём по ордеру.
@@ -22,12 +25,14 @@ export class BybitOrderExchangeQueryService {
       return false;
     }
     try {
-      const res = await client.getExecutionList({
-        category: 'linear',
-        symbol: sym,
-        orderId,
-        limit: 50,
-      });
+      const res = await this.rateLimit.runBybitCall(() =>
+        client.getExecutionList({
+          category: 'linear',
+          symbol: sym,
+          orderId,
+          limit: 50,
+        }),
+      );
       if (res.retCode !== 0) {
         return false;
       }
@@ -36,7 +41,10 @@ export class BybitOrderExchangeQueryService {
         cum += parseFloat(String(ex.execQty ?? 0));
       }
       return cum >= expectedQty * 0.999;
-    } catch {
+    } catch (e) {
+      if (this.rateLimit.isRateLimitError(e)) {
+        throw e;
+      }
       return false;
     }
   }
@@ -51,6 +59,17 @@ export class BybitOrderExchangeQueryService {
     orderId: string,
     expectedQty?: number,
   ): Promise<string | undefined> {
+    return this.rateLimit.run(() =>
+      this.fetchOrderStatusFromExchangeCore(client, pair, orderId, expectedQty),
+    );
+  }
+
+  private async fetchOrderStatusFromExchangeCore(
+    client: RestClientV5,
+    pair: string,
+    orderId: string,
+    expectedQty?: number,
+  ): Promise<string | undefined> {
     const sym = normalizeTradingPair(pair);
     const base = {
       category: 'linear' as const,
@@ -59,35 +78,47 @@ export class BybitOrderExchangeQueryService {
       orderFilter: 'Order' as const,
     };
     try {
-      const active = await client.getActiveOrders({
-        ...base,
-        orderId,
-        openOnly: 0,
-        limit: 1,
-      });
+      const active = await this.rateLimit.runBybitCall(() =>
+        client.getActiveOrders({
+          ...base,
+          orderId,
+          openOnly: 0,
+          limit: 1,
+        }),
+      );
       if (active.retCode === 0 && (active.result?.list?.length ?? 0) > 0) {
         return active.result!.list![0]!.orderStatus;
       }
     } catch (e) {
+      if (this.rateLimit.isRateLimitError(e)) {
+        throw e;
+      }
       this.logger.debug(`getActiveOrders ${orderId}: ${formatError(e)}`);
     }
     try {
-      const hist = await client.getHistoricOrders({
-        ...base,
-        orderId,
-        limit: 1,
-      });
+      const hist = await this.rateLimit.runBybitCall(() =>
+        client.getHistoricOrders({
+          ...base,
+          orderId,
+          limit: 1,
+        }),
+      );
       if (hist.retCode === 0 && (hist.result?.list?.length ?? 0) > 0) {
         return hist.result!.list![0]!.orderStatus;
       }
     } catch (e) {
+      if (this.rateLimit.isRateLimitError(e)) {
+        throw e;
+      }
       this.logger.debug(`getHistoricOrders ${orderId}: ${formatError(e)}`);
     }
     try {
-      const histScan = await client.getHistoricOrders({
-        ...base,
-        limit: 50,
-      });
+      const histScan = await this.rateLimit.runBybitCall(() =>
+        client.getHistoricOrders({
+          ...base,
+          limit: 50,
+        }),
+      );
       if (histScan.retCode === 0) {
         const row = histScan.result?.list?.find((o) => o.orderId === orderId);
         if (row?.orderStatus) {
@@ -102,6 +133,9 @@ export class BybitOrderExchangeQueryService {
         }
       }
     } catch (e) {
+      if (this.rateLimit.isRateLimitError(e)) {
+        throw e;
+      }
       this.logger.debug(`getHistoricOrders scan ${orderId}: ${formatError(e)}`);
     }
     if (expectedQty !== undefined && expectedQty > 0) {
@@ -130,12 +164,14 @@ export class BybitOrderExchangeQueryService {
     lastExecAt?: string;
   }> {
     const sym = normalizeTradingPair(pair);
-    const res = await client.getExecutionList({
-      category: 'linear',
-      symbol: sym,
-      orderId,
-      limit: 50,
-    });
+    const res = await this.rateLimit.runBybitCall(() =>
+      client.getExecutionList({
+        category: 'linear',
+        symbol: sym,
+        orderId,
+        limit: 50,
+      }),
+    );
     if (res.retCode !== 0) {
       return { execQty: 0, execValue: 0, execCount: 0 };
     }

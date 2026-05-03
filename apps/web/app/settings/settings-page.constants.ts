@@ -32,6 +32,7 @@ export const ADMIN_GLOBAL_KEYS = new Set<string>([
   'MAX_ALLOWED_LEVERAGE',
   'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',
   'POLLING_INTERVAL_MS',
+  'BYBIT_ACCOUNT_MAX_CONCURRENCY',
   'TP_SL_STEP_START',
   'TP_SL_STEP_RANGE',
 ]);
@@ -179,6 +180,10 @@ export const KEYS = [
   { key: 'TELEGRAM_WHITELIST', label: 'Telegram user IDs (через запятую)' },
   { key: 'POLLING_INTERVAL_MS', label: 'Polling (0 = отключить опрос Bybit)' },
   {
+    key: 'BYBIT_ACCOUNT_MAX_CONCURRENCY',
+    label: 'Bybit: параллелизм REST-запросов на кабинет (рекомендовано 1)',
+  },
+  {
     key: 'TP_SL_STEP_START',
     label:
       'Подтягивание SL после TP: с какого уровня начинать лестницу (off / tp1–tp5). Устаревший TP_SL_STEP_ENABLED=true в БД эквивалентен tp2, пока не задана эта строка',
@@ -260,6 +265,7 @@ export const SETTINGS_SECTIONS: { id: string; title: string; keys: string[] }[] 
       'MAX_ALLOWED_LEVERAGE',
       'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',
       'POLLING_INTERVAL_MS',
+      'BYBIT_ACCOUNT_MAX_CONCURRENCY',
       'TP_SL_STEP_START',
       'TP_SL_STEP_RANGE',
     ],

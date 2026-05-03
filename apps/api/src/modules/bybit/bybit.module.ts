@@ -12,6 +12,7 @@ import { BybitController } from './bybit.controller';
 import { BybitService } from './bybit.service';
 import { BybitBalanceInstrumentService } from './instrument/bybit-balance-instrument.service';
 import { BybitClientService } from './instrument/bybit-client.service';
+import { BybitRateLimitService } from './instrument/bybit-rate-limit.service';
 import { BybitExposureService } from './exposure/bybit-exposure.service';
 import { BybitLiveSnapshotService } from './exposure/bybit-live-snapshot.service';
 import { BybitOrderExchangeQueryService } from './orders/bybit-order-exchange-query.service';
@@ -42,6 +43,7 @@ import { BybitTpSlService } from './tpsl/bybit-tpsl.service';
   providers: [
     BybitService,
     BybitClientService,
+    BybitRateLimitService,
     BybitBalanceInstrumentService,
     BybitOrderExchangeQueryService,
     BybitPlacementValidationService,

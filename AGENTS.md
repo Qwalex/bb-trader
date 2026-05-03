@@ -18,6 +18,7 @@
 - Загрузка переменных: корень монорепозитория и `apps/api` (поздний файл перекрывает ранний). Значения в БД со страницы `/settings` для того же ключа перекрывают переменные окружения.
 - Bybit: отдельные ключи для testnet (`BYBIT_API_KEY_TESTNET` / `BYBIT_API_SECRET_TESTNET`) и mainnet (`BYBIT_API_KEY_MAINNET` / `BYBIT_API_SECRET_MAINNET`); переключение `BYBIT_TESTNET`; общих legacy-ключей `BYBIT_API_KEY` / `BYBIT_API_SECRET` в логике нет.
 - Клиент Bybit (`bybit-api`) может отдавать ошибки не как `Error`; перед логом и сообщением в чат нормализовать в строку (например общим `formatError`).
+- Bybit при нескольких кабинетах: private WS по умолчанию не поднимается (`BYBIT_WS_MULTI_CABINET=auto`, см. `BybitClientService`); REST лимитируется `BybitRateLimitService` по кабинету с параметрами `BYBIT_ACCOUNT_REQUEST_INTERVAL_MS`, `BYBIT_ACCOUNT_MAX_CONCURRENCY`, `BYBIT_RATE_LIMIT_BACKOFF_MS`; rate-limit ответы Bybit (`retCode=10006` и аналоги) идут через backoff/retry; placement/stale in-memory ключи включают `cabinetId`.
 - Массовое приветствие в Telegram при старте API: доставка возможна только пользователям, которые уже открыли чат с ботом (ограничение Telegram).
 - Сигналы: подтверждение в Telegram перед выставлением ордеров; при неполных данных — многоходовый сбор с сохранением контекста до готовности.
 - Проверка дубликата пары: при наличии ключей Bybit приоритет у состояния биржи по API; торговая пара нормализуется для БД и запросов; зависшие записи `ORDERS_PLACED` в БД снимаются при «чистой» бирже.

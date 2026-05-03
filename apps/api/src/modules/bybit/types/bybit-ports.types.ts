@@ -44,6 +44,7 @@ export interface BybitSignalPlacementPorts {
     client: RestClientV5,
     reason: string,
   ) => Promise<number>;
+  /** Ключ включает кабинет (см. BybitPlacementValidationService.buildPlacementLockKey). */
   buildPlacementLockKey: (pair: string, direction: 'long' | 'short') => string;
   getLastPrice: (client: RestClientV5, symbol: string) => Promise<number | undefined>;
   validateSignalLevels: (signal: SignalDto, lastPrice?: number) => string | undefined;

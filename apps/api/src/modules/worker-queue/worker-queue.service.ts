@@ -20,6 +20,7 @@ export class WorkerQueueService implements OnModuleInit {
   private readonly maxAttempts = 8;
   private readonly staleLockMs = 10 * 60 * 1000;
   private running = false;
+  private loopIteration = 0;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -225,6 +226,10 @@ export class WorkerQueueService implements OnModuleInit {
   private async loop(): Promise<void> {
     while (this.running) {
       try {
+        this.loopIteration += 1;
+        if (this.loopIteration % 40 === 0) {
+          void this.logReconcileQueueBacklog();
+        }
         await Promise.all([
           this.runQueue(WORK_QUEUE_EXECUTION),
           this.runQueue(WORK_QUEUE_RECONCILE),
@@ -234,6 +239,34 @@ export class WorkerQueueService implements OnModuleInit {
         this.logger.warn(`worker loop: ${formatError(e)}`);
       }
       await new Promise((resolve) => setTimeout(resolve, this.pollMs));
+    }
+  }
+
+  /** Периодически: возраст самой старой pending-задачи reconcile (нагрузка / заторы). */
+  private async logReconcileQueueBacklog(): Promise<void> {
+    try {
+      const oldest = await this.prisma.workerQueueJob.findFirst({
+        where: {
+          queue: WORK_QUEUE_RECONCILE,
+          status: 'pending',
+          runAfter: { lte: new Date() },
+        },
+        orderBy: [{ runAfter: 'asc' }, { createdAt: 'asc' }],
+        select: { createdAt: true, jobKey: true },
+      });
+      if (!oldest) return;
+      const ageMs = Date.now() - oldest.createdAt.getTime();
+      if (ageMs > 15_000) {
+        this.logger.warn(
+          `worker_queue reconcile backlog oldestPendingAgeMs=${ageMs} jobKey=${oldest.jobKey}`,
+        );
+      } else if (ageMs > 5_000) {
+        this.logger.debug(
+          `worker_queue reconcile backlog oldestPendingAgeMs=${ageMs} jobKey=${oldest.jobKey}`,
+        );
+      }
+    } catch (e) {
+      this.logger.debug(`logReconcileQueueBacklog: ${formatError(e)}`);
     }
   }
 
@@ -260,9 +293,24 @@ export class WorkerQueueService implements OnModuleInit {
       },
     });
     if (lock.count === 0) return;
+    const payload = JSON.parse(job.payloadJson) as WorkQueuePayload;
+    const started = Date.now();
     try {
-      const payload = JSON.parse(job.payloadJson) as WorkQueuePayload;
       await this.handlePayload(payload);
+      const elapsed = Date.now() - started;
+      if (queue === WORK_QUEUE_RECONCILE) {
+        const brief =
+          payload.type === 'poll-cabinet'
+            ? `poll-cabinet cabinetId=${payload.cabinetId}`
+            : payload.type === 'bybit-ws-reconcile'
+              ? `bybit-ws-reconcile cabinetId=${payload.cabinetId}`
+              : payload.type;
+        if (elapsed > 8_000) {
+          this.logger.warn(`worker_queue reconcile slow ${brief} durationMs=${elapsed}`);
+        } else if (elapsed > 2_000) {
+          this.logger.debug(`worker_queue reconcile ${brief} durationMs=${elapsed}`);
+        }
+      }
       await this.prisma.workerQueueJob.update({
         where: { id: job.id },
         data: {

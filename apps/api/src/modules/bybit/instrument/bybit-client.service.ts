@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { RestClientV5, WebsocketClient } from 'bybit-api';
 
 import { formatError } from '../../../common/format-error';
+import { PrismaService } from '../../../prisma/prisma.service';
 import { SettingsService } from '../../settings/settings.service';
 
 @Injectable()
@@ -10,7 +11,10 @@ export class BybitClientService {
   private wsClient: WebsocketClient | null = null;
   private wsStarted = false;
 
-  constructor(private readonly settings: SettingsService) {}
+  constructor(
+    private readonly settings: SettingsService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   private static normalizeSettingValue(value: string | undefined): string | undefined {
     if (value === undefined) {
@@ -91,6 +95,20 @@ export class BybitClientService {
         this.logger.log('bybit ws sync disabled by BYBIT_WS_SYNC_ENABLED');
         return;
       }
+
+      const multiPolicy = String(
+        (await this.settings.get('BYBIT_WS_MULTI_CABINET')) ?? 'auto',
+      )
+        .trim()
+        .toLowerCase();
+      const cabinetCount = await this.prisma.cabinet.count();
+      if (cabinetCount > 1 && multiPolicy !== 'force') {
+        this.logger.log(
+          `bybit ws disabled: ${cabinetCount} cabinets (один глобальный private WS не покрывает все ключи; polling остаётся; BYBIT_WS_MULTI_CABINET=force — прежнее поведение)`,
+        );
+        return;
+      }
+
       this.wsClient = new WebsocketClient({
         key: creds.key,
         secret: creds.secret,

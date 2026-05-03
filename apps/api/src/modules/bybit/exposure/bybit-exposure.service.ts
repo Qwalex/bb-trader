@@ -4,6 +4,7 @@ import { RestClientV5 } from 'bybit-api';
 import { normalizeTradingPair } from '@repo/shared';
 
 import { formatError } from '../../../common/format-error';
+import { BybitRateLimitService } from '../instrument/bybit-rate-limit.service';
 import { BYBIT_OPEN_ORDER_STATUSES } from '../bybit.constants';
 import { isReduceOnlyOrClosingOrder } from './bybit-exposure.util';
 import type { LiveExposureOrder, LiveExposurePosition } from '../types/bybit.types';
@@ -11,6 +12,8 @@ import type { LiveExposureOrder, LiveExposurePosition } from '../types/bybit.typ
 @Injectable()
 export class BybitExposureService {
   private readonly logger = new Logger(BybitExposureService.name);
+
+  constructor(private readonly rateLimit: BybitRateLimitService) {}
 
   private isOpenOrderStatus(status: string | null | undefined): boolean {
     const normalized = (status ?? '').trim().toLowerCase();
@@ -24,6 +27,16 @@ export class BybitExposureService {
     symbol: string,
     direction: 'long' | 'short',
   ): Promise<boolean> {
+    return this.rateLimit.run(() =>
+      this.hasExchangeExposureForDirectionCore(client, symbol, direction),
+    );
+  }
+
+  private async hasExchangeExposureForDirectionCore(
+    client: RestClientV5,
+    symbol: string,
+    direction: 'long' | 'short',
+  ): Promise<boolean> {
     const minPos = 1e-12;
     const wantBuy = direction === 'long';
 
@@ -32,14 +45,16 @@ export class BybitExposureService {
       try {
         let cursor: string | undefined;
         do {
-          const ao = await client.getActiveOrders({
-            category: 'linear',
-            symbol,
-            openOnly: 0,
-            limit: 50,
-            orderFilter,
-            cursor,
-          });
+          const ao = await this.rateLimit.runBybitCall(() =>
+            client.getActiveOrders({
+              category: 'linear',
+              symbol,
+              openOnly: 0,
+              limit: 50,
+              orderFilter,
+              cursor,
+            }),
+          );
           if (ao.retCode !== 0) {
             this.logger.debug(
               `getActiveOrders ${orderFilter} retCode=${ao.retCode} ${ao.retMsg}`,
@@ -66,15 +81,20 @@ export class BybitExposureService {
           cursor = ao.result?.nextPageCursor || undefined;
         } while (cursor);
       } catch (e) {
+        if (this.rateLimit.isRateLimitError(e)) {
+          throw e;
+        }
         this.logger.debug(`getActiveOrders ${orderFilter}: ${formatError(e)}`);
       }
     }
 
     try {
-      const pos = await client.getPositionInfo({
-        category: 'linear',
-        symbol,
-      });
+      const pos = await this.rateLimit.runBybitCall(() =>
+        client.getPositionInfo({
+          category: 'linear',
+          symbol,
+        }),
+      );
       if (pos.retCode === 0) {
         const rows = pos.result?.list ?? [];
         for (const row of rows) {
@@ -97,18 +117,23 @@ export class BybitExposureService {
         );
       }
     } catch (e) {
+      if (this.rateLimit.isRateLimitError(e)) {
+        throw e;
+      }
       this.logger.debug(`getPositionInfo symbol=${symbol}: ${formatError(e)}`);
     }
 
     try {
       let cursor: string | undefined;
       do {
-        const pos = await client.getPositionInfo({
-          category: 'linear',
-          settleCoin: 'USDT',
-          limit: 50,
-          cursor,
-        });
+        const pos = await this.rateLimit.runBybitCall(() =>
+          client.getPositionInfo({
+            category: 'linear',
+            settleCoin: 'USDT',
+            limit: 50,
+            cursor,
+          }),
+        );
         if (pos.retCode !== 0) {
           break;
         }
@@ -133,6 +158,9 @@ export class BybitExposureService {
         cursor = pos.result?.nextPageCursor || undefined;
       } while (cursor);
     } catch (e) {
+      if (this.rateLimit.isRateLimitError(e)) {
+        throw e;
+      }
       this.logger.debug(`getPositionInfo settleCoin scan: ${formatError(e)}`);
     }
 

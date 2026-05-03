@@ -32,6 +32,11 @@ export class TelegramUserbotIngestSignalLookupService {
     return this.userbotClient.isClientAuthorized(client);
   }
 
+  private cabinetScopeWhere(): { cabinetId?: string } {
+    const cabinetId = this.cabinetContext.getCabinetId();
+    return cabinetId ? { cabinetId } : {};
+  }
+
   async fetchChatMessageMeta(
     chatId: string,
     messageId: string,
@@ -71,16 +76,16 @@ export class TelegramUserbotIngestSignalLookupService {
     direction: 'long' | 'short',
   ): Promise<ActiveSignalLookup | null> {
     const wantPair = normalizeTradingPair(pair);
-    const cabinetId = this.cabinetContext.getCabinetId();
     const rows = await this.prisma.signal.findMany({
       where: {
-        ...(cabinetId ? { cabinetId } : {}),
+        ...this.cabinetScopeWhere(),
         deletedAt: null,
         status: { in: ['ORDERS_PLACED', 'OPEN', 'PARSED'] },
         direction,
       },
       select: {
         id: true,
+        cabinetId: true,
         pair: true,
         direction: true,
         entries: true,
@@ -95,10 +100,8 @@ export class TelegramUserbotIngestSignalLookupService {
       },
       orderBy: { createdAt: 'desc' },
     });
-    return (
-      rows.find((row) => normalizeTradingPair(row.pair) === wantPair) ??
-      null
-    );
+    const hit = rows.find((row) => normalizeTradingPair(row.pair) === wantPair);
+    return (hit ?? null) as ActiveSignalLookup | null;
   }
 
   async resolveSourcePriorityForSignal(signal: {
@@ -168,6 +171,7 @@ export class TelegramUserbotIngestSignalLookupService {
     );
     const signal = await this.prisma.signal.findFirst({
       where: {
+        ...this.cabinetScopeWhere(),
         deletedAt: null,
         sourceChatId: params.chatId,
         sourceMessageId: rootSource.messageId,
@@ -176,6 +180,7 @@ export class TelegramUserbotIngestSignalLookupService {
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
+        cabinetId: true,
         pair: true,
         direction: true,
         entries: true,
@@ -244,6 +249,7 @@ export class TelegramUserbotIngestSignalLookupService {
   ): Promise<ActiveSignalLookup | null> {
     const row = await (this.prisma as any).signal.findFirst({
       where: {
+        ...this.cabinetScopeWhere(),
         deletedAt: null,
         sourceChatId: chatId,
         signalExternalId,
@@ -252,6 +258,7 @@ export class TelegramUserbotIngestSignalLookupService {
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
+        cabinetId: true,
         pair: true,
         direction: true,
         entries: true,
@@ -340,6 +347,7 @@ export class TelegramUserbotIngestSignalLookupService {
   ): Promise<boolean> {
     const count = await this.prisma.signal.count({
       where: {
+        ...this.cabinetScopeWhere(),
         sourceChatId: chatId,
         sourceMessageId: messageId,
       },
@@ -359,6 +367,7 @@ export class TelegramUserbotIngestSignalLookupService {
   }> {
     const rootSignals = await this.prisma.signal.findMany({
       where: {
+        ...this.cabinetScopeWhere(),
         sourceChatId: chatId,
         sourceMessageId: rootSourceMessageId,
       },
@@ -376,6 +385,7 @@ export class TelegramUserbotIngestSignalLookupService {
       chainUnique.map(async (messageId) => {
         const rows = await this.prisma.signal.findMany({
           where: {
+            ...this.cabinetScopeWhere(),
             sourceChatId: chatId,
             sourceMessageId: messageId,
           },
