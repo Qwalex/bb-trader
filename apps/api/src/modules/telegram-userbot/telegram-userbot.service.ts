@@ -1992,6 +1992,18 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       const queueDelayMs = options?.enqueuedAtMs
         ? Math.max(0, Date.now() - options.enqueuedAtMs)
         : 0;
+      const currentIngest = await this.prisma.tgUserbotIngest.findUnique({
+        where: { id: ingest.id },
+        select: { status: true, signalHash: true },
+      });
+      if (currentIngest?.status === 'placed') {
+        this.appendIngestStageLog('warn', 'Userbot: already placed ingest skipped', ingest, {
+          source: options?.source ?? null,
+          signalHash: currentIngest.signalHash,
+          queueDelayMs,
+        });
+        return;
+      }
       this.appendIngestStageLog('debug', 'Userbot: processing started', ingest, {
         replyToMessageId: meta?.replyToMessageId ?? null,
         textPreview: this.makeTextPreview(text),
