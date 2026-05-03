@@ -36,6 +36,23 @@ export class BybitSignalPlacementService {
     }
 
     try {
+      const oppositeDirection = signal.direction === 'long' ? 'short' : 'long';
+      const hedgeModeActive = await ports.isHedgeModeActiveForSymbol(client, symbol);
+      if (
+        !hedgeModeActive &&
+        await ports.hasExchangeExposureForDirection(client, symbol, oppositeDirection)
+      ) {
+        void ports.appLog.append(
+          'warn',
+          'bybit',
+          'placeSignalOrders: отказ (противоположная позиция/ордера на бирже)',
+          { symbol, direction: signal.direction, oppositeDirection, hedgeModeActive },
+        );
+        return {
+          ok: false,
+          error: `По ${symbol} уже есть позиция или входные ордера ${oppositeDirection.toUpperCase()}. Новый ${signal.direction.toUpperCase()} может закрыть существующую позицию, поэтому вход заблокирован.`,
+        };
+      }
       if (await ports.hasExchangeExposureForDirection(client, symbol, signal.direction)) {
         void ports.appLog.append(
           'warn',

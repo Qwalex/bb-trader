@@ -49,7 +49,14 @@ export class BybitExchangeCleanupService {
       };
     }
 
-    const flatResult = await this.flattenLinearSymbolOnExchange(client, symbol);
+    const direction = signal.direction === 'short' ? 'short' : 'long';
+    const flatResult = await this.bybitPositionClose.closeSignalSideOnExchange(
+      client,
+      symbol,
+      direction,
+      signal,
+      this.createPositionClosePorts(),
+    );
     if (!flatResult.ok) {
       if (flatResult.pendingExchange) {
         await this.orders.createSignalEvent(
@@ -146,6 +153,35 @@ export class BybitExchangeCleanupService {
       waitForSymbolToBeFlat: (c, s, timeoutMs, pollMs) =>
         this.waitForSymbolToBeFlat(c, s, timeoutMs, pollMs),
     });
+  }
+
+  private createPositionClosePorts() {
+    return {
+      normalizeTradingPair,
+      orders: this.orders,
+      getClient: () => this.balanceInstrument.getClient(),
+      flattenLinearSymbolOnExchange: (client: RestClientV5, symbol: string) =>
+        this.flattenLinearSymbolOnExchange(client, symbol),
+      getExchangeActiveOrders: (client: RestClientV5, symbol: string) =>
+        this.bybitExposure.getExchangeActiveOrders(client, symbol),
+      getExchangePositions: (client: RestClientV5, symbol: string) =>
+        this.bybitExposure.getExchangePositions(client, symbol),
+      getLotStep: (client: RestClientV5, symbol: string) =>
+        this.balanceInstrument.getLotStep(client, symbol),
+      formatQtyToStep: (qty: number, qtyStep: string) =>
+        this.placementValidation.formatQtyToStep(qty, qtyStep),
+      fetchOrderStatusFromExchange: async () => undefined,
+      appLog: this.appLog,
+      isFilledOrderStatus,
+      isOpenOrderStatus: (status: string | null | undefined) => {
+        const normalized = (status ?? '').trim().toLowerCase();
+        return ['created', 'new', 'partiallyfilled', 'untriggered', 'triggered', 'active'].includes(
+          normalized,
+        );
+      },
+      notifyApiTradeCancelled: (signal: any, reason: string) =>
+        this.bybitNotify.notifyApiTradeCancelled(signal, reason),
+    };
   }
 
   private async waitForSymbolToBeFlat(

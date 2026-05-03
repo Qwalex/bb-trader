@@ -96,6 +96,26 @@ export class TelegramUserbotIngestPipelineService {
     const queueDelayMs = options?.enqueuedAtMs
       ? Math.max(0, Date.now() - options.enqueuedAtMs)
       : 0;
+    const cabinetId = this.cabinetContext.getCabinetId();
+    const currentRoute = cabinetId
+      ? await this.prisma.cabinetIngestRoute.findUnique({
+          where: { cabinetId_ingestId: { cabinetId, ingestId: ingest.id } },
+          select: { status: true },
+        })
+      : null;
+    const currentIngest = await this.prisma.tgUserbotIngest.findUnique({
+      where: { id: ingest.id },
+      select: { status: true, signalHash: true },
+    });
+    if (currentRoute?.status === 'placed' || (!cabinetId && currentIngest?.status === 'placed')) {
+      this.appendIngestStageLog('warn', 'Userbot: already placed ingest skipped', ingest, {
+        source: options?.source ?? null,
+        signalHash: currentIngest?.signalHash ?? ingest.signalHash,
+        queueDelayMs,
+        cabinetId: cabinetId ?? null,
+      });
+      return;
+    }
     this.appendIngestStageLog('debug', 'Userbot: processing started', ingest, {
       replyToMessageId: meta?.replyToMessageId ?? null,
       textPreview: makeTextPreview(text),

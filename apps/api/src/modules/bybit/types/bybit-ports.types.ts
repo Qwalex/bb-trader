@@ -2,7 +2,12 @@ import { RestClientV5 } from 'bybit-api';
 
 import type { SignalDto } from '@repo/shared';
 
-import type { CloseSignalResult, PlaceOrdersResult, SignalOrderOrigin } from './bybit.types';
+import type {
+  CloseSignalResult,
+  LiveExposurePosition,
+  PlaceOrdersResult,
+  SignalOrderOrigin,
+} from './bybit.types';
 
 export interface BybitSignalPlacementPorts {
   settings: {
@@ -27,6 +32,10 @@ export interface BybitSignalPlacementPorts {
     client: RestClientV5,
     symbol: string,
     direction: 'long' | 'short',
+  ) => Promise<boolean>;
+  isHedgeModeActiveForSymbol: (
+    client: RestClientV5,
+    symbol: string,
   ) => Promise<boolean>;
   clearImmediateStaleDbBlockerIfExchangeFlat: (
     pair: string,
@@ -105,8 +114,22 @@ export interface BybitPositionClosePorts {
   };
   getClient: () => Promise<RestClientV5 | null>;
   flattenLinearSymbolOnExchange: (client: RestClientV5, symbol: string) => Promise<any>;
+  getExchangeActiveOrders: (client: RestClientV5, symbol: string) => Promise<any[]>;
+  getExchangePositions: (
+    client: RestClientV5,
+    symbol: string,
+  ) => Promise<LiveExposurePosition[]>;
+  getLotStep: (client: RestClientV5, symbol: string) => Promise<{ qtyStep: string }>;
+  formatQtyToStep: (qty: number, qtyStep: string) => string;
+  fetchOrderStatusFromExchange: (
+    client: RestClientV5,
+    pair: string,
+    orderId: string,
+    expectedQty?: number,
+  ) => Promise<string | undefined>;
   appLog: { append: (...args: any[]) => Promise<void> | void };
   isFilledOrderStatus: (status: string | null | undefined) => boolean;
+  isOpenOrderStatus: (status: string | null | undefined) => boolean;
   notifyApiTradeCancelled: (signal: any, reason: string) => Promise<void>;
 }
 

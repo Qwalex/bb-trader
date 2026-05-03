@@ -10,6 +10,8 @@ export function pickPositionRowForSignalDirection(
     side?: string;
     positionIdx?: number;
     stopLoss?: string;
+    avgPrice?: string;
+    markPrice?: string;
   }>,
   direction: 'long' | 'short',
 ):
@@ -18,6 +20,8 @@ export function pickPositionRowForSignalDirection(
       side?: string;
       positionIdx?: number;
       stopLoss?: string;
+      avgPrice?: string;
+      markPrice?: string;
     }
   | undefined {
   const wantBuy = direction === 'long';

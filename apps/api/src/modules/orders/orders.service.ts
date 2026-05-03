@@ -116,6 +116,28 @@ export class OrdersService {
     origin?: { chatId?: string; messageId?: string; signalExternalId?: string },
   ) {
     const cabinetId = this.currentCabinetId() ?? (await this.cabinets.getDefaultCabinetId());
+    const sourceChatId = origin?.chatId?.trim() || null;
+    const sourceMessageId = origin?.messageId?.trim() || null;
+    const signalExternalId = origin?.signalExternalId?.trim() || null;
+
+    if (sourceChatId && sourceMessageId) {
+      const existing = await this.prisma.signal.findFirst({
+        where: {
+          cabinetId,
+          deletedAt: null,
+          sourceChatId,
+          sourceMessageId,
+          status: { in: Array.from(OrdersService.ACTIVE_SIGNAL_STATUSES) },
+        },
+        select: { id: true },
+      });
+      if (existing) {
+        throw new BadRequestException(
+          `По этому Telegram-сообщению уже есть активная сделка (${existing.id.slice(0, 8)}…)`,
+        );
+      }
+    }
+
     try {
       return await this.prisma.signal.create({
         data: {
@@ -130,9 +152,9 @@ export class OrdersService {
           orderUsd: signal.orderUsd,
           capitalPercent: signal.capitalPercent,
           source: signal.source ?? null,
-          sourceChatId: origin?.chatId ?? null,
-          sourceMessageId: origin?.messageId ?? null,
-          signalExternalId: origin?.signalExternalId?.trim() || null,
+          sourceChatId,
+          sourceMessageId,
+          signalExternalId,
           rawMessage: rawMessage ?? null,
           status,
         },

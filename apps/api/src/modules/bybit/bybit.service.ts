@@ -23,6 +23,7 @@ import { BybitOrderLifecyclePollService } from './orders/bybit-order-lifecycle-p
 import {
   isFilledOrderStatus,
   isInsufficientBalanceError,
+  isOpenOrderStatus,
 } from './orders/bybit-order-status.util';
 import { pickPositionRowForSignalDirection } from './position/bybit-position-pick.util';
 import { BybitPollFinalizeService } from './poll/bybit-poll-finalize.service';
@@ -292,8 +293,23 @@ export class BybitService implements OnModuleInit {
       getClient: () => this.balanceInstrument.getClient(),
       flattenLinearSymbolOnExchange: (client, symbol) =>
         this.exchangeCleanup.flattenLinearSymbolOnExchange(client, symbol),
+      getExchangeActiveOrders: (client, symbol) =>
+        this.bybitExposure.getExchangeActiveOrders(client, symbol),
+      getExchangePositions: (client, symbol) =>
+        this.bybitExposure.getExchangePositions(client, symbol),
+      getLotStep: (client, symbol) => this.balanceInstrument.getLotStep(client, symbol),
+      formatQtyToStep: (qty, qtyStep) =>
+        this.placementValidation.formatQtyToStep(qty, qtyStep),
+      fetchOrderStatusFromExchange: (client, pair, orderId, expectedQty) =>
+        this.orderExchangeQuery.fetchOrderStatusFromExchange(
+          client,
+          pair,
+          orderId,
+          expectedQty,
+        ),
       appLog: this.appLog,
       isFilledOrderStatus: (status) => isFilledOrderStatus(status),
+      isOpenOrderStatus: (status) => isOpenOrderStatus(status),
       notifyApiTradeCancelled: (signal, reason) =>
         this.bybitNotify.notifyApiTradeCancelled(signal, reason),
     };
@@ -313,6 +329,20 @@ export class BybitService implements OnModuleInit {
       applyForcedLeverage: (s, o) => ov.applyForcedLeverage(s, o),
       hasExchangeExposureForDirection: (client, symbol, direction) =>
         this.bybitExposure.hasExchangeExposureForDirection(client, symbol, direction),
+      isHedgeModeActiveForSymbol: async (client, symbol) => {
+        try {
+          const pos = await client.getPositionInfo({ category: 'linear', symbol });
+          if (pos.retCode !== 0) {
+            return false;
+          }
+          return (pos.result?.list ?? []).some((row) => {
+            const idx = Number(row.positionIdx ?? 0);
+            return idx === 1 || idx === 2;
+          });
+        } catch {
+          return false;
+        }
+      },
       clearImmediateStaleDbBlockerIfExchangeFlat: (pair, direction, client, reason) =>
         this.clearImmediateStaleDbBlockerIfExchangeFlat(pair, direction, client, reason),
       buildPlacementLockKey: (pair, direction) => pv.buildPlacementLockKey(pair, direction),

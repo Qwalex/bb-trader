@@ -18,6 +18,7 @@ import {
   BYBIT_LADDER_SOURCE_FALLBACK_LOG_CAP,
   BYBIT_SOURCE_MAP_SKIP_LOG_CAP,
 } from '../bybit.constants';
+import { pickPositionRowForSignalDirection } from '../position/bybit-position-pick.util';
 import { positionHasStopLoss } from './bybit-tpsl.util';
 
 @Injectable()
@@ -310,11 +311,14 @@ export class BybitTpSlService {
       return;
     }
     if (posInfo.retCode !== 0) return;
-    const posRows = posInfo.result?.list ?? [];
-    const posRow = posRows.find((r: any) => {
-      const sz = r?.size ? Math.abs(parseFloat(String(r.size))) : 0;
-      return sz > 1e-12;
-    });
+    const posRows = (posInfo.result?.list ?? []) as Array<{
+      size?: string;
+      side?: string;
+      positionIdx?: number;
+      avgPrice?: string;
+      markPrice?: string;
+    }>;
+    const posRow = pickPositionRowForSignalDirection(posRows, direction);
     if (!posRow) return;
     const positionIdx = (posRow.positionIdx ?? 0) as 0 | 1 | 2;
 
