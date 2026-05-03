@@ -780,3 +780,15 @@
 - Manual verification: `npm run build -w apps/api` (pass).
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-064
+
+- Status: `done`
+- Scope: Ежедневный дайджест в Telegram-ассистенте: баланс, PnL/WR, сделки за 24 ч, дельты к состоянию до окна, топы источников.
+- Files: `apps/api/src/modules/orders/orders.service.ts`, `apps/api/src/modules/orders/orders-digest.types.ts`, `apps/api/src/modules/telegram/services/telegram-digest-scheduler.service.ts`, `apps/api/src/modules/telegram/utils/telegram-daily-digest-html.util.ts`, `apps/api/src/modules/telegram/telegram.module.ts`, `apps/api/src/modules/telegram/services/index.ts`, `apps/api/src/modules/telegram/utils/index.ts`, `.env.example`, `docs/audit/06-progress-tracker.md`
+- Findings: сводка по меню уже есть; не хватало плановой рассылки и среза «последние 24 ч» относительно кумулятива до окна.
+- Changes: `OrdersService.getDailyDigestModel()` (учёт exclude/STATS_RESET_AT); `TelegramDigestSchedulerService` + `CronJob` из `TELEGRAM_DAILY_DIGEST_CRON` (дефолт `0 0 9 * * *` UTC), выкл. `TELEGRAM_DAILY_DIGEST_ENABLED=false`; рассылка по `TELEGRAM_WHITELIST` только кабинетов с запущенным ботом; HTML `formatTelegramDailyDigestHtml`.
+- Decomposition notes (`utils/constants/hooks/types`): типы дайджеста в `orders-digest.types.ts`, разметка в `telegram-daily-digest-html.util.ts`.
+- Manual verification: `npm run build` в `apps/api` (pass); в проде проверить время cron (UTC) и whitelist.
+- Docs updated: этот трекер, `.env.example`.
+- Linked risks (`SEC-###`): N/A

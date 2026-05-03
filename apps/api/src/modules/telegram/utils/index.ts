@@ -1,4 +1,5 @@
 export * from './telegram-api-notify-html.util';
+export * from './telegram-daily-digest-html.util';
 export * from './telegram-dashboard-html.util';
 export * from './telegram-draft.util';
 export * from './telegram-external-request-key.util';

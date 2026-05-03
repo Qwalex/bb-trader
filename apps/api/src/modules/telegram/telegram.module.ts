@@ -9,6 +9,7 @@ import {
   TelegramBotRegistryService,
   TelegramChatMenuService,
   TelegramConversationStateService,
+  TelegramDigestSchedulerService,
   TelegramService,
   TelegramSignalDraftFlowService,
 } from './services';
@@ -26,6 +27,7 @@ import {
     TelegramBotRegistryService,
     TelegramSignalDraftFlowService,
     TelegramChatMenuService,
+    TelegramDigestSchedulerService,
     TelegramService,
   ],
   exports: [TelegramService],

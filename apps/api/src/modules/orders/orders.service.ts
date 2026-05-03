@@ -20,6 +20,7 @@ import { UserbotSignalHashService } from '../telegram-userbot/userbot-signal-has
 
 import { formatError } from '../../common/format-error';
 import type { ActiveSignalTradeSnapshot } from './orders-active-signal-snapshot.types';
+import type { OrdersDailyDigestModel } from './orders-digest.types';
 import { parseStringList } from './orders-source.util';
 import {
   computeWinratePercent,
@@ -910,6 +911,126 @@ export class OrdersService {
       liquidationTotal,
       liquidationBySource,
       liquidationByLeverage,
+    };
+  }
+
+  /**
+   * Снимок для ежедневного дайджеста: окно 24 ч по `closedAt`, кумулятив до окна, итоги как в дашборде.
+   * Учитывает `SOURCE_EXCLUDE_LIST` и `STATS_RESET_AT` так же, как `getDashboardStats`.
+   */
+  async getDailyDigestModel(): Promise<OrdersDailyDigestModel> {
+    const now = new Date();
+    const from = new Date(now.getTime() - 86_400_000);
+    const excluded = await this.getExcludedSourcesSet();
+    const statsResetAt = await this.getStatsResetAt();
+    const fromEff =
+      statsResetAt && statsResetAt.getTime() > from.getTime() ? statsResetAt : from;
+
+    const closedWindowRows = await this.prisma.signal.findMany({
+      where: this.withCabinetScope({
+        deletedAt: null,
+        status: { in: ['CLOSED_WIN', 'CLOSED_LOSS', 'CLOSED_MIXED'] },
+        closedAt: {
+          not: null,
+          gte: fromEff,
+          lt: now,
+        },
+      }),
+      select: {
+        pair: true,
+        direction: true,
+        status: true,
+        realizedPnl: true,
+        closedAt: true,
+        source: true,
+      },
+      orderBy: { closedAt: 'desc' },
+      take: 80,
+    });
+    const closedWindowFiltered = closedWindowRows.filter(
+      (row) => !excluded.has(String(row.source ?? '')),
+    );
+
+    let wins = 0;
+    let losses = 0;
+    let mixed = 0;
+    let totalPnlWindow = 0;
+    for (const r of closedWindowFiltered) {
+      if (r.status === 'CLOSED_WIN') wins += 1;
+      else if (r.status === 'CLOSED_LOSS') losses += 1;
+      else if (r.status === 'CLOSED_MIXED') mixed += 1;
+      totalPnlWindow += r.realizedPnl ?? 0;
+    }
+    const decided = wins + losses;
+    const winrateWindow = decided === 0 ? 0 : (wins / decided) * 100;
+
+    const beforeRows = await this.prisma.signal.findMany({
+      where: this.withCabinetScope({
+        deletedAt: null,
+        status: { in: ['CLOSED_WIN', 'CLOSED_LOSS', 'CLOSED_MIXED'] },
+        closedAt: statsResetAt
+          ? { not: null, lt: fromEff, gte: statsResetAt }
+          : { not: null, lt: fromEff },
+      }),
+      select: { status: true, realizedPnl: true, source: true },
+    });
+    const beforeFiltered = beforeRows.filter((row) => !excluded.has(String(row.source ?? '')));
+    let bw = 0;
+    let bl = 0;
+    let beforePnl = 0;
+    for (const r of beforeFiltered) {
+      if (r.status === 'CLOSED_WIN') bw += 1;
+      else if (r.status === 'CLOSED_LOSS') bl += 1;
+      beforePnl += r.realizedPnl ?? 0;
+    }
+    const beforeDecided = bw + bl;
+    const winrateBefore =
+      beforeDecided === 0 ? 0 : computeWinratePercent(bw, bl);
+
+    const overallFull = await this.getDashboardStats();
+    const overall = {
+      winrate: overallFull.winrate,
+      wins: overallFull.wins,
+      losses: overallFull.losses,
+      totalClosed: overallFull.totalClosed,
+      totalPnl: overallFull.totalPnl,
+      openSignals: overallFull.openSignals,
+    };
+
+    const cumulativeBeforeWindow = {
+      wins: bw,
+      losses: bl,
+      decided: beforeDecided,
+      winrate: winrateBefore,
+      totalPnl: beforePnl,
+    };
+
+    const deltaPnlVsBefore = overall.totalPnl - cumulativeBeforeWindow.totalPnl;
+    const deltaWinratePoints = overall.winrate - cumulativeBeforeWindow.winrate;
+
+    return {
+      rolling24h: {
+        from: fromEff,
+        to: now,
+        wins,
+        losses,
+        mixed,
+        decided,
+        winrate: winrateWindow,
+        totalPnl: totalPnlWindow,
+        trades: closedWindowFiltered.slice(0, 15).map((r) => ({
+          pair: r.pair,
+          direction: r.direction,
+          status: r.status,
+          realizedPnl: r.realizedPnl,
+          closedAt: r.closedAt,
+          source: r.source,
+        })),
+      },
+      cumulativeBeforeWindow,
+      overall,
+      deltaPnlVsBefore,
+      deltaWinratePoints,
     };
   }
 
