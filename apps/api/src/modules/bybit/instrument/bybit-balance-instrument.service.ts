@@ -5,12 +5,16 @@ import { normalizeTradingPair } from '@repo/shared';
 
 import { formatError } from '../../../common/format-error';
 import { BybitClientService } from './bybit-client.service';
+import { BybitRateLimitService } from './bybit-rate-limit.service';
 
 @Injectable()
 export class BybitBalanceInstrumentService {
   private readonly logger = new Logger(BybitBalanceInstrumentService.name);
 
-  constructor(private readonly bybitClient: BybitClientService) {}
+  constructor(
+    private readonly bybitClient: BybitClientService,
+    private readonly rateLimit: BybitRateLimitService,
+  ) {}
 
   async getClient(): Promise<RestClientV5 | null> {
     return this.bybitClient.getClient();
@@ -55,7 +59,9 @@ export class BybitBalanceInstrumentService {
     };
 
     for (const accountType of accountTypes) {
-      const res = await client.getWalletBalance({ accountType });
+      const res = await this.rateLimit.runBybitCall(() =>
+        client.getWalletBalance({ accountType }),
+      );
       const list = res.result?.list?.[0];
       const coin = list?.coin?.find((c) => c.coin === 'USDT');
       if (!coin) continue;
@@ -136,10 +142,12 @@ export class BybitBalanceInstrumentService {
     client: RestClientV5,
     symbol: string,
   ): Promise<{ qtyStep: string; minQty: string; tickSize: string }> {
-    const res = await client.getInstrumentsInfo({
-      category: 'linear',
-      symbol,
-    });
+    const res = await this.rateLimit.runBybitCall(() =>
+      client.getInstrumentsInfo({
+        category: 'linear',
+        symbol,
+      }),
+    );
     const info = res.result?.list?.[0];
     const lot = info?.lotSizeFilter;
     const price = info?.priceFilter;
@@ -177,10 +185,12 @@ export class BybitBalanceInstrumentService {
     symbol: string,
   ): Promise<number | undefined> {
     try {
-      const t = await client.getTickers({
-        category: 'linear',
-        symbol,
-      });
+      const t = await this.rateLimit.runBybitCall(() =>
+        client.getTickers({
+          category: 'linear',
+          symbol,
+        }),
+      );
       if (t.retCode !== 0) return undefined;
       const row = t.result?.list?.[0];
       const v = Number(row?.lastPrice ?? row?.markPrice ?? row?.indexPrice);

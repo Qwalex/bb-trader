@@ -4,12 +4,15 @@ import { RestClientV5 } from 'bybit-api';
 import { normalizeTradingPair, type SignalDto } from '@repo/shared';
 
 import { formatError } from '../../../common/format-error';
+import { BybitRateLimitService } from '../instrument/bybit-rate-limit.service';
 import type { BybitSignalPlacementPorts } from '../types/bybit-ports.types';
 import type { PlaceOrdersResult, SignalOrderOrigin } from '../types/bybit.types';
 
 @Injectable()
 export class BybitSignalPlacementService {
   private readonly logger = new Logger(BybitSignalPlacementService.name);
+
+  constructor(private readonly rateLimit: BybitRateLimitService) {}
 
   private async cancelCreatedEntryOrders(
     client: RestClientV5,
@@ -24,12 +27,14 @@ export class BybitSignalPlacementService {
       let cancelled = false;
       for (const orderFilter of ['Order', 'StopOrder'] as const) {
         try {
-          const res = await client.cancelOrder({
-            category: 'linear',
-            symbol,
-            orderId,
-            orderFilter,
-          });
+          const res = await this.rateLimit.runBybitCall(() =>
+            client.cancelOrder({
+              category: 'linear',
+              symbol,
+              orderId,
+              orderFilter,
+            }),
+          );
           if (res.retCode === 0 || res.retCode === 110008 || res.retCode === 110001) {
             cancelled = true;
             if (res.retCode === 0) {
@@ -281,12 +286,14 @@ export class BybitSignalPlacementService {
       } else {
         leveragedNotional = defaultOrderUsd;
       }
-      const leverageRes = await client.setLeverage({
-        category: 'linear',
-        symbol,
-        buyLeverage: String(signal.leverage),
-        sellLeverage: String(signal.leverage),
-      });
+      const leverageRes = await this.rateLimit.runBybitCall(() =>
+        client.setLeverage({
+          category: 'linear',
+          symbol,
+          buyLeverage: String(signal.leverage),
+          sellLeverage: String(signal.leverage),
+        }),
+      );
       if (leverageRes.retCode !== 0 && leverageRes.retCode !== 110043) {
         const errText = `setLeverage failed: ${leverageRes.retCode} ${String(leverageRes.retMsg ?? '')}`;
         void ports.appLog.append('error', 'bybit', 'setLeverage отклонён', {
@@ -413,14 +420,16 @@ export class BybitSignalPlacementService {
         }
         const qtyNum = leveragedNotional / lastPrice;
         const qty = ports.roundQty(qtyNum, qtyStep, minQty);
-        const orderRes = await client.submitOrder({
-          category: 'linear',
-          symbol,
-          side,
-          orderType: 'Market',
-          qty,
-          positionIdx: entryPositionIdx,
-        });
+        const orderRes = await this.rateLimit.runBybitCall(() =>
+          client.submitOrder({
+            category: 'linear',
+            symbol,
+            side,
+            orderType: 'Market',
+            qty,
+            positionIdx: entryPositionIdx,
+          }),
+        );
         const oid = orderRes.result?.orderId;
         if (oid) bybitIds.push(oid);
         await ports.orders.createOrderRecord({
@@ -482,7 +491,7 @@ export class BybitSignalPlacementService {
               : {}),
           };
 
-          const orderRes = await client.submitOrder(orderReq);
+          const orderRes = await this.rateLimit.runBybitCall(() => client.submitOrder(orderReq));
           const oid = orderRes.result?.orderId;
           if (oid) bybitIds.push(oid);
           await ports.orders.createOrderRecord({

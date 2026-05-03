@@ -27,9 +27,7 @@ export class BybitExposureService {
     symbol: string,
     direction: 'long' | 'short',
   ): Promise<boolean> {
-    return this.rateLimit.run(() =>
-      this.hasExchangeExposureForDirectionCore(client, symbol, direction),
-    );
+    return this.hasExchangeExposureForDirectionCore(client, symbol, direction);
   }
 
   private async hasExchangeExposureForDirectionCore(
@@ -177,14 +175,16 @@ export class BybitExposureService {
     for (const orderFilter of orderFilters) {
       let cursor: string | undefined;
       do {
-        const res = await client.getActiveOrders({
-          category: 'linear',
-          symbol,
-          openOnly: 0,
-          orderFilter,
-          limit: 50,
-          cursor,
-        });
+        const res = await this.rateLimit.runBybitCall(() =>
+          client.getActiveOrders({
+            category: 'linear',
+            symbol,
+            openOnly: 0,
+            orderFilter,
+            limit: 50,
+            cursor,
+          }),
+        );
         if (res.retCode !== 0) {
           break;
         }
@@ -217,10 +217,12 @@ export class BybitExposureService {
     client: RestClientV5,
     symbol: string,
   ): Promise<LiveExposurePosition[]> {
-    const res = await client.getPositionInfo({
-      category: 'linear',
-      symbol,
-    });
+    const res = await this.rateLimit.runBybitCall(() =>
+      client.getPositionInfo({
+        category: 'linear',
+        symbol,
+      }),
+    );
     if (res.retCode !== 0) {
       return [];
     }

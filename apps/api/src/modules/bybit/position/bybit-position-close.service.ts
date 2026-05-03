@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { RestClientV5 } from 'bybit-api';
 
 import { formatError } from '../../../common/format-error';
+import { BybitRateLimitService } from '../instrument/bybit-rate-limit.service';
 import type { BybitPositionClosePorts } from '../types/bybit-ports.types';
 import type { CloseSignalResult } from '../types/bybit.types';
 import { pickLiveExposurePositionForDirection } from './bybit-position-pick.util';
@@ -21,6 +22,8 @@ type FlattenResult =
 
 @Injectable()
 export class BybitPositionCloseService {
+  constructor(private readonly rateLimit: BybitRateLimitService) {}
+
   private isFinalOrderStatus(status: string | null | undefined): boolean {
     const normalized = (status ?? '').trim().toLowerCase();
     return (
@@ -63,11 +66,13 @@ export class BybitPositionCloseService {
       const orderFilters = ['Order', 'StopOrder'] as const;
       for (const orderFilter of orderFilters) {
         try {
-          const res = await client.cancelAllOrders({
-            category: 'linear',
-            symbol,
-            orderFilter,
-          });
+          const res = await this.rateLimit.runBybitCall(() =>
+            client.cancelAllOrders({
+              category: 'linear',
+              symbol,
+              orderFilter,
+            }),
+          );
           if (res.retCode !== 0) {
             errors.push(
               `[round ${round}] cancelAllOrders(${orderFilter}) retCode=${res.retCode} ${String(res.retMsg ?? '')}`,
@@ -91,16 +96,18 @@ export class BybitPositionCloseService {
           if (!qty || parseFloat(qty) <= 0) {
             continue;
           }
-          const res = await client.submitOrder({
-            category: 'linear',
-            symbol,
-            side: closeSide,
-            orderType: 'Market',
-            qty,
-            reduceOnly: true,
-            closeOnTrigger: true,
-            positionIdx: (p.positionIdx as 0 | 1 | 2) ?? 0,
-          });
+          const res = await this.rateLimit.runBybitCall(() =>
+            client.submitOrder({
+              category: 'linear',
+              symbol,
+              side: closeSide,
+              orderType: 'Market',
+              qty,
+              reduceOnly: true,
+              closeOnTrigger: true,
+              positionIdx: (p.positionIdx as 0 | 1 | 2) ?? 0,
+            }),
+          );
           if (res.retCode !== 0) {
             errors.push(
               `[round ${round}] submit close Market retCode=${res.retCode} ${String(res.retMsg ?? '')}`,
@@ -184,12 +191,14 @@ export class BybitPositionCloseService {
       let cancelled = false;
       for (const orderFilter of ['Order', 'StopOrder'] as const) {
         try {
-          const res = await client.cancelOrder({
-            category: 'linear',
-            symbol,
-            orderId,
-            orderFilter,
-          });
+          const res = await this.rateLimit.runBybitCall(() =>
+            client.cancelOrder({
+              category: 'linear',
+              symbol,
+              orderId,
+              orderFilter,
+            }),
+          );
           if (res.retCode === 0 || res.retCode === 110008) {
             cancelled = true;
             if (res.retCode === 0) {
@@ -333,16 +342,18 @@ export class BybitPositionCloseService {
         const closeSide = direction === 'long' ? 'Sell' : 'Buy';
         const qty = ports.formatQtyToStep(p.size, qtyStep);
         if (qty && parseFloat(qty) > 0) {
-          const res = await client.submitOrder({
-            category: 'linear',
-            symbol,
-            side: closeSide,
-            orderType: 'Market',
-            qty,
-            reduceOnly: true,
-            closeOnTrigger: true,
-            positionIdx: (p.positionIdx as 0 | 1 | 2) ?? 0,
-          });
+          const res = await this.rateLimit.runBybitCall(() =>
+            client.submitOrder({
+              category: 'linear',
+              symbol,
+              side: closeSide,
+              orderType: 'Market',
+              qty,
+              reduceOnly: true,
+              closeOnTrigger: true,
+              positionIdx: (p.positionIdx as 0 | 1 | 2) ?? 0,
+            }),
+          );
           if (res.retCode !== 0) {
             errors.push(
               `submit close ${direction} retCode=${res.retCode} ${String(res.retMsg ?? '')}`,

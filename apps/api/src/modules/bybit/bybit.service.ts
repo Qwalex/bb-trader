@@ -14,6 +14,7 @@ import { WorkerQueueService } from '../worker-queue/worker-queue.service';
 import { stalePairDirectionKey as stalePairDirectionKeyUtil } from './exposure/bybit-exposure.util';
 import { BybitBalanceInstrumentService } from './instrument/bybit-balance-instrument.service';
 import { BybitClientService } from './instrument/bybit-client.service';
+import { BybitRateLimitService } from './instrument/bybit-rate-limit.service';
 import { BybitExchangeCleanupService } from './position/bybit-exchange-cleanup.service';
 import { BybitExposureService } from './exposure/bybit-exposure.service';
 import { BybitLiveSnapshotService } from './exposure/bybit-live-snapshot.service';
@@ -77,6 +78,7 @@ export class BybitService implements OnModuleInit {
     private readonly bybitRecalc: BybitRecalcService,
     private readonly balanceInstrument: BybitBalanceInstrumentService,
     private readonly orderExchangeQuery: BybitOrderExchangeQueryService,
+    private readonly bybitRateLimit: BybitRateLimitService,
     private readonly placementValidation: BybitPlacementValidationService,
     private readonly signalOverrides: BybitSignalOverridesService,
     private readonly liveSnapshot: BybitLiveSnapshotService,
@@ -349,7 +351,9 @@ export class BybitService implements OnModuleInit {
         this.bybitExposure.hasExchangeExposureForDirection(client, symbol, direction),
       isHedgeModeActiveForSymbol: async (client, symbol) => {
         try {
-          const pos = await client.getPositionInfo({ category: 'linear', symbol });
+          const pos = await this.bybitRateLimit.runBybitCall(() =>
+            client.getPositionInfo({ category: 'linear', symbol }),
+          );
           if (pos.retCode !== 0) {
             return false;
           }

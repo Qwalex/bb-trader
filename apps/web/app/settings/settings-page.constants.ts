@@ -181,7 +181,8 @@ export const KEYS = [
   { key: 'POLLING_INTERVAL_MS', label: 'Polling (0 = отключить опрос Bybit)' },
   {
     key: 'BYBIT_ACCOUNT_MAX_CONCURRENCY',
-    label: 'Bybit: параллелизм REST-запросов на кабинет (рекомендовано 1)',
+    label:
+      'Bybit: зарезервировано (оставьте 1). >1 игнорируется: лимитер держит один REST-канал на кабинет между всеми вызовами',
   },
   {
     key: 'TP_SL_STEP_START',

@@ -59,9 +59,7 @@ export class BybitOrderExchangeQueryService {
     orderId: string,
     expectedQty?: number,
   ): Promise<string | undefined> {
-    return this.rateLimit.run(() =>
-      this.fetchOrderStatusFromExchangeCore(client, pair, orderId, expectedQty),
-    );
+    return this.fetchOrderStatusFromExchangeCore(client, pair, orderId, expectedQty);
   }
 
   private async fetchOrderStatusFromExchangeCore(

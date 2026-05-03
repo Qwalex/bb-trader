@@ -12,7 +12,10 @@ export const ENV_FALLBACK: Record<string, string> = {
   TP_SL_STEP_RANGE: '',
   /** Минимальный интервал между REST-вызовами Bybit на один кабинет (мс). */
   BYBIT_ACCOUNT_REQUEST_INTERVAL_MS: '80',
-  /** Параллелизм REST-вызовов Bybit на кабинет (безопасный дефолт = 1). */
+  /**
+   * Зарезервировано: в production-safe limiter параллельные REST-каналы на кабинет не используются
+   * (значение >1 игнорируется, см. `BybitRateLimitService`).
+   */
   BYBIT_ACCOUNT_MAX_CONCURRENCY: '1',
   /** Базовая задержка при признаках rate limit (мс), умножается на номер попытки. */
   BYBIT_RATE_LIMIT_BACKOFF_MS: '2000',

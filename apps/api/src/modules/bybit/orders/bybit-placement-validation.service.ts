@@ -4,6 +4,7 @@ import { RestClientV5 } from 'bybit-api';
 import { normalizeTradingPair, type SignalDto } from '@repo/shared';
 
 import { AppLogService } from '../../app-log/app-log.service';
+import { BybitRateLimitService } from '../instrument/bybit-rate-limit.service';
 import {
   buildTpSplitDiagnostics as buildTpSplitDiagnosticsUtil,
   entryNotionalWeights as entryNotionalWeightsUtil,
@@ -17,7 +18,10 @@ import {
 
 @Injectable()
 export class BybitPlacementValidationService {
-  constructor(private readonly appLog: AppLogService) {}
+  constructor(
+    private readonly appLog: AppLogService,
+    private readonly rateLimit: BybitRateLimitService,
+  ) {}
 
   formatQtyToStep(qty: number, qtyStep: string): string {
     return formatQtyToStepUtil(qty, qtyStep);
@@ -148,10 +152,12 @@ export class BybitPlacementValidationService {
     side: 'Buy' | 'Sell',
   ): Promise<0 | 1 | 2> {
     try {
-      const pos = await client.getPositionInfo({
-        category: 'linear',
-        symbol,
-      });
+      const pos = await this.rateLimit.runBybitCall(() =>
+        client.getPositionInfo({
+          category: 'linear',
+          symbol,
+        }),
+      );
       if (pos.retCode !== 0) {
         return 0;
       }

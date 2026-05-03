@@ -1,5 +1,4 @@
-import { Injectable } from '@nestjs/common';
-import { AsyncLocalStorage } from 'node:async_hooks';
+import { Injectable, Logger } from '@nestjs/common';
 
 import { CabinetContextService } from '../../cabinet/cabinet-context.service';
 import { SettingsService } from '../../settings/settings.service';
@@ -17,17 +16,16 @@ class BybitRateLimitRetCodeError extends Error {
 }
 
 /**
- * Очередь REST-вызовов Bybit по кабинету (или default), минимальный интервал между запросами
- * и backoff при признаках rate limit. Вложенные вызовы `run` для того же ключа не ставятся
- * в очередь повторно (избегаем deadlock при TP/SL → applyPositionStopLossFull).
+ * Строгая очередь REST-вызовов Bybit по кабинету (или `default`): один HTTP-запрос
+ * за раз на ключ, минимальный интервал между успешными/неуспешными попытками и
+ * backoff+retry при признаках rate limit (включая `retCode=10006` в теле ответа).
  */
 @Injectable()
 export class BybitRateLimitService {
-  private readonly queueTail = new Map<string, Promise<unknown>[]>();
-  private readonly queueDepth = new Map<string, number[]>();
-  private readonly queueCursor = new Map<string, number>();
+  private readonly logger = new Logger(BybitRateLimitService.name);
+  private readonly queueTail = new Map<string, Promise<unknown>>();
   private readonly lastEndMs = new Map<string, number>();
-  private readonly reentryContext = new AsyncLocalStorage<Set<string>>();
+  private maxConcurrencyWarned = false;
 
   constructor(
     private readonly settings: SettingsService,
@@ -52,11 +50,18 @@ export class BybitRateLimitService {
     return Math.floor(n);
   }
 
-  private async getMaxConcurrency(): Promise<number> {
+  private async maybeWarnMaxConcurrencyIgnored(): Promise<void> {
+    if (this.maxConcurrencyWarned) {
+      return;
+    }
     const raw = await this.settings.get('BYBIT_ACCOUNT_MAX_CONCURRENCY');
     const n = raw != null && String(raw).trim() !== '' ? Number(raw) : Number.NaN;
-    if (!Number.isFinite(n) || n < 1) return 1;
-    return Math.min(8, Math.floor(n));
+    if (Number.isFinite(n) && n > 1) {
+      this.maxConcurrencyWarned = true;
+      this.logger.warn(
+        'BYBIT_ACCOUNT_MAX_CONCURRENCY>1 зарезервировано под будущий throughput; production-safe limiter держит один REST-канал на кабинет (эффективно 1). Значение игнорируется.',
+      );
+    }
   }
 
   private static normalizeRetCode(retCode: unknown): number | null {
@@ -86,116 +91,46 @@ export class BybitRateLimitService {
   }
 
   async runBybitCall<T extends BybitResponseLike>(fn: () => Promise<T>): Promise<T> {
-    return this.run(async () => {
-      const response = await fn();
-      const retCode = BybitRateLimitService.normalizeRetCode(response?.retCode);
-      const retMsg = BybitRateLimitService.normalizeRetMsg(response?.retMsg);
-      if (this.isRateLimitSignal({ retCode, retMsg })) {
-        throw new BybitRateLimitRetCodeError(retCode ?? -1, retMsg || 'rate limit');
-      }
-      return response;
-    });
-  }
-
-  private isLikelyRateLimit(err: unknown): boolean {
-    const s = String(err ?? '');
-    if (/429|too many requests|rate.?limit|10006|frequency/i.test(s)) return true;
-    if (typeof err === 'object' && err !== null && 'retCode' in err) {
-      const c = Number((err as { retCode?: unknown }).retCode);
-      if (c === 10006) return true;
-    }
-    return false;
-  }
-
-  private hasReentryForAccountKey(accountKey: string): boolean {
-    return this.reentryContext.getStore()?.has(accountKey) === true;
-  }
-
-  private runInsideAccountContext<T>(accountKey: string, fn: () => Promise<T>): Promise<T> {
-    const existing = this.reentryContext.getStore();
-    if (existing?.has(accountKey)) {
-      return fn();
-    }
-    const next = new Set(existing ?? []);
-    next.add(accountKey);
-    return this.reentryContext.run(next, fn);
-  }
-
-  private ensureQueueLanes(accountKey: string, laneCount: number): {
-    tails: Promise<unknown>[];
-    depths: number[];
-  } {
-    const tails = this.queueTail.get(accountKey) ?? [];
-    const depths = this.queueDepth.get(accountKey) ?? [];
-    while (tails.length < laneCount) {
-      tails.push(Promise.resolve());
-      depths.push(0);
-    }
-    this.queueTail.set(accountKey, tails);
-    this.queueDepth.set(accountKey, depths);
-    return { tails, depths };
-  }
-
-  private pickLane(accountKey: string, laneCount: number, depths: number[]): number {
-    if (laneCount <= 1) {
-      return 0;
-    }
-    const start = this.queueCursor.get(accountKey) ?? 0;
-    let chosen = 0;
-    let bestDepth = Number.POSITIVE_INFINITY;
-    for (let i = 0; i < laneCount; i += 1) {
-      const idx = (start + i) % laneCount;
-      const d = depths[idx] ?? 0;
-      if (d < bestDepth) {
-        bestDepth = d;
-        chosen = idx;
-      }
-    }
-    this.queueCursor.set(accountKey, (chosen + 1) % laneCount);
-    return chosen;
-  }
-
-  async run<T>(fn: () => Promise<T>): Promise<T> {
     const accountKey = this.accountKey();
-    if (this.hasReentryForAccountKey(accountKey)) {
-      return fn();
-    }
-    const laneCount = await this.getMaxConcurrency();
-    const { tails, depths } = this.ensureQueueLanes(accountKey, laneCount);
-    const lane = this.pickLane(accountKey, laneCount, depths);
-    const prev = tails[lane] ?? Promise.resolve();
-    depths[lane] = (depths[lane] ?? 0) + 1;
+    return this.enqueue(accountKey, () => this.executeThrottledWithRetry(accountKey, fn));
+  }
 
-    const task = prev.then(() =>
-      this.runThrottled(accountKey, () =>
-        this.runInsideAccountContext(accountKey, fn),
-      ),
+  private enqueue<T>(accountKey: string, work: () => Promise<T>): Promise<T> {
+    const prev = this.queueTail.get(accountKey) ?? Promise.resolve();
+    const task = prev.then(() => work());
+    this.queueTail.set(
+      accountKey,
+      task
+        .then(() => undefined)
+        .catch(() => undefined),
     );
-
-    tails[lane] = task
-      .then(() => undefined)
-      .catch(() => undefined)
-      .finally(() => {
-        depths[lane] = Math.max(0, (depths[lane] ?? 1) - 1);
-      });
-
     return task;
   }
 
-  private async runThrottled<T>(accountKey: string, fn: () => Promise<T>): Promise<T> {
+  private async executeThrottledWithRetry<T extends BybitResponseLike>(
+    accountKey: string,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    await this.maybeWarnMaxConcurrencyIgnored();
     const intervalMs = await this.getIntervalMs();
     const last = this.lastEndMs.get(accountKey) ?? 0;
     const wait = Math.max(0, last + intervalMs - Date.now());
     if (wait > 0) {
       await new Promise((r) => setTimeout(r, wait));
     }
+
     const backoffBase = await this.getBackoffMs();
     let attempt = 0;
     while (true) {
       try {
-        const out = await fn();
+        const response = await fn();
+        const retCode = BybitRateLimitService.normalizeRetCode(response?.retCode);
+        const retMsg = BybitRateLimitService.normalizeRetMsg(response?.retMsg);
+        if (this.isRateLimitSignal({ retCode, retMsg })) {
+          throw new BybitRateLimitRetCodeError(retCode ?? -1, retMsg || 'rate limit');
+        }
         this.lastEndMs.set(accountKey, Date.now());
-        return out;
+        return response;
       } catch (e) {
         if (attempt < 4 && this.isLikelyRateLimit(e)) {
           attempt += 1;
@@ -206,5 +141,15 @@ export class BybitRateLimitService {
         throw e;
       }
     }
+  }
+
+  private isLikelyRateLimit(err: unknown): boolean {
+    const s = String(err ?? '');
+    if (/429|too many requests|rate.?limit|10006|frequency/i.test(s)) return true;
+    if (typeof err === 'object' && err !== null && 'retCode' in err) {
+      const c = Number((err as { retCode?: unknown }).retCode);
+      if (c === 10006) return true;
+    }
+    return false;
   }
 }

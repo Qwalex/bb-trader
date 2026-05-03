@@ -3,6 +3,7 @@ import { RestClientV5 } from 'bybit-api';
 import { normalizeTradingPair } from '@repo/shared';
 
 import { formatError } from '../../../common/format-error';
+import { BybitRateLimitService } from '../instrument/bybit-rate-limit.service';
 import {
   buildClosedPnlWindow,
   isLiquidationExecutionRow,
@@ -11,6 +12,8 @@ import type { TradePnlBreakdownResult } from '../types/bybit.types';
 
 @Injectable()
 export class BybitPnlService {
+  constructor(private readonly rateLimit: BybitRateLimitService) {}
+
   private extractClosedPnlOrderId(row: unknown): string {
     if (!row || typeof row !== 'object') {
       return '';
@@ -150,14 +153,16 @@ export class BybitPnlService {
       const maxPages = 40;
 
       for (let page = 0; page < maxPages; page += 1) {
-        const res = await client.getClosedPnL({
-          category: 'linear',
-          symbol,
-          startTime: rangeStart,
-          endTime: rangeEnd,
-          limit: 100,
-          cursor,
-        });
+        const res = await this.rateLimit.runBybitCall(() =>
+          client.getClosedPnL({
+            category: 'linear',
+            symbol,
+            startTime: rangeStart,
+            endTime: rangeEnd,
+            limit: 100,
+            cursor,
+          }),
+        );
         if (res.retCode !== 0) {
           break;
         }
@@ -193,12 +198,14 @@ export class BybitPnlService {
     const maxPages = 8;
 
     for (let page = 0; page < maxPages; page += 1) {
-      const res = await params.client.getExecutionList({
-        category: 'linear',
-        symbol: params.symbol,
-        limit: 50,
-        cursor,
-      });
+      const res = await this.rateLimit.runBybitCall(() =>
+        params.client.getExecutionList({
+          category: 'linear',
+          symbol: params.symbol,
+          limit: 50,
+          cursor,
+        }),
+      );
       if (res.retCode !== 0) {
         break;
       }
@@ -284,12 +291,14 @@ export class BybitPnlService {
     const maxPages = 8;
     let hasMarkerWithExpectedCloseSide = false;
     for (let page = 0; page < maxPages; page += 1) {
-      const res = await params.client.getExecutionList({
-        category: 'linear',
-        symbol: params.symbol,
-        limit: 50,
-        cursor,
-      });
+      const res = await this.rateLimit.runBybitCall(() =>
+        params.client.getExecutionList({
+          category: 'linear',
+          symbol: params.symbol,
+          limit: 50,
+          cursor,
+        }),
+      );
       if (res.retCode !== 0) {
         break;
       }
