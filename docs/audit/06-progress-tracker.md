@@ -684,6 +684,18 @@
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
 
+### AUD-057
+
+- Status: `done`
+- Scope: Userbot `POST .../telegram-userbot/qr/start` отдавал HTTP 500 при ошибках конфигурации/сети или при отсутствии владельца кабинета в контексте.
+- Files: `apps/api/src/modules/telegram-userbot/client/telegram-userbot-client.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: проверка `ownerUserId` выполнялась после `getApiCreds()` / `connect()`; `getApiCreds()` и связанные шаги бросали необработанный `Error` → Nest 500.
+- Changes: ранний `return { ok: false, ... }` при пустом `ownerUserId`; обёртка инициализации клиента в `try/catch` с `formatError`, `setQrState` и `disconnect` при фейле; ответ с `ok: false` и текстом ошибки вместо падения.
+- Decomposition notes (`utils/constants/hooks/types`): N/A
+- Manual verification: `npm run build -w apps/api` (pass).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
 ### AUD-056
 
 - Status: `done`

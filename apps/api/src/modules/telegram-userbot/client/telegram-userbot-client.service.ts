@@ -158,19 +158,45 @@ export class TelegramUserbotClientService {
       return { ok: true, message: 'QR-вход уже запущен.', qr: this.getQrStateForUser(ownerUserId) };
     }
 
-    const creds = await this.getApiCreds();
-    const clientOptions = await this.getTelegramClientOptions();
-    await this.stopQrClient(ownerUserId);
-    const qrClient = new TelegramClient(
-      new StringSession(''),
-      creds.apiId,
-      creds.apiHash,
-      clientOptions,
-    );
-    await qrClient.connect();
     if (!ownerUserId) {
       return { ok: false, error: 'Пользователь не определен для кабинета' };
     }
+
+    let creds: { apiId: number; apiHash: string } | undefined;
+    let qrClient: TelegramClient | undefined;
+    try {
+      creds = await this.getApiCreds();
+      const clientOptions = await this.getTelegramClientOptions();
+      await this.stopQrClient(ownerUserId);
+      qrClient = new TelegramClient(
+        new StringSession(''),
+        creds.apiId,
+        creds.apiHash,
+        clientOptions,
+      );
+      await qrClient.connect();
+    } catch (e) {
+      const msg = formatError(e);
+      this.logger.error(`Userbot QR start failed: ${msg}`);
+      this.setQrStateForUser(ownerUserId, { phase: 'error', error: msg });
+      if (qrClient) {
+        try {
+          await qrClient.disconnect();
+        } catch {
+          /* ignore */
+        }
+      }
+      return { ok: false, error: msg, qr: this.getQrStateForUser(ownerUserId) };
+    }
+
+    if (!creds || !qrClient) {
+      return {
+        ok: false,
+        error: 'Не удалось инициализировать Telegram-клиент для QR.',
+        qr: this.getQrStateForUser(ownerUserId),
+      };
+    }
+
     this.qrClientByUserId.set(ownerUserId, qrClient);
     this.setQrStateForUser(ownerUserId, { phase: 'starting' });
 

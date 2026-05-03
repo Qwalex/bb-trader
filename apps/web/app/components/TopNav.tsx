@@ -61,7 +61,7 @@ export function TopNav(props: TopNavProps) {
 
   return (
     <header className="nav">
-      <strong className="brand">SignalsBot</strong>
+      <Link href="/" className="brand">QSignals</Link>
       <nav className="navLinks">
         {visibleItems.map((item) => (
           <Link
