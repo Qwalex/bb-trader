@@ -707,3 +707,15 @@
 - Manual verification: `npm run lint -w api` (pass, только исторические warning), `npm run lint -w web` (pass, только исторические warning), `npm run build -w api` (pass), `npm run build -w web` (pass).
 - Docs updated: этот трекер, `01-env-and-secrets-matrix.md`, `README.md`, `AGENTS.md`.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-058
+
+- Status: `done`
+- Scope: Исправление чтения глобальных Telegram userbot app credentials при QR-входе.
+- Files: `apps/api/src/modules/settings/settings.constants.ts`, `apps/web/app/settings/settings-page.constants.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: `TELEGRAM_USERBOT_API_ID` / `TELEGRAM_USERBOT_API_HASH` отображались на странице настроек в режиме «Аккаунт», но не были классифицированы как account/global ключи; из-за этого QR-логин мог видеть их пустыми.
+- Changes: добавил оба ключа в backend `GLOBAL_SHARED_SETTING_KEYS` и frontend `ADMIN_GLOBAL_KEYS`, чтобы сохранение и чтение использовали одну область настроек.
+- Decomposition notes (`utils/constants/hooks/types`): N/A
+- Manual verification: `npm run lint -w api` (pass, только исторические warning), `npm run lint -w web` (pass, только исторические warning), `npm run build -w api` (pass), `npm run check-types -w web` (pass).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
