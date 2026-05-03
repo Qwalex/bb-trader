@@ -200,6 +200,144 @@ a:hover {
   margin-bottom: 2rem;
 }
 
+/* Главная (дашборд): кабинеты + подключённые группы */
+.dashboardSectionTitle {
+  font-size: 1.15rem;
+  margin-bottom: 0.35rem;
+}
+
+.dashboardSectionHint {
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin: 0 0 0.85rem;
+  line-height: 1.45;
+}
+
+.dashboardCabinetCards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1rem;
+}
+
+.dashboardCabinetCard {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 1rem 1.1rem;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: linear-gradient(145deg, rgba(26, 35, 50, 0.95), rgba(15, 20, 25, 0.88));
+  text-decoration: none;
+  color: inherit;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.22);
+  transition:
+    border-color 0.15s ease,
+    transform 0.12s ease,
+    box-shadow 0.15s ease;
+}
+
+.dashboardCabinetCard:hover {
+  border-color: rgba(59, 130, 246, 0.45);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.28);
+}
+
+.dashboardCabinetCardActive {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 1px rgba(59, 130, 246, 0.35),
+    0 8px 28px rgba(59, 130, 246, 0.12);
+}
+
+.dashboardCabinetCardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.dashboardCabinetCardName {
+  font-weight: 700;
+  font-size: 1.02rem;
+  letter-spacing: 0.01em;
+}
+
+.dashboardCabinetBadge {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  border-radius: 999px;
+  padding: 0.12rem 0.45rem;
+}
+
+.dashboardCabinetCardMetrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem 0.75rem;
+}
+
+.dashboardCabinetMetricLabel {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.12rem;
+}
+
+.dashboardCabinetMetricValue {
+  font-size: 0.92rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboardCabinetMetricNeg {
+  color: #f87171;
+}
+
+.dashboardCabinetCardSlug {
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+}
+
+.dashboardConnectedGroups {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+}
+
+.dashboardConnectedGroupChip {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.18);
+  max-width: min(320px, 100%);
+}
+
+.dashboardConnectedGroupTitle {
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+
+.dashboardConnectedGroupMeta {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.dashboardConnectedGroupMeta.mono {
+  font-family: ui-monospace, monospace;
+  word-break: break-all;
+}
+
 .dashboardTodoCard {
   position: sticky;
   top: 1rem;

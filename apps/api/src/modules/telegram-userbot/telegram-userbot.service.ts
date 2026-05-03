@@ -221,6 +221,31 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     return this.userbotClient.submitQrPassword(password);
   }
 
+  /** Включённые источники (группы/каналы) для текущего кабинета — для дашборда. */
+  async listEnabledConnectedGroups(): Promise<{
+    items: { chatId: string; title: string; username: string | null }[];
+  }> {
+    const cabinetId = this.cabinetContext.getCabinetId();
+    if (!cabinetId) {
+      return { items: [] };
+    }
+    const rows = await this.prisma.cabinetTelegramSource.findMany({
+      where: { cabinetId, enabled: true },
+      orderBy: { chatId: 'asc' },
+      select: {
+        chatId: true,
+        chat: { select: { title: true, username: true } },
+      },
+    });
+    return {
+      items: rows.map((r) => ({
+        chatId: r.chatId,
+        title: (r.chat?.title ?? '').trim() || r.chatId,
+        username: r.chat?.username?.trim() ? r.chat.username.trim() : null,
+      })),
+    };
+  }
+
   async syncChats() {
     const cabinetId = this.cabinetContext.getCabinetId();
     if (!cabinetId) {

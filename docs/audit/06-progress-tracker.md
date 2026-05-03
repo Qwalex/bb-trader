@@ -803,3 +803,15 @@
 - Manual verification: `npm run build` в `apps/api` (pass); в проде проверить время cron (UTC) и whitelist.
 - Docs updated: этот трекер, `.env.example`.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-065
+
+- Status: `done`
+- Scope: Главная дашборд — карточки по всем кабинетам (win/lose/winrate/PnL/bаланс) и блок подключённых Telegram-групп.
+- Files: `apps/api/src/modules/orders/orders-dashboard-cabinets.types.ts`, `apps/api/src/modules/orders/orders.service.ts`, `apps/api/src/modules/orders/orders.controller.ts`, `apps/api/src/modules/telegram-userbot/telegram-userbot.service.ts`, `apps/api/src/modules/telegram-userbot/telegram-userbot.controller.ts`, `apps/web/app/home-dashboard.types.ts`, `apps/web/app/page.tsx`, `apps/web/app/globals.css`, `docs/audit/06-progress-tracker.md`
+- Findings: на главной не было сводки по кабинетам и явного списка включённых источников userbot.
+- Changes: `GET /orders/dashboard-cabinets` (агрегация `getDashboardStats` + USDT balance в контексте каждого кабинета); `GET /telegram-userbot/dashboard-connected-groups`; UI секции с сеткой карточек и чипами групп.
+- Decomposition notes (`utils/constants/hooks/types`): DTO в `orders-dashboard-cabinets.types.ts`, UI-типы в `home-dashboard.types.ts`.
+- Manual verification: `npm run build -w apps/api`, `npm run check-types -w apps/web` (pass); вручную открыть `/` после входа — карточки и группы при наличии данных.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

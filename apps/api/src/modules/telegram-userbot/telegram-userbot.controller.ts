@@ -122,6 +122,19 @@ export class TelegramUserbotController {
     );
   }
 
+  @ApiOperation({
+    summary: 'Подключённые группы (включённые источники) для дашборда',
+    description: 'Список чатов с enabled=true для текущего кабинета.',
+  })
+  @ApiOkResponse({ description: 'Список получен' })
+  @Get('dashboard-connected-groups')
+  async dashboardConnectedGroups(
+    @Req() req: AuthReq,
+    @Query('cabinetId') cabinetId?: string,
+  ) {
+    return this.runWithCabinet(req, cabinetId, () => this.userbot.listEnabledConnectedGroups());
+  }
+
   @ApiOperation({ summary: 'Синхронизировать чаты userbot' })
   @ApiOkResponse({ description: 'Синхронизация чатов выполнена' })
   @Post('chats/sync')

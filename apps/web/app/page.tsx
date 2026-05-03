@@ -8,6 +8,7 @@ import Link from 'next/link';
 import { cookies } from 'next/headers';
 
 import { fetchJson } from '../lib/api';
+import type { ConnectedGroupItem, DashboardCabinetCard } from './home-dashboard.types';
 
 type Stats = {
   source?: string | null;
@@ -91,6 +92,8 @@ export default async function Home({
   let userbotStatus: UserbotStatus | null = null;
   let authMe: AuthMe | null = null;
   let cabinetItems: CabinetItem[] = [];
+  let dashboardCabinetCards: DashboardCabinetCard[] = [];
+  let connectedGroups: ConnectedGroupItem[] = [];
   let err: string | null = null;
   const q = new URLSearchParams();
   if (source) q.set('source', source);
@@ -198,6 +201,26 @@ export default async function Home({
     // Userbot status is optional for dashboard render.
   }
   try {
+    const dc = await fetchJson<{ items?: DashboardCabinetCard[] }>(
+      '/orders/dashboard-cabinets',
+      undefined,
+      cabinetId,
+    );
+    dashboardCabinetCards = Array.isArray(dc.items) ? dc.items : [];
+  } catch {
+    dashboardCabinetCards = [];
+  }
+  try {
+    const cg = await fetchJson<{ items?: ConnectedGroupItem[] }>(
+      '/telegram-userbot/dashboard-connected-groups',
+      undefined,
+      cabinetId,
+    );
+    connectedGroups = Array.isArray(cg.items) ? cg.items : [];
+  } catch {
+    connectedGroups = [];
+  }
+  try {
     const bh = await fetchJson<{ points: BalancePoint[] }>(
       '/bybit/balance-history?days=30',
       undefined,
@@ -288,6 +311,102 @@ export default async function Home({
             `Автоматическая установка ордеров приостановлена: доступный баланс ниже порога ${guard.minBalanceUsd.toFixed(2)}$`}
         </p>
       )}
+
+      {dashboardCabinetCards.length > 0 && (
+        <section className="dashboardSection" style={{ marginBottom: '1.5rem' }}>
+          <h2 className="pageTitle dashboardSectionTitle">Кабинеты</h2>
+          <p className="dashboardSectionHint">
+            Краткая сводка по каждому кабинету. Нажмите карточку, чтобы переключить активный кабинет на
+            главной.
+          </p>
+          <div className="dashboardCabinetCards">
+            {dashboardCabinetCards.map((c) => {
+              const isActive =
+                (cabinetId && c.cabinetId === cabinetId) ||
+                (!cabinetId && currentCabinet?.id === c.cabinetId);
+              const href =
+                source.length > 0
+                  ? `/?cabinetId=${encodeURIComponent(c.cabinetId)}&source=${encodeURIComponent(source)}`
+                  : `/?cabinetId=${encodeURIComponent(c.cabinetId)}`;
+              return (
+                <Link
+                  key={c.cabinetId}
+                  href={href}
+                  className={`dashboardCabinetCard${isActive ? ' dashboardCabinetCardActive' : ''}`}
+                >
+                  <div className="dashboardCabinetCardHeader">
+                    <span className="dashboardCabinetCardName">{c.name}</span>
+                    {c.isDefault ? (
+                      <span className="dashboardCabinetBadge">по умолчанию</span>
+                    ) : null}
+                  </div>
+                  <div className="dashboardCabinetCardMetrics">
+                    <div>
+                      <span className="dashboardCabinetMetricLabel">Winrate</span>
+                      <span className="dashboardCabinetMetricValue">{c.winrate.toFixed(1)}%</span>
+                    </div>
+                    <div>
+                      <span className="dashboardCabinetMetricLabel">W / L</span>
+                      <span className="dashboardCabinetMetricValue">
+                        {c.wins} / {c.losses}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="dashboardCabinetMetricLabel">PnL</span>
+                      <span
+                        className={`dashboardCabinetMetricValue${
+                          c.totalPnl < 0 ? ' dashboardCabinetMetricNeg' : ''
+                        }`}
+                      >
+                        {c.totalPnl.toFixed(2)} USDT
+                      </span>
+                    </div>
+                    <div>
+                      <span className="dashboardCabinetMetricLabel">Баланс (equity)</span>
+                      <span className="dashboardCabinetMetricValue">
+                        {c.totalBalanceUsd != null && Number.isFinite(c.totalBalanceUsd)
+                          ? `${c.totalBalanceUsd.toFixed(2)} $`
+                          : '—'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="dashboardCabinetMetricLabel">Доступно</span>
+                      <span className="dashboardCabinetMetricValue">
+                        {c.availableBalanceUsd != null && Number.isFinite(c.availableBalanceUsd)
+                          ? `${c.availableBalanceUsd.toFixed(2)} $`
+                          : '—'}
+                      </span>
+                    </div>
+                  </div>
+                  <span className="dashboardCabinetCardSlug">{c.slug}</span>
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {connectedGroups.length > 0 && (
+        <section className="dashboardSection" style={{ marginBottom: '1.5rem' }}>
+          <h2 className="pageTitle dashboardSectionTitle">Подключённые группы Telegram</h2>
+          <p className="dashboardSectionHint">
+            Источники с включённым приёмом для текущего кабинета. Управление — в разделе Userbot.
+          </p>
+          <ul className="dashboardConnectedGroups">
+            {connectedGroups.map((g) => (
+              <li key={g.chatId} className="dashboardConnectedGroupChip">
+                <span className="dashboardConnectedGroupTitle">{g.title}</span>
+                {g.username ? (
+                  <span className="dashboardConnectedGroupMeta">@{g.username}</span>
+                ) : (
+                  <span className="dashboardConnectedGroupMeta mono">{g.chatId}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <form className="filters" method="get" action="/">
         {cabinetId ? <input type="hidden" name="cabinetId" value={cabinetId} /> : null}
         <label>

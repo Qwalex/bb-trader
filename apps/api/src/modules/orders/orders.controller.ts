@@ -61,6 +61,18 @@ export class OrdersController {
     return this.cabinetContext.runWithCabinet(cabinetId, fn);
   }
 
+  @ApiOperation({
+    summary: 'Сводка по кабинетам для дашборда',
+    description:
+      'По каждому кабинету пользователя: W/L, winrate, PnL, баланс Bybit (если ключи заданы). Без привязки к текущему кабинету в query.',
+  })
+  @ApiOkResponse({ description: 'Карточки кабинетов' })
+  @Get('dashboard-cabinets')
+  async dashboardCabinets(@Req() req: AuthReq) {
+    const userId = String(req.auth?.userId ?? '').trim() || null;
+    return this.orders.getDashboardCabinetsOverviewForUser(userId);
+  }
+
   @ApiOperation({ summary: 'Сводная статистика по сделкам' })
   @ApiQuery({ name: 'source', required: false, description: 'Фильтр по source' })
   @ApiOkResponse({ description: 'Статистика успешно получена' })

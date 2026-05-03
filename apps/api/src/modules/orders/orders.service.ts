@@ -19,6 +19,10 @@ import { TelegramService } from '../telegram';
 import { UserbotSignalHashService } from '../telegram-userbot/userbot-signal-hash.service';
 
 import { formatError } from '../../common/format-error';
+import type {
+  DashboardCabinetCardDto,
+  DashboardCabinetsOverviewDto,
+} from './orders-dashboard-cabinets.types';
 import type { ActiveSignalTradeSnapshot } from './orders-active-signal-snapshot.types';
 import type { OrdersDailyDigestModel } from './orders-digest.types';
 import { parseStringList } from './orders-source.util';
@@ -786,6 +790,55 @@ export class OrdersService {
       select: { id: true },
     });
     return updated.map((r) => r.id);
+  }
+
+  /**
+   * Сводка по всем кабинетам пользователя для дашборда (win/lose/winrate/pnl/balance).
+   * Последовательные вызовы — чтобы не дублировать параллельные запросы к Bybit по rate limit.
+   */
+  async getDashboardCabinetsOverviewForUser(
+    userIdRaw: string | null | undefined,
+  ): Promise<DashboardCabinetsOverviewDto> {
+    const userId = String(userIdRaw ?? '').trim();
+    if (!userId) {
+      return { items: [] };
+    }
+    const cabinets = await this.cabinets.listCabinetsForUser(userId);
+    const items: DashboardCabinetCardDto[] = [];
+    for (const c of cabinets) {
+      const row = await this.cabinetContext.runWithCabinet(c.id, async () => {
+        const stats = await this.getDashboardStats();
+        let totalBalanceUsd: number | null = null;
+        let availableBalanceUsd: number | null = null;
+        try {
+          const bal = await this.bybit.getUnifiedUsdtBalanceDetails();
+          if (bal && Number.isFinite(bal.totalUsd)) {
+            totalBalanceUsd = bal.totalUsd;
+          }
+          if (bal && Number.isFinite(bal.availableUsd)) {
+            availableBalanceUsd = bal.availableUsd;
+          }
+        } catch (e) {
+          this.logger.debug(
+            `getDashboardCabinetsOverviewForUser: баланс недоступен cabinet=${c.id}: ${formatError(e)}`,
+          );
+        }
+        return {
+          cabinetId: c.id,
+          slug: c.slug,
+          name: c.name,
+          isDefault: c.isDefault,
+          wins: stats.wins,
+          losses: stats.losses,
+          winrate: stats.winrate,
+          totalPnl: stats.totalPnl,
+          totalBalanceUsd,
+          availableBalanceUsd,
+        };
+      });
+      items.push(row);
+    }
+    return { items };
   }
 
   async getDashboardStats(params?: { source?: string }) {
