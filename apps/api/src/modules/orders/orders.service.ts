@@ -19,6 +19,7 @@ import { TelegramService } from '../telegram';
 import { UserbotSignalHashService } from '../telegram-userbot/userbot-signal-hash.service';
 
 import { formatError } from '../../common/format-error';
+import type { ActiveSignalTradeSnapshot } from './orders-active-signal-snapshot.types';
 import { parseStringList } from './orders-source.util';
 import {
   computeWinratePercent,
@@ -702,6 +703,43 @@ export class OrdersService {
       direction,
     });
     return hit !== null;
+  }
+
+  /**
+   * Активная сделка в БД по паре и направлению (для аудита противоположной стороны при hedge).
+   */
+  async findActiveSignalTradeSnapshotForPairAndDirection(
+    pair: string,
+    direction: 'long' | 'short',
+  ): Promise<ActiveSignalTradeSnapshot | null> {
+    const cabinetId = this.currentCabinetId() ?? (await this.cabinets.getDefaultCabinetId());
+    const wantedPair = normalizeTradingPair(pair);
+    const rows = await this.prisma.signal.findMany({
+      where: {
+        cabinetId,
+        deletedAt: null,
+        status: { in: OrdersService.ACTIVE_SIGNAL_STATUS_LIST },
+        direction,
+      },
+      select: {
+        id: true,
+        pair: true,
+        direction: true,
+        status: true,
+        entries: true,
+        entryIsRange: true,
+        stopLoss: true,
+        takeProfits: true,
+        leverage: true,
+        orderUsd: true,
+        capitalPercent: true,
+        source: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    const found = rows.find((row) => normalizeTradingPair(row.pair) === wantedPair);
+    return found ?? null;
   }
 
   /**

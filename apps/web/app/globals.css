@@ -1944,7 +1944,98 @@ h1.pageTitle {
   }
 }
 
+/* Telegram userbot: QR login — пароль облака (2FA) */
+.userbotQr2faPanel {
+  margin-top: 1rem;
+  max-width: 420px;
+  padding: 1rem 1.1rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.userbotQr2faPanelHint {
+  margin: 0 0 0.9rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.userbotQr2faField {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.userbotQr2faFieldLabel {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--foreground);
+  letter-spacing: 0.02em;
+}
+
+.userbotQr2faInput {
+  width: 100%;
+  min-height: 44px;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.95rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--background);
+  color: var(--foreground);
+  outline: none;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.userbotQr2faInput::placeholder {
+  color: var(--muted);
+  opacity: 0.85;
+}
+
+.userbotQr2faInput:hover:not(:disabled) {
+  border-color: rgba(139, 148, 158, 0.45);
+}
+
+.userbotQr2faInput:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.22);
+}
+
+.userbotQr2faInput:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.userbotQr2faActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.9rem;
+}
+
+.userbotQr2faKbd {
+  font-size: 0.72rem;
+  color: var(--muted);
+  padding: 0.2rem 0.45rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+}
+
 @media (max-width: 480px) {
+  .userbotQr2faActions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .userbotQr2faKbd {
+    margin-left: 0;
+    text-align: center;
+  }
+
   .cabinetActions {
     flex-direction: column;
     align-items: stretch;

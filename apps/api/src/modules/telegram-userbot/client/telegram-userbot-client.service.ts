@@ -6,6 +6,10 @@ import * as QRCode from 'qrcode';
 
 import { formatError } from '../../../common/format-error';
 import { PrismaService } from '../../../prisma/prisma.service';
+import {
+  formatUserbotQrAuthErrorForUser,
+  normalizeCloudPasswordInput,
+} from '../utils/telegram-userbot-qr-auth-error.util';
 import { CabinetContextService } from '../../cabinet/cabinet-context.service';
 import { SettingsService } from '../../settings/settings.service';
 import type { QrState } from '../telegram-userbot.types';
@@ -105,8 +109,8 @@ export class TelegramUserbotClientService {
     if (!ownerUserId) {
       return { ok: false, error: 'Пользователь не определен для кабинета' };
     }
-    const trimmed = String(password ?? '').trim();
-    if (!trimmed) {
+    const normalized = normalizeCloudPasswordInput(password ?? '');
+    if (!normalized) {
       return { ok: false, error: 'Введите пароль облака Telegram (2FA).' };
     }
     const w = this.qrPasswordDeferredByUserId.get(ownerUserId);
@@ -118,8 +122,7 @@ export class TelegramUserbotClientService {
     }
     clearTimeout(w.timer);
     this.qrPasswordDeferredByUserId.delete(ownerUserId);
-    w.resolve(trimmed);
-    this.setQrStateForUser(ownerUserId, { phase: 'completing_login' });
+    w.resolve(normalized);
     return { ok: true };
   }
 
@@ -257,8 +260,9 @@ export class TelegramUserbotClientService {
           { apiId: creds.apiId, apiHash: creds.apiHash },
           {
             onError: async (err: unknown) => {
-              const msg = formatError(err);
-              this.logger.warn(`Userbot QR onError: ${msg}`);
+              const raw = formatError(err);
+              const msg = formatUserbotQrAuthErrorForUser(raw);
+              this.logger.warn(`Userbot QR onError: ${raw}`);
               this.setQrStateForUser(ownerUserId, { phase: 'error', error: msg });
               return false;
             },
@@ -288,6 +292,7 @@ export class TelegramUserbotClientService {
               }),
           },
         );
+        this.setQrStateForUser(ownerUserId, { phase: 'completing_login' });
         const authorized = await this.isClientAuthorized(qrClient);
         if (!authorized) {
           this.setQrStateForUser(ownerUserId, {
@@ -305,8 +310,9 @@ export class TelegramUserbotClientService {
         this.qrClientByUserId.delete(ownerUserId);
         this.setQrStateForUser(ownerUserId, { phase: 'authorized' });
       } catch (e) {
-        const msg = formatError(e);
-        this.logger.error(`Userbot QR flow failed: ${msg}`);
+        const raw = formatError(e);
+        const msg = formatUserbotQrAuthErrorForUser(raw);
+        this.logger.error(`Userbot QR flow failed: ${raw}`);
         this.setQrStateForUser(ownerUserId, { phase: 'error', error: msg });
         await this.stopQrClient(ownerUserId);
       } finally {

@@ -275,6 +275,39 @@ export default function TelegramUserbotPage() {
     }
   }
 
+  async function submitQrCloudPassword() {
+    const pwd = qrCloudPassword.trim();
+    if (!pwd) {
+      setMsg({ type: 'err', text: 'Введите пароль облака.' });
+      return;
+    }
+    await runAction('qr-2fa', async () => {
+      const res = await apiFetch('/telegram-userbot/qr/password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: pwd }),
+      });
+      const j = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok || !j.ok) {
+        throw new Error(j.error ?? `Ошибка (${res.status})`);
+      }
+      const st = await apiFetch('/telegram-userbot/qr/status');
+      if (st.ok) {
+        const sj = (await st.json()) as { qr?: BotStatus['qr']; connected?: boolean };
+        setStatus((prev) =>
+          prev
+            ? {
+                ...prev,
+                connected: sj.connected ?? prev.connected,
+                qr: sj.qr ?? prev.qr,
+              }
+            : prev,
+        );
+      }
+      setMsg({ type: 'ok', text: 'Пароль отправлен, завершаем вход…' });
+    });
+  }
+
   async function commitChatDefaultEntry(
     chat: UserbotChat,
     mode: EntrySizingMode,
@@ -1007,56 +1040,43 @@ export default function TelegramUserbotPage() {
             </p>
           )}
           {status?.qr.phase === 'need_password' && (
-            <div style={{ marginTop: '1rem', maxWidth: 360 }}>
-              <p style={{ marginBottom: '0.5rem', fontSize: '0.9rem' }}>
-                Telegram запросил пароль облака (2FA). Введите его здесь — на сервер в настройки он
-                не сохраняется, только для завершения входа.
+            <div className="userbotQr2faPanel">
+              <p className="userbotQr2faPanelHint">
+                Telegram запросил <strong>облачный пароль</strong> (двухэтапная проверка): в приложении
+                Telegram — Настройки → Конфиденциальность → Облачный пароль. Это не PIN-код
+                разблокировки телефона. Пароль вводится только здесь, в настройки сервера не
+                сохраняется.
               </p>
-              <label style={{ display: 'block', marginBottom: '0.35rem', fontSize: '0.85rem' }}>
-                Пароль облака
-                <input
-                  type="password"
-                  autoComplete="off"
-                  value={qrCloudPassword}
-                  onChange={(e) => setQrCloudPassword(e.target.value)}
-                  style={{ display: 'block', width: '100%', marginTop: '0.25rem' }}
-                />
-              </label>
-              <button
-                className="btn"
-                type="button"
-                style={{ marginTop: '0.5rem' }}
-                disabled={busy !== null}
-                onClick={() =>
-                  void runAction('qr-2fa', async () => {
-                    const res = await apiFetch('/telegram-userbot/qr/password', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ password: qrCloudPassword }),
-                    });
-                    const j = (await res.json()) as { ok?: boolean; error?: string };
-                    if (!res.ok || !j.ok) {
-                      throw new Error(j.error ?? `Ошибка (${res.status})`);
-                    }
-                    const st = await apiFetch('/telegram-userbot/qr/status');
-                    if (st.ok) {
-                      const sj = (await st.json()) as { qr?: BotStatus['qr']; connected?: boolean };
-                      setStatus((prev) =>
-                        prev
-                          ? {
-                              ...prev,
-                              connected: sj.connected ?? prev.connected,
-                              qr: sj.qr ?? prev.qr,
-                            }
-                          : prev,
-                      );
-                    }
-                    setMsg({ type: 'ok', text: 'Пароль отправлен, завершаем вход…' });
-                  })
-                }
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void submitQrCloudPassword();
+                }}
               >
-                {busy === 'qr-2fa' ? 'Отправка…' : 'Подтвердить пароль'}
-              </button>
+                <div className="userbotQr2faField">
+                  <label className="userbotQr2faFieldLabel" htmlFor="userbot-qr-cloud-password">
+                    Пароль облака
+                  </label>
+                  <input
+                    id="userbot-qr-cloud-password"
+                    className="userbotQr2faInput"
+                    type="password"
+                    name="telegram-cloud-password"
+                    autoComplete="off"
+                    placeholder="Введите пароль из Telegram"
+                    value={qrCloudPassword}
+                    onChange={(e) => setQrCloudPassword(e.target.value)}
+                    disabled={busy !== null}
+                    autoFocus
+                  />
+                </div>
+                <div className="userbotQr2faActions">
+                  <button className="btn" type="submit" disabled={busy !== null}>
+                    {busy === 'qr-2fa' ? 'Отправка…' : 'Подтвердить пароль'}
+                  </button>
+                  <span className="userbotQr2faKbd">Enter — отправить</span>
+                </div>
+              </form>
             </div>
           )}
           {status?.qr.phase === 'completing_login' && (

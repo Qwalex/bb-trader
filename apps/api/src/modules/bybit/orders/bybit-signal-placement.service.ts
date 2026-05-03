@@ -4,6 +4,7 @@ import { RestClientV5 } from 'bybit-api';
 import { normalizeTradingPair, type SignalDto } from '@repo/shared';
 
 import { formatError } from '../../../common/format-error';
+import type { ActiveSignalTradeSnapshot } from '../../orders/orders-active-signal-snapshot.types';
 import { BybitRateLimitService } from '../instrument/bybit-rate-limit.service';
 import type { BybitSignalPlacementPorts } from '../types/bybit-ports.types';
 import type { PlaceOrdersResult, SignalOrderOrigin } from '../types/bybit.types';
@@ -136,13 +137,19 @@ export class BybitSignalPlacementService {
       };
     }
 
+    const oppositeDirection: 'long' | 'short' =
+      signal.direction === 'long' ? 'short' : 'long';
+    let hedgeModeActive = false;
+    let oppositeOnExchangeBusy = false;
+
     try {
-      const oppositeDirection = signal.direction === 'long' ? 'short' : 'long';
-      const hedgeModeActive = await ports.isHedgeModeActiveForSymbol(client, symbol);
-      if (
-        !hedgeModeActive &&
-        await ports.hasExchangeExposureForDirection(client, symbol, oppositeDirection)
-      ) {
+      hedgeModeActive = await ports.isHedgeModeActiveForSymbol(client, symbol);
+      oppositeOnExchangeBusy = await ports.hasExchangeExposureForDirection(
+        client,
+        symbol,
+        oppositeDirection,
+      );
+      if (!hedgeModeActive && oppositeOnExchangeBusy) {
         void ports.appLog.append(
           'warn',
           'bybit',
@@ -198,6 +205,19 @@ export class BybitSignalPlacementService {
         ok: false,
         error: `По паре ${symbol} уже есть активный сигнал ${signal.direction.toUpperCase()} (ордера в работе). Дождитесь закрытия сделки.`,
       };
+    }
+
+    let oppositeSideDbSnapshot: ActiveSignalTradeSnapshot | null = null;
+    try {
+      oppositeSideDbSnapshot =
+        await ports.orders.findActiveSignalTradeSnapshotForPairAndDirection(
+          signal.pair,
+          oppositeDirection,
+        );
+    } catch (e) {
+      this.logger.warn(
+        `placeSignalOrders: снимок противоположной сделки в БД: ${formatError(e)}`,
+      );
     }
 
     const side: 'Buy' | 'Sell' = signal.direction === 'long' ? 'Buy' : 'Sell';
@@ -397,8 +417,9 @@ export class BybitSignalPlacementService {
         }
       }
 
+      const signalToStore: SignalDto = { ...signal, entries: effectiveEntries };
       const signalRow = await ports.orders.createSignalRecord(
-        { ...signal, entries: effectiveEntries },
+        signalToStore,
         rawMessage,
         'PENDING',
         origin,
@@ -544,6 +565,34 @@ export class BybitSignalPlacementService {
         signalId: signalRow.id,
         bybitOrderIds: bybitIds,
       });
+      if (hedgeModeActive && (oppositeOnExchangeBusy || oppositeSideDbSnapshot)) {
+        const auditPayload = {
+          symbol,
+          hedgeModeActive,
+          oppositeOnExchange: oppositeOnExchangeBusy,
+          oppositeDbSignalId: oppositeSideDbSnapshot?.id ?? null,
+          newSignalId: signalRow.id,
+          newDirection: signal.direction,
+          existingDirection: oppositeDirection,
+        };
+        void ports.appLog.append('info', 'bybit', 'placeSignalOrders: hedge opposite-side audit', auditPayload);
+        this.logger.log(
+          `placeSignalOrders hedge audit symbol=${symbol} new=${signalRow.id} oppositeDb=${oppositeSideDbSnapshot?.id ?? 'none'} oppositeExchange=${oppositeOnExchangeBusy}`,
+        );
+        void ports.orders.createSignalEvent(
+          signalRow.id,
+          'BYBIT_HEDGE_OPPOSITE_PLACEMENT_AUDIT',
+          auditPayload,
+        );
+        void ports.notifyHedgeOppositePlacementAudit({
+          symbol,
+          hedgeModeActive,
+          oppositeOnExchange: oppositeOnExchangeBusy,
+          oppositeSideDb: oppositeSideDbSnapshot,
+          newSignalId: signalRow.id,
+          newSignalDto: signalToStore,
+        });
+      }
       return { ok: true, signalId: signalRow.id, bybitOrderIds: bybitIds };
     } catch (e) {
       const msg = formatError(e);

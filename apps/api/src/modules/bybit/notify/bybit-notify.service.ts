@@ -1,7 +1,10 @@
 import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 
+import type { SignalDto } from '@repo/shared';
+
 import { formatError } from '../../../common/format-error';
 import { CabinetContextService } from '../../cabinet/cabinet-context.service';
+import type { ActiveSignalTradeSnapshot } from '../../orders/orders-active-signal-snapshot.types';
 import { OrdersService } from '../../orders/orders.service';
 import { TelegramService } from '../../telegram';
 import { VkNotifyMirrorService } from '../../vk/vk-notify-mirror.service';
@@ -82,6 +85,62 @@ export class BybitNotifyService {
     } catch (e) {
       this.logger.warn(
         `notifyApiTradeCancelled exception signalId=${signal.id}: ${formatError(e)}`,
+      );
+    }
+  }
+
+  async notifyHedgeOppositePlacementAudit(params: {
+    symbol: string;
+    hedgeModeActive: boolean;
+    oppositeOnExchange: boolean;
+    oppositeSideDb: ActiveSignalTradeSnapshot | null;
+    newSignalId: string;
+    newSignalDto: SignalDto;
+  }): Promise<void> {
+    try {
+      const existingOppositeDb = params.oppositeSideDb
+        ? {
+            id: params.oppositeSideDb.id,
+            pair: params.oppositeSideDb.pair,
+            direction: params.oppositeSideDb.direction,
+            status: params.oppositeSideDb.status,
+            entries: parseNumberArrayFromJson(params.oppositeSideDb.entries),
+            entryIsRange: params.oppositeSideDb.entryIsRange,
+            stopLoss: params.oppositeSideDb.stopLoss,
+            takeProfits: parseNumberArrayFromJson(params.oppositeSideDb.takeProfits),
+            leverage: params.oppositeSideDb.leverage,
+            orderUsd: params.oppositeSideDb.orderUsd,
+            capitalPercent: params.oppositeSideDb.capitalPercent,
+            source: params.oppositeSideDb.source,
+          }
+        : null;
+      const res = await this.telegram.notifyHedgeOppositePlacementAudit({
+        symbol: params.symbol,
+        hedgeModeActive: params.hedgeModeActive,
+        oppositeOnExchange: params.oppositeOnExchange,
+        existingOppositeDb,
+        newPlaced: {
+          signalId: params.newSignalId,
+          pair: params.newSignalDto.pair,
+          direction: params.newSignalDto.direction,
+          entries: params.newSignalDto.entries,
+          entryIsRange: params.newSignalDto.entryIsRange,
+          stopLoss: params.newSignalDto.stopLoss,
+          takeProfits: params.newSignalDto.takeProfits,
+          leverage: params.newSignalDto.leverage,
+          orderUsd: params.newSignalDto.orderUsd,
+          capitalPercent: params.newSignalDto.capitalPercent,
+          source: params.newSignalDto.source,
+        },
+      });
+      if (!res.ok) {
+        this.logger.warn(
+          `notifyHedgeOppositePlacementAudit failed newSignalId=${params.newSignalId}: ${res.error ?? 'unknown'}`,
+        );
+      }
+    } catch (e) {
+      this.logger.warn(
+        `notifyHedgeOppositePlacementAudit exception newSignalId=${params.newSignalId}: ${formatError(e)}`,
       );
     }
   }

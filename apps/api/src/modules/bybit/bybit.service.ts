@@ -336,6 +336,8 @@ export class BybitService implements OnModuleInit {
       orders: {
         hasActiveSignalForPairAndDirection: (pair, direction) =>
           this.orders.hasActiveSignalForPairAndDirection(pair, direction),
+        findActiveSignalTradeSnapshotForPairAndDirection: (pair, direction) =>
+          this.orders.findActiveSignalTradeSnapshotForPairAndDirection(pair, direction),
         createSignalRecord: (signal, rawMessage, status, origin) =>
           this.orders.createSignalRecord(signal, rawMessage, status, origin),
         createOrderRecord: (data) => this.orders.createOrderRecord(data),
@@ -382,6 +384,8 @@ export class BybitService implements OnModuleInit {
       roundQty: (qtyNum, qtyStep, minQty) => pv.roundQty(qtyNum, qtyStep, minQty),
       snapPriceToTickNum: (price, tickSize) => pv.snapPriceToTickNum(price, tickSize),
       isInsufficientBalanceError: (msg) => isInsufficientBalanceError(msg),
+      notifyHedgeOppositePlacementAudit: (params) =>
+        void this.bybitNotify.notifyHedgeOppositePlacementAudit(params),
     };
   }
 

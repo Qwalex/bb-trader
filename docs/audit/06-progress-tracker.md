@@ -757,3 +757,26 @@
 - Manual verification: `npm run build -w api`, `npm run check-types -w web` (pass).
 - Docs updated: этот трекер, `docs/telegram-userbot-decomposition-plan.md`.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-062
+
+- Status: `done`
+- Scope: Аудит размещения второй стороны по паре в hedge (лонг при открытом шорте и наоборот): логи, SignalEvent, Telegram.
+- Files: `apps/api/src/modules/bybit/orders/bybit-signal-placement.service.ts`, `apps/api/src/modules/bybit/types/bybit-ports.types.ts`, `apps/api/src/modules/bybit/bybit.service.ts`, `apps/api/src/modules/bybit/notify/bybit-notify.service.ts`, `apps/api/src/modules/orders/orders.service.ts`, `apps/api/src/modules/orders/orders-active-signal-snapshot.types.ts`, `apps/api/src/modules/telegram/services/telegram.service.ts`, `apps/api/src/modules/telegram/utils/telegram-api-notify-html.util.ts`, `.env.example`, `docs/audit/06-progress-tracker.md`
+- Findings: при one-way противоположная сторона блокируется до ордера; при hedge второй вход возможен — нужна явная трассировка, чтобы убедиться, что первый вход не закрыт ошибочно.
+- Changes: снимок противоположной активной сделки в БД до размещения; после успешного `ORDERS_PLACED` при hedge и (биржа противоположная ИЛИ запись в БД) — `appLog`, `Logger`, `SignalEvent` `BYBIT_HEDGE_OPPOSITE_PLACEMENT_AUDIT` (тип исключён из дублирующего `notifyTradeSignalEvent`), HTML в бот через `TELEGRAM_NOTIFY_HEDGE_OPPOSITE_PLACEMENT`; форматтер `formatHedgeOppositePlacementAuditHtml`.
+- Decomposition notes (`utils/constants/hooks/types`): тип снимка сделки в `orders-active-signal-snapshot.types.ts`.
+- Manual verification: `npm run build -w apps/api` (ожидается pass); в hedge при втором входе — сообщение в бот и событие в `/logs` по новой сделке.
+- Docs updated: этот трекер, `.env.example`.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-063
+
+- Status: `done`
+- Scope: QR userbot — понятные сообщения при `PASSWORD_HASH_INVALID` и подсказка на web про облачный пароль.
+- Files: `apps/api/src/modules/telegram-userbot/utils/telegram-userbot-qr-auth-error.util.ts`, `apps/api/src/modules/telegram-userbot/client/telegram-userbot-client.service.ts`, `apps/web/app/telegram-userbot/page.tsx`, `docs/audit/06-progress-tracker.md`
+- Findings: ошибка Telegram `auth.CheckPassword` / `PASSWORD_HASH_INVALID` при неверном облачном пароле попадала в UI как сырой RPC-текст; фаза `completing_login` выставлялась до фактической проверки пароля.
+- Changes: `normalizeCloudPasswordInput` (NFC + trim), `formatUserbotQrAuthErrorForUser` для HASH_INVALID и родственных кодов; `completing_login` только после успешного `signInUserWithQrCode`; уточнён текст подсказки на странице userbot.
+- Manual verification: `npm run build -w apps/api` (pass).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

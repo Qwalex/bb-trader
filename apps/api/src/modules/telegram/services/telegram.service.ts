@@ -24,6 +24,7 @@ import { OrdersService } from '../../orders/orders.service';
 import {
   formatApiTradeCancelledHtml,
   formatApiTradeLiquidationHtml,
+  formatHedgeOppositePlacementAuditHtml,
   formatUserbotResultWithoutEntryHtml,
   formatUserbotSignalFailureMessage,
 } from '../utils/telegram-api-notify-html.util';
@@ -584,6 +585,76 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Уведомление при размещении второй стороны по паре в hedge-режиме (лонг+шорт одновременно).
+   * TELEGRAM_NOTIFY_HEDGE_OPPOSITE_PLACEMENT: false/0/off — не слать.
+   */
+  async notifyHedgeOppositePlacementAudit(params: {
+    symbol: string;
+    hedgeModeActive: boolean;
+    oppositeOnExchange: boolean;
+    existingOppositeDb: {
+      id: string;
+      pair: string;
+      direction: string;
+      status: string;
+      entries: number[];
+      entryIsRange: boolean;
+      stopLoss: number;
+      takeProfits: number[];
+      leverage: number;
+      orderUsd: number;
+      capitalPercent: number;
+      source: string | null;
+    } | null;
+    newPlaced: {
+      signalId: string;
+      pair: string;
+      direction: string;
+      entries: number[];
+      entryIsRange?: boolean;
+      stopLoss: number;
+      takeProfits: number[];
+      leverage: number;
+      orderUsd: number;
+      capitalPercent: number;
+      source?: string | null;
+    };
+  }): Promise<{ ok: boolean; deliveredTo: number; error?: string }> {
+    const raw = (await this.settings.get('TELEGRAM_NOTIFY_HEDGE_OPPOSITE_PLACEMENT'))
+      ?.trim()
+      .toLowerCase();
+    if (raw === 'false' || raw === '0' || raw === 'no' || raw === 'off') {
+      return { ok: true, deliveredTo: 0 };
+    }
+    const bot = this.getBotForCabinet(this.currentCabinetId());
+    if (!bot) {
+      return { ok: false, deliveredTo: 0, error: 'Telegram bot не запущен' };
+    }
+    const ids = await this.getWhitelistUserIds();
+    if (ids.length === 0) {
+      return { ok: false, deliveredTo: 0, error: 'TELEGRAM_WHITELIST пуст' };
+    }
+    const msg = formatHedgeOppositePlacementAuditHtml(params);
+    let deliveredTo = 0;
+    for (const uid of ids) {
+      try {
+        await bot.telegram.sendMessage(uid, msg, { parse_mode: 'HTML' });
+        deliveredTo += 1;
+      } catch (e) {
+        this.logger.warn(`notifyHedgeOppositePlacementAudit -> ${uid}: ${formatError(e)}`);
+      }
+    }
+    if (deliveredTo === 0) {
+      return {
+        ok: false,
+        deliveredTo: 0,
+        error: 'Не удалось доставить уведомление об аудите hedge',
+      };
+    }
+    return { ok: true, deliveredTo };
+  }
+
+  /**
    * Уведомление в бота о записи в журнале событий сделки (SignalEvent).
    * По умолчанию включено (TELEGRAM_NOTIFY_TRADE_EVENTS не false/0/off).
    * TELEGRAM_NOTIFY_TRADE_EVENT_TYPES: JSON-массив id типов; пусто = все; [] = ни одного.
@@ -598,6 +669,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const skipTypes = new Set<string>([
       'BYBIT_TRADE_DELETE_CLEANUP_SUCCESS',
       'USERBOT_RESULT_WITHOUT_ENTRY',
+      'BYBIT_HEDGE_OPPOSITE_PLACEMENT_AUDIT',
     ]);
     if (skipTypes.has(params.type)) {
       return;

@@ -2,6 +2,7 @@ import { RestClientV5 } from 'bybit-api';
 
 import type { SignalDto } from '@repo/shared';
 
+import type { ActiveSignalTradeSnapshot } from '../../orders/orders-active-signal-snapshot.types';
 import type {
   CloseSignalResult,
   LiveExposurePosition,
@@ -20,6 +21,10 @@ export interface BybitSignalPlacementPorts {
       pair: string,
       direction: 'long' | 'short',
     ) => Promise<boolean>;
+    findActiveSignalTradeSnapshotForPairAndDirection: (
+      pair: string,
+      direction: 'long' | 'short',
+    ) => Promise<ActiveSignalTradeSnapshot | null>;
     createSignalRecord: (...args: any[]) => Promise<any>;
     createOrderRecord: (...args: any[]) => Promise<any>;
     updateSignalStatus: (signalId: string, data: any) => Promise<any>;
@@ -70,6 +75,14 @@ export interface BybitSignalPlacementPorts {
   roundQty: (qty: number, step: string, minQty: string) => string;
   snapPriceToTickNum: (price: number, tickSize: string) => number;
   isInsufficientBalanceError: (msg: string | null | undefined) => boolean;
+  notifyHedgeOppositePlacementAudit: (params: {
+    symbol: string;
+    hedgeModeActive: boolean;
+    oppositeOnExchange: boolean;
+    oppositeSideDb: ActiveSignalTradeSnapshot | null;
+    newSignalId: string;
+    newSignalDto: SignalDto;
+  }) => void | Promise<void>;
 }
 
 export interface BybitOrderLifecyclePollPorts {
