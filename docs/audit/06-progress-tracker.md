@@ -784,6 +784,17 @@
 ### AUD-064
 
 - Status: `done`
+- Scope: Userbot — автоматическая первая синхронизация групп после успешного attach (QR / сессия).
+- Files: `apps/api/src/modules/telegram-userbot/telegram-userbot.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: после входа список чатов пуст до ручного POST `chats/sync`.
+- Changes: `onAfterUserbotAttach` после `refreshEnabledChatsCache`: если для текущего кабинета нет `TgUserbotChat`, привязанных через `CabinetTelegramSource`, вызывается `syncChats()` с логированием результата.
+- Manual verification: `npm run build -w apps/api` (pass).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-064
+
+- Status: `done`
 - Scope: Ежедневный дайджест в Telegram-ассистенте: баланс, PnL/WR, сделки за 24 ч, дельты к состоянию до окна, топы источников.
 - Files: `apps/api/src/modules/orders/orders.service.ts`, `apps/api/src/modules/orders/orders-digest.types.ts`, `apps/api/src/modules/telegram/services/telegram-digest-scheduler.service.ts`, `apps/api/src/modules/telegram/utils/telegram-daily-digest-html.util.ts`, `apps/api/src/modules/telegram/telegram.module.ts`, `apps/api/src/modules/telegram/services/index.ts`, `apps/api/src/modules/telegram/utils/index.ts`, `.env.example`, `docs/audit/06-progress-tracker.md`
 - Findings: сводка по меню уже есть; не хватало плановой рассылки и среза «последние 24 ч» относительно кумулятива до окна.

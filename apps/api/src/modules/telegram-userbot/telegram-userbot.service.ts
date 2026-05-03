@@ -123,7 +123,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleInit(): Promise<void> {
     this.userbotClient.setInboundHandler((e) => this.handleIncomingMessage(e));
-    this.userbotClient.setAfterAttachHook(() => this.refreshEnabledChatsCache());
+    this.userbotClient.setAfterAttachHook(() => this.onAfterUserbotAttach());
     this.ingest.setProcessIngestRecord((ingest, text, meta, opts) =>
       this.userbotPipeline.processIngestRecord(ingest, text, meta, opts),
     );
@@ -584,6 +584,39 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       this.logger.error(`handleIncomingMessage failed: ${msg}`);
     }
   };
+
+  /**
+   * После успешного attach клиента: кэш включённых чатов; если для кабинета ещё нет привязанных
+   * диалогов — первая синхронизация групп (как POST chats/sync) без ручного нажатия.
+   */
+  private async onAfterUserbotAttach(): Promise<void> {
+    await this.refreshEnabledChatsCache();
+    const cabinetId = this.cabinetContext.getCabinetId();
+    if (!cabinetId) {
+      this.logger.warn(
+        'onAfterUserbotAttach: cabinetId не в контексте — автосинхронизация чатов пропущена',
+      );
+      return;
+    }
+    const chatsLinked = await this.prisma.tgUserbotChat.count({
+      where: { cabinetSources: { some: { cabinetId } } },
+    });
+    if (chatsLinked > 0) {
+      return;
+    }
+    try {
+      const r = await this.syncChats();
+      if (!r.ok) {
+        this.logger.warn(
+          `onAfterUserbotAttach: syncChats не выполнена (${r.error ?? 'unknown'}) — можно синхронизировать вручную.`,
+        );
+      } else {
+        this.logger.log(`onAfterUserbotAttach: первая синхронизация чатов, upserted=${r.upserted}`);
+      }
+    } catch (e) {
+      this.logger.warn(`onAfterUserbotAttach: syncChats исключение: ${formatError(e)}`);
+    }
+  }
 
   private async refreshEnabledChatsCache() {
     const [scopedRows, legacyRows] = await Promise.all([
