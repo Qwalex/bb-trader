@@ -20,7 +20,6 @@ export const ADMIN_GLOBAL_KEYS = new Set<string>([
   'APPLOG_LOG_NOISY_EVENTS',
   'TELEGRAM_USERBOT_API_ID',
   'TELEGRAM_USERBOT_API_HASH',
-  'TELEGRAM_USERBOT_2FA_PASSWORD',
   'TELEGRAM_USERBOT_MTPROXY_URL',
   DIAGNOSTIC_MODELS_KEY,
   'MIN_CAPITAL_AMOUNT',
@@ -128,7 +127,6 @@ export const KEYS = [
   { key: 'TELEGRAM_BOT_TOKEN', label: 'Telegram bot token' },
   { key: 'TELEGRAM_USERBOT_API_ID', label: 'Telegram Userbot API ID (my.telegram.org)' },
   { key: 'TELEGRAM_USERBOT_API_HASH', label: 'Telegram Userbot API Hash (my.telegram.org)' },
-  { key: 'TELEGRAM_USERBOT_2FA_PASSWORD', label: 'Telegram Userbot 2FA password (если включен)' },
   {
     key: 'TELEGRAM_USERBOT_MTPROXY_URL',
     label: 'Telegram Userbot MTProxy URL (формат https://t.me/proxy?server=...&port=...&secret=...)',
@@ -301,7 +299,6 @@ export const SETTINGS_SECTIONS: { id: string; title: string; keys: string[] }[] 
       'TELEGRAM_BOT_TOKEN',
       'TELEGRAM_USERBOT_API_ID',
       'TELEGRAM_USERBOT_API_HASH',
-      'TELEGRAM_USERBOT_2FA_PASSWORD',
       'TELEGRAM_USERBOT_MTPROXY_URL',
       'TELEGRAM_USERBOT_ENABLED',
       'TELEGRAM_USERBOT_POLL_INTERVAL_MS',

@@ -43,11 +43,22 @@ export default function TelegramUserbotPage() {
   const [entryByChat, setEntryByChat] = useState<
     Record<string, { mode: EntrySizingMode; amount: string }>
   >({});
+  const [qrCloudPassword, setQrCloudPassword] = useState('');
 
   const qrVisible = useMemo(
-    () => status?.qr.phase === 'waiting_scan' || status?.qr.phase === 'starting',
+    () =>
+      status?.qr.phase === 'waiting_scan' ||
+      status?.qr.phase === 'starting' ||
+      status?.qr.phase === 'need_password' ||
+      status?.qr.phase === 'completing_login',
     [status?.qr.phase],
   );
+
+  useEffect(() => {
+    if (status?.qr.phase !== 'need_password') {
+      setQrCloudPassword('');
+    }
+  }, [status?.qr.phase]);
   const normalizedSearch = search.trim().toLowerCase();
   const filteredChats = useMemo(() => {
     if (!normalizedSearch) {
@@ -994,6 +1005,62 @@ export default function TelegramUserbotPage() {
             <p className="msg err" style={{ marginTop: '0.5rem' }}>
               {status.qr.error}
             </p>
+          )}
+          {status?.qr.phase === 'need_password' && (
+            <div style={{ marginTop: '1rem', maxWidth: 360 }}>
+              <p style={{ marginBottom: '0.5rem', fontSize: '0.9rem' }}>
+                Telegram запросил пароль облака (2FA). Введите его здесь — на сервер в настройки он
+                не сохраняется, только для завершения входа.
+              </p>
+              <label style={{ display: 'block', marginBottom: '0.35rem', fontSize: '0.85rem' }}>
+                Пароль облака
+                <input
+                  type="password"
+                  autoComplete="off"
+                  value={qrCloudPassword}
+                  onChange={(e) => setQrCloudPassword(e.target.value)}
+                  style={{ display: 'block', width: '100%', marginTop: '0.25rem' }}
+                />
+              </label>
+              <button
+                className="btn"
+                type="button"
+                style={{ marginTop: '0.5rem' }}
+                disabled={busy !== null}
+                onClick={() =>
+                  void runAction('qr-2fa', async () => {
+                    const res = await apiFetch('/telegram-userbot/qr/password', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ password: qrCloudPassword }),
+                    });
+                    const j = (await res.json()) as { ok?: boolean; error?: string };
+                    if (!res.ok || !j.ok) {
+                      throw new Error(j.error ?? `Ошибка (${res.status})`);
+                    }
+                    const st = await apiFetch('/telegram-userbot/qr/status');
+                    if (st.ok) {
+                      const sj = (await st.json()) as { qr?: BotStatus['qr']; connected?: boolean };
+                      setStatus((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              connected: sj.connected ?? prev.connected,
+                              qr: sj.qr ?? prev.qr,
+                            }
+                          : prev,
+                      );
+                    }
+                    setMsg({ type: 'ok', text: 'Пароль отправлен, завершаем вход…' });
+                  })
+                }
+              >
+                {busy === 'qr-2fa' ? 'Отправка…' : 'Подтвердить пароль'}
+              </button>
+            </div>
+          )}
+          {status?.qr.phase === 'completing_login' && (
+            <p style={{ marginTop: '0.75rem', color: 'var(--muted)' }}>Завершение входа…</p>
           )}
         </div>
       )}

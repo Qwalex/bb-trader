@@ -86,22 +86,40 @@ export class TelegramUserbotController {
   @ApiOperation({ summary: 'Начать QR-логин userbot' })
   @ApiOkResponse({ description: 'QR-логин запущен' })
   @Post('qr/start')
-  async startQr() {
-    return this.userbot.startQrLogin();
+  async startQr(@Req() req: AuthReq, @Query('cabinetId') cabinetId?: string) {
+    return this.runWithCabinet(req, cabinetId, () => this.userbot.startQrLogin());
   }
 
   @ApiOperation({ summary: 'Статус QR-логина userbot' })
   @ApiOkResponse({ description: 'Статус QR получен' })
   @Get('qr/status')
-  async qrStatus() {
-    return this.userbot.getQrStatus();
+  async qrStatus(@Req() req: AuthReq, @Query('cabinetId') cabinetId?: string) {
+    return this.runWithCabinet(req, cabinetId, () => this.userbot.getQrStatus());
   }
 
   @ApiOperation({ summary: 'Отменить QR-логин userbot' })
   @ApiOkResponse({ description: 'QR-логин отменён' })
   @Post('qr/cancel')
-  async cancelQr() {
-    return this.userbot.cancelQrLogin();
+  async cancelQr(@Req() req: AuthReq, @Query('cabinetId') cabinetId?: string) {
+    return this.runWithCabinet(req, cabinetId, () => this.userbot.cancelQrLogin());
+  }
+
+  @ApiOperation({
+    summary: 'Пароль 2FA при QR-входе userbot',
+    description:
+      'После сканирования QR Telegram может запросить пароль облака. Пароль не сохраняется в настройках, только передаётся в текущую сессию входа.',
+  })
+  @ApiBody({ schema: { properties: { password: { type: 'string' } }, required: ['password'] } })
+  @ApiOkResponse({ description: 'Пароль принят или отклонён' })
+  @Post('qr/password')
+  async submitQrPassword(
+    @Req() req: AuthReq,
+    @Query('cabinetId') cabinetId: string | undefined,
+    @Body() body: { password?: string },
+  ) {
+    return this.runWithCabinet(req, cabinetId, () =>
+      this.userbot.submitQrPassword(String(body.password ?? '')),
+    );
   }
 
   @ApiOperation({ summary: 'Синхронизировать чаты userbot' })

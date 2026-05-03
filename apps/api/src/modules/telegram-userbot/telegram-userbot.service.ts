@@ -217,6 +217,10 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     return this.userbotClient.cancelQrLogin();
   }
 
+  async submitQrPassword(password: string) {
+    return this.userbotClient.submitQrPassword(password);
+  }
+
   async syncChats() {
     const cabinetId = this.cabinetContext.getCabinetId();
     if (!cabinetId) {

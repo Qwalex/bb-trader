@@ -14,7 +14,15 @@ export type UserbotFilterPatternMatch = {
   requiresQuote: boolean;
 };
 
-export type QrPhase = 'idle' | 'starting' | 'waiting_scan' | 'authorized' | 'cancelled' | 'error';
+export type QrPhase =
+  | 'idle'
+  | 'starting'
+  | 'waiting_scan'
+  | 'need_password'
+  | 'completing_login'
+  | 'authorized'
+  | 'cancelled'
+  | 'error';
 
 export type QrState = {
   phase: QrPhase;

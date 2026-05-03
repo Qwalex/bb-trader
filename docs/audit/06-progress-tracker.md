@@ -745,3 +745,15 @@
 - Manual verification: `npm run build -w api` (pass); после деплоя: сохранить 2FA в глобальных настройках → `cancelQrLogin` при зависшем QR → `startQrLogin` → скан; пароль подхватывается из глобальной `Setting`.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-061
+
+- Status: `done`
+- Scope: Userbot QR — пароль 2FA только при входе (без хранения в настройках).
+- Files: `apps/api/src/modules/telegram-userbot/client/telegram-userbot-client.service.ts`, `apps/api/src/modules/telegram-userbot/telegram-userbot.service.ts`, `apps/api/src/modules/telegram-userbot/telegram-userbot.controller.ts`, `apps/api/src/modules/telegram-userbot/telegram-userbot.types.ts`, `apps/api/src/modules/settings/settings.constants.ts`, `apps/api/src/modules/settings/settings.service.ts`, `apps/web/app/settings/settings-page.constants.ts`, `apps/web/app/telegram-userbot/page.tsx`, `.env.example`, `docs/telegram-userbot-decomposition-plan.md`, `docs/audit/06-progress-tracker.md`
+- Findings: секрет 2FA в БД настроек нежелателен; GramJS вызывает `password` только если у аккаунта включён 2FA.
+- Changes: `POST /telegram-userbot/qr/password` + фазы `need_password` / `completing_login`, таймаут 2 мин, очистка при cancel/stop/finally; ключ `TELEGRAM_USERBOT_2FA_PASSWORD` удалён из settings/env; `qr/start|status|cancel` через `runWithCabinet`.
+- Decomposition notes (`utils/constants/hooks/types`): N/A
+- Manual verification: `npm run build -w api`, `npm run check-types -w web` (pass).
+- Docs updated: этот трекер, `docs/telegram-userbot-decomposition-plan.md`.
+- Linked risks (`SEC-###`): N/A

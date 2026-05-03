@@ -13,7 +13,7 @@
 Методы должны остаться на `TelegramUserbotService` (делегирование внутрь допускается):
 
 - Статус: `getStatus`, `getTodayMetrics`
-- Сессия: `connectFromStoredSession`, `disconnect`, `startQrLogin`, `getQrStatus`, `cancelQrLogin`
+- Сессия: `connectFromStoredSession`, `disconnect`, `startQrLogin`, `getQrStatus`, `cancelQrLogin`, `submitQrPassword` (2FA при QR, не в настройках)
 - Чаты: `syncChats`, `listChats`
 - OpenRouter: `getOpenrouterSpendAnalytics`, `getOpenrouterBalance`
 - Ingest: `listIngestLinkCandidates`, `scanTodayMessages`, `rereadIngestMessage`, `rereadAllIngestMessages` (реализация на **`TelegramUserbotIngestPipelineService`**, фасад только вызывает pipeline)

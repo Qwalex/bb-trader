@@ -12,12 +12,23 @@ import type { QrState } from '../telegram-userbot.types';
 
 @Injectable()
 export class TelegramUserbotClientService {
+  private static readonly QR_2FA_WAIT_MS = 120_000;
+
   private readonly logger = new Logger(TelegramUserbotClientService.name);
   private readonly clientsByUserId = new Map<string, TelegramClient>();
   private readonly messageHandlerRegisteredByUserId = new Set<string>();
   private readonly qrClientByUserId = new Map<string, TelegramClient>();
   private readonly qrTaskByUserId = new Map<string, Promise<void>>();
   private readonly qrStateByUserId = new Map<string, QrState>();
+  /** Ожидание пароля 2FA при QR: пароль только в памяти до resolve, не в БД. */
+  private readonly qrPasswordDeferredByUserId = new Map<
+    string,
+    {
+      resolve: (p: string) => void;
+      reject: (e: Error) => void;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  >();
 
   private inboundHandler: ((event: unknown) => Promise<void>) | null = null;
   private afterAttachHook: (() => Promise<void>) | null = null;
@@ -76,6 +87,40 @@ export class TelegramUserbotClientService {
       startedAt: prev.startedAt ?? now,
       updatedAt: now,
     });
+  }
+
+  private rejectQrPasswordWait(userId: string | null, err: Error): void {
+    if (!userId) return;
+    const w = this.qrPasswordDeferredByUserId.get(userId);
+    if (!w) return;
+    clearTimeout(w.timer);
+    this.qrPasswordDeferredByUserId.delete(userId);
+    w.reject(err);
+  }
+
+  async submitQrPassword(
+    password: string,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    const ownerUserId = await this.getOwnerUserId();
+    if (!ownerUserId) {
+      return { ok: false, error: 'Пользователь не определен для кабинета' };
+    }
+    const trimmed = String(password ?? '').trim();
+    if (!trimmed) {
+      return { ok: false, error: 'Введите пароль облака Telegram (2FA).' };
+    }
+    const w = this.qrPasswordDeferredByUserId.get(ownerUserId);
+    if (!w) {
+      return {
+        ok: false,
+        error: 'Сейчас пароль 2FA не ожидается. Отсканируйте QR ещё раз или дождитесь запроса.',
+      };
+    }
+    clearTimeout(w.timer);
+    this.qrPasswordDeferredByUserId.delete(ownerUserId);
+    w.resolve(trimmed);
+    this.setQrStateForUser(ownerUserId, { phase: 'completing_login' });
+    return { ok: true };
   }
 
   getConnectedClientsCount(): number {
@@ -227,7 +272,20 @@ export class TelegramUserbotClientService {
               });
             },
             password: async () =>
-              (await this.settings.get('TELEGRAM_USERBOT_2FA_PASSWORD')) ?? '',
+              new Promise<string>((resolve, reject) => {
+                const timer = setTimeout(() => {
+                  const cur = this.qrPasswordDeferredByUserId.get(ownerUserId);
+                  if (cur?.timer !== timer) return;
+                  this.qrPasswordDeferredByUserId.delete(ownerUserId);
+                  reject(new Error('Истекло время ввода пароля 2FA (2 мин.)'));
+                }, TelegramUserbotClientService.QR_2FA_WAIT_MS);
+                this.qrPasswordDeferredByUserId.set(ownerUserId, {
+                  resolve,
+                  reject,
+                  timer,
+                });
+                this.setQrStateForUser(ownerUserId, { phase: 'need_password' });
+              }),
           },
         );
         const authorized = await this.isClientAuthorized(qrClient);
@@ -252,6 +310,7 @@ export class TelegramUserbotClientService {
         this.setQrStateForUser(ownerUserId, { phase: 'error', error: msg });
         await this.stopQrClient(ownerUserId);
       } finally {
+        this.rejectQrPasswordWait(ownerUserId, new Error('Вход по QR завершён'));
         this.qrTaskByUserId.delete(ownerUserId);
       }
     })();
@@ -277,6 +336,7 @@ export class TelegramUserbotClientService {
 
   async cancelQrLogin(): Promise<{ ok: true; qr: QrState }> {
     const ownerUserId = await this.getOwnerUserId();
+    this.rejectQrPasswordWait(ownerUserId, new Error('Вход по QR отменён'));
     await this.stopQrClient(ownerUserId);
     if (ownerUserId) {
       this.qrTaskByUserId.delete(ownerUserId);
@@ -298,6 +358,9 @@ export class TelegramUserbotClientService {
   }
 
   async disconnectAll(): Promise<void> {
+    for (const userId of Array.from(this.qrPasswordDeferredByUserId.keys())) {
+      this.rejectQrPasswordWait(userId, new Error('Сервис останавливается'));
+    }
     for (const userId of Array.from(this.clientsByUserId.keys())) {
       const client = this.clientsByUserId.get(userId);
       if (!client) continue;
@@ -347,6 +410,7 @@ export class TelegramUserbotClientService {
     if (!userId) {
       return;
     }
+    this.rejectQrPasswordWait(userId, new Error('Прервано'));
     const client = this.qrClientByUserId.get(userId);
     if (!client) return;
     try {
