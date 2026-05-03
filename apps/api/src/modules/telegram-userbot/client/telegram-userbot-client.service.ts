@@ -155,7 +155,13 @@ export class TelegramUserbotClientService {
       };
     }
     if (ownerUserId && this.qrTaskByUserId.get(ownerUserId)) {
-      return { ok: true, message: 'QR-вход уже запущен.', qr: this.getQrStateForUser(ownerUserId) };
+      const qrNow = this.getQrStateForUser(ownerUserId);
+      if (qrNow.phase === 'error' || qrNow.phase === 'cancelled') {
+        await this.stopQrClient(ownerUserId);
+        this.qrTaskByUserId.delete(ownerUserId);
+      } else {
+        return { ok: true, message: 'QR-вход уже запущен.', qr: qrNow };
+      }
     }
 
     if (!ownerUserId) {

@@ -44,6 +44,10 @@ export const GLOBAL_SHARED_SETTING_KEYS = new Set<string>([
   'APPLOG_LOG_NOISY_EVENTS',
   'TELEGRAM_USERBOT_API_ID',
   'TELEGRAM_USERBOT_API_HASH',
+  /** QR/сессия: читаются из глобальной `Setting`, иначе при залогиненном владельце `get()` не видит глобальное значение. */
+  'TELEGRAM_USERBOT_2FA_PASSWORD',
+  'TELEGRAM_USERBOT_SESSION',
+  'TELEGRAM_USERBOT_MTPROXY_URL',
   'OPENROUTER_DIAGNOSTIC_MODELS',
   'MIN_CAPITAL_AMOUNT',
   'DEFAULT_ORDER_USD',

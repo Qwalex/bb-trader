@@ -733,3 +733,15 @@
 - Manual verification (strict limiter): два параллельных `runBybitCall` на один cabinet key не стартуют одновременно; последовательные вызовы внутри `fetchOrderStatusFromExchange` проходят spacing каждый раз; composite TP/SL без внешнего `run` — нет deadlock из-за вложенного limiter; `retCode=10006` блокирует очередь на время backoff/retry.
 - Docs updated: этот трекер, `.env.example`, `AGENTS.md`.
 - Linked risks (`SEC-###`): `SEC-015`
+
+### AUD-060
+
+- Status: `done`
+- Scope: QR userbot — чтение глобального `TELEGRAM_USERBOT_2FA_PASSWORD` (и согласованные userbot-секреты) при залогиненном владельце кабинета.
+- Files: `apps/api/src/modules/settings/settings.constants.ts`, `apps/web/app/settings/settings-page.constants.ts`, `apps/api/src/modules/telegram-userbot/client/telegram-userbot-client.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: `SettingsService.get()` не обращался к глобальной таблице `Setting` для ключей вне `GLOBAL_SHARED_SETTING_KEYS`, если есть `ownerUserId`; `TELEGRAM_USERBOT_2FA_PASSWORD` не был в этом множестве → пустой пароль в `signInUserWithQrCode` → ошибка `Password is empty`; повторный `startQrLogin` при ещё идущей задаче возвращал «QR-вход уже запущен» при `phase: error`.
+- Changes: добавлены `TELEGRAM_USERBOT_2FA_PASSWORD`, `TELEGRAM_USERBOT_SESSION`, `TELEGRAM_USERBOT_MTPROXY_URL` в `GLOBAL_SHARED_SETTING_KEYS`; в web `ADMIN_GLOBAL_KEYS` — `TELEGRAM_USERBOT_2FA_PASSWORD`, `TELEGRAM_USERBOT_MTPROXY_URL` (как у API_ID/HASH в AUD-058); при повторном `startQrLogin` после `phase: error|cancelled` — сброс QR-клиента и задачи, чтобы не залипало «уже запущен».
+- Decomposition notes (`utils/constants/hooks/types`): только константы ключей.
+- Manual verification: `npm run build -w api` (pass); после деплоя: сохранить 2FA в глобальных настройках → `cancelQrLogin` при зависшем QR → `startQrLogin` → скан; пароль подхватывается из глобальной `Setting`.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
