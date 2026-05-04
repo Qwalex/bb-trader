@@ -5,6 +5,7 @@ import { formatError } from '../../../common/format-error';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { SettingsService } from '../../settings/settings.service';
 import { CabinetContextService } from '../../cabinet/cabinet-context.service';
+import { CabinetService } from '../../cabinet/cabinet.service';
 import { TelegramUserbotClientService } from '../client/telegram-userbot-client.service';
 import { TelegramUserbotIngestService } from '../ingest/telegram-userbot-ingest.service';
 import {
@@ -35,6 +36,7 @@ export class TelegramUserbotScanService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly cabinetContext: CabinetContextService,
+    private readonly cabinets: CabinetService,
     private readonly settings: SettingsService,
     private readonly userbotClient: TelegramUserbotClientService,
     private readonly ingest: TelegramUserbotIngestService,
@@ -270,17 +272,15 @@ export class TelegramUserbotScanService {
         if (!(await this.userbotClient.isClientAuthorized(client))) {
           continue;
         }
-        const defaultCabinet = await this.prisma.cabinet.findFirst({
-          where: { ownerUserId: userId },
-          orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
-          select: { id: true },
-        });
-        if (!defaultCabinet?.id) {
+        const ownerCabinets = await this.cabinets.listCabinetsForUser(userId);
+        if (ownerCabinets.length === 0) {
           continue;
         }
-        await this.cabinetContext.runWithCabinet(defaultCabinet.id, () =>
-          this.scanTodayMessagesCore(USERBOT_POLL_FETCH_LIMIT, false, client),
-        );
+        for (const cab of ownerCabinets) {
+          await this.cabinetContext.runWithCabinet(cab.id, () =>
+            this.scanTodayMessagesCore(USERBOT_POLL_FETCH_LIMIT, false, client),
+          );
+        }
       }
     } catch (e) {
       this.logger.warn(`Userbot pollTick failed: ${formatError(e)}`);

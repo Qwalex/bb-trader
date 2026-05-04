@@ -18,8 +18,11 @@ import {
   BYBIT_LADDER_SOURCE_FALLBACK_LOG_CAP,
   BYBIT_SOURCE_MAP_SKIP_LOG_CAP,
 } from '../bybit.constants';
+import { splitPositionQtyForTps } from '../instrument/bybit-qty.util';
+import { hasOpenEntryOrders } from '../orders/bybit-order-status.util';
 import { pickPositionRowForSignalDirection } from '../position/bybit-position-pick.util';
 import { positionHasStopLoss } from './bybit-tpsl.util';
+import type { BybitTpSplitPlacementPorts } from './bybit-tp-split-ports.types';
 import { BybitRateLimitService } from '../instrument/bybit-rate-limit.service';
 
 @Injectable()
@@ -453,7 +456,203 @@ export class BybitTpSlService {
     });
   }
 
-  async placeTpSplitIfNeeded(client: RestClientV5, fresh: any, ports: any): Promise<void> {
-    await ports.placeTpSplitIfNeededPort(client, fresh);
+  /**
+   * Reduce-only лимитки TP после исполнения входов (по одному на уровень, деление qty).
+   * Ранее порт был заглушкой — без этого шага на бирже оставался только SL.
+   */
+  async placeTpSplitIfNeeded(
+    client: RestClientV5,
+    fresh: {
+      id: string;
+      pair: string;
+      direction: string;
+      status?: string;
+      takeProfits: string;
+      orders: { orderKind: string; status: string | null }[];
+    },
+    ports: BybitTpSplitPlacementPorts,
+  ): Promise<void> {
+    const activeStatuses = new Set(['ORDERS_PLACED', 'OPEN', 'PARSED']);
+    if (!activeStatuses.has(String(fresh.status ?? ''))) {
+      return;
+    }
+    let takeProfits: number[];
+    try {
+      takeProfits = JSON.parse(fresh.takeProfits) as number[];
+    } catch (e) {
+      this.logger.warn(
+        `placeTpSplitIfNeeded: takeProfits JSON parse error signalId=${fresh.id}: ${formatError(e)}`,
+      );
+      return;
+    }
+    if (!Array.isArray(takeProfits) || takeProfits.length === 0) {
+      return;
+    }
+    const direction = fresh.direction === 'short' ? 'short' : 'long';
+    const sortedRaw = [...takeProfits].filter((p) => Number.isFinite(p) && p > 0);
+    if (sortedRaw.length === 0) {
+      return;
+    }
+    const symbol = normalizeTradingPair(fresh.pair);
+    const { qtyStep, minQty, tickSize } = await ports.getLinearInstrumentFilters(client, symbol);
+
+    const seenTick = new Set<string>();
+    const sorted: number[] = [];
+    const ordered = sortedRaw.sort((a, b) => (direction === 'long' ? a - b : b - a));
+    for (const p of ordered) {
+      const ticked = ports.formatPriceToTick(p, tickSize);
+      if (seenTick.has(ticked)) {
+        continue;
+      }
+      seenTick.add(ticked);
+      sorted.push(parseFloat(ticked));
+    }
+    if (sorted.length === 0) {
+      return;
+    }
+
+    if (hasOpenEntryOrders(fresh.orders)) {
+      return;
+    }
+
+    const deadTp = new Set(['cancelled', 'rejected', 'failed', 'deactivated']);
+    const hasLiveTp = fresh.orders.some((o) => {
+      if (o.orderKind !== 'TP') {
+        return false;
+      }
+      const s = (o.status ?? '').trim().toLowerCase();
+      if (!s) {
+        return false;
+      }
+      return !deadTp.has(s);
+    });
+    if (hasLiveTp) {
+      return;
+    }
+
+    const posRes = await this.rateLimit.runBybitCall(() =>
+      client.getPositionInfo({ category: 'linear', symbol }),
+    );
+    if (posRes.retCode !== 0) {
+      return;
+    }
+    const rows = posRes.result?.list ?? [];
+    const posRow = pickPositionRowForSignalDirection(rows, direction);
+    if (!posRow) {
+      return;
+    }
+    const posSize = posRow.size ? Math.abs(parseFloat(String(posRow.size))) : 0;
+    if (!(posSize > 1e-12)) {
+      return;
+    }
+
+    const closeSide: 'Buy' | 'Sell' = direction === 'long' ? 'Sell' : 'Buy';
+    const positionIdx = await ports.resolveEntryPositionIdx(client, symbol, closeSide);
+
+    let levelCount = sorted.length;
+    let qtyParts: string[] = [];
+    let pricesSlice: number[] = [];
+    while (levelCount >= 1) {
+      pricesSlice = sorted.slice(0, levelCount);
+      qtyParts = splitPositionQtyForTps({
+        totalQtyBase: posSize,
+        tpCount: levelCount,
+        qtyStep,
+        minQty,
+      });
+      if (qtyParts.length === levelCount && qtyParts.every((q) => parseFloat(q) > 0)) {
+        break;
+      }
+      levelCount -= 1;
+    }
+    if (levelCount < 1 || qtyParts.length === 0) {
+      const diag = ports.buildTpSplitDiagnostics({
+        posSize,
+        requestedLevels: sorted.length,
+        qtyStep,
+        minQty,
+      });
+      void this.appLog.append('warn', 'bybit', 'placeTpSplit: не удалось разбить qty по TP', {
+        signalId: fresh.id,
+        symbol,
+        direction,
+        posSizeRounded: diag.posSizeRounded,
+        reasons: diag.reasons,
+      });
+      return;
+    }
+    if (levelCount < sorted.length) {
+      void this.appLog.append('info', 'bybit', 'placeTpSplit: число TP уменьшено из-за minQty лота', {
+        signalId: fresh.id,
+        symbol,
+        requested: sorted.length,
+        used: levelCount,
+      });
+    }
+
+    const placedIds: string[] = [];
+    const errors: string[] = [];
+    for (let i = 0; i < levelCount; i += 1) {
+      const price = pricesSlice[i]!;
+      const qtyStr = qtyParts[i]!;
+      const priceStr = ports.formatPriceToTick(price, tickSize);
+      try {
+        const orderRes = await this.rateLimit.runBybitCall(() =>
+          client.submitOrder({
+            category: 'linear',
+            symbol,
+            side: closeSide,
+            orderType: 'Limit',
+            qty: qtyStr,
+            price: priceStr,
+            timeInForce: 'GTC',
+            reduceOnly: true,
+            positionIdx,
+          }),
+        );
+        const oid = orderRes.result?.orderId ? String(orderRes.result.orderId) : undefined;
+        if (orderRes.retCode === 0 && oid) {
+          placedIds.push(oid);
+          await ports.orders.createOrderRecord({
+            signalId: fresh.id,
+            bybitOrderId: oid,
+            orderKind: 'TP',
+            side: closeSide,
+            price: parseFloat(priceStr),
+            qty: parseFloat(qtyStr),
+            status: 'NEW',
+          });
+        } else {
+          const msg = `${orderRes.retCode} ${String(orderRes.retMsg ?? '')}`.trim();
+          errors.push(`TP#${i + 1}: ${msg}`);
+          void this.appLog.append('warn', 'bybit', 'placeTpSplit: submitOrder TP отклонён', {
+            signalId: fresh.id,
+            symbol,
+            tpIndex: i + 1,
+            retCode: orderRes.retCode,
+            retMsg: String(orderRes.retMsg ?? ''),
+          });
+        }
+      } catch (e) {
+        const msg = formatError(e);
+        errors.push(`TP#${i + 1}: ${msg}`);
+        void this.appLog.append('warn', 'bybit', 'placeTpSplit: submitOrder TP исключение', {
+          signalId: fresh.id,
+          symbol,
+          tpIndex: i + 1,
+          error: msg,
+        });
+      }
+    }
+
+    if (placedIds.length > 0) {
+      await ports.orders.createSignalEvent(fresh.id, 'BYBIT_TP_LIMITS_PLACED', {
+        symbol,
+        direction,
+        bybitOrderIds: placedIds,
+        levels: levelCount,
+        errors: errors.length > 0 ? errors : undefined,
+      });
+    }
   }
 }

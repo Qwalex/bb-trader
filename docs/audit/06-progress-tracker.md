@@ -816,6 +816,17 @@
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
 
+### AUD-067
+
+- Status: `done`
+- Scope: Userbot фоновый опрос по всем кабинетам владельца; постановка TP reduce-only после входа (раньше порт был заглушкой).
+- Files: `apps/api/src/modules/telegram-userbot/scan/telegram-userbot-scan.service.ts`, `apps/api/src/modules/bybit/tpsl/bybit-tpsl.service.ts`, `apps/api/src/modules/bybit/tpsl/bybit-tp-split-ports.types.ts`, `apps/api/src/modules/bybit/bybit.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: `pollTick` сканировал только «дефолтный» кабинет пользователя — чаты, привязанные только к другим кабинетам, не подтягивались до ручного скана в UI. В `BybitService.placeTpSplitIfNeeded` в `BybitTpSlService` передавался пустой `placeTpSplitIfNeededPort` — лимитки TP не выставлялись после fill, оставался только SL.
+- Changes: для каждого подключённого userbot-клиента цикл `listCabinetsForUser` + `runWithCabinet` + `scanTodayMessagesCore`; реализован `placeTpSplitIfNeeded` (позиция на бирже, нет открытых ENTRY/DCA, нет живых TP в БД, `splitPositionQtyForTps`, снижение числа уровней при minQty, `submitOrder` Limit reduceOnly, событие `BYBIT_TP_LIMITS_PLACED`).
+- Manual verification: `npm run build -w apps/api` (pass); на стенде — фоновый опрос для не-дефолтного кабинета; после входа в позицию появляются TP в БД и на Bybit.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
 ### AUD-066
 
 - Status: `done`

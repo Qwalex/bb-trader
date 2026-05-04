@@ -474,6 +474,7 @@ export class BybitService implements OnModuleInit {
       id: string;
       pair: string;
       direction: string;
+      status?: string;
       stopLoss: number;
       takeProfits: string;
       orders: {
@@ -486,8 +487,18 @@ export class BybitService implements OnModuleInit {
       }[];
     },
   ): Promise<void> {
+    const pv = this.placementValidation;
     await this.bybitTpSl.placeTpSplitIfNeeded(client, fresh, {
-      placeTpSplitIfNeededPort: async () => {},
+      getLinearInstrumentFilters: (c, s) => this.balanceInstrument.getLinearInstrumentFilters(c, s),
+      resolveEntryPositionIdx: (c, s, side) => pv.resolveEntryPositionIdx(c, s, side),
+      formatPriceToTick: (p, t) => pv.formatPriceToTick(p, t),
+      buildTpSplitDiagnostics: (p) => pv.buildTpSplitDiagnostics(p),
+      orders: {
+        createOrderRecord: (data) => this.orders.createOrderRecord(data),
+        createSignalEvent: (signalId, type, payload) =>
+          this.orders.createSignalEvent(signalId, type, payload),
+      },
+      appLog: this.appLog,
     });
   }
 
