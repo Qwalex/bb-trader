@@ -54,9 +54,6 @@ export function SessionInfoBar({ login, userId, cabinetName }: SessionInfoBarPro
         <div style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>
           Логин: <strong style={{ color: 'var(--foreground)' }}>{login ?? '—'}</strong>
         </div>
-        <div style={{ color: 'var(--muted)', fontSize: '0.88rem' }}>
-          Текущий кабинет: <strong style={{ color: 'var(--foreground)' }}>{cabinetName ?? '—'}</strong>
-        </div>
         {userId ? (
           <div style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>
             user id: <code>{userId}</code>
