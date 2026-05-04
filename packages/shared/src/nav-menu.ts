@@ -12,6 +12,7 @@ export const NAV_MENU_ITEMS: NavMenuItemConfig[] = [
   { id: 'trades', label: 'Сделки', href: '/trades', cabinetAware: true },
   { id: 'ai', label: 'AI', href: '/ai', cabinetAware: true, defaultHidden: true },
   { id: 'diagnostics', label: 'Диагностика', href: '/diagnostics', cabinetAware: true, adminOnly: true, defaultHidden: true },
+  { id: 'logs', label: 'Логи', href: '/logs', adminOnly: true, defaultHidden: true },
   { id: 'telegram-userbot', label: 'Userbot', href: '/telegram-userbot', cabinetAware: true, defaultHidden: true },
   { id: 'openrouter-spend', label: 'Расходы OpenRouter', href: '/openrouter-spend', cabinetAware: true, adminOnly: true, defaultHidden: true },
   { id: 'my-group', label: 'Моя группа', href: '/my-group', cabinetAware: true, adminOnly: true, defaultHidden: true },

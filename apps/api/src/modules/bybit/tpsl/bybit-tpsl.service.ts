@@ -19,7 +19,7 @@ import {
   BYBIT_SOURCE_MAP_SKIP_LOG_CAP,
 } from '../bybit.constants';
 import { splitPositionQtyForTps } from '../instrument/bybit-qty.util';
-import { hasOpenEntryOrders } from '../orders/bybit-order-status.util';
+import { hasLiveTpOrders, hasOpenEntryOrders } from '../orders/bybit-order-status.util';
 import { pickPositionRowForSignalDirection } from '../position/bybit-position-pick.util';
 import { positionHasStopLoss } from './bybit-tpsl.util';
 import type { BybitTpSplitPlacementPorts } from './bybit-tp-split-ports.types';
@@ -139,6 +139,12 @@ export class BybitTpSlService {
     }
   }
 
+  /**
+   * Ставит SL на позицию (setTradingStop Full), пока нет активных TP-ордеров:
+   * после исполнения входов, до/параллельно с выставлением reduce-only TP.
+   * Ранее выполнялось только при takeProfits.length > 1 — из-за этого один TP и SL не проставлялись.
+   * «Живые» TP считаем через {@link hasLiveTpOrders} (FAILED/Cancelled в БД не блокируют повтор SL).
+   */
   async ensureStopLossForMultiTpOpenPosition(
     client: RestClientV5,
     sig: {
@@ -146,8 +152,7 @@ export class BybitTpSlService {
       pair: string;
       direction: string;
       stopLoss: number;
-      takeProfits: string;
-      orders: { orderKind: string }[];
+      orders: { orderKind: string; status: string | null }[];
     },
     helpers: {
       pickPositionRowForSignalDirection: (
@@ -156,14 +161,12 @@ export class BybitTpSlService {
       ) => { size?: string; side?: string; positionIdx?: number; stopLoss?: string } | undefined;
     },
   ): Promise<void> {
-    let tps: number[];
-    try {
-      tps = JSON.parse(sig.takeProfits) as number[];
-    } catch {
+    if (!Number.isFinite(sig.stopLoss) || sig.stopLoss <= 0) {
       return;
     }
-    if (tps.length <= 1) return;
-    if (sig.orders.some((o) => o.orderKind === 'TP')) return;
+    if (hasLiveTpOrders(sig.orders)) {
+      return;
+    }
 
     const symbol = normalizeTradingPair(sig.pair);
     const posRes = await this.rateLimit.runBybitCall(() =>

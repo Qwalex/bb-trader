@@ -4,7 +4,20 @@ import { NextResponse } from 'next/server';
 import { normalizeBasePath } from './lib/base-path';
 
 const AUTH_COOKIE = 'sb_auth';
+const CABINET_COOKIE = 'cabinet_id';
 const configuredBasePath = normalizeBasePath(process.env.NEXT_PUBLIC_BASE_PATH);
+
+/** Дублирует выбор кабинета из query в cookie для SSR (страницы вроде `/trades`). */
+function applyCabinetCookieFromQuery(req: NextRequest, res: NextResponse): void {
+  const fromQuery = req.nextUrl.searchParams.get('cabinetId')?.trim() ?? '';
+  if (!fromQuery) return;
+  res.cookies.set(CABINET_COOKIE, fromQuery, {
+    path: '/',
+    maxAge: 31536000,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+  });
+}
 
 function stripBasePath(pathname: string): string {
   if (!configuredBasePath) {
@@ -39,7 +52,9 @@ export function middleware(req: NextRequest) {
   }
   const token = req.cookies.get(AUTH_COOKIE)?.value?.trim();
   if (token) {
-    return NextResponse.next();
+    const res = NextResponse.next();
+    applyCabinetCookieFromQuery(req, res);
+    return res;
   }
   const url = req.nextUrl.clone();
   url.pathname = configuredBasePath ? `${configuredBasePath}/login` : '/login';

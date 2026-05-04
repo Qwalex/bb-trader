@@ -427,8 +427,7 @@ export class BybitService implements OnModuleInit {
       pair: string;
       direction: string;
       stopLoss: number;
-      takeProfits: string;
-      orders: { orderKind: string }[];
+      orders: { orderKind: string; status: string | null }[];
     },
   ): Promise<void> {
     return this.bybitTpSl.ensureStopLossForMultiTpOpenPosition(client, sig, {

@@ -849,6 +849,17 @@
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
 
+### AUD-071
+
+- Status: `done`
+- Scope: Web — cookie `cabinet_id` при навигации с `?cabinetId=` (SSR для сделок).
+- Files: `apps/web/middleware.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: переключатель кабинета пишет cookie только в `useEffect` на клиенте; при редиректе с `?cabinetId=` первый SSR к `/trades` мог идти без cookie (до эффекта), список пустой до клиента.
+- Changes: для авторизованных запросов middleware выставляет `cabinet_id` из query (как `CabinetSwitcher`: path `/`, max-age, SameSite=Lax, Secure в production).
+- Manual verification: `npm run check-types -w apps/web`; после смены кабинета обновить `/trades` без query — сделки видны.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
 ### AUD-070
 
 - Status: `done`
@@ -872,6 +883,17 @@
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
 
+### AUD-072
+
+- Status: `done`
+- Scope: Web — пункт меню «Логи» (`/logs`).
+- Files: `packages/shared/src/nav-menu.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: в `NAV_MENU_ITEMS` не было записи для `/logs` (страница и admin-only API остаются); пункт не рендерился ни в шапке, ни в бургере.
+- Changes: добавлен `{ id: 'logs', label: 'Логи', href: '/logs', adminOnly: true, defaultHidden: true }` — виден только админу, по умолчанию в блоке бургера (как «Диагностика»).
+- Manual verification: `npm run build -w packages/shared` (или общий web build).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A (`GET /logs` по-прежнему только admin)
+
 ### AUD-066
 
 - Status: `done`
@@ -880,5 +902,17 @@
 - Findings: ключи из `CABINET_SCOPED` одновременно были в `GLOBAL_SHARED_SETTING_KEYS` → `get`/`set` обходили `cabinetSetting` и писали в глобальную таблицу `Setting` (одно значение на всё приложение); плюс fallback на `userSetting` для кабинетных ключей давал общий слой между кабинетами одного пользователя.
 - Changes: убрано пересечение кабинетных ключей с `GLOBAL_SHARED_SETTING_KEYS`; `POLLING_INTERVAL_MS` и `BYBIT_ACCOUNT_MAX_CONCURRENCY` добавлены в `CABINET_SCOPED_SETTING_KEYS`; при активном кабинете для кабинетных ключей не подмешиваются `userSetting`/глобальная `Setting` в `get`/`getMany`/`list` (и `set` не пишет в `userSetting` для этой комбинации); в web `ADMIN_GLOBAL_KEYS` убраны те же торговые ключи, чтобы не скрывать их не-админу в режиме кабинета.
 - Manual verification: `npm run build -w apps/api`, `npm run check-types -w apps/web` (pass); смена активного кабинета и `/settings` — разные значения после отдельного сохранения; старые значения в глобальной `Setting` для этих ключей больше не подставляются в кабинет без строки в `CabinetSetting` (см. `.env`/дефолты).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-073
+
+- Status: `done`
+- Scope: Bybit — постановка SL/TP после входа.
+- Files: `apps/api/src/modules/bybit/tpsl/bybit-tpsl.service.ts`, `apps/api/src/modules/bybit/bybit.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: `ensureStopLossForMultiTpOpenPosition` выходил при `takeProfits.length <= 1`, поэтому для одного TP `setTradingStop` никогда не вызывался; проверка «есть любой ордер kind=TP» блокировала SL при мёртвых TP в БД (failed/cancelled).
+- Changes: ранний SL для любой позиции при валидном `stopLoss` и отсутствии **живых** TP (`hasLiveTpOrders`); убрана зависимость от числа уровней take-profit.
+- Decomposition notes (`utils/constants/hooks/types`): переиспользован `hasLiveTpOrders` из `bybit-order-status.util`.
+- Manual verification: `npm run build -w apps/api` (ожидается pass).
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
