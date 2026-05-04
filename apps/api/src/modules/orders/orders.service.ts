@@ -789,7 +789,11 @@ export class OrdersService {
       }),
       select: { id: true },
     });
-    return updated.map((r) => r.id);
+    const closedIds = updated.map((r) => r.id);
+    for (const id of closedIds) {
+      void this.userbotSignalHash.releaseForSignalId(id);
+    }
+    return closedIds;
   }
 
   /**

@@ -861,6 +861,17 @@
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
 
+### AUD-071
+
+- Status: `done`
+- Scope: Userbot — повторный сигнал по той же паре/направлению после закрытия позиции не должен помечаться дубликатом из‑за «залипшего» дедуп-хеша.
+- Files: `apps/api/src/modules/orders/orders.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: `wouldDuplicateActivePairDirection` при чистой бирже вызывает `reconcileStaleOpenSignalsForPairAndDirection`, который закрывал сделки через `updateMany` без `UserbotSignalHashService.releaseForSignalId`; следующий ingest с теми же уровнями падал на `tryCreate(signalHash)` («Сигнал уже обрабатывался ранее»), хотя позиции на бирже уже нет.
+- Changes: после успешного reconcile для каждого закрытого `signalId` вызывается `releaseForSignalId` (как при `updateSignalStatus` на CLOSED_*).
+- Manual verification: `npm run build -w apps/api`.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
 ### AUD-066
 
 - Status: `done`
