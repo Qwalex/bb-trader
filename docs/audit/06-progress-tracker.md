@@ -816,6 +816,17 @@
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
 
+### AUD-068
+
+- Status: `done`
+- Scope: `POLLING_INTERVAL_MS` — глобальная админская настройка, дефолт 2000 мс.
+- Files: `packages/shared/src/cabinet-settings.ts`, `apps/api/src/modules/settings/settings.constants.ts`, `apps/api/src/modules/settings/settings.service.ts`, `apps/api/src/modules/bybit/poll/bybit-poll.service.ts`, `apps/web/app/settings/settings-page.constants.ts`, `.env.example`, `docs/audit/06-progress-tracker.md`
+- Findings: ключ был в `CABINET_SCOPED` и в UI кабинета; при пустом значении poll использовал 30 с; устаревшие `CabinetSetting` могли перекрывать глобальное значение в `list()`.
+- Changes: ключ перенесён в `GLOBAL_SHARED_SETTING_KEYS` + `ENV_FALLBACK=2000`; валидация при `set` (пусто → 2000, 0 или 250–600000); poll fallback 2000 и кламп; в web — `ADMIN_GLOBAL_KEYS`, секция «Диагностика», убрано из кабинетного «Торговые параметры»; `list()` не перезаписывает глобальные ключи из `CabinetSetting`.
+- Manual verification: `npm run build -w apps/api`, `npm run check-types -w apps/web` (после сборки shared при необходимости).
+- Docs updated: этот трекер, `.env.example`.
+- Linked risks (`SEC-###`): N/A
+
 ### AUD-067
 
 - Status: `done`

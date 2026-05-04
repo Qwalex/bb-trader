@@ -15,16 +15,26 @@ export class BybitPollService {
     private readonly workers: WorkerQueueService,
   ) {}
 
+  private static readonly POLL_DEFAULT_MS = 2000;
+  private static readonly POLL_MIN_MS = 250;
+  private static readonly POLL_MAX_MS = 600_000;
+
   @Interval(1_000)
   async tick(): Promise<void> {
     const msRaw = await this.settings.get('POLLING_INTERVAL_MS');
-    if (msRaw === '0') {
+    const trimmed = (msRaw ?? '').trim();
+    if (trimmed === '0') {
       return;
     }
 
-    const configuredMs = Number(msRaw);
+    const configuredMs = Number(trimmed);
     const pollEveryMs =
-      Number.isFinite(configuredMs) && configuredMs > 0 ? configuredMs : 30_000;
+      Number.isFinite(configuredMs) && configuredMs > 0
+        ? Math.min(
+            Math.max(Math.trunc(configuredMs), BybitPollService.POLL_MIN_MS),
+            BybitPollService.POLL_MAX_MS,
+          )
+        : BybitPollService.POLL_DEFAULT_MS;
     const now = Date.now();
     if (this.isPolling || now - this.lastPollAt < pollEveryMs) {
       return;

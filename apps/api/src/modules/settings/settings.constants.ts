@@ -6,6 +6,8 @@ export const DASHBOARD_TODOS_MAX_TEXT_LEN = 4000;
 
 export const ENV_FALLBACK: Record<string, string> = {
   APPLOG_ENABLED: 'true',
+  /** Интервал enqueue poll sweep Bybit (мс). 0 — выключить опрос (только для отладки). */
+  POLLING_INTERVAL_MS: '2000',
   DEFAULT_ORDER_USD: '10',
   BUMP_TO_MIN_EXCHANGE_LOT: 'false',
   APPLOG_LOG_NOISY_EVENTS: 'false',
@@ -48,6 +50,8 @@ export const GLOBAL_SHARED_SETTING_KEYS = new Set<string>([
   'TELEGRAM_USERBOT_SESSION',
   'TELEGRAM_USERBOT_MTPROXY_URL',
   'OPENROUTER_DIAGNOSTIC_MODELS',
+  /** Глобально: опрос статусов ордеров/позиций Bybit (см. `BybitPollService`). */
+  'POLLING_INTERVAL_MS',
 ]);
 
 export const ADMIN_ONLY_GLOBAL_KEYS = new Set<string>(GLOBAL_SHARED_SETTING_KEYS);

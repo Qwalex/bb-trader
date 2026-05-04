@@ -22,6 +22,7 @@ export const ADMIN_GLOBAL_KEYS = new Set<string>([
   'TELEGRAM_USERBOT_API_HASH',
   'TELEGRAM_USERBOT_MTPROXY_URL',
   DIAGNOSTIC_MODELS_KEY,
+  'POLLING_INTERVAL_MS',
 ]);
 export const KEYS = [
   { key: NAV_MENU_HIDDEN_SETTING_KEY, label: 'Скрытые пункты меню (бургер)' },
@@ -164,7 +165,11 @@ export const KEYS = [
       'Источник сигналов (канал / приложение, для статистики: Binance Killers, Crypto Signals, …)',
   },
   { key: 'TELEGRAM_WHITELIST', label: 'Telegram user IDs (через запятую)' },
-  { key: 'POLLING_INTERVAL_MS', label: 'Polling (0 = отключить опрос Bybit)' },
+  {
+    key: 'POLLING_INTERVAL_MS',
+    label:
+      'Bybit: интервал опроса ордеров/позиций (мс). По умолчанию 2000; 0 — отключить (поломает сопровождение сделок; только отладка). Только глобально, для администратора',
+  },
   {
     key: 'BYBIT_ACCOUNT_MAX_CONCURRENCY',
     label:
@@ -251,7 +256,6 @@ export const SETTINGS_SECTIONS: { id: string; title: string; keys: string[] }[] 
       'MIN_ALLOWED_LEVERAGE',
       'MAX_ALLOWED_LEVERAGE',
       'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',
-      'POLLING_INTERVAL_MS',
       'BYBIT_ACCOUNT_MAX_CONCURRENCY',
       'TP_SL_STEP_START',
       'TP_SL_STEP_RANGE',
@@ -265,6 +269,7 @@ export const SETTINGS_SECTIONS: { id: string; title: string; keys: string[] }[] 
       'DIAGNOSTIC_MAX_LOG_LINES',
       'APPLOG_ENABLED',
       'APPLOG_LOG_NOISY_EVENTS',
+      'POLLING_INTERVAL_MS',
     ],
   },
   {

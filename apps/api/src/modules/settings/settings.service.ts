@@ -257,6 +257,24 @@ export class SettingsService {
           }
           normalized = String(Math.round(n));
         }
+      } else if (key === 'POLLING_INTERVAL_MS') {
+        const t = value.trim();
+        if (t === '') {
+          normalized = '2000';
+        } else if (t === '0') {
+          normalized = '0';
+        } else {
+          const n = Math.trunc(Number(t.replace(',', '.')));
+          if (!Number.isFinite(n) || n < 250) {
+            throw new BadRequestException(
+              'POLLING_INTERVAL_MS: пусто = 2000 по умолчанию; 0 — выкл.; иначе целое мс от 250 до 600000',
+            );
+          }
+          if (n > 600_000) {
+            throw new BadRequestException('POLLING_INTERVAL_MS: не более 600000 мс');
+          }
+          normalized = String(n);
+        }
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -467,6 +485,9 @@ export class SettingsService {
       map.set(row.key, row.value);
     }
     for (const row of scopedRows) {
+      if (this.isGlobalSharedKey(row.key)) {
+        continue;
+      }
       map.set(row.key, row.value);
     }
     return Array.from(map.entries())
