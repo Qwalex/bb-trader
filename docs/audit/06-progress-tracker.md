@@ -913,6 +913,6 @@
 - Findings: `ensureStopLossForMultiTpOpenPosition` выходил при `takeProfits.length <= 1`, поэтому для одного TP `setTradingStop` никогда не вызывался; проверка «есть любой ордер kind=TP» блокировала SL при мёртвых TP в БД (failed/cancelled).
 - Changes: ранний SL для любой позиции при валидном `stopLoss` и отсутствии **живых** TP (`hasLiveTpOrders`); убрана зависимость от числа уровней take-profit.
 - Decomposition notes (`utils/constants/hooks/types`): переиспользован `hasLiveTpOrders` из `bybit-order-status.util`.
-- Manual verification: `npm run build -w apps/api` (ожидается pass).
+- Manual verification: `npm run build -w apps/api` (pass).
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
