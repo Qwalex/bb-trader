@@ -74,8 +74,6 @@ import {
 export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TelegramUserbotService.name);
   private enabledChatIds = new Set<string>();
-  private reconnectInFlight = false;
-  private lastReconnectAttemptAtMs = 0;
 
   private async getCurrentOwnerUserId(): Promise<string | null> {
     return this.userbotClient.getOwnerUserId();
@@ -129,9 +127,10 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     );
     this.userbotSettings.setEnabledChatsRefreshCallback(() => this.refreshEnabledChatsCache());
     await this.refreshEnabledChatsCache();
+    await this.tryRestoreUserbotOnStartup().catch((e) => {
+      this.logger.warn(`Userbot startup restore failed: ${formatError(e)}`);
+    });
     void this.startPollingLoop();
-    // В multi-user режиме автоподключение на старте небезопасно:
-    // нет пользовательского контекста, поэтому подключение должно инициироваться из HTTP-запроса конкретного пользователя.
   }
 
   async onModuleDestroy(): Promise<void> {
@@ -515,29 +514,57 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  private async tryReconnectFromStoredSession(): Promise<void> {
-    if (this.reconnectInFlight) {
+  /**
+   * После деплоя MTProto-клиент в памяти пуст; строка сессии в глобальных настройках остаётся.
+   * Восстанавливаем подключение для кабинета по умолчанию (или первого с ownerUserId).
+   * Отключение: env `TELEGRAM_USERBOT_SKIP_STARTUP_RESTORE=true`.
+   * Ограничение: одна глобальная `TELEGRAM_USERBOT_SESSION` — автоматом один владелец/кабинет;
+   * остальные владельцы подключают вручную из UI своего кабинета.
+   */
+  private async tryRestoreUserbotOnStartup(): Promise<void> {
+    if (String(process.env.TELEGRAM_USERBOT_SKIP_STARTUP_RESTORE ?? '').trim().toLowerCase() === 'true') {
+      this.logger.log('Userbot: пропуск восстановления сессии при старте (TELEGRAM_USERBOT_SKIP_STARTUP_RESTORE)');
       return;
     }
-    const now = Date.now();
-    // Не долбим Telegram/API слишком часто.
-    if (now - this.lastReconnectAttemptAtMs < 30_000) {
+    const [enabled, session] = await Promise.all([
+      this.getBoolSetting('TELEGRAM_USERBOT_ENABLED', false),
+      this.settings.get('TELEGRAM_USERBOT_SESSION'),
+    ]);
+    if (!enabled || !session?.trim()) {
       return;
     }
-    this.lastReconnectAttemptAtMs = now;
-    this.reconnectInFlight = true;
-    try {
-      const res = await this.connectFromStoredSession();
-      if (!res.ok) {
-        this.logger.warn(`Userbot auto-reconnect skipped: ${res.error ?? 'unknown error'}`);
+    const cabinetId = await this.resolveCabinetIdForUserbotStartup();
+    if (!cabinetId) {
+      this.logger.warn(
+        'Userbot: восстановление при старте пропущено — нет кабинета с ownerUserId (привяжите владельца к кабинету)',
+      );
+      return;
+    }
+    await this.cabinetContext.runWithCabinet(cabinetId, async () => {
+      const res = await this.userbotClient.connectFromStoredSession();
+      if (res.ok) {
+        this.logger.log('Userbot: сессия восстановлена при старте API из сохранённой строки');
       } else {
-        this.logger.log('Userbot auto-reconnect: connected from stored session');
+        this.logger.warn(`Userbot: при старте не удалось восстановить сессию: ${res.error ?? 'unknown'}`);
       }
-    } catch (e) {
-      this.logger.warn(`Userbot auto-reconnect failed: ${formatError(e)}`);
-    } finally {
-      this.reconnectInFlight = false;
+    });
+  }
+
+  private async resolveCabinetIdForUserbotStartup(): Promise<string | null> {
+    const defaultId = await this.cabinets.getDefaultCabinetId();
+    const primary = await this.prisma.cabinet.findUnique({
+      where: { id: defaultId },
+      select: { id: true, ownerUserId: true },
+    });
+    if (primary?.ownerUserId && String(primary.ownerUserId).trim()) {
+      return primary.id;
     }
+    const fallback = await this.prisma.cabinet.findFirst({
+      where: { ownerUserId: { not: null } },
+      orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+      select: { id: true },
+    });
+    return fallback?.id ?? null;
   }
 
   async updateChat(

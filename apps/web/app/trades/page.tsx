@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { cookies } from 'next/headers';
 
 import { fetchJson } from '../../lib/api';
 import { DeleteAllTradesButton } from './delete-all-trades-button';
@@ -76,8 +77,12 @@ export default async function TradesPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const cookieStore = await cookies();
+  const cabinetIdFromCookie = cookieStore.get('cabinet_id')?.value?.trim() ?? '';
   const sp = await searchParams;
-  const cabinetId = typeof sp.cabinetId === 'string' ? sp.cabinetId : '';
+  const cabinetIdFromQuery =
+    typeof sp.cabinetId === 'string' ? sp.cabinetId.trim() : '';
+  const cabinetId = cabinetIdFromQuery || cabinetIdFromCookie;
   const q = new URLSearchParams();
   const signalId = typeof sp.signalId === 'string' ? sp.signalId : '';
   const source = typeof sp.source === 'string' ? sp.source : '';

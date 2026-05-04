@@ -816,6 +816,17 @@
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
 
+### AUD-069
+
+- Status: `done`
+- Scope: Userbot — восстановление MTProto-сессии после деплоя/рестарта API.
+- Files: `apps/api/src/modules/telegram-userbot/telegram-userbot.service.ts`, `apps/api/src/modules/telegram-userbot/telegram-userbot.controller.ts`, `.env.example`, `docs/audit/06-progress-tracker.md`
+- Findings: клиент хранится только в памяти процесса; при старте не вызывался `connectFromStoredSession`; `POST /telegram-userbot/connect` и `disconnect` не оборачивались в `runWithCabinet` (в отличие от остальных эндпоинтов).
+- Changes: `tryRestoreUserbotOnStartup` после `refreshEnabledChatsCache`: при `TELEGRAM_USERBOT_ENABLED` + непустой глобальной сессии — `runWithCabinet` для кабинета по умолчанию или первого с `ownerUserId`; env `TELEGRAM_USERBOT_SKIP_STARTUP_RESTORE=true` — отключить; удалены неиспользуемые поля reconnect; connect/disconnect через `runWithCabinet`.
+- Manual verification: `npm run build -w apps/api` (pass); после рестарта при наличии сессии в БД — в логах строка о восстановлении, polling userbot видит клиента.
+- Docs updated: этот трекер, `.env.example`.
+- Linked risks (`SEC-###`): N/A
+
 ### AUD-068
 
 - Status: `done`
@@ -835,6 +846,18 @@
 - Findings: `pollTick` сканировал только «дефолтный» кабинет пользователя — чаты, привязанные только к другим кабинетам, не подтягивались до ручного скана в UI. В `BybitService.placeTpSplitIfNeeded` в `BybitTpSlService` передавался пустой `placeTpSplitIfNeededPort` — лимитки TP не выставлялись после fill, оставался только SL.
 - Changes: для каждого подключённого userbot-клиента цикл `listCabinetsForUser` + `runWithCabinet` + `scanTodayMessagesCore`; реализован `placeTpSplitIfNeeded` (позиция на бирже, нет открытых ENTRY/DCA, нет живых TP в БД, `splitPositionQtyForTps`, снижение числа уровней при minQty, `submitOrder` Limit reduceOnly, событие `BYBIT_TP_LIMITS_PLACED`).
 - Manual verification: `npm run build -w apps/api` (pass); на стенде — фоновый опрос для не-дефолтного кабинета; после входа в позицию появляются TP в БД и на Bybit.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-070
+
+- Status: `done`
+- Scope: Web — страница «Сделки» и активный кабинет (SSR).
+- Files: `apps/web/app/trades/page.tsx`, `docs/audit/06-progress-tracker.md`
+- Findings: `/trades` брала `cabinetId` только из query; при прямом заходе или обновлении без `?cabinetId=` серверный `fetchJson` не передавал кабинет, API резолвил другой кабинет (дефолт пользователя), список сделок был пустым при сигналах в выбранном кабинете. Главная (`/`) уже использовала cookie `cabinet_id`.
+- Changes: как на главной — `cabinetId = query || cookie('cabinet_id')` перед запросами к `/orders/trades`, `/orders/sources`, `/settings/effective`.
+- Decomposition notes (`utils/constants/hooks/types`): N/A (2 строки контекста в существующей странице).
+- Manual verification: `npm run check-types -w apps/web` или `npm run build -w apps/web`; вручную — активный кабинет с сделками, открыть `/trades` без query (с установленной cookie переключателя) — список не пустой.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
 

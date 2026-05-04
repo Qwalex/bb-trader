@@ -72,15 +72,15 @@ export class TelegramUserbotController {
   @ApiOperation({ summary: 'Подключить userbot из сохраненной сессии' })
   @ApiOkResponse({ description: 'Подключение выполнено' })
   @Post('connect')
-  async connect() {
-    return this.userbot.connectFromStoredSession();
+  async connect(@Req() req: AuthReq, @Query('cabinetId') cabinetId?: string) {
+    return this.runWithCabinet(req, cabinetId, () => this.userbot.connectFromStoredSession());
   }
 
   @ApiOperation({ summary: 'Отключить userbot' })
   @ApiOkResponse({ description: 'Отключение выполнено' })
   @Post('disconnect')
-  async disconnect() {
-    return this.userbot.disconnect();
+  async disconnect(@Req() req: AuthReq, @Query('cabinetId') cabinetId?: string) {
+    return this.runWithCabinet(req, cabinetId, () => this.userbot.disconnect());
   }
 
   @ApiOperation({ summary: 'Начать QR-логин userbot' })
