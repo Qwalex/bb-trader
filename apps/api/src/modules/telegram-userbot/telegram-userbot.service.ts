@@ -15,6 +15,7 @@ import { StringSession } from 'telegram/sessions';
 import * as QRCode from 'qrcode';
 
 import { formatError } from '../../common/format-error';
+import { isTransientPrismaConnectionError } from '../../common/prisma-transient';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppLogService } from '../app-log/app-log.service';
 import { SettingsService } from '../settings/settings.service';
@@ -1402,7 +1403,20 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     if (this.pollTimer) {
       return;
     }
-    const pollMs = await this.getUserbotPollIntervalMs();
+    let pollMs = USERBOT_POLL_INTERVAL_MS;
+    try {
+      pollMs = await this.getUserbotPollIntervalMs();
+    } catch (e) {
+      if (isTransientPrismaConnectionError(e)) {
+        this.logger.warn(
+          `Userbot startPollingLoop: transient DB issue, fallback to default interval ${USERBOT_POLL_INTERVAL_MS}ms`,
+        );
+      } else {
+        this.logger.warn(
+          `Userbot startPollingLoop: failed to read interval, fallback to default ${USERBOT_POLL_INTERVAL_MS}ms: ${formatError(e)}`,
+        );
+      }
+    }
     this.pollTimer = setTimeout(() => {
       this.pollTimer = null;
       void this.pollTick().finally(() => {
@@ -1448,6 +1462,12 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     try {
       await this.scanTodayMessagesCore(USERBOT_POLL_FETCH_LIMIT, false);
     } catch (e) {
+      if (isTransientPrismaConnectionError(e)) {
+        this.logger.warn(
+          `Userbot pollTick transient DB issue: ${formatError(e)}`,
+        );
+        return;
+      }
       this.logger.warn(`Userbot pollTick failed: ${formatError(e)}`);
     } finally {
       this.pollInFlight = false;

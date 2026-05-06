@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 
+import { isTransientPrismaConnectionError } from '../../common/prisma-transient';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 
@@ -100,6 +101,7 @@ export class AppLogService {
   private readonly logger = new Logger(AppLogService.name);
   private dbFullMuteUntilTs = 0;
   private dbFullLastErrorTs = 0;
+  private dbTransientLastWarnTs = 0;
   private logNoisyPolicyCache: { expiresAt: number; value: boolean } | null =
     null;
   private logEnabledPolicyCache: { expiresAt: number; value: boolean } | null =
@@ -181,6 +183,15 @@ export class AppLogService {
     }
   }
 
+  private warnDbTransient(context: string, error: unknown): void {
+    const now = Date.now();
+    if (now - this.dbTransientLastWarnTs < 30_000) {
+      return;
+    }
+    this.dbTransientLastWarnTs = now;
+    this.logger.warn(`${context}: transient DB issue: ${String(error)}`);
+  }
+
   async append(
     level: LogLevel,
     category: LogCategory,
@@ -218,6 +229,10 @@ export class AppLogService {
       const errText = String(e);
       if (this.isDbFullError(e)) {
         this.activateDbFullMute(errText);
+        return;
+      }
+      if (isTransientPrismaConnectionError(e)) {
+        this.warnDbTransient('append log skipped', e);
         return;
       }
       this.logger.error(`append log failed: ${errText}`);
@@ -273,6 +288,10 @@ export class AppLogService {
         this.activateDbFullMute(String(e));
         return;
       }
+      if (isTransientPrismaConnectionError(e)) {
+        this.warnDbTransient('deleteOldNoiseLogs skipped', e);
+        return;
+      }
       this.logger.warn(`deleteOldNoiseLogs failed: ${String(e)}`);
     }
   }
@@ -299,6 +318,10 @@ export class AppLogService {
     } catch (e) {
       if (this.isDbFullError(e)) {
         this.activateDbFullMute(String(e));
+        return;
+      }
+      if (isTransientPrismaConnectionError(e)) {
+        this.warnDbTransient('deleteOldRegularLogs skipped', e);
         return;
       }
       this.logger.warn(`deleteOldRegularLogs failed: ${String(e)}`);
