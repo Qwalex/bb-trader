@@ -16,6 +16,7 @@ import { AppLogService } from '../app-log/app-log.service';
 import { CabinetContextService } from '../cabinet/cabinet-context.service';
 import { CabinetService } from '../cabinet/cabinet.service';
 import { SettingsService } from '../settings/settings.service';
+import { TELEGRAM_USERBOT_SESSION_OWNER_USER_ID_KEY } from '../settings/settings.constants';
 /** До Bybit/Orders/Telegram: иначе orders → telegram раньше transcript. */
 import {
   TranscriptService,
@@ -560,7 +561,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     if (!enabled || !session?.trim()) {
       return;
     }
-    const cabinetId = await this.resolveCabinetIdForUserbotStartup();
+    const cabinetId = await this.resolveCabinetIdForStoredSessionRestore();
     if (!cabinetId) return;
     await this.cabinetContext.runWithCabinet(cabinetId, async () => {
       const sameUserClient = await this.isClientOwnedByCurrentUser();
@@ -589,10 +590,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * После деплоя MTProto-клиент в памяти пуст; строка сессии в глобальных настройках остаётся.
-   * Восстанавливаем подключение для кабинета по умолчанию (или первого с ownerUserId).
+   * Восстанавливаем в контексте кабинета владельца сессии (`TELEGRAM_USERBOT_SESSION_OWNER_USER_ID`), иначе — дефолтный/первый кабинет с ownerUserId.
    * Отключение: env `TELEGRAM_USERBOT_SKIP_STARTUP_RESTORE=true`.
-   * Ограничение: одна глобальная `TELEGRAM_USERBOT_SESSION` — автоматом один владелец/кабинет;
-   * остальные владельцы подключают вручную из UI своего кабинета.
+   * Ограничение: одна глобальная `TELEGRAM_USERBOT_SESSION` на процесс; при нескольких репликах API возможны гонки и повторная авторизация.
    */
   private async tryRestoreUserbotOnStartup(): Promise<void> {
     if (String(process.env.TELEGRAM_USERBOT_SKIP_STARTUP_RESTORE ?? '').trim().toLowerCase() === 'true') {
@@ -606,7 +606,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     if (!enabled || !session?.trim()) {
       return;
     }
-    const cabinetId = await this.resolveCabinetIdForUserbotStartup();
+    const cabinetId = await this.resolveCabinetIdForStoredSessionRestore();
     if (!cabinetId) {
       this.logger.warn(
         'Userbot: восстановление при старте пропущено — нет кабинета с ownerUserId (привяжите владельца к кабинету)',
@@ -621,6 +621,29 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
         this.logger.warn(`Userbot: при старте не удалось восстановить сессию: ${res.error ?? 'unknown'}`);
       }
     });
+  }
+
+  /**
+   * Кабинет для восстановления глобальной MTProto-сессии: приоритет у владельца, сохранённого при QR/ручном connect.
+   */
+  private async resolveCabinetIdForStoredSessionRestore(): Promise<string | null> {
+    const sessionOwner = (
+      await this.settings.get(TELEGRAM_USERBOT_SESSION_OWNER_USER_ID_KEY)
+    )?.trim();
+    if (sessionOwner) {
+      const owned = await this.prisma.cabinet.findFirst({
+        where: { ownerUserId: sessionOwner },
+        orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+        select: { id: true },
+      });
+      if (owned) {
+        return owned.id;
+      }
+      this.logger.warn(
+        `Userbot: в настройках указан владелец сессии (${sessionOwner}), но кабинет с таким ownerUserId не найден — fallback на дефолтный кабинет`,
+      );
+    }
+    return this.resolveCabinetIdForUserbotStartup();
   }
 
   private async resolveCabinetIdForUserbotStartup(): Promise<string | null> {

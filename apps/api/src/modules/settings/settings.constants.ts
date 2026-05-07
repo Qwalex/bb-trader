@@ -33,6 +33,10 @@ export const ENV_FALLBACK: Record<string, string> = {
   BYBIT_WS_MULTI_CABINET: 'auto',
 };
 
+/** Ключ глобальной настройки: `AuthUser.id` владельца, под которым сохранена `TELEGRAM_USERBOT_SESSION`. */
+export const TELEGRAM_USERBOT_SESSION_OWNER_USER_ID_KEY =
+  'TELEGRAM_USERBOT_SESSION_OWNER_USER_ID';
+
 export const GLOBAL_SHARED_SETTING_KEYS = new Set<string>([
   NAV_MENU_HIDDEN_SETTING_KEY,
   'OPENROUTER_API_KEY',
@@ -53,6 +57,7 @@ export const GLOBAL_SHARED_SETTING_KEYS = new Set<string>([
   'TELEGRAM_USERBOT_API_HASH',
   /** Сессия/прокси: глобальная `Setting` (см. AUD-058/060). Пароль 2FA не хранится — ввод при QR через API. */
   'TELEGRAM_USERBOT_SESSION',
+  TELEGRAM_USERBOT_SESSION_OWNER_USER_ID_KEY,
   'TELEGRAM_USERBOT_MTPROXY_URL',
   'OPENROUTER_DIAGNOSTIC_MODELS',
   /** Глобально: опрос статусов ордеров/позиций Bybit (см. `BybitPollService`). */

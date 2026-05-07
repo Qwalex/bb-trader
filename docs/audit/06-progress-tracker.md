@@ -950,3 +950,25 @@
 - Manual verification: `npm run build -w apps/api` (pass).
 - Docs updated: этот трекер, `AGENTS.md`, `.env.example`.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-077
+
+- Status: `done`
+- Scope: Userbot — после деплоя снова нужно было «подключать» сессию / иногда QR: восстановление шло только для дефолтного кабинета.
+- Files: `apps/api/src/modules/settings/settings.constants.ts`, `apps/api/src/modules/settings/settings.service.ts`, `apps/api/src/modules/telegram-userbot/client/telegram-userbot-client.service.ts`, `apps/api/src/modules/telegram-userbot/telegram-userbot.service.ts`, `AGENTS.md`, `docs/audit/06-progress-tracker.md`
+- Findings: MTProto-клиент кладётся в `clientsByUserId` под `cabinet.ownerUserId`; при старте `connectFromStoredSession` вызывался в контексте **дефолтного** кабинета, а не того, где пользователь прошёл QR — для «своего» кабинета в UI клиент оказывался «чужим».
+- Changes: глобальная настройка `TELEGRAM_USERBOT_SESSION_OWNER_USER_ID`; запись при успешном QR и `connectFromStoredSession`; `resolveCabinetIdForStoredSessionRestore()` для старта и watchdog; при очистке `TELEGRAM_USERBOT_SESSION` удаляется и привязка владельца.
+- Manual verification: `npm run build -w apps/api` (pass); один раз «Подключить из сессии» или QR после деплоя старой версии — записывает owner; следующие деплои восстанавливают нужный кабинет.
+- Docs updated: этот трекер, `AGENTS.md`.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-077
+
+- Status: `done`
+- Scope: Userbot — после деплоя снова нужно было «подключать» сессию / иногда QR: восстановление шло только для дефолтного кабинета.
+- Files: `apps/api/src/modules/settings/settings.constants.ts`, `apps/api/src/modules/settings/settings.service.ts`, `apps/api/src/modules/telegram-userbot/client/telegram-userbot-client.service.ts`, `apps/api/src/modules/telegram-userbot/telegram-userbot.service.ts`, `AGENTS.md`, `docs/audit/06-progress-tracker.md`
+- Findings: MTProto-клиент кладётся в `clientsByUserId` под `cabinet.ownerUserId`; при старте `connectFromStoredSession` вызывался в контексте **дефолтного** кабинета, а не того, где пользователь прошёл QR — для «своего» кабинета в UI клиент оказывался «чужим».
+- Changes: глобальная настройка `TELEGRAM_USERBOT_SESSION_OWNER_USER_ID`; запись при успешном QR и `connectFromStoredSession`; `resolveCabinetIdForStoredSessionRestore()` для старта и watchdog; при очистке `TELEGRAM_USERBOT_SESSION` удаляется и привязка владельца.
+- Manual verification: `npm run build -w apps/api` (pass); после деплоя — один раз нажать «Подключить из сессии» (или QR) чтобы записался owner — далее восстановление само попадёт в нужный кабинет.
+- Docs updated: этот трекер, `AGENTS.md`.
+- Linked risks (`SEC-###`): N/A

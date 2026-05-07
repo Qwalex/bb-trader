@@ -12,6 +12,9 @@ import {
 } from '../utils/telegram-userbot-qr-auth-error.util';
 import { CabinetContextService } from '../../cabinet/cabinet-context.service';
 import { SettingsService } from '../../settings/settings.service';
+import {
+  TELEGRAM_USERBOT_SESSION_OWNER_USER_ID_KEY,
+} from '../../settings/settings.constants';
 import type { QrState } from '../telegram-userbot.types';
 
 @Injectable()
@@ -168,6 +171,10 @@ export class TelegramUserbotClientService {
     }
     await this.attachClient(client);
     await this.settings.set('TELEGRAM_USERBOT_ENABLED', 'true');
+    await this.settings.set(
+      TELEGRAM_USERBOT_SESSION_OWNER_USER_ID_KEY,
+      currentOwnerUserId,
+    );
     return { ok: true, connected: true };
   }
 
@@ -305,6 +312,10 @@ export class TelegramUserbotClientService {
           qrClient.session as unknown as { save: () => string }
         ).save();
         await this.settings.set('TELEGRAM_USERBOT_SESSION', savedSession);
+        await this.settings.set(
+          TELEGRAM_USERBOT_SESSION_OWNER_USER_ID_KEY,
+          ownerUserId,
+        );
         await this.settings.set('TELEGRAM_USERBOT_ENABLED', 'true');
         await this.attachClient(qrClient);
         this.qrClientByUserId.delete(ownerUserId);

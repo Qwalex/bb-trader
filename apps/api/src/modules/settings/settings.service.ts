@@ -21,6 +21,7 @@ import {
   DASHBOARD_TODOS_MAX_TEXT_LEN,
   ENV_FALLBACK,
   GLOBAL_SHARED_SETTING_KEYS,
+  TELEGRAM_USERBOT_SESSION_OWNER_USER_ID_KEY,
 } from './settings.constants';
 
 /** JSON-массив заметок на дашборде: `{ id, text }[]` */
@@ -346,6 +347,14 @@ export class SettingsService {
       create: { key, value: normalized },
       update: { value: normalized },
     });
+    if (key === 'TELEGRAM_USERBOT_SESSION' && normalized.trim() === '') {
+      await this.prisma.setting
+        .delete({
+          where: { key: TELEGRAM_USERBOT_SESSION_OWNER_USER_ID_KEY },
+        })
+        .catch(() => undefined);
+      this.invalidateCacheForKey(TELEGRAM_USERBOT_SESSION_OWNER_USER_ID_KEY);
+    }
     this.invalidateCacheForKey(key);
   }
 
