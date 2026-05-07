@@ -22,7 +22,7 @@ import {
 } from '../transcript/transcript.service';
 import { BybitService } from '../bybit/bybit.service';
 import { OrdersService } from '../orders/orders.service';
-import { TelegramService } from '../telegram';
+import { TelegramService } from '../telegram/services/telegram.service';
 import { VkNotifyMirrorService } from '../vk/vk-notify-mirror.service';
 import { UserbotSignalHashService } from './userbot-signal-hash.service';
 import { parseSignalPriceArrayJson } from './userbot-signal-hash.util';
