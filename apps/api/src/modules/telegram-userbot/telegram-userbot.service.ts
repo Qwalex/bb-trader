@@ -106,6 +106,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     private readonly bybit: BybitService,
     private readonly orders: OrdersService,
     private readonly appLog: AppLogService,
+    @Inject(forwardRef(() => TelegramService))
     private readonly telegramBot: TelegramService,
     @Inject(forwardRef(() => VkNotifyMirrorService))
     private readonly vkNotifyMirror: VkNotifyMirrorService,
