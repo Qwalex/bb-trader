@@ -17,6 +17,7 @@ import type { BybitService } from '../bybit/bybit.service';
 import { SettingsService } from '../settings/settings.service';
 import { TelegramService } from '../telegram';
 import { UserbotSignalHashService } from '../telegram-userbot/userbot-signal-hash.service';
+import type { TelegramUserbotService } from '../telegram-userbot/telegram-userbot.service';
 
 import { formatError } from '../../common/format-error';
 import type {
@@ -63,6 +64,13 @@ export class OrdersService {
     private readonly settings: SettingsService,
     private readonly cabinets: CabinetService,
     private readonly cabinetContext: CabinetContextService,
+    @Inject(
+      forwardRef(() => {
+        // Lazy resolve: избегаем потенциальных циклов DI между userbot и orders.
+        return require('../telegram-userbot/telegram-userbot.service').TelegramUserbotService;
+      }),
+    )
+    private readonly userbot: TelegramUserbotService,
     @Inject(
       forwardRef(() => {
         // Lazy resolve: избегаем циклического require() bybit.service ↔ orders.service (Nest иначе видит undefined-провайдер).
@@ -816,8 +824,13 @@ export class OrdersService {
         startOfToday.setHours(0, 0, 0, 0);
         let totalBalanceUsd: number | null = null;
         let availableBalanceUsd: number | null = null;
-        const [userbotReadMessagesToday, userbotSignalsPlacedToday, enabledGroupsCount, required] =
-          await Promise.all([
+        const [
+          userbotReadMessagesToday,
+          userbotSignalsPlacedToday,
+          enabledGroupsCount,
+          userbotStatus,
+          required,
+        ] = await Promise.all([
           this.prisma.cabinetIngestRoute.count({
             where: { cabinetId: c.id, createdAt: { gte: startOfToday } },
           }),
@@ -827,8 +840,8 @@ export class OrdersService {
           this.prisma.cabinetTelegramSource.count({
             where: { cabinetId: c.id, enabled: true },
           }),
+          this.userbot.getStatus().catch(() => ({ connected: false } as { connected: boolean })),
           this.settings.getMany([
-            'TELEGRAM_USERBOT_SESSION',
             'BYBIT_API_KEY_MAINNET',
             'BYBIT_API_SECRET_MAINNET',
             'TELEGRAM_BOT_TOKEN',
@@ -836,7 +849,7 @@ export class OrdersService {
           ]),
         ]);
         const isFilled = (v: string | undefined) => String(v ?? '').trim().length > 0;
-        const userbotConnected = isFilled(required.TELEGRAM_USERBOT_SESSION);
+        const userbotConnected = Boolean(userbotStatus?.connected);
         const setupWarnings: string[] = [];
         if (!userbotConnected) {
           setupWarnings.push('Подключите Userbot (статус должен быть «подключен»).');

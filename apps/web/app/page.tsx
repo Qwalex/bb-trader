@@ -358,30 +358,6 @@ export default async function Home({
                       <span className="dashboardCabinetMetricValue">{c.openSignals ?? 0}</span>
                     </div>
                     <div>
-                      <span className="dashboardCabinetMetricLabel">Userbot: прочитано</span>
-                      <span className="dashboardCabinetMetricValue">
-                        {c.userbotReadMessagesToday ?? 0}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="dashboardCabinetMetricLabel">Userbot: установлено</span>
-                      <span className="dashboardCabinetMetricValue">
-                        {c.userbotSignalsPlacedToday ?? 0}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="dashboardCabinetMetricLabel">Userbot: статус</span>
-                      <span className="dashboardCabinetMetricValue">
-                        {c.userbotConnected ? 'подключен' : 'не подключен'}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="dashboardCabinetMetricLabel">Userbot: групп</span>
-                      <span className="dashboardCabinetMetricValue">
-                        {c.enabledGroupsCount ?? 0}
-                      </span>
-                    </div>
-                    <div>
                       <span className="dashboardCabinetMetricLabel">W / L</span>
                       <span className="dashboardCabinetMetricValue">
                         {c.wins} / {c.losses}
