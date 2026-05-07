@@ -74,6 +74,8 @@ import {
 export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TelegramUserbotService.name);
   private enabledChatIds = new Set<string>();
+  private restoreWatchdogTimer: NodeJS.Timeout | null = null;
+  private restoreWatchdogInFlight = false;
 
   private async getCurrentOwnerUserId(): Promise<string | null> {
     return this.userbotClient.getOwnerUserId();
@@ -130,12 +132,14 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     await this.tryRestoreUserbotOnStartup().catch((e) => {
       this.logger.warn(`Userbot startup restore failed: ${formatError(e)}`);
     });
+    this.startRestoreWatchdog();
     void this.startPollingLoop();
   }
 
   async onModuleDestroy(): Promise<void> {
     this.userbotPipeline.clearAllSignalLevelsValidationWatches();
     this.stopPollingLoop();
+    this.stopRestoreWatchdog();
     await this.userbotClient.disconnectAll();
   }
 
@@ -503,6 +507,57 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
   private stopPollingLoop() {
     this.polling.stopLoop();
+  }
+
+  /**
+   * После деплоя процесс новый, MTProto клиент в памяти пуст.
+   * Даже если restore при старте не успел/упал (сеть/Telegram), нужно догнать подключение позже.
+   */
+  private startRestoreWatchdog(): void {
+    if (this.restoreWatchdogTimer) return;
+    this.restoreWatchdogTimer = setInterval(() => {
+      if (this.restoreWatchdogInFlight) return;
+      this.restoreWatchdogInFlight = true;
+      void this.tryRestoreUserbotWatchdogTick()
+        .catch((e) => {
+          this.logger.debug(`Userbot restore watchdog tick failed: ${formatError(e)}`);
+        })
+        .finally(() => {
+          this.restoreWatchdogInFlight = false;
+        });
+    }, 30_000);
+  }
+
+  private stopRestoreWatchdog(): void {
+    if (!this.restoreWatchdogTimer) return;
+    clearInterval(this.restoreWatchdogTimer);
+    this.restoreWatchdogTimer = null;
+  }
+
+  private async tryRestoreUserbotWatchdogTick(): Promise<void> {
+    const [enabled, session] = await Promise.all([
+      this.getBoolSetting('TELEGRAM_USERBOT_ENABLED', false),
+      this.settings.get('TELEGRAM_USERBOT_SESSION'),
+    ]);
+    if (!enabled || !session?.trim()) {
+      return;
+    }
+    const cabinetId = await this.resolveCabinetIdForUserbotStartup();
+    if (!cabinetId) return;
+    await this.cabinetContext.runWithCabinet(cabinetId, async () => {
+      const sameUserClient = await this.isClientOwnedByCurrentUser();
+      const client = await this.getCurrentUserClient();
+      const connectedNow = sameUserClient && (await this.userbotClient.isClientAuthorized(client));
+      if (connectedNow) {
+        return;
+      }
+      const res = await this.userbotClient.connectFromStoredSession();
+      if (res.ok) {
+        this.logger.log('Userbot: подключение восстановлено watchdog после деплоя');
+      } else {
+        this.logger.warn(`Userbot: watchdog restore failed: ${res.error ?? 'unknown'}`);
+      }
+    });
   }
 
   private async getUserbotPollIntervalMs(): Promise<number> {
