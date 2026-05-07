@@ -928,3 +928,14 @@
 - Manual verification: `npm run build -w apps/api` (pass).
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-075
+
+- Status: `done`
+- Scope: Nest DI — падение старта API (Railway) из-за цикла модулей userbot ↔ orders ↔ telegram.
+- Files: `apps/api/src/modules/telegram-userbot/telegram-userbot.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: `UndefinedDependencyException` у `TelegramUserbotService`, параметр с индексом 8 (`TelegramService` как `?`): при циклическом `require` класс `TelegramService` оказывался `undefined` на этапе метаданных DI.
+- Changes: `@Inject(forwardRef(() => TelegramService))` для `telegramBot` в конструкторе (аналогично `OrdersService`).
+- Manual verification: `npm run build -w apps/api` (pass); после деплоя — успешный `start:railway` без `UndefinedDependencyException`.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
