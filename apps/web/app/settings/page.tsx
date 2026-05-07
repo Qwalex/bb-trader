@@ -12,6 +12,7 @@ import {
 
 import { EntrySizingControl } from '../components/EntrySizingControl';
 import { fetchApiResponse } from '../../lib/api';
+import { readActiveCabinetIdClient } from '../../lib/cabinet-client.util';
 import { parseStoredEntry, serializeEntry } from '../../lib/entry-sizing';
 import type { PendingChange, Row } from './settings.types';
 import {
@@ -36,6 +37,7 @@ import {
 } from './settings-page.util';
 
 export default function SettingsPage() {
+  type CabinetItem = { id: string; slug: string; name: string; isDefault: boolean };
   const searchParams = useSearchParams();
   const requestedScope = searchParams.get('scope') === 'account' ? 'account' : 'cabinet';
   const [savedRows, setSavedRows] = useState<Row[]>([]);
@@ -57,6 +59,7 @@ export default function SettingsPage() {
   const [newSource, setNewSource] = useState('');
   const [newExcludedSource, setNewExcludedSource] = useState('');
   const [newDiagnosticModel, setNewDiagnosticModel] = useState('');
+  const [activeCabinet, setActiveCabinet] = useState<CabinetItem | null>(null);
   const scope = !isAdmin && requestedScope === 'account' ? 'cabinet' : requestedScope;
 
   const apiFetchScoped = useCallback(
@@ -108,12 +111,33 @@ export default function SettingsPage() {
       const list = j.settings ?? [];
       setSavedRows(list);
       setDraftRows(list);
+      if (scope === 'cabinet') {
+        try {
+          const cabinetsRes = await apiFetchScoped('/cabinets');
+          if (cabinetsRes.ok) {
+            const cabinetsJson = (await cabinetsRes.json()) as { items?: CabinetItem[] };
+            const items = Array.isArray(cabinetsJson.items) ? cabinetsJson.items : [];
+            const fromQuery = searchParams.get('cabinetId')?.trim() ?? '';
+            const activeId = fromQuery || readActiveCabinetIdClient();
+            const active =
+              (activeId ? items.find((c) => c.id === activeId) : null) ??
+              items.find((c) => c.isDefault) ??
+              items[0] ??
+              null;
+            setActiveCabinet(active);
+          }
+        } catch {
+          setActiveCabinet(null);
+        }
+      } else {
+        setActiveCabinet(null);
+      }
     } catch {
       setMessage({ type: 'err', text: 'Не удалось загрузить настройки' });
     } finally {
       setLoading(false);
     }
-  }, [apiFetchScoped]);
+  }, [apiFetchScoped, scope, searchParams]);
 
   useEffect(() => {
     void (async () => {
@@ -864,6 +888,14 @@ export default function SettingsPage() {
       <h1 className="pageTitle">
         {scope === 'account' ? 'Настройки аккаунта (глобальные)' : 'Настройки кабинета'}
       </h1>
+      {scope === 'cabinet' && (
+        <p style={{ color: 'var(--muted)', marginBottom: '0.5rem' }}>
+          Активный кабинет:{' '}
+          <strong>
+            {activeCabinet ? `${activeCabinet.name} (${activeCabinet.slug})` : 'не определён'}
+          </strong>
+        </p>
+      )}
       <p style={{ color: 'var(--muted)', marginBottom: '1rem' }}>
         Значения хранятся в PostgreSQL на сервере API. Глобальные настройки работают как
         значения по умолчанию для всех кабинетов, а в режиме кабинета меняются только

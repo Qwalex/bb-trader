@@ -347,7 +347,7 @@ export default async function Home({
                     </div>
                     <div>
                       <span className="dashboardCabinetMetricLabel">Открыто</span>
-                      <span className="dashboardCabinetMetricValue">{c.openSignals}</span>
+                      <span className="dashboardCabinetMetricValue">{c.openSignals ?? 0}</span>
                     </div>
                     <div>
                       <span className="dashboardCabinetMetricLabel">W / L</span>
