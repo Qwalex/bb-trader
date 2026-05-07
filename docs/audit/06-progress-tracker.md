@@ -962,13 +962,13 @@
 - Docs updated: этот трекер, `AGENTS.md`.
 - Linked risks (`SEC-###`): N/A
 
-### AUD-077
+### AUD-078
 
 - Status: `done`
-- Scope: Userbot — после деплоя снова нужно было «подключать» сессию / иногда QR: восстановление шло только для дефолтного кабинета.
-- Files: `apps/api/src/modules/settings/settings.constants.ts`, `apps/api/src/modules/settings/settings.service.ts`, `apps/api/src/modules/telegram-userbot/client/telegram-userbot-client.service.ts`, `apps/api/src/modules/telegram-userbot/telegram-userbot.service.ts`, `AGENTS.md`, `docs/audit/06-progress-tracker.md`
-- Findings: MTProto-клиент кладётся в `clientsByUserId` под `cabinet.ownerUserId`; при старте `connectFromStoredSession` вызывался в контексте **дефолтного** кабинета, а не того, где пользователь прошёл QR — для «своего» кабинета в UI клиент оказывался «чужим».
-- Changes: глобальная настройка `TELEGRAM_USERBOT_SESSION_OWNER_USER_ID`; запись при успешном QR и `connectFromStoredSession`; `resolveCabinetIdForStoredSessionRestore()` для старта и watchdog; при очистке `TELEGRAM_USERBOT_SESSION` удаляется и привязка владельца.
-- Manual verification: `npm run build -w apps/api` (pass); после деплоя — один раз нажать «Подключить из сессии» (или QR) чтобы записался owner — далее восстановление само попадёт в нужный кабинет.
+- Scope: Userbot — одна MTProto-сессия на AuthUser для всех кабинетов; восстановление после деплоя без `runWithCabinet`.
+- Files: `apps/api/src/modules/telegram-userbot/client/telegram-userbot-client.service.ts`, `apps/api/src/modules/telegram-userbot/telegram-userbot.service.ts`, `AGENTS.md`, `docs/audit/06-progress-tracker.md`
+- Findings: старт/watchdog вызывали `connectFromStoredSession` в контексте **кабинета**, найденного по владельцу сессии; при отсутствии кабинета с `ownerUserId` или рассинхроне восстановление не поднимало клиент, UI показывал «отключено».
+- Changes: `connectFromStoredSession({ sessionOwnerUserId })` и `attachClient(client, ownerUserId)`; активный клиент в UI — если `cabinet.ownerUserId === TELEGRAM_USERBOT_SESSION_OWNER_USER_ID`; `resolveSessionOwnerUserIdForRestore()` (настройка + fallback при ровно одном `AuthUser`); удалены `resolveCabinetIdForStoredSessionRestore` / `CabinetService` из фасада; `onAfterUserbotAttach` подбирает кабинет владельца сессии только для autosync чатов.
+- Manual verification: `npm run build -w apps/api` (pass); деплой при `TELEGRAM_USERBOT_ENABLED` + непустая сессия + известный owner — MTProto поднимается без привязки к выбранному кабинету.
 - Docs updated: этот трекер, `AGENTS.md`.
 - Linked risks (`SEC-###`): N/A

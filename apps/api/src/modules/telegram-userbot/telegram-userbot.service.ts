@@ -14,7 +14,6 @@ import { formatError } from '../../common/format-error';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppLogService } from '../app-log/app-log.service';
 import { CabinetContextService } from '../cabinet/cabinet-context.service';
-import { CabinetService } from '../cabinet/cabinet.service';
 import { SettingsService } from '../settings/settings.service';
 import { TELEGRAM_USERBOT_SESSION_OWNER_USER_ID_KEY } from '../settings/settings.constants';
 /** До Bybit/Orders/Telegram: иначе orders → telegram раньше transcript. */
@@ -101,7 +100,6 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly settings: SettingsService,
-    private readonly cabinets: CabinetService,
     private readonly cabinetContext: CabinetContextService,
     private readonly transcript: TranscriptService,
     private readonly bybit: BybitService,
@@ -561,22 +559,21 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     if (!enabled || !session?.trim()) {
       return;
     }
-    const cabinetId = await this.resolveCabinetIdForStoredSessionRestore();
-    if (!cabinetId) return;
-    await this.cabinetContext.runWithCabinet(cabinetId, async () => {
-      const sameUserClient = await this.isClientOwnedByCurrentUser();
-      const client = await this.getCurrentUserClient();
-      const connectedNow = sameUserClient && (await this.userbotClient.isClientAuthorized(client));
-      if (connectedNow) {
-        return;
-      }
-      const res = await this.userbotClient.connectFromStoredSession();
-      if (res.ok) {
-        this.logger.log('Userbot: подключение восстановлено watchdog после деплоя');
-      } else {
-        this.logger.warn(`Userbot: watchdog restore failed: ${res.error ?? 'unknown'}`);
-      }
+    const ownerId = await this.resolveSessionOwnerUserIdForRestore();
+    if (!ownerId) return;
+    const client = this.userbotClient.getClientForOwnerUserId(ownerId);
+    const connectedNow = Boolean(client && (await this.userbotClient.isClientAuthorized(client)));
+    if (connectedNow) {
+      return;
+    }
+    const res = await this.userbotClient.connectFromStoredSession({
+      sessionOwnerUserId: ownerId,
     });
+    if (res.ok) {
+      this.logger.log('Userbot: подключение восстановлено watchdog после деплоя');
+    } else {
+      this.logger.warn(`Userbot: watchdog restore failed: ${res.error ?? 'unknown'}`);
+    }
   }
 
   private async getUserbotPollIntervalMs(): Promise<number> {
@@ -590,7 +587,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * После деплоя MTProto-клиент в памяти пуст; строка сессии в глобальных настройках остаётся.
-   * Восстанавливаем в контексте кабинета владельца сессии (`TELEGRAM_USERBOT_SESSION_OWNER_USER_ID`), иначе — дефолтный/первый кабинет с ownerUserId.
+   * Восстанавливаем по владельцу AuthUser (`TELEGRAM_USERBOT_SESSION_OWNER_USER_ID`), без привязки к выбранному кабинету.
+   * Если ключ владельца пуст и в БД ровно один AuthUser — используется он (и затем записывается в настройки).
    * Отключение: env `TELEGRAM_USERBOT_SKIP_STARTUP_RESTORE=true`.
    * Ограничение: одна глобальная `TELEGRAM_USERBOT_SESSION` на процесс; при нескольких репликах API возможны гонки и повторная авторизация.
    */
@@ -606,61 +604,43 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     if (!enabled || !session?.trim()) {
       return;
     }
-    const cabinetId = await this.resolveCabinetIdForStoredSessionRestore();
-    if (!cabinetId) {
+    const ownerId = await this.resolveSessionOwnerUserIdForRestore();
+    if (!ownerId) {
       this.logger.warn(
-        'Userbot: восстановление при старте пропущено — нет кабинета с ownerUserId (привяжите владельца к кабинету)',
+        'Userbot: восстановление при старте пропущено — неизвестен владелец сессии (войдите по QR или задайте TELEGRAM_USERBOT_SESSION_OWNER_USER_ID; при одном AuthUser в БД владелец подставится автоматически).',
       );
       return;
     }
-    await this.cabinetContext.runWithCabinet(cabinetId, async () => {
-      const res = await this.userbotClient.connectFromStoredSession();
-      if (res.ok) {
-        this.logger.log('Userbot: сессия восстановлена при старте API из сохранённой строки');
-      } else {
-        this.logger.warn(`Userbot: при старте не удалось восстановить сессию: ${res.error ?? 'unknown'}`);
-      }
+    const res = await this.userbotClient.connectFromStoredSession({
+      sessionOwnerUserId: ownerId,
     });
+    if (res.ok) {
+      this.logger.log('Userbot: сессия восстановлена при старте API из сохранённой строки');
+    } else {
+      this.logger.warn(`Userbot: при старте не удалось восстановить сессию: ${res.error ?? 'unknown'}`);
+    }
   }
 
   /**
-   * Кабинет для восстановления глобальной MTProto-сессии: приоритет у владельца, сохранённого при QR/ручном connect.
+   * AuthUser, для которого поднимается глобальная MTProto-сессия при старте/watchdog.
    */
-  private async resolveCabinetIdForStoredSessionRestore(): Promise<string | null> {
-    const sessionOwner = (
+  private async resolveSessionOwnerUserIdForRestore(): Promise<string | null> {
+    const fromSettings = (
       await this.settings.get(TELEGRAM_USERBOT_SESSION_OWNER_USER_ID_KEY)
     )?.trim();
-    if (sessionOwner) {
-      const owned = await this.prisma.cabinet.findFirst({
-        where: { ownerUserId: sessionOwner },
-        orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
-        select: { id: true },
-      });
-      if (owned) {
-        return owned.id;
-      }
-      this.logger.warn(
-        `Userbot: в настройках указан владелец сессии (${sessionOwner}), но кабинет с таким ownerUserId не найден — fallback на дефолтный кабинет`,
-      );
+    if (fromSettings) {
+      return fromSettings;
     }
-    return this.resolveCabinetIdForUserbotStartup();
-  }
-
-  private async resolveCabinetIdForUserbotStartup(): Promise<string | null> {
-    const defaultId = await this.cabinets.getDefaultCabinetId();
-    const primary = await this.prisma.cabinet.findUnique({
-      where: { id: defaultId },
-      select: { id: true, ownerUserId: true },
-    });
-    if (primary?.ownerUserId && String(primary.ownerUserId).trim()) {
-      return primary.id;
+    const n = await this.prisma.authUser.count();
+    if (n === 1) {
+      const u = await this.prisma.authUser.findFirst({ select: { id: true } });
+      const id = String(u?.id ?? '').trim();
+      return id || null;
     }
-    const fallback = await this.prisma.cabinet.findFirst({
-      where: { ownerUserId: { not: null } },
-      orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
-      select: { id: true },
-    });
-    return fallback?.id ?? null;
+    this.logger.debug(
+      'Userbot: владелец сессии не задан (TELEGRAM_USERBOT_SESSION_OWNER_USER_ID) и в БД не один AuthUser — восстановление без явного владельца пропущено',
+    );
+    return null;
   }
 
   async updateChat(
@@ -739,31 +719,47 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
    */
   private async onAfterUserbotAttach(): Promise<void> {
     await this.refreshEnabledChatsCache();
-    const cabinetId = this.cabinetContext.getCabinetId();
+    let cabinetId = this.cabinetContext.getCabinetId();
+    if (!cabinetId) {
+      const sessionOwner = (
+        await this.settings.get(TELEGRAM_USERBOT_SESSION_OWNER_USER_ID_KEY)
+      )?.trim();
+      if (sessionOwner) {
+        const cab = await this.prisma.cabinet.findFirst({
+          where: { ownerUserId: sessionOwner },
+          orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+          select: { id: true },
+        });
+        cabinetId = cab?.id ?? null;
+      }
+    }
     if (!cabinetId) {
       this.logger.warn(
-        'onAfterUserbotAttach: cabinetId не в контексте — автосинхронизация чатов пропущена',
+        'onAfterUserbotAttach: нет кабинета для автосинхронизации (контекст и кабинет владельца сессии)',
       );
       return;
     }
-    const chatsLinked = await this.prisma.tgUserbotChat.count({
-      where: { cabinetSources: { some: { cabinetId } } },
-    });
-    if (chatsLinked > 0) {
-      return;
-    }
-    try {
-      const r = await this.syncChats();
-      if (!r.ok) {
-        this.logger.warn(
-          `onAfterUserbotAttach: syncChats не выполнена (${r.error ?? 'unknown'}) — можно синхронизировать вручную.`,
-        );
-      } else {
-        this.logger.log(`onAfterUserbotAttach: первая синхронизация чатов, upserted=${r.upserted}`);
+    const sid = cabinetId;
+    await this.cabinetContext.runWithCabinet(sid, async () => {
+      const chatsLinked = await this.prisma.tgUserbotChat.count({
+        where: { cabinetSources: { some: { cabinetId: sid } } },
+      });
+      if (chatsLinked > 0) {
+        return;
       }
-    } catch (e) {
-      this.logger.warn(`onAfterUserbotAttach: syncChats исключение: ${formatError(e)}`);
-    }
+      try {
+        const r = await this.syncChats();
+        if (!r.ok) {
+          this.logger.warn(
+            `onAfterUserbotAttach: syncChats не выполнена (${r.error ?? 'unknown'}) — можно синхронизировать вручную.`,
+          );
+        } else {
+          this.logger.log(`onAfterUserbotAttach: первая синхронизация чатов, upserted=${r.upserted}`);
+        }
+      } catch (e) {
+        this.logger.warn(`onAfterUserbotAttach: syncChats исключение: ${formatError(e)}`);
+      }
+    });
   }
 
   private async refreshEnabledChatsCache() {

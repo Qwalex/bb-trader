@@ -67,16 +67,36 @@ export class TelegramUserbotClientService {
     return String(row?.ownerUserId ?? '').trim() || null;
   }
 
+  /**
+   * Userbot привязан к AuthUser (владелец MTProto-сессии), а не к кабинету.
+   * В UI «текущего» кабинета клиент виден, если owner кабинета совпадает с владельцем сохранённой сессии.
+   */
   async isClientOwnedByCurrentUser(): Promise<boolean> {
-    const currentOwnerUserId = await this.getOwnerUserId();
-    if (!currentOwnerUserId) return false;
-    return this.clientsByUserId.has(currentOwnerUserId);
+    const client = await this.getCurrentUserClient();
+    if (!client) return false;
+    return this.isClientAuthorized(client);
   }
 
   async getCurrentUserClient(): Promise<TelegramClient | null> {
-    const currentOwnerUserId = await this.getOwnerUserId();
-    if (!currentOwnerUserId) return null;
-    return this.clientsByUserId.get(currentOwnerUserId) ?? null;
+    const sessionOwner = (
+      await this.settings.get(TELEGRAM_USERBOT_SESSION_OWNER_USER_ID_KEY)
+    )?.trim() || null;
+    const cabinetOwner = await this.getOwnerUserId();
+
+    if (sessionOwner) {
+      if (cabinetOwner && cabinetOwner !== sessionOwner) {
+        return null;
+      }
+      return this.clientsByUserId.get(sessionOwner) ?? null;
+    }
+    if (!cabinetOwner) return null;
+    return this.clientsByUserId.get(cabinetOwner) ?? null;
+  }
+
+  getClientForOwnerUserId(userId: string): TelegramClient | null {
+    const id = String(userId ?? '').trim();
+    if (!id) return null;
+    return this.clientsByUserId.get(id) ?? null;
   }
 
   getQrStateForUser(userId: string | null): QrState {
@@ -137,12 +157,18 @@ export class TelegramUserbotClientService {
     yield* this.clientsByUserId.entries();
   }
 
-  async connectFromStoredSession(): Promise<
-    { ok: true; connected: true } | { ok: false; error: string }
-  > {
-    const currentOwnerUserId = await this.getOwnerUserId();
-    if (!currentOwnerUserId) {
-      return { ok: false, error: 'Пользователь не определен для кабинета' };
+  async connectFromStoredSession(opts?: {
+    sessionOwnerUserId?: string;
+  }): Promise<{ ok: true; connected: true } | { ok: false; error: string }> {
+    const fromOpt = opts?.sessionOwnerUserId?.trim();
+    const fromCabinet = await this.getOwnerUserId();
+    const ownerForAttach = fromOpt || fromCabinet;
+    if (!ownerForAttach) {
+      return {
+        ok: false,
+        error:
+          'Не удалось определить владельца сессии userbot. Войдите по QR из кабинета или задайте TELEGRAM_USERBOT_SESSION_OWNER_USER_ID.',
+      };
     }
     const creds = await this.getApiCreds();
     const clientOptions = await this.getTelegramClientOptions();
@@ -153,7 +179,7 @@ export class TelegramUserbotClientService {
         error: 'Сессия userbot не найдена. Запустите вход по QR.',
       };
     }
-    await this.stopQrClient(currentOwnerUserId);
+    await this.stopQrClient(ownerForAttach);
     const client = new TelegramClient(
       new StringSession(session),
       creds.apiId,
@@ -169,29 +195,39 @@ export class TelegramUserbotClientService {
         error: 'Сессия недействительна. Выполните повторный вход по QR.',
       };
     }
-    await this.attachClient(client);
+    await this.attachClient(client, ownerForAttach);
     await this.settings.set('TELEGRAM_USERBOT_ENABLED', 'true');
-    await this.settings.set(
-      TELEGRAM_USERBOT_SESSION_OWNER_USER_ID_KEY,
-      currentOwnerUserId,
-    );
+    await this.settings.set(TELEGRAM_USERBOT_SESSION_OWNER_USER_ID_KEY, ownerForAttach);
     return { ok: true, connected: true };
   }
 
   async disconnect(): Promise<{ ok: true; connected: false }> {
-    const currentOwnerUserId = await this.getOwnerUserId();
-    if (!currentOwnerUserId) {
+    const sessionOwner =
+      (await this.settings.get(TELEGRAM_USERBOT_SESSION_OWNER_USER_ID_KEY))?.trim() || null;
+    const cabinetOwner = await this.getOwnerUserId();
+    if (!cabinetOwner) {
       return { ok: true, connected: false };
     }
-    const client = this.clientsByUserId.get(currentOwnerUserId);
+    let ownerKey: string | null = null;
+    if (sessionOwner) {
+      if (sessionOwner !== cabinetOwner) {
+        return { ok: true, connected: false };
+      }
+      ownerKey = sessionOwner;
+    } else {
+      ownerKey = cabinetOwner;
+    }
+    const client = ownerKey ? this.clientsByUserId.get(ownerKey) : null;
     if (!client) {
       return { ok: true, connected: false };
     }
     try {
       await client.disconnect();
     } finally {
-      this.clientsByUserId.delete(currentOwnerUserId);
-      this.messageHandlerRegisteredByUserId.delete(currentOwnerUserId);
+      if (ownerKey) {
+        this.clientsByUserId.delete(ownerKey);
+        this.messageHandlerRegisteredByUserId.delete(ownerKey);
+      }
     }
     return { ok: true, connected: false };
   }
@@ -317,7 +353,7 @@ export class TelegramUserbotClientService {
           ownerUserId,
         );
         await this.settings.set('TELEGRAM_USERBOT_ENABLED', 'true');
-        await this.attachClient(qrClient);
+        await this.attachClient(qrClient, ownerUserId);
         this.qrClientByUserId.delete(ownerUserId);
         this.setQrStateForUser(ownerUserId, { phase: 'authorized' });
       } catch (e) {
@@ -398,22 +434,22 @@ export class TelegramUserbotClientService {
     }
   }
 
-  private async attachClient(client: TelegramClient): Promise<void> {
-    const ownerUserId = await this.getOwnerUserId();
-    if (!ownerUserId) {
-      throw new BadRequestException('Пользователь не определен для кабинета');
+  private async attachClient(client: TelegramClient, ownerUserId: string): Promise<void> {
+    const owner = String(ownerUserId ?? '').trim();
+    if (!owner) {
+      throw new BadRequestException('Пользователь не определен для userbot');
     }
-    const prev = this.clientsByUserId.get(ownerUserId);
+    const prev = this.clientsByUserId.get(owner);
     if (prev && prev !== client) {
       await prev.disconnect();
-      this.messageHandlerRegisteredByUserId.delete(ownerUserId);
+      this.messageHandlerRegisteredByUserId.delete(owner);
     }
-    this.clientsByUserId.set(ownerUserId, client);
-    if (!this.messageHandlerRegisteredByUserId.has(ownerUserId)) {
+    this.clientsByUserId.set(owner, client);
+    if (!this.messageHandlerRegisteredByUserId.has(owner)) {
       const handler = this.inboundHandler;
       if (handler) {
         client.addEventHandler(handler, new NewMessage({ incoming: true }));
-        this.messageHandlerRegisteredByUserId.add(ownerUserId);
+        this.messageHandlerRegisteredByUserId.add(owner);
       } else {
         this.logger.warn('TelegramUserbotClientService: inboundHandler не задан до addEventHandler');
       }
