@@ -28,7 +28,7 @@ import { UserbotSignalHashModule } from './userbot-signal-hash.module';
   imports: [
     SettingsModule,
     TranscriptModule,
-    BybitModule,
+    forwardRef(() => BybitModule),
     forwardRef(() => OrdersModule),
     AppLogModule,
     TelegramModule,
