@@ -27,6 +27,10 @@ export class TelegramBotRegistryService {
     this.bots.set(cabinetId, bot);
   }
 
+  removeCabinetBot(cabinetId: string): void {
+    this.bots.delete(cabinetId);
+  }
+
   get launchedCount(): number {
     return this.bots.size;
   }

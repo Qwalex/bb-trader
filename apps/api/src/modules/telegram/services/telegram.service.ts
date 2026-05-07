@@ -55,8 +55,10 @@ import type { ExternalConfirmationResult } from '../types/telegram.types';
 export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TelegramService.name);
   private botLaunchRetryTimer: NodeJS.Timeout | null = null;
+  private botSyncTimer: NodeJS.Timeout | null = null;
   private cleanupTimer: NodeJS.Timeout | null = null;
   private shuttingDown = false;
+  private readonly launchedBotTokensByCabinet = new Map<string, string>();
 
   constructor(
     private readonly settings: SettingsService,
@@ -90,31 +92,82 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async initializeBots(): Promise<void> {
+    const launched = await this.syncBotsWithCabinetTokens();
+    if (launched <= 0) {
+      this.logger.warn(
+        'No cabinet has TELEGRAM_BOT_TOKEN in cabinet settings — assistant bots are disabled',
+      );
+      return;
+    }
+    this.shuttingDown = false;
+    this.startBotSyncLoop();
+    this.startMemoryCleanupLoop();
+    await this.sendStartupGreeting();
+  }
+
+  private startBotSyncLoop(): void {
+    if (this.botSyncTimer) return;
+    this.botSyncTimer = setInterval(() => {
+      if (this.shuttingDown) {
+        return;
+      }
+      void this.syncBotsWithCabinetTokens().catch((e) => {
+        this.logger.warn(`Telegram bot sync failed: ${formatError(e)}`);
+      });
+    }, 30_000);
+  }
+
+  private async syncBotsWithCabinetTokens(): Promise<number> {
     const cabinets = await this.prisma.cabinet.findMany({
-      select: { id: true, name: true },
+      select: {
+        id: true,
+        name: true,
+        settings: {
+          where: { key: 'TELEGRAM_BOT_TOKEN' },
+          select: { value: true },
+          take: 1,
+        },
+      },
       orderBy: { createdAt: 'asc' },
     });
-    let launched = 0;
-    let primaryBot: Telegraf | null = null;
+    const desired = new Map<
+      string,
+      { token: string; name: string }
+    >();
     for (const cabinet of cabinets) {
-      const tokenRow = await this.prisma.cabinetSetting.findUnique({
-        where: {
-          cabinetId_key: { cabinetId: cabinet.id, key: 'TELEGRAM_BOT_TOKEN' },
-        },
-        select: { value: true },
-      });
-      const token = String(tokenRow?.value ?? '').trim();
-      if (!token) {
+      const token = String(cabinet.settings[0]?.value ?? '').trim();
+      if (!token) continue;
+      desired.set(cabinet.id, { token, name: cabinet.name });
+    }
+
+    for (const [cabinetId, existingBot] of this.botRegistry.entries()) {
+      const wanted = desired.get(cabinetId);
+      const launchedToken = this.launchedBotTokensByCabinet.get(cabinetId);
+      if (wanted && launchedToken === wanted.token) {
         continue;
       }
-      const bot = new Telegraf(token, {
+      try {
+        existingBot.stop('SIGTERM');
+      } catch {
+        // ignore
+      }
+      this.botRegistry.removeCabinetBot(cabinetId);
+      this.launchedBotTokensByCabinet.delete(cabinetId);
+      this.logger.log(`Telegram bot stopped for cabinet=${cabinetId}`);
+    }
+
+    for (const [cabinetId, cfg] of desired.entries()) {
+      if (this.launchedBotTokensByCabinet.get(cabinetId) === cfg.token) {
+        continue;
+      }
+      const bot = new Telegraf(cfg.token, {
         handlerTimeout: 180_000,
       });
       bot.catch((err, ctx) => {
         const msg = err instanceof Error ? err.message : String(err);
         const stack = err instanceof Error ? err.stack : undefined;
         this.logger.error(
-          `Telegraf unhandled error (cabinet=${cabinet.id}): ${msg} updateType=${ctx?.updateType ?? '?'}`,
+          `Telegraf unhandled error (cabinet=${cabinetId}): ${msg} updateType=${ctx?.updateType ?? '?'}`,
           stack,
         );
         void ctx
@@ -125,31 +178,22 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
             this.logger.warn(`Could not reply with error to user: ${String(e)}`),
           );
       });
-      this.registerHandlers(bot, cabinet.id);
+      this.registerHandlers(bot, cabinetId);
       try {
         await bot.launch();
-        this.botRegistry.addLaunchedBot(cabinet.id, bot);
-        if (!primaryBot) {
-          primaryBot = bot;
-        }
-        launched += 1;
-        this.logger.log(`Telegram bot started for cabinet=${cabinet.id} (${cabinet.name})`);
+        this.botRegistry.addLaunchedBot(cabinetId, bot);
+        this.launchedBotTokensByCabinet.set(cabinetId, cfg.token);
+        this.logger.log(`Telegram bot started for cabinet=${cabinetId} (${cfg.name})`);
       } catch (e) {
         this.logger.error(
-          `Telegram bot launch failed for cabinet=${cabinet.id}: ${formatError(e)}`,
+          `Telegram bot launch failed for cabinet=${cabinetId}: ${formatError(e)}`,
         );
       }
     }
-    if (launched === 0) {
-      this.logger.warn(
-        'No cabinet has TELEGRAM_BOT_TOKEN in cabinet settings — assistant bots are disabled',
-      );
-      return;
-    }
-    this.botRegistry.setPrimaryBot(primaryBot);
-    this.shuttingDown = false;
-    this.startMemoryCleanupLoop();
-    await this.sendStartupGreeting();
+
+    const first = this.botRegistry.values().next().value ?? null;
+    this.botRegistry.setPrimaryBot(first);
+    return this.botRegistry.launchedCount;
   }
 
   /** Уведомление пользователей из whitelist при старте (нужен хотя бы один /start от пользователя ранее). */
@@ -207,6 +251,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleDestroy(): Promise<void> {
     this.shuttingDown = true;
+    if (this.botSyncTimer) {
+      clearInterval(this.botSyncTimer);
+      this.botSyncTimer = null;
+    }
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer);
       this.cleanupTimer = null;
@@ -218,6 +266,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     for (const bot of this.botRegistry.values()) {
       bot.stop('SIGTERM');
     }
+    this.launchedBotTokensByCabinet.clear();
     this.botRegistry.clear();
   }
 
