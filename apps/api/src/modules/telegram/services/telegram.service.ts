@@ -180,10 +180,15 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       });
       this.registerHandlers(bot, cabinetId);
       try {
+        // На части токенов может быть активный webhook; без удаления Telegram блокирует getUpdates (long polling).
+        await bot.telegram.deleteWebhook({ drop_pending_updates: false });
         await bot.launch();
         this.botRegistry.addLaunchedBot(cabinetId, bot);
         this.launchedBotTokensByCabinet.set(cabinetId, cfg.token);
-        this.logger.log(`Telegram bot started for cabinet=${cabinetId} (${cfg.name})`);
+        const me = await bot.telegram.getMe().catch(() => null);
+        this.logger.log(
+          `Telegram bot started for cabinet=${cabinetId} (${cfg.name}) username=@${me?.username ?? '?'}`,
+        );
       } catch (e) {
         this.logger.error(
           `Telegram bot launch failed for cabinet=${cabinetId}: ${formatError(e)}`,

@@ -39,6 +39,8 @@ import {
 export default function SettingsPage() {
   type CabinetItem = { id: string; slug: string; name: string; isDefault: boolean };
   const searchParams = useSearchParams();
+  const cabinetIdFromQuery = searchParams.get('cabinetId')?.trim() ?? '';
+  const activeCabinetId = cabinetIdFromQuery || readActiveCabinetIdClient();
   const requestedScope = searchParams.get('scope') === 'account' ? 'account' : 'cabinet';
   const [savedRows, setSavedRows] = useState<Row[]>([]);
   const [draftRows, setDraftRows] = useState<Row[]>([]);
@@ -64,8 +66,8 @@ export default function SettingsPage() {
 
   const apiFetchScoped = useCallback(
     (path: string, init?: RequestInit) =>
-      fetchApiResponse(path, init, scope === 'account' ? '' : undefined),
-    [scope],
+      fetchApiResponse(path, init, scope === 'account' ? '' : activeCabinetId),
+    [scope, activeCabinetId],
   );
 
   const visibleKeys = useMemo(
@@ -117,8 +119,7 @@ export default function SettingsPage() {
           if (cabinetsRes.ok) {
             const cabinetsJson = (await cabinetsRes.json()) as { items?: CabinetItem[] };
             const items = Array.isArray(cabinetsJson.items) ? cabinetsJson.items : [];
-            const fromQuery = searchParams.get('cabinetId')?.trim() ?? '';
-            const activeId = fromQuery || readActiveCabinetIdClient();
+            const activeId = activeCabinetId;
             const active =
               (activeId ? items.find((c) => c.id === activeId) : null) ??
               items.find((c) => c.isDefault) ??
@@ -137,7 +138,7 @@ export default function SettingsPage() {
     } finally {
       setLoading(false);
     }
-  }, [apiFetchScoped, scope, searchParams]);
+  }, [apiFetchScoped, scope, activeCabinetId]);
 
   useEffect(() => {
     void (async () => {
