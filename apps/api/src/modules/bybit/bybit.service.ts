@@ -907,15 +907,23 @@ export class BybitService {
     const client = await this.getClient();
     if (client) {
       try {
-        const busy = await this.hasExchangeExposureForDirection(
+        const verdict = await this.getExchangeExposureVerdict(
           client,
           symbol,
           direction,
         );
-        if (busy) {
+        if (verdict === 'exposed') {
           return true;
         }
-        await this.clearImmediateStaleDbBlockerIfExchangeFlat(symbol, direction, client, 'duplicate-check');
+        if (verdict === 'unknown') {
+          return this.orders.hasActiveSignalForPairAndDirection(pair, direction);
+        }
+        await this.clearImmediateStaleDbBlockerIfExchangeFlat(
+          symbol,
+          direction,
+          client,
+          'duplicate-check',
+        );
         return false;
       } catch (e) {
         this.logger.warn(`wouldDuplicateActivePairDirection: ${formatError(e)}`);
@@ -1024,14 +1032,14 @@ export class BybitService {
   }
 
   /**
-   * Активность на бирже по символу в заданную сторону (long=Buy, short=Sell).
-   * Учитываются ненулевая позиция на этой стороне и открытые не-reduce-only ордера на этой стороне.
+   * Состояние стороны на Bybit по символу. Важно: при сбоях API — `unknown`, а не «пусто»,
+   * иначе ложно срабатывает reconcile ORDERS_PLACED (инцидент: ответы Forbidden / обрыв запросов).
    */
-  private async hasExchangeExposureForDirection(
+  private async getExchangeExposureVerdict(
     client: RestClientV5,
     symbol: string,
     direction: 'long' | 'short',
-  ): Promise<boolean> {
+  ): Promise<'exposed' | 'flat' | 'unknown'> {
     const MIN_POS = 1e-12;
     const wantBuy = direction === 'long';
 
@@ -1053,7 +1061,7 @@ export class BybitService {
             this.logger.debug(
               `getActiveOrders ${orderFilter} retCode=${ao.retCode} ${ao.retMsg}`,
             );
-            break;
+            return 'unknown';
           }
           const list = ao.result?.list ?? [];
           for (const o of list) {
@@ -1067,9 +1075,9 @@ export class BybitService {
             const isBuy = side === 'buy';
             if (wantBuy === isBuy) {
               this.logger.debug(
-                `hasExchangeExposureForDirection(${direction}): open order ${o.orderId} status=${o.orderStatus} filter=${orderFilter}`,
+                `getExchangeExposureVerdict(${direction}): open order ${o.orderId} status=${o.orderStatus} filter=${orderFilter}`,
               );
-              return true;
+              return 'exposed';
             }
           }
           cursor = ao.result?.nextPageCursor || undefined;
@@ -1078,6 +1086,7 @@ export class BybitService {
         this.logger.debug(
           `getActiveOrders ${orderFilter}: ${formatError(e)}`,
         );
+        return 'unknown';
       }
     }
 
@@ -1097,9 +1106,9 @@ export class BybitService {
           const isBuy = side === 'buy';
           if (wantBuy === isBuy) {
             this.logger.debug(
-              `hasExchangeExposureForDirection(${direction}): position idx=${row.positionIdx} size=${row.size}`,
+              `getExchangeExposureVerdict(${direction}): position idx=${row.positionIdx} size=${row.size}`,
             );
-            return true;
+            return 'exposed';
           }
         }
       } else {
@@ -1122,7 +1131,10 @@ export class BybitService {
           cursor,
         });
         if (pos.retCode !== 0) {
-          break;
+          this.logger.debug(
+            `getPositionInfo settleCoin scan retCode=${pos.retCode} ${pos.retMsg}`,
+          );
+          return 'unknown';
         }
         const rows = pos.result?.list ?? [];
         for (const row of rows) {
@@ -1137,18 +1149,33 @@ export class BybitService {
           const isBuy = side === 'buy';
           if (wantBuy === isBuy) {
             this.logger.debug(
-              `hasExchangeExposureForDirection(${direction}): USDT scan match ${row.symbol} size=${row.size}`,
+              `getExchangeExposureVerdict(${direction}): USDT scan match ${row.symbol} size=${row.size}`,
             );
-            return true;
+            return 'exposed';
           }
         }
         cursor = pos.result?.nextPageCursor || undefined;
       } while (cursor);
     } catch (e) {
       this.logger.debug(`getPositionInfo settleCoin scan: ${formatError(e)}`);
+      return 'unknown';
     }
 
-    return false;
+    return 'flat';
+  }
+
+  /**
+   * Активность на бирже по символу в заданную сторону (long=Buy, short=Sell).
+   * Учитываются ненулевая позиция на этой стороне и открытые не-reduce-only ордера на этой стороне.
+   * При неудаче API возвращает true (как «есть активность / нельзя считать плоским»), чтобы не снимать сигналы.
+   */
+  private async hasExchangeExposureForDirection(
+    client: RestClientV5,
+    symbol: string,
+    direction: 'long' | 'short',
+  ): Promise<boolean> {
+    const v = await this.getExchangeExposureVerdict(client, symbol, direction);
+    return v !== 'flat';
   }
 
   private async getExchangeActiveOrders(
