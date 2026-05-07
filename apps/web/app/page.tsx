@@ -346,6 +346,10 @@ export default async function Home({
                       <span className="dashboardCabinetMetricValue">{c.winrate.toFixed(1)}%</span>
                     </div>
                     <div>
+                      <span className="dashboardCabinetMetricLabel">Открыто</span>
+                      <span className="dashboardCabinetMetricValue">{c.openSignals}</span>
+                    </div>
+                    <div>
                       <span className="dashboardCabinetMetricLabel">W / L</span>
                       <span className="dashboardCabinetMetricValue">
                         {c.wins} / {c.losses}

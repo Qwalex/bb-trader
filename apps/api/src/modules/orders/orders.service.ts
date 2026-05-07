@@ -832,6 +832,7 @@ export class OrdersService {
           slug: c.slug,
           name: c.name,
           isDefault: c.isDefault,
+          openSignals: stats.openSignals,
           wins: stats.wins,
           losses: stats.losses,
           winrate: stats.winrate,

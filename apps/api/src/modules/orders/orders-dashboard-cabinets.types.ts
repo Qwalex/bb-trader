@@ -3,6 +3,7 @@ export type DashboardCabinetCardDto = {
   slug: string;
   name: string;
   isDefault: boolean;
+  openSignals: number;
   wins: number;
   losses: number;
   winrate: number;
