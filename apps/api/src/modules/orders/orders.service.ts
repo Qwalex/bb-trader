@@ -816,14 +816,46 @@ export class OrdersService {
         startOfToday.setHours(0, 0, 0, 0);
         let totalBalanceUsd: number | null = null;
         let availableBalanceUsd: number | null = null;
-        const [userbotReadMessagesToday, userbotSignalsPlacedToday] = await Promise.all([
+        const [userbotReadMessagesToday, userbotSignalsPlacedToday, enabledGroupsCount, required] =
+          await Promise.all([
           this.prisma.cabinetIngestRoute.count({
             where: { cabinetId: c.id, createdAt: { gte: startOfToday } },
           }),
           this.prisma.cabinetIngestRoute.count({
             where: { cabinetId: c.id, createdAt: { gte: startOfToday }, status: 'placed' },
           }),
+          this.prisma.cabinetTelegramSource.count({
+            where: { cabinetId: c.id, enabled: true },
+          }),
+          this.settings.getMany([
+            'TELEGRAM_USERBOT_SESSION',
+            'BYBIT_API_KEY_MAINNET',
+            'BYBIT_API_SECRET_MAINNET',
+            'TELEGRAM_BOT_TOKEN',
+            'TELEGRAM_WHITELIST',
+          ]),
         ]);
+        const isFilled = (v: string | undefined) => String(v ?? '').trim().length > 0;
+        const userbotConnected = isFilled(required.TELEGRAM_USERBOT_SESSION);
+        const setupWarnings: string[] = [];
+        if (!userbotConnected) {
+          setupWarnings.push('Подключите Userbot (статус должен быть «подключен»).');
+        }
+        if (enabledGroupsCount < 1) {
+          setupWarnings.push('В Userbot включите подписку минимум на 1 группу.');
+        }
+        if (!isFilled(required.BYBIT_API_KEY_MAINNET)) {
+          setupWarnings.push('Заполните: Bybit API key (основной / боевой).');
+        }
+        if (!isFilled(required.BYBIT_API_SECRET_MAINNET)) {
+          setupWarnings.push('Заполните: Bybit API secret (основной / боевой).');
+        }
+        if (!isFilled(required.TELEGRAM_BOT_TOKEN)) {
+          setupWarnings.push('Заполните: Telegram bot token.');
+        }
+        if (!isFilled(required.TELEGRAM_WHITELIST)) {
+          setupWarnings.push('Заполните: Telegram user IDs.');
+        }
         try {
           const bal = await this.bybit.getUnifiedUsdtBalanceDetails();
           if (bal && Number.isFinite(bal.totalUsd)) {
@@ -845,6 +877,9 @@ export class OrdersService {
           openSignals: stats.openSignals,
           userbotReadMessagesToday,
           userbotSignalsPlacedToday,
+          userbotConnected,
+          enabledGroupsCount,
+          setupWarnings,
           wins: stats.wins,
           losses: stats.losses,
           winrate: stats.winrate,

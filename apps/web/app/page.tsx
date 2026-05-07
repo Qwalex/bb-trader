@@ -340,6 +340,14 @@ export default async function Home({
                       <span className="dashboardCabinetBadge">по умолчанию</span>
                     ) : null}
                   </div>
+                  {Array.isArray(c.setupWarnings) && c.setupWarnings.length > 0 ? (
+                    <div className="dashboardCabinetWarning">
+                      <div className="dashboardCabinetWarningTitle">❗ Требуются действия</div>
+                      <div className="dashboardCabinetWarningList">
+                        {c.setupWarnings.join(' ')}
+                      </div>
+                    </div>
+                  ) : null}
                   <div className="dashboardCabinetCardMetrics">
                     <div>
                       <span className="dashboardCabinetMetricLabel">Winrate</span>
@@ -359,6 +367,18 @@ export default async function Home({
                       <span className="dashboardCabinetMetricLabel">Userbot: установлено</span>
                       <span className="dashboardCabinetMetricValue">
                         {c.userbotSignalsPlacedToday ?? 0}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="dashboardCabinetMetricLabel">Userbot: статус</span>
+                      <span className="dashboardCabinetMetricValue">
+                        {c.userbotConnected ? 'подключен' : 'не подключен'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="dashboardCabinetMetricLabel">Userbot: групп</span>
+                      <span className="dashboardCabinetMetricValue">
+                        {c.enabledGroupsCount ?? 0}
                       </span>
                     </div>
                     <div>

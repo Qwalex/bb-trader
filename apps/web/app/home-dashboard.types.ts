@@ -6,6 +6,9 @@ export type DashboardCabinetCard = {
   openSignals: number;
   userbotReadMessagesToday: number;
   userbotSignalsPlacedToday: number;
+  userbotConnected: boolean;
+  enabledGroupsCount: number;
+  setupWarnings: string[];
   wins: number;
   losses: number;
   winrate: number;

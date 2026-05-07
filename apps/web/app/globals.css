@@ -306,6 +306,27 @@ a:hover {
   font-family: ui-monospace, monospace;
 }
 
+.dashboardCabinetWarning {
+  margin-bottom: 0.6rem;
+  border: 1px solid #7f1d1d;
+  background: rgba(127, 29, 29, 0.18);
+  border-radius: 8px;
+  padding: 0.5rem 0.6rem;
+}
+
+.dashboardCabinetWarningTitle {
+  color: #fecaca;
+  font-size: 0.8rem;
+  font-weight: 700;
+  margin-bottom: 0.2rem;
+}
+
+.dashboardCabinetWarningList {
+  color: #fee2e2;
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
 .dashboardConnectedGroups {
   list-style: none;
   display: flex;
