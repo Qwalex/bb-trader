@@ -271,7 +271,7 @@ export class BybitSignalPlacementService {
       const minCapitalParsed =
         minCapitalRaw != null && minCapitalRaw.trim() !== '' ? parseFloat(minCapitalRaw) : Number.NaN;
       const minPercentNotionalUsd =
-        Number.isFinite(minCapitalParsed) && minCapitalParsed > 0 ? minCapitalParsed : 5;
+        Number.isFinite(minCapitalParsed) && minCapitalParsed > 0 ? minCapitalParsed : 6;
       let leveragedNotional: number;
       if (signal.orderUsd > 0) {
         leveragedNotional = signal.orderUsd;

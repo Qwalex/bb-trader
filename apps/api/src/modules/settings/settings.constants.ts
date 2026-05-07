@@ -8,10 +8,15 @@ export const ENV_FALLBACK: Record<string, string> = {
   APPLOG_ENABLED: 'true',
   /** Интервал enqueue poll sweep Bybit (мс). 0 — выключить опрос (только для отладки). */
   POLLING_INTERVAL_MS: '2000',
-  DEFAULT_ORDER_USD: '10',
+  MIN_CAPITAL_AMOUNT: '6',
+  DEFAULT_ORDER_USD: '6',
   BUMP_TO_MIN_EXCHANGE_LOT: 'false',
+  DEFAULT_LEVERAGE_ENABLED: 'true',
+  DEFAULT_LEVERAGE: '5',
+  LEVERAGE_RANGE_MODE: 'mid',
+  TP_SL_STEP_START: 'tp1',
   APPLOG_LOG_NOISY_EVENTS: 'false',
-  TP_SL_STEP_RANGE: '',
+  TP_SL_STEP_RANGE: '1',
   /** Минимальный интервал между REST-вызовами Bybit на один кабинет (мс). */
   BYBIT_ACCOUNT_REQUEST_INTERVAL_MS: '80',
   /**

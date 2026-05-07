@@ -490,8 +490,16 @@ export class SettingsService {
       }
       map.set(row.key, row.value);
     }
-    return Array.from(map.entries())
-      .map(([key, value]) => ({ key, value }))
+    const keysToResolve = Array.from(
+      new Set<string>([
+        ...map.keys(),
+        ...Object.keys(ENV_FALLBACK),
+      ]),
+    );
+    const effective = await this.getMany(keysToResolve);
+    return keysToResolve
+      .map((key) => ({ key, value: effective[key] }))
+      .filter((row): row is { key: string; value: string } => row.value !== undefined)
       .sort((a, b) => a.key.localeCompare(b.key, 'ru'));
   }
 
