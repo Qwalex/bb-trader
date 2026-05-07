@@ -916,3 +916,15 @@
 - Manual verification: `npm run build -w apps/api` (pass).
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-074
+
+- Status: `done`
+- Scope: Bybit — защита от ложного stale-reconcile при сбоях API (`Forbidden`/`retCode != 0`).
+- Files: `apps/api/src/modules/bybit/exposure/bybit-exposure.service.ts`, `apps/api/src/modules/bybit/bybit.service.ts`, `apps/api/scripts/restore-incident-stale-reconcile-2026-05-07.sql`, `docs/audit/06-progress-tracker.md`
+- Findings: проверка экспозиции возвращала `false` при частичных ошибках запросов к Bybit, из-за чего поллинг считал сторону «чистой» и снимал `ORDERS_PLACED`, хотя ордера/позиции на бирже оставались.
+- Changes: добавлен вердикт экспозиции `exposed|flat|unknown`; при `unknown` сторона считается небезопасной для reconcile; в duplicate-check при `unknown` используется fallback на БД; добавлен SQL-скрипт восстановления ошибочно закрытых сигналов в окне инцидента.
+- Decomposition notes (`utils/constants/hooks/types`): логика вынесена в существующий `exposure`-сервис без расширения фасада бизнес-операциями.
+- Manual verification: `npm run build -w apps/api` (pass).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

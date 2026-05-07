@@ -169,13 +169,16 @@ export class BybitService implements OnModuleInit {
     const client = await this.balanceInstrument.getClient();
     if (client) {
       try {
-        const busy = await this.bybitExposure.hasExchangeExposureForDirection(
+        const verdict = await this.bybitExposure.getExchangeExposureVerdict(
           client,
           symbol,
           direction,
         );
-        if (busy) {
+        if (verdict === 'exposed') {
           return true;
+        }
+        if (verdict === 'unknown') {
+          return this.orders.hasActiveSignalForPairAndDirection(pair, direction);
         }
         await this.clearImmediateStaleDbBlockerIfExchangeFlat(symbol, direction, client, 'duplicate-check');
         return false;
