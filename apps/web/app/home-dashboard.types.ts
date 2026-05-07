@@ -4,6 +4,8 @@ export type DashboardCabinetCard = {
   name: string;
   isDefault: boolean;
   openSignals: number;
+  userbotReadMessagesToday: number;
+  userbotSignalsPlacedToday: number;
   wins: number;
   losses: number;
   winrate: number;

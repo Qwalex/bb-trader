@@ -812,8 +812,18 @@ export class OrdersService {
     for (const c of cabinets) {
       const row = await this.cabinetContext.runWithCabinet(c.id, async () => {
         const stats = await this.getDashboardStats();
+        const startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
         let totalBalanceUsd: number | null = null;
         let availableBalanceUsd: number | null = null;
+        const [userbotReadMessagesToday, userbotSignalsPlacedToday] = await Promise.all([
+          this.prisma.cabinetIngestRoute.count({
+            where: { cabinetId: c.id, createdAt: { gte: startOfToday } },
+          }),
+          this.prisma.cabinetIngestRoute.count({
+            where: { cabinetId: c.id, createdAt: { gte: startOfToday }, status: 'placed' },
+          }),
+        ]);
         try {
           const bal = await this.bybit.getUnifiedUsdtBalanceDetails();
           if (bal && Number.isFinite(bal.totalUsd)) {
@@ -833,6 +843,8 @@ export class OrdersService {
           name: c.name,
           isDefault: c.isDefault,
           openSignals: stats.openSignals,
+          userbotReadMessagesToday,
+          userbotSignalsPlacedToday,
           wins: stats.wins,
           losses: stats.losses,
           winrate: stats.winrate,
