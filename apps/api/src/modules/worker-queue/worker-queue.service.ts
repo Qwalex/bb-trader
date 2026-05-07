@@ -251,11 +251,12 @@ export class WorkerQueueService implements OnModuleInit {
           status: 'pending',
           runAfter: { lte: new Date() },
         },
-        orderBy: [{ runAfter: 'asc' }, { createdAt: 'asc' }],
-        select: { createdAt: true, jobKey: true },
+        orderBy: [{ runAfter: 'asc' }, { updatedAt: 'asc' }],
+        select: { updatedAt: true, jobKey: true },
       });
       if (!oldest) return;
-      const ageMs = Date.now() - oldest.createdAt.getTime();
+      // `createdAt` у upsert по jobKey не меняется — для pending возраст берём от updatedAt.
+      const ageMs = Date.now() - oldest.updatedAt.getTime();
       if (ageMs > 15_000) {
         this.logger.warn(
           `worker_queue reconcile backlog oldestPendingAgeMs=${ageMs} jobKey=${oldest.jobKey}`,

@@ -939,3 +939,14 @@
 - Manual verification: `npm run build -w apps/api` (pass); после деплоя — успешный `start:railway` без `UndefinedDependencyException`.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-076
+
+- Status: `done`
+- Scope: Railway / прод-шум в логах: reconcile backlog, таймаут Telegraf, CHANNEL_INVALID при userbot sync.
+- Files: `apps/api/src/modules/worker-queue/worker-queue.service.ts`, `apps/api/src/modules/telegram/services/telegram.service.ts`, `apps/api/src/modules/telegram-userbot/telegram-userbot.service.ts`, `.env.example`, `AGENTS.md`, `docs/audit/06-progress-tracker.md`
+- Findings: возраст pending в `WorkerQueueService` считали от `createdAt`; при upsert по `jobKey` поле не обновлялось → ложные «14 дней» backlog. Таймаут запуска бота 20s часто не хватал. `getDialogs` без catch давал сырой поток RPC при `CHANNEL_INVALID`.
+- Changes: backlog по `updatedAt`; `TELEGRAM_BOT_LAUNCH_TIMEOUT_MS` (дефолт 60s, 5s–180s); обработка `getDialogs` + сообщение про недоступные каналы.
+- Manual verification: `npm run build -w apps/api` (pass).
+- Docs updated: этот трекер, `AGENTS.md`, `.env.example`.
+- Linked risks (`SEC-###`): N/A

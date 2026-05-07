@@ -203,12 +203,19 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private telegramLaunchTimeoutMs(): number {
+    const raw = process.env.TELEGRAM_BOT_LAUNCH_TIMEOUT_MS?.trim();
+    const n = raw ? Number.parseInt(raw, 10) : NaN;
+    if (!Number.isFinite(n)) return 60_000;
+    return Math.min(180_000, Math.max(5_000, n));
+  }
+
   private async launchCabinetBotWithTimeout(
     bot: Telegraf,
     cabinetId: string,
     cfg: { token: string; name: string },
   ): Promise<void> {
-    const timeoutMs = 20_000;
+    const timeoutMs = this.telegramLaunchTimeoutMs();
     let timeoutHandle: NodeJS.Timeout | null = null;
     try {
       const timeout = new Promise<never>((_, reject) => {

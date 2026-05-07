@@ -264,9 +264,26 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     if (!client || !(await this.isClientAuthorized(client))) {
       return { ok: false, error: 'Userbot не подключен.' };
     }
-    const dialogs = (await client.getDialogs({
-      limit: 1000,
-    })) as unknown as Array<Record<string, unknown>>;
+    let dialogs: Array<Record<string, unknown>>;
+    try {
+      dialogs = (await client.getDialogs({
+        limit: 1000,
+      })) as unknown as Array<Record<string, unknown>>;
+    } catch (e) {
+      const msg = formatError(e);
+      this.logger.warn(`Userbot syncChats: getDialogs failed: ${msg}`);
+      if (/CHANNEL_INVALID/i.test(msg)) {
+        return {
+          ok: false,
+          error:
+            'Telegram вернул CHANNEL_INVALID при загрузке диалогов: в аккаунте есть ссылка на недоступный канал/чат. Уберите такие источники в настройках или отключите лишние чаты; при необходимости переподключите userbot.',
+        };
+      }
+      return {
+        ok: false,
+        error: `Не удалось загрузить список чатов: ${msg}`,
+      };
+    }
     let upserted = 0;
 
     for (const d of dialogs) {
