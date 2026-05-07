@@ -58,6 +58,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private botSyncTimer: NodeJS.Timeout | null = null;
   private cleanupTimer: NodeJS.Timeout | null = null;
   private shuttingDown = false;
+  private botSyncInFlight = false;
   private readonly launchedBotTokensByCabinet = new Map<string, string>();
 
   constructor(
@@ -92,6 +93,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async initializeBots(): Promise<void> {
+    this.shuttingDown = false;
+    this.startBotSyncLoop();
+    this.startMemoryCleanupLoop();
     const launched = await this.syncBotsWithCabinetTokens();
     if (launched <= 0) {
       this.logger.warn(
@@ -99,9 +103,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       );
       return;
     }
-    this.shuttingDown = false;
-    this.startBotSyncLoop();
-    this.startMemoryCleanupLoop();
     await this.sendStartupGreeting();
   }
 
@@ -118,6 +119,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async syncBotsWithCabinetTokens(): Promise<number> {
+    if (this.botSyncInFlight) {
+      this.logger.debug('Telegram bot sync skipped: previous sync still running');
+      return this.botRegistry.launchedCount;
+    }
+    this.botSyncInFlight = true;
+    try {
     const cabinets = await this.prisma.cabinet.findMany({
       select: {
         id: true,
@@ -180,15 +187,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       });
       this.registerHandlers(bot, cabinetId);
       try {
-        // На части токенов может быть активный webhook; без удаления Telegram блокирует getUpdates (long polling).
-        await bot.telegram.deleteWebhook({ drop_pending_updates: false });
-        await bot.launch();
-        this.botRegistry.addLaunchedBot(cabinetId, bot);
-        this.launchedBotTokensByCabinet.set(cabinetId, cfg.token);
-        const me = await bot.telegram.getMe().catch(() => null);
-        this.logger.log(
-          `Telegram bot started for cabinet=${cabinetId} (${cfg.name}) username=@${me?.username ?? '?'}`,
-        );
+        await this.launchCabinetBotWithTimeout(bot, cabinetId, cfg);
       } catch (e) {
         this.logger.error(
           `Telegram bot launch failed for cabinet=${cabinetId}: ${formatError(e)}`,
@@ -199,6 +198,48 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const first = this.botRegistry.values().next().value ?? null;
     this.botRegistry.setPrimaryBot(first);
     return this.botRegistry.launchedCount;
+    } finally {
+      this.botSyncInFlight = false;
+    }
+  }
+
+  private async launchCabinetBotWithTimeout(
+    bot: Telegraf,
+    cabinetId: string,
+    cfg: { token: string; name: string },
+  ): Promise<void> {
+    const timeoutMs = 20_000;
+    let timeoutHandle: NodeJS.Timeout | null = null;
+    try {
+      const timeout = new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          reject(
+            new Error(
+              `Telegram launch timeout after ${timeoutMs}ms (cabinet=${cabinetId})`,
+            ),
+          );
+        }, timeoutMs);
+      });
+
+      await Promise.race([
+        (async () => {
+          // На части токенов может быть активный webhook; без удаления Telegram блокирует getUpdates (long polling).
+          await bot.telegram.deleteWebhook({ drop_pending_updates: false });
+          await bot.launch();
+          this.botRegistry.addLaunchedBot(cabinetId, bot);
+          this.launchedBotTokensByCabinet.set(cabinetId, cfg.token);
+          const me = await bot.telegram.getMe().catch(() => null);
+          this.logger.log(
+            `Telegram bot started for cabinet=${cabinetId} (${cfg.name}) username=@${me?.username ?? '?'}`,
+          );
+        })(),
+        timeout,
+      ]);
+    } finally {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
+    }
   }
 
   /** Уведомление пользователей из whitelist при старте (нужен хотя бы один /start от пользователя ранее). */
