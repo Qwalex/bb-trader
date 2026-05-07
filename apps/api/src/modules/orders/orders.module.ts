@@ -3,6 +3,7 @@ import { forwardRef, Module } from '@nestjs/common';
 import { BybitModule } from '../bybit/bybit.module';
 import { SettingsModule } from '../settings/settings.module';
 import { TelegramModule } from '../telegram';
+import { TelegramUserbotModule } from '../telegram-userbot/telegram-userbot.module';
 import { UserbotSignalHashModule } from '../telegram-userbot/userbot-signal-hash.module';
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
@@ -12,6 +13,7 @@ import { OrdersService } from './orders.service';
     SettingsModule,
     forwardRef(() => BybitModule),
     forwardRef(() => TelegramModule),
+    forwardRef(() => TelegramUserbotModule),
     UserbotSignalHashModule,
   ],
   controllers: [OrdersController],

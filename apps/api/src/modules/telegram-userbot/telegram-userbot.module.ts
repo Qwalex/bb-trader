@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 
 import { AppLogModule } from '../app-log/app-log.module';
 import { BybitModule } from '../bybit/bybit.module';
@@ -29,7 +29,7 @@ import { UserbotSignalHashModule } from './userbot-signal-hash.module';
     SettingsModule,
     TranscriptModule,
     BybitModule,
-    OrdersModule,
+    forwardRef(() => OrdersModule),
     AppLogModule,
     TelegramModule,
     VkModule,
