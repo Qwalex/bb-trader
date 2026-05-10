@@ -56,3 +56,41 @@
 - Для крупного аудита вести работу малыми карточками `AUD-###`: одновременно только одна `in_progress`, остальные `todo/blocked/done`, и обязательно фиксировать ручную проверку.
 - Стандарт декомпозиции: утилиты, константы, хуки, типы, мапперы и адаптеры выносить в отдельные файлы (предпочтительно 1 сущность = 1 файл), но без искусственного дробления.
 - Политика деплоя: Railway-only. VPS restart-скрипты и VPS-specific GitHub workflows не поддерживаются в этом репозитории.
+
+## Cursor Cloud specific instructions
+
+### Сервисы и запуск
+
+- **PostgreSQL:** требуется Docker. Запуск: `sudo dockerd &>/tmp/dockerd.log &` (если демон не запущен), затем `sudo docker run -d --name signals-postgres -e POSTGRES_USER=signals -e POSTGRES_PASSWORD=signals -e POSTGRES_DB=signals -p 5432:5432 postgres:16-alpine`. Docker в Cloud Agent VM — nested Docker-in-Docker, нужен fuse-overlayfs и iptables-legacy (см. инструкции ниже).
+- **API (NestJS):** `npm run dev -w api` — порт 3001, healthcheck `GET /health` → `{"status":"ok"}`. Swagger: `http://localhost:3001/docs`.
+- **Web (Next.js 16):** `npm run dev -w web` — порт 3000, healthcheck `GET /health` → 200.
+- **Lint:** `npm run lint` (turbo, все workspace'ы). Только warnings, 0 errors.
+- **Build:** `npm run build` (turbo, вся сборка).
+
+### Env для локальной разработки
+
+- `cp .env.example .env && cp .env apps/api/.env` — базовый набор переменных с dev-дефолтами (PostgreSQL `signals:signals@localhost:5432/signals`).
+- `AUTH_ALLOW_PUBLIC_REGISTER=true` — для создания пользователя через `POST /auth/register`.
+- `API_INTERNAL_URL=http://localhost:3001` в `.env` обязательна при локальном запуске (без Docker), иначе Next.js SSR пойдёт на `http://api:3001` (Docker-hostname).
+
+### Миграции БД
+
+- `cd apps/api && npx prisma migrate deploy` — применение миграций (idempotent).
+- `cd apps/api && npx prisma generate` — генерация Prisma Client (включена в update script).
+
+### Docker-in-Docker (Cloud Agent VM)
+
+Если dockerd не запущен, инициализация:
+1. Установка: `sudo apt-get update && sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin fuse-overlayfs iptables`
+2. Конфиг: `sudo mkdir -p /etc/docker && echo '{"storage-driver":"fuse-overlayfs"}' | sudo tee /etc/docker/daemon.json`
+3. iptables legacy: `sudo update-alternatives --set iptables /usr/sbin/iptables-legacy && sudo update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy`
+4. Запуск: `sudo dockerd &>/tmp/dockerd.log &`
+
+### Auth (hello-world)
+
+- Регистрация: `POST /auth/register` с `{"login":"admin","password":"TestPass123!"}` (поле `login`, не `username`).
+- Логин: `POST /auth/login` — возвращает `accessToken` (JWT Bearer).
+
+### Порядок сборки shared-пакетов
+
+`@repo/shared` → `@repo/api` → далее `api` и `web`. Update script уже включает `npm run build -w @repo/shared` и `npm run build -w @repo/api`.
