@@ -5264,21 +5264,52 @@ export class BybitService {
       try {
         await this.ensureStopLossForMultiTpOpenPosition(client, fresh);
       } catch (e) {
-        this.logger.warn(
-          `ensureStopLossForMultiTpOpenPosition: ${formatError(e)}`,
+        const errText = formatError(e);
+        this.logger.warn(`ensureStopLossForMultiTpOpenPosition: ${errText}`);
+        void this.appLog.append(
+          'warn',
+          'bybit',
+          'poll: ensureStopLossForMultiTpOpenPosition — ошибка',
+          {
+            signalId: fresh.id,
+            pair: normalizeTradingPair(fresh.pair),
+            error: errText,
+          },
         );
       }
 
       try {
         await this.placeTpSplitIfNeeded(client, fresh);
       } catch (e) {
-        this.logger.warn(`placeTpSplitIfNeeded: ${formatError(e)}`);
+        const errText = formatError(e);
+        this.logger.warn(`placeTpSplitIfNeeded: ${errText}`);
+        void this.appLog.append(
+          'warn',
+          'bybit',
+          'poll: placeTpSplitIfNeeded — ошибка',
+          {
+            signalId: fresh.id,
+            pair: normalizeTradingPair(fresh.pair),
+            error: errText,
+          },
+        );
       }
 
       try {
         await this.stepStopLossIfTpFilled(client, fresh);
       } catch (e) {
-        this.logger.warn(`stepStopLossIfTpFilled: ${formatError(e)}`);
+        const errText = formatError(e);
+        this.logger.warn(`stepStopLossIfTpFilled: ${errText}`);
+        void this.appLog.append(
+          'warn',
+          'bybit',
+          'poll: stepStopLossIfTpFilled — ошибка',
+          {
+            signalId: fresh.id,
+            pair: normalizeTradingPair(fresh.pair),
+            error: errText,
+          },
+        );
       }
 
       try {
