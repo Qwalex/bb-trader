@@ -9,6 +9,7 @@ import {
 } from '@nestjs/swagger';
 
 import { BalanceSnapshotService } from './balance-snapshot.service';
+import { BybitLiveSnapshotCacheService } from './bybit-live-snapshot-cache.service';
 import { BybitService } from './bybit.service';
 
 @ApiTags('Bybit')
@@ -17,13 +18,14 @@ export class BybitController {
   constructor(
     private readonly bybit: BybitService,
     private readonly balanceSnapshots: BalanceSnapshotService,
+    private readonly liveSnapshotCache: BybitLiveSnapshotCacheService,
   ) {}
 
   @ApiOperation({ summary: 'Live-снимок экспозиции и ордеров Bybit' })
   @ApiOkResponse({ description: 'Снимок получен' })
   @Get('live')
   async live() {
-    return this.bybit.getLiveExposureSnapshot();
+    return this.liveSnapshotCache.getLiveExposure();
   }
 
   /** Дневные снимки суммарного USDT в SQLite (cron), без запросов к Bybit. Дашборд: график. */
@@ -62,7 +64,9 @@ export class BybitController {
     @Param('signalId') signalId: string,
     @Body() _body?: Record<string, unknown>,
   ) {
-    return this.bybit.closeSignalManually(signalId);
+    const result = await this.bybit.closeSignalManually(signalId);
+    this.liveSnapshotCache.invalidate();
+    return result;
   }
 
   @ApiOperation({ summary: 'Пересчёт closed PnL (sync/async)' })

@@ -50,6 +50,12 @@ type LiveExposureItem = {
 type LiveExposureRes = {
   bybitConnected: boolean;
   items: LiveExposureItem[];
+  liveCache?: {
+    fetchedAt: string;
+    ageMs: number;
+    refreshIntervalMs: number;
+    servedFromCache: boolean;
+  };
 };
 
 export function LiveExposurePanel() {
@@ -64,8 +70,11 @@ export function LiveExposurePanel() {
 
   const apiBase = useMemo(() => getApiBase(), []);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent === true;
+    if (!silent) {
+      setLoading(true);
+    }
     setError(null);
     try {
       const res = await fetch(`${apiBase}/bybit/live`, { cache: 'no-store' });
@@ -77,7 +86,9 @@ export function LiveExposurePanel() {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Ошибка загрузки');
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, [apiBase]);
 
@@ -142,8 +153,11 @@ export function LiveExposurePanel() {
     [apiBase],
   );
 
+  /** Сразу и далее раз в секунду без спиннера; к Bybit на сервере — по BYBIT_LIVE_REFRESH_MS */
   useEffect(() => {
     void load();
+    const id = window.setInterval(() => void load({ silent: true }), 1_000);
+    return () => window.clearInterval(id);
   }, [load]);
 
   const toggleExpanded = useCallback((signalId: string) => {
@@ -189,6 +203,15 @@ export function LiveExposurePanel() {
       {lastMsg && (
         <p className="msg ok" style={{ marginBottom: '0.75rem' }}>
           {lastMsg}
+        </p>
+      )}
+      {data?.liveCache && (
+        <p style={{ color: 'var(--muted)', fontSize: '0.85rem', marginBottom: '0.5rem' }}>
+          Снимок с биржи: {Math.round(data.liveCache.ageMs / 100) / 10} с назад
+          {data.liveCache.servedFromCache ? ' · из кэша' : ''}
+          {data.liveCache.refreshIntervalMs > 0
+            ? ` · обновление с API Bybit не чаще ${data.liveCache.refreshIntervalMs / 1000} с`
+            : ' · кэш отключён (каждый запрос к Bybit)'}
         </p>
       )}
       {data && !data.bybitConnected && (

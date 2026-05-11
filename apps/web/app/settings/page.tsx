@@ -165,6 +165,11 @@ const KEYS = [
   { key: 'TELEGRAM_WHITELIST', label: 'Telegram user IDs (через запятую)' },
   { key: 'POLLING_INTERVAL_MS', label: 'Polling (0 = отключить опрос Bybit)' },
   {
+    key: 'BYBIT_LIVE_REFRESH_MS',
+    label:
+      'Интервал обновления снимка GET /bybit/live с биржи (мс). UI может опрашивать каждую секунду — к Bybit пойдёт не чаще этого значения. 0 = без кэша (каждый запрос к бирже). Рекомендуется ≥3000',
+  },
+  {
     key: 'TP_SL_STEP_START',
     label:
       'Подтягивание SL после TP: с какого уровня начинать лестницу (off / tp1–tp5). Устаревший TP_SL_STEP_ENABLED=true в БД эквивалентен tp2, пока не задана эта строка',
@@ -271,6 +276,7 @@ const SETTINGS_SECTIONS: { id: string; title: string; keys: string[] }[] = [
       'MAX_ALLOWED_LEVERAGE',
       'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',
       'POLLING_INTERVAL_MS',
+      'BYBIT_LIVE_REFRESH_MS',
       'TP_SL_STEP_START',
       'TP_SL_STEP_RANGE',
     ],

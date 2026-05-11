@@ -8,6 +8,7 @@ import { TelegramModule } from '../telegram/telegram.module';
 import { VkModule } from '../vk/vk.module';
 import { BalanceSnapshotService } from './balance-snapshot.service';
 import { BybitController } from './bybit.controller';
+import { BybitLiveSnapshotCacheService } from './bybit-live-snapshot-cache.service';
 import { BybitPollService } from './bybit-poll.service';
 import { BybitService } from './bybit.service';
 
@@ -21,7 +22,12 @@ import { BybitService } from './bybit.service';
     AppLogModule,
   ],
   controllers: [BybitController],
-  providers: [BybitService, BybitPollService, BalanceSnapshotService],
-  exports: [BybitService, BalanceSnapshotService],
+  providers: [
+    BybitService,
+    BybitPollService,
+    BybitLiveSnapshotCacheService,
+    BalanceSnapshotService,
+  ],
+  exports: [BybitService, BalanceSnapshotService, BybitLiveSnapshotCacheService],
 })
 export class BybitModule {}
