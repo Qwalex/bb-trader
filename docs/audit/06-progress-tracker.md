@@ -1161,3 +1161,15 @@
 - Manual verification: `npm run build -w apps/api`, `npm run build -w apps/web` (pass); админ на `/diagnostics` — кнопка отправляет тест и показывает счётчики или текст ошибки.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A (эндпоинт только admin).
+
+### AUD-095
+
+- Status: `done`
+- Scope: Настройки — выравнивание переключателя `TELEGRAM_NOTIFY_API_TRADE_CANCELLED` с opt-out логикой API.
+- Files: `apps/web/app/settings/settings-page.util.ts`, `apps/web/app/settings/page.tsx`, `apps/web/app/settings/settings-page.constants.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: API считает пустое значение «уведомления включены»; UI для boolean показывал только `true` как вкл. → пустой ключ выглядел как «выкл» при фактической отправке уведомлений.
+- Changes: `isTelegramNotifyApiTradeCancelledEnabled` по тем же правилам, что `notifyApiTradeCancelled`; подпись поля уточнена.
+- Decomposition notes (`utils/constants/hooks/types`): хелпер в `settings-page.util.ts`.
+- Manual verification: на `/settings` при пустом значении ключа переключатель в состоянии «вкл»; сохранение «выкл» даёт `false` и отключает уведомления.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

@@ -28,6 +28,7 @@ import {
 import {
   buildPutOperations,
   collectPendingChanges,
+  isTelegramNotifyApiTradeCancelledEnabled,
   labelForKey,
   parseModelHistory,
   tpSlStepStartSelectFromDraft,
@@ -211,6 +212,9 @@ export default function SettingsPage() {
     if (key === 'APPLOG_ENABLED') {
       if (raw === '') return true;
       return raw === 'true';
+    }
+    if (key === 'TELEGRAM_NOTIFY_API_TRADE_CANCELLED') {
+      return isTelegramNotifyApiTradeCancelledEnabled(valueForDraft(key));
     }
     return raw === 'true';
   };

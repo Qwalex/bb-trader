@@ -148,7 +148,7 @@ export const KEYS = [
   {
     key: 'TELEGRAM_NOTIFY_API_TRADE_CANCELLED',
     label:
-      'Telegram: уведомлять об отмене сделки/ордеров (по умолчанию да; false / 0 / off — отключить)',
+      'Telegram: уведомлять об отмене сделки/ордеров (по умолчанию вкл., в т.ч. пустое значение; выкл.: false / 0 / no / off или переключатель «выкл»)',
   },
   {
     key: 'TELEGRAM_NOTIFY_TRADE_EVENTS',

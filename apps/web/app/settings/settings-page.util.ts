@@ -20,6 +20,15 @@ export function labelForKey(key: string): string {
   return LABEL_BY_KEY[key] ?? EXTRA_LABELS[key] ?? key;
 }
 
+/**
+ * Совпадает с API (`TelegramService.notifyApiTradeCancelled`): уведомления идут,
+ * пока значение явно не выключено (opt-out).
+ */
+export function isTelegramNotifyApiTradeCancelledEnabled(raw: string): boolean {
+  const v = raw.trim().toLowerCase();
+  return !(v === 'false' || v === '0' || v === 'no' || v === 'off');
+}
+
 /** Соответствие черновика TP_SL_STEP_START варианту селекта + флаг мусора в поле. */
 export function tpSlStepStartSelectFromDraft(
   draftRaw: string,
