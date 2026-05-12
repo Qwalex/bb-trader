@@ -1,10 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 
 import { NAV_MENU_ITEMS } from '@repo/shared';
 
+import { readActiveCabinetIdClient } from '../../lib/cabinet-client.util';
 import { CabinetSwitcher } from './CabinetSwitcher';
 
 type TopNavProps = {
@@ -13,11 +15,25 @@ type TopNavProps = {
   hiddenMenuIds: string[];
 };
 
-export function TopNav(props: TopNavProps) {
-  const { isAdmin, cabinetId, hiddenMenuIds } = props;
+type TopNavBodyProps = TopNavProps & {
+  /** Меняется при смене query (в т.ч. `cabinetId`) — пересчёт ссылок и селекта */
+  cabinetSyncKey: string;
+};
+
+function TopNavBody({
+  isAdmin,
+  cabinetId: serverCabinetId,
+  hiddenMenuIds,
+  cabinetSyncKey,
+}: TopNavBodyProps) {
   const hiddenSet = useMemo(() => new Set(hiddenMenuIds), [hiddenMenuIds]);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDetailsElement | null>(null);
+  const [linkCabinetId, setLinkCabinetId] = useState(serverCabinetId);
+
+  useEffect(() => {
+    setLinkCabinetId(readActiveCabinetIdClient() || serverCabinetId);
+  }, [serverCabinetId, cabinetSyncKey]);
 
   useEffect(() => {
     const handlePointerDown = (event: MouseEvent | TouchEvent) => {
@@ -44,9 +60,10 @@ export function TopNav(props: TopNavProps) {
   }, []);
 
   const withCabinet = (path: string): string => {
-    if (!cabinetId) return path;
+    const id = String(linkCabinetId ?? '').trim();
+    if (!id) return path;
     const hasQuery = path.includes('?');
-    return `${path}${hasQuery ? '&' : '?'}cabinetId=${encodeURIComponent(cabinetId)}`;
+    return `${path}${hasQuery ? '&' : '?'}cabinetId=${encodeURIComponent(id)}`;
   };
 
   const visibleItems = NAV_MENU_ITEMS.filter((item) => {
@@ -84,7 +101,7 @@ export function TopNav(props: TopNavProps) {
         <div className="navBurgerMenu card">
           <div className="navBurgerSection">
             <span className="navBurgerCaption">Активный кабинет</span>
-            <CabinetSwitcher compact />
+            <CabinetSwitcher compact cabinetSyncKey={cabinetSyncKey} />
           </div>
           <div className="navBurgerLinks navBurgerLinksDesktop">
             {hiddenItems.map((item) => (
@@ -114,3 +131,16 @@ export function TopNav(props: TopNavProps) {
   );
 }
 
+function TopNavCabinetSynced(props: TopNavProps) {
+  const searchParams = useSearchParams();
+  const cabinetSyncKey = searchParams.toString();
+  return <TopNavBody {...props} cabinetSyncKey={cabinetSyncKey} />;
+}
+
+export function TopNav(props: TopNavProps) {
+  return (
+    <Suspense fallback={<TopNavBody {...props} cabinetSyncKey="" />}>
+      <TopNavCabinetSynced {...props} />
+    </Suspense>
+  );
+}

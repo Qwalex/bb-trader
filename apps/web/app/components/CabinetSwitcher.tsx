@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
+import { ACTIVE_CABINET_STORAGE_KEY } from '../../lib/api.constants';
+import { readActiveCabinetIdClient } from '../../lib/cabinet-client.util';
 import { fetchApiResponse } from '../../lib/api';
 
 type CabinetItem = {
@@ -11,9 +13,16 @@ type CabinetItem = {
   isDefault: boolean;
 };
 
-const STORAGE_KEY = 'active_cabinet_id';
+type CabinetSwitcherProps = {
+  compact?: boolean;
+  /** См. TopNav: меняется при смене query, чтобы выровнять селект с `?cabinetId=` */
+  cabinetSyncKey?: string;
+};
 
-export function CabinetSwitcher({ compact = false }: { compact?: boolean }) {
+export function CabinetSwitcher({
+  compact = false,
+  cabinetSyncKey = '',
+}: CabinetSwitcherProps) {
   const [items, setItems] = useState<CabinetItem[]>([]);
   const [selected, setSelected] = useState('');
 
@@ -31,21 +40,18 @@ export function CabinetSwitcher({ compact = false }: { compact?: boolean }) {
   }, []);
 
   useEffect(() => {
-    const fromStorage = localStorage.getItem(STORAGE_KEY)?.trim() ?? '';
-    const fromCookie = document.cookie
-      .split(';')
-      .map((p) => p.trim())
-      .find((p) => p.startsWith('cabinet_id='))
-      ?.split('=')[1];
-    const initial = fromStorage || (fromCookie ? decodeURIComponent(fromCookie) : '');
-    if (initial) {
-      setSelected(initial);
-    }
-  }, []);
+    const preferred = readActiveCabinetIdClient();
+    if (!preferred) return;
+    setSelected((prev) => (prev === preferred ? prev : preferred));
+  }, [items, cabinetSyncKey]);
 
   useEffect(() => {
     if (!selected) return;
-    localStorage.setItem(STORAGE_KEY, selected);
+    try {
+      window.localStorage.setItem(ACTIVE_CABINET_STORAGE_KEY, selected);
+    } catch {
+      // ignore
+    }
     document.cookie = `cabinet_id=${encodeURIComponent(selected)}; path=/; max-age=31536000; SameSite=Lax`;
   }, [selected]);
 
@@ -74,7 +80,11 @@ export function CabinetSwitcher({ compact = false }: { compact?: boolean }) {
         onChange={(e) => {
           const next = e.target.value;
           setSelected(next);
-          localStorage.setItem(STORAGE_KEY, next);
+          try {
+            window.localStorage.setItem(ACTIVE_CABINET_STORAGE_KEY, next);
+          } catch {
+            // ignore
+          }
           document.cookie = `cabinet_id=${encodeURIComponent(next)}; path=/; max-age=31536000; SameSite=Lax`;
           const url = new URL(window.location.href);
           url.searchParams.set('cabinetId', next);
@@ -90,4 +100,3 @@ export function CabinetSwitcher({ compact = false }: { compact?: boolean }) {
     </label>
   );
 }
-

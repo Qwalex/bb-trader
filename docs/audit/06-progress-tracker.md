@@ -1245,3 +1245,15 @@
 - Manual verification: `npm run build -w apps/api`, `npm run build -w apps/web` (pass); при двух кабинетах с одним токеном — новые записи AppLog в кабинете, для которого пользователь проходит whitelist первым в порядке кабинетов по токену.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-102
+
+- Status: `done`
+- Scope: Web — синхрон `?cabinetId=`, cookie и селект кабинета в шапке.
+- Files: `apps/web/app/components/TopNav.tsx`, `apps/web/app/components/CabinetSwitcher.tsx`, `docs/audit/06-progress-tracker.md`
+- Findings: `readActiveCabinetIdClient` отдаёт приоритет query, а `CabinetSwitcher` инициализировался только из localStorage/cookie; ссылки в `TopNav` строились из cookie сервера без учёта URL → рассинхрон GET и выпадающего списка при клиентских переходах.
+- Changes: `readActiveCabinetIdClient` + ключ `cabinetSyncKey` из `useSearchParams` под `Suspense`; пересчёт `linkCabinetId` для `cabinetAware` ссылок; `CabinetSwitcher` синхронизирует выбор с URL и использует `ACTIVE_CABINET_STORAGE_KEY`.
+- Decomposition notes (`utils/constants/hooks/types`): переиспользованы `readActiveCabinetIdClient`, `ACTIVE_CABINET_STORAGE_KEY`.
+- Manual verification: `npm run build -w apps/web` (pass).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
