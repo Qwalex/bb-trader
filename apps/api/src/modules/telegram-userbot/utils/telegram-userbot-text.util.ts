@@ -24,3 +24,12 @@ export function extractTokenHint(text: string): string {
     .toUpperCase();
   return firstWord || 'UNKNOWN';
 }
+
+/** Для уведомлений об ошибке после парса — показывать пару из `SignalDto`, если есть, иначе эвристика по тексту. */
+export function tokenHintForSignalFailure(text: string, pair?: string | null): string {
+  const p = String(pair ?? '').trim().toUpperCase();
+  if (p.length > 0) {
+    return p;
+  }
+  return extractTokenHint(text);
+}

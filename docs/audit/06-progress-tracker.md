@@ -1353,3 +1353,15 @@
 - Manual verification: `npm run build -w apps/api` (pass); повторный reread того же SUI-сообщения в кабинете — проходит стадию дедупа (при отсутствии других блокировок).
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-111
+
+- Status: `done`
+- Scope: Userbot — в уведомлении об ошибке сигнала показывать пару из парсера, а не только эвристику по сырому тексту.
+- Files: `apps/api/src/modules/telegram-userbot/utils/telegram-userbot-text.util.ts`, `apps/api/src/modules/telegram-userbot/ingest/telegram-userbot-ingest-pipeline.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: поле «Токен» в `notifyUserbotSignalFailure` заполнялось `extractTokenHint(text)` (regex `XXXUSDT` или первое слово); в VIP-постах часто нет подстроки `SUIUSDT` → `UNKNOWN`, хотя `signal.pair` уже корректен.
+- Changes: `tokenHintForSignalFailure(text, pair)`; на стадиях ingest после успешного `parse` — `signal.pair` в подсказке токена.
+- Decomposition notes (`utils/constants/hooks/types`): N/A.
+- Manual verification: `npm run build -w apps/api` (pass).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

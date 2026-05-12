@@ -35,6 +35,7 @@ import {
   countLockEmojiInText,
   extractTokenHint,
   makeTextPreview,
+  tokenHintForSignalFailure,
 } from '../utils/telegram-userbot-text.util';
 import {
   extractSignalExternalId,
@@ -545,7 +546,7 @@ export class TelegramUserbotIngestPipelineService {
       await this.notifySignalFailureToBot({
         ingestId: ingest.id,
         chatId: ingest.chatId,
-        token: extractTokenHint(text),
+        token: tokenHintForSignalFailure(text, signal.pair),
         stage: 'ingest',
         error: `Повторный вход по ${signal.pair} (${signal.direction}) временно заблокирован после close (${Math.ceil(
           closeCooldownMs / 1000,
@@ -596,7 +597,7 @@ export class TelegramUserbotIngestPipelineService {
             await this.notifySignalFailureToBot({
               ingestId: ingest.id,
               chatId: ingest.chatId,
-              token: extractTokenHint(text),
+              token: tokenHintForSignalFailure(text, signal.pair),
               stage: 'ingest',
               error: `Более приоритетный источник ${incomingSourceName} (${incomingPriority}) найден, но отмена предыдущего сигнала не удалась: ${closed.error ?? 'unknown'}`,
             });
@@ -657,7 +658,7 @@ export class TelegramUserbotIngestPipelineService {
           await this.notifySignalFailureToBot({
             ingestId: ingest.id,
             chatId: ingest.chatId,
-            token: extractTokenHint(text),
+            token: tokenHintForSignalFailure(text, signal.pair),
             stage: 'ingest',
             error: `Активный сигнал по паре ${signal.pair} (${signal.direction}) имеет приоритет ${activeSource.priority} (${activeSource.sourceName ?? 'неизвестный источник'}), входящий источник ${incomingSourceName} с приоритетом ${incomingPriority} отклонен`,
           });
@@ -678,7 +679,7 @@ export class TelegramUserbotIngestPipelineService {
         await this.notifySignalFailureToBot({
           ingestId: ingest.id,
           chatId: ingest.chatId,
-          token: extractTokenHint(text),
+          token: tokenHintForSignalFailure(text, signal.pair),
           stage: 'ingest',
           error: `Активная позиция/сигнал по паре ${signal.pair} (${signal.direction})`,
         });
@@ -714,7 +715,7 @@ export class TelegramUserbotIngestPipelineService {
       await this.notifySignalFailureToBot({
         ingestId: ingest.id,
         chatId: ingest.chatId,
-        token: extractTokenHint(text),
+        token: tokenHintForSignalFailure(text, signal.pair),
         stage: 'ingest',
         error: 'Сигнал уже обрабатывался ранее',
       });
