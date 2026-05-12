@@ -1065,3 +1065,27 @@
 - Manual verification: `npm run build -w apps/web` (ожидается pass); вручную: два кабинета, `/trades`, смена кабинета и смена фильтра/сброс — список и total соответствуют кабинету.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-087
+
+- Status: `done`
+- Scope: Ассистент-бот — события сделки (SignalEvent) и ошибки userbot: контекст кабинета, дубликаты ingest; critical util для userbot/OpenRouter (не ассист-поток).
+- Files: `apps/api/src/common/critical-notify.constants.ts`, `apps/api/src/common/critical-notify.util.ts`, `apps/api/src/modules/telegram/services/telegram.service.ts`, `apps/api/src/modules/telegram/utils/telegram-api-notify-html.util.ts`, `apps/api/src/modules/orders/orders.service.ts`, `apps/api/src/modules/bybit/bybit.service.ts`, `apps/api/src/modules/bybit/orders/bybit-signal-placement.service.ts`, `apps/api/src/modules/telegram-userbot/telegram-userbot.constants.ts`, `apps/api/src/modules/telegram-userbot/telegram-userbot.service.ts`, `apps/api/src/modules/telegram-userbot/ingest/telegram-userbot-ingest-pipeline.service.ts`, `apps/api/src/modules/telegram-userbot/openrouter/telegram-userbot-openrouter.service.ts`, `apps/api/src/modules/vk/vk-notify-mirror.service.ts`
+- Findings: `notifyTradeSignalEvent` вызывался через `void` после выхода из `runWithCabinet` — ALS без `cabinetId`, whitelist пуст, Telegram молчал; hedge audit — тот же класс `void` на notify; дубликаты userbot не вызывали `notifySignalFailureToBot`.
+- Changes: разрешение `cabinetId` по `signalId` и выполнение trade-event + настройки внутри `runWithCabinet`; `postCriticalNotifyText` + вынесенный `CRITICAL_NOTIFY_URL` для **операционных** алертов (pipeline `notifyCriticalExternalApiUnavailable`, OpenRouter low balance), без дублирования обычных ассист-уведомлений в Telegram; `await notifyTradeSignalEvent` из `createSignalEvent`; `await` hedge audit из placement; этап `ingest` и уведомления по веткам `duplicate_signal`; pipeline/openrouter на общий util для critical POST.
+- Decomposition notes (`utils/constants/hooks/types`): `critical-notify.{constants,util}.ts` в `common/`.
+- Manual verification: `npm run build -w api` (pass); ожидаемо: `TP_SL_STEPPED` и дубликаты ingest — только Telegram whitelist; `CRITICAL_NOTIFY_URL` — по-прежнему при `[CRITICAL API UNAVAILABLE]` / low balance OpenRouter.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-088
+
+- Status: `done`
+- Scope: Уточнение AUD-087 — не слать обычные ассист-уведомления (trade-events, userbot-failure, hedge audit) на `CRITICAL_NOTIFY_URL`.
+- Files: `apps/api/src/modules/telegram/services/telegram.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: дублирование ассист-сообщений на qnotify засоряло канал ops.
+- Changes: удалены вызовы `postCriticalNotifyText` из `notifyTradeSignalEvent`, `notifyUserbotSignalFailure`, `notifyHedgeOppositePlacementAudit`.
+- Decomposition notes (`utils/constants/hooks/types`): N/A.
+- Manual verification: `npm run build -w api` (pass).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

@@ -584,7 +584,7 @@ export class BybitSignalPlacementService {
           'BYBIT_HEDGE_OPPOSITE_PLACEMENT_AUDIT',
           auditPayload,
         );
-        void ports.notifyHedgeOppositePlacementAudit({
+        await ports.notifyHedgeOppositePlacementAudit({
           symbol,
           hedgeModeActive,
           oppositeOnExchange: oppositeOnExchangeBusy,

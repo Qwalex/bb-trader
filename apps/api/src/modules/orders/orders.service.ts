@@ -512,11 +512,9 @@ export class OrdersService {
           payload === undefined ? null : JSON.stringify(payload),
       },
     });
-    void this.telegram
-      .notifyTradeSignalEvent({ signalId, type, payload })
-      .catch((e) =>
-        this.logger.warn(`notifyTradeSignalEvent: ${formatError(e)}`),
-      );
+    await this.telegram.notifyTradeSignalEvent({ signalId, type, payload }).catch((e) =>
+      this.logger.warn(`notifyTradeSignalEvent: ${formatError(e)}`),
+    );
     return row;
   }
 

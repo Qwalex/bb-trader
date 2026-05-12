@@ -527,10 +527,15 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     /** Название группы/канала из userbot (TgUserbotChat.title), если есть */
     groupTitle?: string;
     token: string;
-    stage: 'classify' | 'transcript' | 'bybit';
+    stage: 'classify' | 'transcript' | 'bybit' | 'ingest';
     error: string;
     missingData?: string[];
   }): Promise<{ ok: boolean; deliveredTo: number; error?: string }> {
+    const cabinetLabel = await this.resolveCabinetDisplayLabel();
+    const msg =
+      this.cabinetNotifyPlainPrefix(cabinetLabel) +
+      formatUserbotSignalFailureMessage(params);
+
     const bot = this.getBotForCabinet(this.currentCabinetId());
     if (!bot) {
       return { ok: false, deliveredTo: 0, error: 'Telegram bot не запущен' };
@@ -539,11 +544,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (ids.length === 0) {
       return { ok: false, deliveredTo: 0, error: 'TELEGRAM_WHITELIST пуст' };
     }
-
-    const cabinetLabel = await this.resolveCabinetDisplayLabel();
-    const msg =
-      this.cabinetNotifyPlainPrefix(cabinetLabel) +
-      formatUserbotSignalFailureMessage(params);
 
     let deliveredTo = 0;
     for (const uid of ids) {
@@ -751,41 +751,59 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       source?: string | null;
     };
   }): Promise<{ ok: boolean; deliveredTo: number; error?: string }> {
-    const raw = (await this.settings.get('TELEGRAM_NOTIFY_HEDGE_OPPOSITE_PLACEMENT'))
-      ?.trim()
-      .toLowerCase();
-    if (raw === 'false' || raw === '0' || raw === 'no' || raw === 'off') {
-      return { ok: true, deliveredTo: 0 };
+    let effectiveCabinetId = this.currentCabinetId();
+    if (!effectiveCabinetId) {
+      const row = await this.prisma.signal.findFirst({
+        where: { id: params.newPlaced.signalId, deletedAt: null },
+        select: { cabinetId: true },
+      });
+      effectiveCabinetId = row?.cabinetId ?? null;
     }
-    const bot = this.getBotForCabinet(this.currentCabinetId());
-    if (!bot) {
-      return { ok: false, deliveredTo: 0, error: 'Telegram bot не запущен' };
+    if (!effectiveCabinetId) {
+      this.logger.warn(
+        `notifyHedgeOppositePlacementAudit: no cabinet for signalId=${params.newPlaced.signalId}`,
+      );
+      return { ok: false, deliveredTo: 0, error: 'Кабинет для сигнала не найден' };
     }
-    const ids = await this.getWhitelistUserIds();
-    if (ids.length === 0) {
-      return { ok: false, deliveredTo: 0, error: 'TELEGRAM_WHITELIST пуст' };
-    }
-    const cabinetLabel = await this.resolveCabinetDisplayLabel();
-    const msg =
-      this.cabinetNotifyHtmlPrefix(cabinetLabel) +
-      formatHedgeOppositePlacementAuditHtml(params);
-    let deliveredTo = 0;
-    for (const uid of ids) {
-      try {
-        await bot.telegram.sendMessage(uid, msg, { parse_mode: 'HTML' });
-        deliveredTo += 1;
-      } catch (e) {
-        this.logger.warn(`notifyHedgeOppositePlacementAudit -> ${uid}: ${formatError(e)}`);
+
+    return await this.cabinetContext.runWithCabinet(effectiveCabinetId, async () => {
+      const raw = (await this.settings.get('TELEGRAM_NOTIFY_HEDGE_OPPOSITE_PLACEMENT'))
+        ?.trim()
+        .toLowerCase();
+      if (raw === 'false' || raw === '0' || raw === 'no' || raw === 'off') {
+        return { ok: true, deliveredTo: 0 };
       }
-    }
-    if (deliveredTo === 0) {
-      return {
-        ok: false,
-        deliveredTo: 0,
-        error: 'Не удалось доставить уведомление об аудите hedge',
-      };
-    }
-    return { ok: true, deliveredTo };
+      const cabinetLabel = await this.resolveCabinetDisplayLabel();
+      const msg =
+        this.cabinetNotifyHtmlPrefix(cabinetLabel) +
+        formatHedgeOppositePlacementAuditHtml(params);
+
+      const bot = this.getBotForCabinet(this.currentCabinetId());
+      if (!bot) {
+        return { ok: false, deliveredTo: 0, error: 'Telegram bot не запущен' };
+      }
+      const ids = await this.getWhitelistUserIds();
+      if (ids.length === 0) {
+        return { ok: false, deliveredTo: 0, error: 'TELEGRAM_WHITELIST пуст' };
+      }
+      let deliveredTo = 0;
+      for (const uid of ids) {
+        try {
+          await bot.telegram.sendMessage(uid, msg, { parse_mode: 'HTML' });
+          deliveredTo += 1;
+        } catch (e) {
+          this.logger.warn(`notifyHedgeOppositePlacementAudit -> ${uid}: ${formatError(e)}`);
+        }
+      }
+      if (deliveredTo === 0) {
+        return {
+          ok: false,
+          deliveredTo: 0,
+          error: 'Не удалось доставить уведомление об аудите hedge',
+        };
+      }
+      return { ok: true, deliveredTo };
+    });
   }
 
   /**
@@ -808,77 +826,94 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (skipTypes.has(params.type)) {
       return;
     }
-    const raw = (await this.settings.get('TELEGRAM_NOTIFY_TRADE_EVENTS'))
-      ?.trim()
-      .toLowerCase();
-    const off = raw === 'false' || raw === '0' || raw === 'off' || raw === 'no';
-    if (off) {
-      return;
+
+    let effectiveCabinetId = this.currentCabinetId();
+    if (!effectiveCabinetId) {
+      const row = await this.prisma.signal.findFirst({
+        where: { id: params.signalId, deletedAt: null },
+        select: { cabinetId: true },
+      });
+      effectiveCabinetId = row?.cabinetId ?? null;
     }
-    const filterRaw = await this.settings.get('TELEGRAM_NOTIFY_TRADE_EVENT_TYPES');
-    const evFilter = parseTradeSignalNotifyEventFilter(filterRaw);
-    if (evFilter.mode === 'none') {
-      return;
-    }
-    if (evFilter.mode === 'only' && !evFilter.types.has(params.type)) {
-      return;
-    }
-    const bot = this.getBotForCabinet(this.currentCabinetId());
-    if (!bot) {
-      return;
-    }
-    const ids = await this.getWhitelistUserIds();
-    if (ids.length === 0) {
+    if (!effectiveCabinetId) {
+      this.logger.warn(`notifyTradeSignalEvent: no cabinet for signalId=${params.signalId}`);
       return;
     }
 
-    const title = tradeSignalEventTitleRu(params.type);
-    let pairLine = '';
-    let sourceLine = '';
-    try {
-      const cabinetId = this.currentCabinetId();
-      const sig = await this.prisma.signal.findFirst({
-        where: { id: params.signalId, cabinetId, deletedAt: null },
-        select: { pair: true, source: true },
-      });
-      if (sig) {
-        pairLine = `\nПара: <code>${escapeTelegramHtml((sig.pair ?? '').trim().toUpperCase())}</code>`;
-        const src = sig.source?.trim();
-        if (src) {
-          sourceLine = `\nИсточник: <code>${escapeTelegramHtml(src)}</code>`;
+    await this.cabinetContext.runWithCabinet(effectiveCabinetId, async () => {
+      const raw = (await this.settings.get('TELEGRAM_NOTIFY_TRADE_EVENTS'))
+        ?.trim()
+        .toLowerCase();
+      const off = raw === 'false' || raw === '0' || raw === 'off' || raw === 'no';
+      if (off) {
+        return;
+      }
+      const filterRaw = await this.settings.get('TELEGRAM_NOTIFY_TRADE_EVENT_TYPES');
+      const evFilter = parseTradeSignalNotifyEventFilter(filterRaw);
+      if (evFilter.mode === 'none') {
+        return;
+      }
+      if (evFilter.mode === 'only' && !evFilter.types.has(params.type)) {
+        return;
+      }
+
+      const title = tradeSignalEventTitleRu(params.type);
+      let pairLine = '';
+      let sourceLine = '';
+      try {
+        const sig = await this.prisma.signal.findFirst({
+          where: { id: params.signalId, deletedAt: null },
+          select: { pair: true, source: true },
+        });
+        if (sig) {
+          const pairU = (sig.pair ?? '').trim().toUpperCase();
+          pairLine = `\nПара: <code>${escapeTelegramHtml(pairU)}</code>`;
+          const src = sig.source?.trim();
+          if (src) {
+            sourceLine = `\nИсточник: <code>${escapeTelegramHtml(src)}</code>`;
+          }
+        }
+      } catch {
+        // ignore
+      }
+
+      let payloadBlock = '';
+      if (params.payload !== undefined) {
+        const text =
+          typeof params.payload === 'string'
+            ? params.payload
+            : JSON.stringify(params.payload, null, 0);
+        const clipped = text.length > 2800 ? `${text.slice(0, 2800)}…` : text;
+        payloadBlock = `\n<pre>${escapeTelegramHtml(clipped)}</pre>`;
+      }
+
+      const cabinetLabel = await this.resolveCabinetDisplayLabel();
+      const msg =
+        this.cabinetNotifyHtmlPrefix(cabinetLabel) +
+        `<b>${escapeTelegramHtml(title)}</b>\n` +
+        `Сделка: <code>${escapeTelegramHtml(params.signalId)}</code>` +
+        pairLine +
+        sourceLine +
+        `\nТип: <code>${escapeTelegramHtml(params.type)}</code>` +
+        payloadBlock;
+
+      const bot = this.getBotForCabinet(this.currentCabinetId());
+      if (!bot) {
+        return;
+      }
+      const ids = await this.getWhitelistUserIds();
+      if (ids.length === 0) {
+        return;
+      }
+
+      for (const uid of ids) {
+        try {
+          await bot.telegram.sendMessage(uid, msg, { parse_mode: 'HTML' });
+        } catch (e) {
+          this.logger.warn(`notifyTradeSignalEvent -> ${uid}: ${formatError(e)}`);
         }
       }
-    } catch {
-      // ignore
-    }
-
-    let payloadBlock = '';
-    if (params.payload !== undefined) {
-      const text =
-        typeof params.payload === 'string'
-          ? params.payload
-          : JSON.stringify(params.payload, null, 0);
-      const clipped = text.length > 2800 ? `${text.slice(0, 2800)}…` : text;
-      payloadBlock = `\n<pre>${escapeTelegramHtml(clipped)}</pre>`;
-    }
-
-    const cabinetLabel = await this.resolveCabinetDisplayLabel();
-    const msg =
-      this.cabinetNotifyHtmlPrefix(cabinetLabel) +
-      `<b>${escapeTelegramHtml(title)}</b>\n` +
-      `Сделка: <code>${escapeTelegramHtml(params.signalId)}</code>` +
-      pairLine +
-      sourceLine +
-      `\nТип: <code>${escapeTelegramHtml(params.type)}</code>` +
-      payloadBlock;
-
-    for (const uid of ids) {
-      try {
-        await bot.telegram.sendMessage(uid, msg, { parse_mode: 'HTML' });
-      } catch (e) {
-        this.logger.warn(`notifyTradeSignalEvent -> ${uid}: ${formatError(e)}`);
-      }
-    }
+    });
   }
 
   private async clearTelegramInlineKeyboard(ctx: Context): Promise<void> {

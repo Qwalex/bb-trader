@@ -8,7 +8,7 @@ export const USERBOT_MIN_BALANCE_USD_DEFAULT = 3;
 export const USERBOT_BALANCE_CHECK_CACHE_MS = 30_000;
 export const USERBOT_FILTER_MATCH_THRESHOLD = 0.34;
 export const CLOSE_REOPEN_COOLDOWN_MS = 30_000;
-export const CRITICAL_NOTIFY_URL = 'https://qnotify.up.railway.app';
+export { CRITICAL_NOTIFY_URL } from '../../common/critical-notify.constants';
 export const OPENROUTER_BALANCE_LOW_THRESHOLD_USD = 2;
 export const OPENROUTER_BALANCE_NOTIFY_COOLDOWN_MS = 30 * 60_000;
 /** Опрос Telegram после ошибки уровней (validateSignalLevels). */

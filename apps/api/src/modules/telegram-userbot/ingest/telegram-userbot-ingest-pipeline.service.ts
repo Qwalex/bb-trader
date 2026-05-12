@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
 } from '@nestjs/common';
+import { postCriticalNotifyText } from '../../../common/critical-notify.util';
 import { formatError } from '../../../common/format-error';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AppLogService } from '../../app-log/app-log.service';
@@ -17,7 +18,6 @@ import { TelegramService } from '../../telegram/services/telegram.service';
 import { VkNotifyMirrorService } from '../../vk/vk-notify-mirror.service';
 import { UserbotSignalHashService } from '../userbot-signal-hash.service';
 import {
-  CRITICAL_NOTIFY_URL,
   USERBOT_BALANCE_CHECK_CACHE_MS,
   USERBOT_INLINE_TEXT_MAX_CHARS,
   USERBOT_MIN_BALANCE_USD_DEFAULT,
@@ -542,6 +542,15 @@ export class TelegramUserbotIngestPipelineService {
         aiRequest,
         aiResponse,
       });
+      await this.notifySignalFailureToBot({
+        ingestId: ingest.id,
+        chatId: ingest.chatId,
+        token: extractTokenHint(text),
+        stage: 'ingest',
+        error: `Повторный вход по ${signal.pair} (${signal.direction}) временно заблокирован после close (${Math.ceil(
+          closeCooldownMs / 1000,
+        )}s)`,
+      });
       return;
     }
 
@@ -583,6 +592,13 @@ export class TelegramUserbotIngestPipelineService {
               error: `Более приоритетный источник ${incomingSourceName} (${incomingPriority}) найден, но отмена предыдущего сигнала не удалась: ${closed.error ?? 'unknown'}`,
               aiRequest,
               aiResponse,
+            });
+            await this.notifySignalFailureToBot({
+              ingestId: ingest.id,
+              chatId: ingest.chatId,
+              token: extractTokenHint(text),
+              stage: 'ingest',
+              error: `Более приоритетный источник ${incomingSourceName} (${incomingPriority}) найден, но отмена предыдущего сигнала не удалась: ${closed.error ?? 'unknown'}`,
             });
             return;
           }
@@ -638,6 +654,13 @@ export class TelegramUserbotIngestPipelineService {
             aiRequest,
             aiResponse,
           });
+          await this.notifySignalFailureToBot({
+            ingestId: ingest.id,
+            chatId: ingest.chatId,
+            token: extractTokenHint(text),
+            stage: 'ingest',
+            error: `Активный сигнал по паре ${signal.pair} (${signal.direction}) имеет приоритет ${activeSource.priority} (${activeSource.sourceName ?? 'неизвестный источник'}), входящий источник ${incomingSourceName} с приоритетом ${incomingPriority} отклонен`,
+          });
           return;
         }
       } else {
@@ -651,6 +674,13 @@ export class TelegramUserbotIngestPipelineService {
           error: `Активная позиция/сигнал по паре ${signal.pair} (${signal.direction})`,
           aiRequest,
           aiResponse,
+        });
+        await this.notifySignalFailureToBot({
+          ingestId: ingest.id,
+          chatId: ingest.chatId,
+          token: extractTokenHint(text),
+          stage: 'ingest',
+          error: `Активная позиция/сигнал по паре ${signal.pair} (${signal.direction})`,
         });
         return;
       }
@@ -675,6 +705,13 @@ export class TelegramUserbotIngestPipelineService {
         error: 'Сигнал уже обрабатывался ранее',
         aiRequest,
         aiResponse,
+      });
+      await this.notifySignalFailureToBot({
+        ingestId: ingest.id,
+        chatId: ingest.chatId,
+        token: extractTokenHint(text),
+        stage: 'ingest',
+        error: 'Сигнал уже обрабатывался ранее',
       });
       return;
     }
@@ -1209,7 +1246,7 @@ export class TelegramUserbotIngestPipelineService {
   ingestId: string;
   chatId: string;
   token: string;
-  stage: 'classify' | 'transcript' | 'bybit';
+  stage: 'classify' | 'transcript' | 'bybit' | 'ingest';
   error: string;
   missingData?: string[];
 }): Promise<void> {
@@ -1294,20 +1331,7 @@ export class TelegramUserbotIngestPipelineService {
     `chatId=${params.chatId ?? 'n/a'}\n` +
     `stage=${params.stage ?? 'n/a'}\n` +
     `error=${params.error}`;
-  try {
-    const res = await fetch(CRITICAL_NOTIFY_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
-    });
-    if (!res.ok) {
-      this.logger.warn(
-        `critical notify failed: status=${res.status} api=${api} ingestId=${params.ingestId ?? 'n/a'}`,
-      );
-    }
-  } catch (e) {
-    this.logger.warn(`critical notify error: ${formatError(e)}`);
-  }
+  await postCriticalNotifyText(text, (m) => this.logger.warn(m));
 }
 
   private async classifyMessage(

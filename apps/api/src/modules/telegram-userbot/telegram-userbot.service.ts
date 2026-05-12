@@ -28,7 +28,6 @@ import { UserbotSignalHashService } from './userbot-signal-hash.service';
 import { parseSignalPriceArrayJson } from './userbot-signal-hash.util';
 import {
   CLOSE_REOPEN_COOLDOWN_MS,
-  CRITICAL_NOTIFY_URL,
   USERBOT_MIN_BALANCE_USD_DEFAULT,
   USERBOT_POLL_INTERVAL_MS,
   USERBOT_SIGNAL_LEVELS_EDIT_WATCH_POLL_MS,

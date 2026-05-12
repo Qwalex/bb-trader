@@ -388,7 +388,7 @@ export class BybitService implements OnModuleInit {
       snapPriceToTickNum: (price, tickSize) => pv.snapPriceToTickNum(price, tickSize),
       isInsufficientBalanceError: (msg) => isInsufficientBalanceError(msg),
       notifyHedgeOppositePlacementAudit: (params) =>
-        void this.bybitNotify.notifyHedgeOppositePlacementAudit(params),
+        this.bybitNotify.notifyHedgeOppositePlacementAudit(params),
     };
   }
 

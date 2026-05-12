@@ -6,7 +6,7 @@ export function formatUserbotSignalFailureMessage(params: {
   chatId: string;
   groupTitle?: string;
   token: string;
-  stage: 'classify' | 'transcript' | 'bybit';
+  stage: 'classify' | 'transcript' | 'bybit' | 'ingest';
   error: string;
   missingData?: string[];
 }): string {
@@ -15,7 +15,9 @@ export function formatUserbotSignalFailureMessage(params: {
       ? 'классификации'
       : params.stage === 'transcript'
         ? 'транскрибации/разбора'
-        : 'установки ордеров на Bybit';
+        : params.stage === 'bybit'
+          ? 'установки ордеров на Bybit'
+          : 'проверки дубликата и лимитов';
   const missing =
     params.missingData && params.missingData.length > 0
       ? `\nНе хватило данных: ${params.missingData.join(', ')}`

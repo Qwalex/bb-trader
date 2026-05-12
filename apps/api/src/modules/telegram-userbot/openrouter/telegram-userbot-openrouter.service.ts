@@ -1,11 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 
+import { postCriticalNotifyText } from '../../../common/critical-notify.util';
 import { formatError } from '../../../common/format-error';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CabinetContextService } from '../../cabinet/cabinet-context.service';
 import { TranscriptService } from '../../transcript/transcript.service';
 import {
-  CRITICAL_NOTIFY_URL,
   OPENROUTER_BALANCE_LOW_THRESHOLD_USD,
   OPENROUTER_BALANCE_NOTIFY_COOLDOWN_MS,
 } from '../telegram-userbot.constants';
@@ -174,17 +174,6 @@ export class TelegramUserbotOpenrouterService {
       `[CRITICAL OPENROUTER LOW BALANCE]\n` +
       `balanceUsd=${balanceUsd.toFixed(4)}\n` +
       `thresholdUsd=${thresholdUsd.toFixed(2)}`;
-    try {
-      const res = await fetch(CRITICAL_NOTIFY_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
-      });
-      if (!res.ok) {
-        this.logger.warn(`openrouter low balance notify failed: status=${res.status}`);
-      }
-    } catch (e) {
-      this.logger.warn(`openrouter low balance notify error: ${formatError(e)}`);
-    }
+    await postCriticalNotifyText(text, (m) => this.logger.warn(m));
   }
 }
