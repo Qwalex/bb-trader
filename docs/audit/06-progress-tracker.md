@@ -1125,3 +1125,15 @@
 - Manual verification: файлы правки читаемы; дубликатов секции Railway нет.
 - Docs updated: этот трекер, `AGENTS.md`, новое правило.
 - Linked risks (`SEC-###`): N/A (SSH/CLI — только с согласия владельца проекта; секреты в чат не выводить).
+
+### AUD-092
+
+- Status: `done`
+- Scope: Telegram — исходящие уведомления (ошибки userbot, события сделки, стартовое приветствие, дайджест): те же получатели, что нужны при доступе по привязанному аккаунту без whitelist.
+- Files: `apps/api/src/modules/telegram/services/telegram.service.ts`, `apps/api/src/modules/telegram/services/telegram-digest-scheduler.service.ts`, `apps/api/src/modules/telegram/utils/telegram-whitelist.util.ts`, `docs/audit/06-progress-tracker.md`, `AGENTS.md`
+- Findings: `isAllowed` допускает и whitelist, и любого `AuthUser` с тем же `telegramUserId`; проактивные `sendMessage` шли только на `TELEGRAM_WHITELIST` → команды работали, уведомления нет.
+- Changes: объединение получателей: whitelist ∪ числовой Telegram владельца кабинета ∪ активные `CabinetMember`; публичный `listCabinetTelegramNotifyRecipientIds` для дайджеста; хелперы слияния id в `telegram-whitelist.util.ts`.
+- Decomposition notes (`utils/constants/hooks/types`): расширен только существующий whitelist-util.
+- Manual verification: `npm run build -w apps/api` (pass); после деплоя — ошибка ingest duplicate должна приходить владельцу с привязанным Telegram даже при пустом whitelist (если нужна изоляция только по whitelist — заполнить whitelist и не полагаться на owner).
+- Docs updated: этот трекер, `AGENTS.md`.
+- Linked risks (`SEC-###`): N/A (владелец/участники получают больше сообщений, чем при чистом whitelist-only — это намеренное выравнивание с доступом к боту).

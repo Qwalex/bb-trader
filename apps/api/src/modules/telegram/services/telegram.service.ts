@@ -48,7 +48,11 @@ import {
 } from '../utils/telegram-signal-message-format.util';
 import { TelegramSignalDraftFlowService } from './telegram-signal-draft-flow.service';
 import { tradeSignalEventTitleRu } from '../utils/telegram-trade-event-titles.util';
-import { parseTelegramWhitelistUserIds } from '../utils/telegram-whitelist.util';
+import {
+  mergeDistinctFiniteNumericIds,
+  parseStoredTelegramUserIdAsChatId,
+  parseTelegramWhitelistUserIds,
+} from '../utils/telegram-whitelist.util';
 import type { ExternalConfirmationResult } from '../types/telegram.types';
 
 @Injectable()
@@ -264,7 +268,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       ].join('\n');
 
     for (const [cabinetId, bot] of this.botRegistry.entries()) {
-      const ids = await this.getWhitelistUserIdsForCabinet(cabinetId);
+      const ids = await this.resolveCabinetTelegramNotifyRecipientIds(cabinetId);
       if (ids.length === 0) {
         continue;
       }
@@ -303,6 +307,53 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     return parseTelegramWhitelistUserIds(raw);
   }
 
+  /**
+   * Исходящие уведомления бота: TELEGRAM_WHITELIST ∪ Telegram владельца кабинета ∪ активные участники.
+   * Команды дополнительно разрешены любому AuthUser с тем же telegramUserId (`isAllowed`), поэтому без
+   * записи в whitelist сообщения об ошибках раньше не уходили — этот список закрывает типичный случай.
+   */
+  async listCabinetTelegramNotifyRecipientIds(cabinetId: string): Promise<number[]> {
+    return this.resolveCabinetTelegramNotifyRecipientIds(cabinetId);
+  }
+
+  private async resolveCabinetTelegramNotifyRecipientIds(cabinetId: string): Promise<number[]> {
+    const whitelist = await this.getWhitelistUserIdsForCabinet(cabinetId);
+    const linked = await this.collectCabinetLinkedTelegramNotifyChatIds(cabinetId);
+    return mergeDistinctFiniteNumericIds([...whitelist, ...linked]);
+  }
+
+  private async collectCabinetLinkedTelegramNotifyChatIds(cabinetId: string): Promise<number[]> {
+    const out: number[] = [];
+    const cabinet = await this.prisma.cabinet.findUnique({
+      where: { id: cabinetId },
+      select: { ownerUserId: true },
+    });
+    if (cabinet?.ownerUserId) {
+      const owner = await this.prisma.authUser.findUnique({
+        where: { id: cabinet.ownerUserId },
+        select: { telegramUserId: true },
+      });
+      const n = parseStoredTelegramUserIdAsChatId(owner?.telegramUserId);
+      if (n !== null) out.push(n);
+    }
+    const members = await this.prisma.cabinetMember.findMany({
+      where: { cabinetId, isActive: true },
+      select: { telegramUserId: true },
+    });
+    for (const m of members) {
+      const n = parseStoredTelegramUserIdAsChatId(m.telegramUserId);
+      if (n !== null) out.push(n);
+    }
+    return out;
+  }
+
+  private async getTelegramNotifyRecipientIds(): Promise<number[]> {
+    const cabinetId = this.currentCabinetId();
+    if (!cabinetId) {
+      return [];
+    }
+    return this.resolveCabinetTelegramNotifyRecipientIds(cabinetId);
+  }
 
   async onModuleDestroy(): Promise<void> {
     this.shuttingDown = true;
@@ -476,9 +527,14 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (!bot) {
       return { ok: false, deliveredTo: 0, error: 'Telegram bot не запущен' };
     }
-    const ids = await this.getWhitelistUserIds();
+    const ids = await this.getTelegramNotifyRecipientIds();
     if (ids.length === 0) {
-      return { ok: false, deliveredTo: 0, error: 'TELEGRAM_WHITELIST пуст' };
+      return {
+        ok: false,
+        deliveredTo: 0,
+        error:
+          'Нет получателей уведомлений (TELEGRAM_WHITELIST или Telegram владельца/участников кабинета)',
+      };
     }
     const cabinetId =
       this.cabinetContext.getCabinetId() ?? (await this.cabinets.getDefaultCabinetId());
@@ -542,9 +598,14 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (!bot) {
       return { ok: false, deliveredTo: 0, error: 'Telegram bot не запущен' };
     }
-    const ids = await this.getWhitelistUserIds();
+    const ids = await this.getTelegramNotifyRecipientIds();
     if (ids.length === 0) {
-      return { ok: false, deliveredTo: 0, error: 'TELEGRAM_WHITELIST пуст' };
+      return {
+        ok: false,
+        deliveredTo: 0,
+        error:
+          'Нет получателей уведомлений (TELEGRAM_WHITELIST или Telegram владельца/участников кабинета)',
+      };
     }
 
     let deliveredTo = 0;
@@ -580,9 +641,14 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (!bot) {
       return { ok: false, deliveredTo: 0, error: 'Telegram bot не запущен' };
     }
-    const ids = await this.getWhitelistUserIds();
+    const ids = await this.getTelegramNotifyRecipientIds();
     if (ids.length === 0) {
-      return { ok: false, deliveredTo: 0, error: 'TELEGRAM_WHITELIST пуст' };
+      return {
+        ok: false,
+        deliveredTo: 0,
+        error:
+          'Нет получателей уведомлений (TELEGRAM_WHITELIST или Telegram владельца/участников кабинета)',
+      };
     }
     const cabinetLabel = await this.resolveCabinetDisplayLabel();
     const msg =
@@ -639,9 +705,14 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (!bot) {
       return { ok: false, deliveredTo: 0, error: 'Telegram bot не запущен' };
     }
-    const ids = await this.getWhitelistUserIds();
+    const ids = await this.getTelegramNotifyRecipientIds();
     if (ids.length === 0) {
-      return { ok: false, deliveredTo: 0, error: 'TELEGRAM_WHITELIST пуст' };
+      return {
+        ok: false,
+        deliveredTo: 0,
+        error:
+          'Нет получателей уведомлений (TELEGRAM_WHITELIST или Telegram владельца/участников кабинета)',
+      };
     }
     const cabinetLabel = await this.resolveCabinetDisplayLabel();
     const msg =
@@ -687,9 +758,14 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (!bot) {
       return { ok: false, deliveredTo: 0, error: 'Telegram bot не запущен' };
     }
-    const ids = await this.getWhitelistUserIds();
+    const ids = await this.getTelegramNotifyRecipientIds();
     if (ids.length === 0) {
-      return { ok: false, deliveredTo: 0, error: 'TELEGRAM_WHITELIST пуст' };
+      return {
+        ok: false,
+        deliveredTo: 0,
+        error:
+          'Нет получателей уведомлений (TELEGRAM_WHITELIST или Telegram владельца/участников кабинета)',
+      };
     }
 
     const cabinetLabel = await this.resolveCabinetDisplayLabel();
@@ -784,9 +860,14 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       if (!bot) {
         return { ok: false, deliveredTo: 0, error: 'Telegram bot не запущен' };
       }
-      const ids = await this.getWhitelistUserIds();
+      const ids = await this.getTelegramNotifyRecipientIds();
       if (ids.length === 0) {
-        return { ok: false, deliveredTo: 0, error: 'TELEGRAM_WHITELIST пуст' };
+        return {
+          ok: false,
+          deliveredTo: 0,
+          error:
+            'Нет получателей уведомлений (TELEGRAM_WHITELIST или Telegram владельца/участников кабинета)',
+        };
       }
       let deliveredTo = 0;
       for (const uid of ids) {
@@ -903,7 +984,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       if (!bot) {
         return;
       }
-      const ids = await this.getWhitelistUserIds();
+      const ids = await this.getTelegramNotifyRecipientIds();
       if (ids.length === 0) {
         return;
       }
