@@ -1019,7 +1019,7 @@ export default function TelegramUserbotPage() {
       {qrVisible && (
         <div className="card" style={{ marginBottom: '1rem' }}>
           <h3 style={{ marginBottom: '0.5rem' }}>QR авторизация</h3>
-          {status?.qr.qrDataUrl ? (
+          {status?.qr.phase === 'waiting_scan' && status.qr.qrDataUrl ? (
             <img
               src={status.qr.qrDataUrl}
               alt="Telegram login QR"
@@ -1028,7 +1028,15 @@ export default function TelegramUserbotPage() {
               style={{ background: '#fff', padding: '0.5rem', borderRadius: 8 }}
             />
           ) : (
-            <p style={{ color: 'var(--muted)' }}>Генерация QR…</p>
+            <p style={{ color: 'var(--muted)' }}>
+              {status?.qr.phase === 'starting'
+                ? 'Подготовка QR…'
+                : status?.qr.phase === 'need_password'
+                  ? 'Введите облачный пароль ниже.'
+                  : status?.qr.phase === 'completing_login'
+                    ? 'Завершение входа…'
+                    : 'Генерация QR…'}
+            </p>
           )}
           <p style={{ marginTop: '0.5rem', color: 'var(--muted)' }}>
             Если QR не сканируется, откройте Telegram на телефоне: Настройки -&gt; Устройства
@@ -1078,9 +1086,6 @@ export default function TelegramUserbotPage() {
                 </div>
               </form>
             </div>
-          )}
-          {status?.qr.phase === 'completing_login' && (
-            <p style={{ marginTop: '0.75rem', color: 'var(--muted)' }}>Завершение входа…</p>
           )}
         </div>
       )}

@@ -38,7 +38,7 @@ export class TelegramUserbotController {
     });
     const userId = String(req.auth?.userId ?? '').trim() || null;
     const cabinetId = await this.cabinets.resolveCabinetIdForUser(userId, requested);
-    return this.cabinetContext.runWithCabinet(cabinetId, fn);
+    return this.cabinetContext.runWithCabinetAsync(cabinetId, fn);
   }
 
   private parseLimit(raw: string | undefined, fallback: number, max = 500): number {

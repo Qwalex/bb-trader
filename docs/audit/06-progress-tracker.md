@@ -1198,14 +1198,26 @@
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): общий токен в нескольких кабинетах — один стек handlers привязан к кабинету первого успешного launch в текущем синке (редкий случай одного env на несколько кабинетов).
 
-### AUD-097
+### AUD-098
 
 - Status: `done`
-- Scope: Запуск Telegraf при `TELEGRAM_BOT_TOKEN` из env / глобальных слоёв без строки в `CabinetSetting`.
-- Files: `apps/api/src/modules/telegram/services/telegram.service.ts`, `apps/api/src/modules/telegram/services/telegram-bot-registry.service.ts`, `docs/audit/06-progress-tracker.md`
-- Findings: `syncBotsWithCabinetTokens` читал токен только из Prisma `cabinet.settings`; `SettingsService.get` подставляет env и `Setting`, из‑за чего UI/переменные могли «видеть» токен, а процесс не поднимал бот → «Telegram bot не запущен».
-- Changes: разрешение токена через `runWithCabinet` + `settings.get`; остановка процесса только если токен больше ни одним кабинетом не используется; повторное использование одного экземпляра Telegraf для кабинетов с одним и тем же токеном (одно подключение long polling).
-- Decomposition notes (`utils/constants/hooks/types`): `TelegramBotRegistryService.getScopedBotOnly`.
-- Manual verification: `npm run build -w apps/api` (pass); при токене только в env — после синка бот в реестре; лог при втором кабинете с тем же токеном — share instance.
+- Scope: `POST /telegram-userbot/connect` — 500 и контекст кабинета для async-handlers.
+- Files: `apps/api/src/modules/cabinet/cabinet-context.service.ts`, `apps/api/src/modules/telegram-userbot/telegram-userbot.controller.ts`, `apps/api/src/modules/telegram-userbot/client/telegram-userbot-client.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: необработанные исключения в `connectFromStoredSession` (`getApiCreds`, MTProxy, `client.connect`, …) давали 500; async-chain мог терять `AsyncLocalStorage` без явной привязки Promise к `storage.run`.
+- Changes: `runWithCabinetAsync`; userbot controller переведён на него; `connectFromStoredSession` в try/catch с возвратом `{ ok: false, error }` и отключением клиента; `TELEGRAM_USERBOT_*` / proxy — `BadRequestException` вместо `throw new Error`.
+- Decomposition notes (`utils/constants/hooks/types`): N/A.
+- Manual verification: `npm run build -w apps/api` (pass).
 - Docs updated: этот трекер.
-- Linked risks (`SEC-###`): общий токен в нескольких кабинетах — один экземпляр handlers привязан к первому поднявшему кабинету в порядке обхода (редкий случай env для нескольких кабинетов).
+- Linked risks (`SEC-###`): N/A
+
+### AUD-099
+
+- Status: `done`
+- Scope: UI userbot — повторный QR после истечения показывал старый код из‑за merge состояния.
+- Files: `apps/api/src/modules/telegram-userbot/client/telegram-userbot-client.service.ts`, `apps/web/app/telegram-userbot/page.tsx`, `docs/audit/06-progress-tracker.md`
+- Findings: `setQrStateForUser` делал `{ ...prev, ...next }`; при `phase: 'starting'` и переходах в ошибку сохранялись прежние `qrDataUrl` / `loginUrl` / `error`, пока GramJS не отдал новый `qrCode` — карточка «QR авторизация» показывала истёкшее изображение после повторного «Войти по QR» и перезагрузки страницы.
+- Changes: константа `QR_STATE_VISUAL_CLEAR`; сброс визуальных полей при `starting`, `need_password`, `completing_login`, `authorized`, `cancelled` и при всех `phase: 'error'` в QR-потоке; на web показывать `<img>` только при `waiting_scan` и наличии `qrDataUrl`, иначе фазы-специфичный текст.
+- Decomposition notes (`utils/constants/hooks/types`): локальная константа рядом с клиентом userbot.
+- Manual verification: `npm run build -w apps/api`, `npm run build -w apps/web` (pass); повторный старт QR до прихода нового токена — «Подготовка QR…», без старого data URL.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

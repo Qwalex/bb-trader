@@ -22,6 +22,12 @@ import {
 } from '../telegram-userbot.constants';
 import type { QrState } from '../telegram-userbot.types';
 
+/** Сброс визуальных полей QR: при `{ ...prev, ...next }` иначе остаются старый data URL и ссылки. */
+const QR_STATE_VISUAL_CLEAR: Partial<QrState> = {
+  qrDataUrl: undefined,
+  loginUrl: undefined,
+};
+
 @Injectable()
 export class TelegramUserbotClientService {
   private static readonly QR_2FA_WAIT_MS = 120_000;
@@ -238,45 +244,59 @@ export class TelegramUserbotClientService {
   async connectFromStoredSession(opts?: {
     sessionOwnerUserId?: string;
   }): Promise<{ ok: true; connected: true } | { ok: false; error: string }> {
-    const fromOpt = opts?.sessionOwnerUserId?.trim();
-    const fromCabinet = await this.getOwnerUserId();
-    const ownerForAttach = fromOpt || fromCabinet;
-    if (!ownerForAttach) {
-      return {
-        ok: false,
-        error:
-          'Не удалось определить владельца сессии userbot. Войдите по QR из кабинета или задайте TELEGRAM_USERBOT_SESSION_OWNER_USER_ID.',
-      };
+    let client: TelegramClient | undefined;
+    try {
+      const fromOpt = opts?.sessionOwnerUserId?.trim();
+      const fromCabinet = await this.getOwnerUserId();
+      const ownerForAttach = fromOpt || fromCabinet;
+      if (!ownerForAttach) {
+        return {
+          ok: false,
+          error:
+            'Не удалось определить владельца сессии userbot. Войдите по QR из кабинета или задайте TELEGRAM_USERBOT_SESSION_OWNER_USER_ID.',
+        };
+      }
+      const creds = await this.getApiCreds();
+      const clientOptions = await this.getTelegramClientOptions();
+      const session = (await this.settings.get('TELEGRAM_USERBOT_SESSION'))?.trim();
+      if (!session) {
+        return {
+          ok: false,
+          error: 'Сессия userbot не найдена. Запустите вход по QR.',
+        };
+      }
+      await this.stopQrClient(ownerForAttach);
+      client = new TelegramClient(
+        new StringSession(session),
+        creds.apiId,
+        creds.apiHash,
+        clientOptions,
+      );
+      await client.connect();
+      const authorized = await this.isClientAuthorized(client);
+      if (!authorized) {
+        await client.disconnect().catch(() => undefined);
+        return {
+          ok: false,
+          error: 'Сессия недействительна. Выполните повторный вход по QR.',
+        };
+      }
+      await this.attachClient(client, ownerForAttach);
+      await this.settings.set('TELEGRAM_USERBOT_ENABLED', 'true');
+      await this.settings.set(TELEGRAM_USERBOT_SESSION_OWNER_USER_ID_KEY, ownerForAttach);
+      return { ok: true, connected: true };
+    } catch (e) {
+      if (client) {
+        try {
+          await client.disconnect();
+        } catch {
+          /* ignore */
+        }
+      }
+      const msg = formatError(e);
+      this.logger.error(`connectFromStoredSession failed: ${msg}`);
+      return { ok: false, error: msg };
     }
-    const creds = await this.getApiCreds();
-    const clientOptions = await this.getTelegramClientOptions();
-    const session = (await this.settings.get('TELEGRAM_USERBOT_SESSION'))?.trim();
-    if (!session) {
-      return {
-        ok: false,
-        error: 'Сессия userbot не найдена. Запустите вход по QR.',
-      };
-    }
-    await this.stopQrClient(ownerForAttach);
-    const client = new TelegramClient(
-      new StringSession(session),
-      creds.apiId,
-      creds.apiHash,
-      clientOptions,
-    );
-    await client.connect();
-    const authorized = await this.isClientAuthorized(client);
-    if (!authorized) {
-      await client.disconnect();
-      return {
-        ok: false,
-        error: 'Сессия недействительна. Выполните повторный вход по QR.',
-      };
-    }
-    await this.attachClient(client, ownerForAttach);
-    await this.settings.set('TELEGRAM_USERBOT_ENABLED', 'true');
-    await this.settings.set(TELEGRAM_USERBOT_SESSION_OWNER_USER_ID_KEY, ownerForAttach);
-    return { ok: true, connected: true };
   }
 
   async disconnect(): Promise<{ ok: true; connected: false }> {
@@ -357,7 +377,11 @@ export class TelegramUserbotClientService {
     } catch (e) {
       const msg = formatError(e);
       this.logger.error(`Userbot QR start failed: ${msg}`);
-      this.setQrStateForUser(ownerUserId, { phase: 'error', error: msg });
+      this.setQrStateForUser(ownerUserId, {
+        phase: 'error',
+        error: msg,
+        ...QR_STATE_VISUAL_CLEAR,
+      });
       if (qrClient) {
         try {
           await qrClient.disconnect();
@@ -377,7 +401,11 @@ export class TelegramUserbotClientService {
     }
 
     this.qrClientByUserId.set(ownerUserId, qrClient);
-    this.setQrStateForUser(ownerUserId, { phase: 'starting' });
+    this.setQrStateForUser(ownerUserId, {
+      phase: 'starting',
+      ...QR_STATE_VISUAL_CLEAR,
+      error: undefined,
+    });
 
     const qrTask = (async () => {
       try {
@@ -388,7 +416,11 @@ export class TelegramUserbotClientService {
               const raw = formatError(err);
               const msg = formatUserbotQrAuthErrorForUser(raw);
               this.logger.warn(`Userbot QR onError: ${raw}`);
-              this.setQrStateForUser(ownerUserId, { phase: 'error', error: msg });
+              this.setQrStateForUser(ownerUserId, {
+                phase: 'error',
+                error: msg,
+                ...QR_STATE_VISUAL_CLEAR,
+              });
               return false;
             },
             qrCode: async (code: { token: Buffer }) => {
@@ -413,16 +445,24 @@ export class TelegramUserbotClientService {
                   reject,
                   timer,
                 });
-                this.setQrStateForUser(ownerUserId, { phase: 'need_password' });
+                this.setQrStateForUser(ownerUserId, {
+                  phase: 'need_password',
+                  ...QR_STATE_VISUAL_CLEAR,
+                });
               }),
           },
         );
-        this.setQrStateForUser(ownerUserId, { phase: 'completing_login' });
+        this.setQrStateForUser(ownerUserId, {
+          phase: 'completing_login',
+          ...QR_STATE_VISUAL_CLEAR,
+          error: undefined,
+        });
         const authorized = await this.isClientAuthorized(qrClient);
         if (!authorized) {
           this.setQrStateForUser(ownerUserId, {
             phase: 'error',
             error: 'QR авторизация не завершена.',
+            ...QR_STATE_VISUAL_CLEAR,
           });
           return;
         }
@@ -437,12 +477,20 @@ export class TelegramUserbotClientService {
         await this.settings.set('TELEGRAM_USERBOT_ENABLED', 'true');
         await this.attachClient(qrClient, ownerUserId);
         this.qrClientByUserId.delete(ownerUserId);
-        this.setQrStateForUser(ownerUserId, { phase: 'authorized' });
+        this.setQrStateForUser(ownerUserId, {
+          phase: 'authorized',
+          ...QR_STATE_VISUAL_CLEAR,
+          error: undefined,
+        });
       } catch (e) {
         const raw = formatError(e);
         const msg = formatUserbotQrAuthErrorForUser(raw);
         this.logger.error(`Userbot QR flow failed: ${raw}`);
-        this.setQrStateForUser(ownerUserId, { phase: 'error', error: msg });
+        this.setQrStateForUser(ownerUserId, {
+          phase: 'error',
+          error: msg,
+          ...QR_STATE_VISUAL_CLEAR,
+        });
         await this.stopQrClient(ownerUserId);
       } finally {
         this.rejectQrPasswordWait(ownerUserId, new Error('Вход по QR завершён'));
@@ -475,7 +523,11 @@ export class TelegramUserbotClientService {
     await this.stopQrClient(ownerUserId);
     if (ownerUserId) {
       this.qrTaskByUserId.delete(ownerUserId);
-      this.setQrStateForUser(ownerUserId, { phase: 'cancelled' });
+      this.setQrStateForUser(ownerUserId, {
+        phase: 'cancelled',
+        ...QR_STATE_VISUAL_CLEAR,
+        error: undefined,
+      });
     }
     return { ok: true, qr: this.getQrStateForUser(ownerUserId) };
   }
@@ -580,7 +632,7 @@ export class TelegramUserbotClientService {
     const apiHash = (await this.settings.get('TELEGRAM_USERBOT_API_HASH'))?.trim();
     const apiId = apiIdRaw ? parseInt(apiIdRaw, 10) : Number.NaN;
     if (!Number.isFinite(apiId) || !apiHash) {
-      throw new Error(
+      throw new BadRequestException(
         'Нужно заполнить TELEGRAM_USERBOT_API_ID и TELEGRAM_USERBOT_API_HASH в настройках.',
       );
     }
@@ -609,7 +661,7 @@ export class TelegramUserbotClientService {
     try {
       url = new URL(normalized);
     } catch {
-      throw new Error(
+      throw new BadRequestException(
         'Неверный TELEGRAM_USERBOT_MTPROXY_URL: ожидается ссылка вида https://t.me/proxy?server=...&port=...&secret=...',
       );
     }
@@ -620,7 +672,7 @@ export class TelegramUserbotClientService {
     const port = Number.parseInt(portRaw, 10);
 
     if (!server || !secret || !Number.isFinite(port) || port < 1 || port > 65535) {
-      throw new Error(
+      throw new BadRequestException(
         'Неверный TELEGRAM_USERBOT_MTPROXY_URL: нужны параметры server, port (1..65535) и secret.',
       );
     }
