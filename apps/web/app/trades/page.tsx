@@ -66,6 +66,8 @@ type Signal = {
   capitalPercent: number;
   martingaleStep?: number;
   events?: SignalEvent[];
+  /** Имя кабинета из БД (список сделок `/orders/trades`) */
+  cabinetName?: string | null;
 };
 
 type TradesRes = {

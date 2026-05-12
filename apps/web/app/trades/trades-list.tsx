@@ -25,6 +25,8 @@ type TradeListItem = {
   capitalPercent: number;
   martingaleStep?: number | null;
   finalPnl?: number | null;
+  /** Имя кабинета (из API списка сделок) */
+  cabinetName?: string | null;
   pnlBreakdown?: {
     source: 'closed_pnl' | 'execution_fallback' | 'unavailable';
     requestWindow: {
@@ -242,6 +244,10 @@ export function TradesList({ items, sourceOptions }: Props) {
           </div>
 
           <div className="tradeCardMeta tradeCardMetaDense">
+            <div className="tradeCardMetaRow">
+              <span className="tradeCardLabel">Кабинет</span>
+              <span className="tradeCardValue">{s.cabinetName?.trim() || '—'}</span>
+            </div>
             <div className="tradeCardMetaRow">
               <span className="tradeCardLabel">Статус</span>
               <span className="tradeCardValue tradeCardMono">{s.status}</span>

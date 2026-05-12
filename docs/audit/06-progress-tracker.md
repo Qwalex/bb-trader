@@ -997,6 +997,18 @@
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
 
+### AUD-083
+
+- Status: `done`
+- Scope: Web/API — в карточках сделок (`/trades`) показывать название кабинета.
+- Files: `apps/api/src/modules/orders/orders.service.ts`, `apps/web/app/trades/page.tsx`, `apps/web/app/trades/trades-list.tsx`, `docs/audit/06-progress-tracker.md`
+- Findings: в ответе `GET /orders/trades` не было человекочитаемой подписи кабинета для строки сделки.
+- Changes: в `listTrades` — `include.cabinet` (`name`, `slug`), в JSON — поле `cabinetName` (имя, иначе slug, иначе `cabinetId`); в UI — строка «Кабинет» в мета-блоке карточки.
+- Decomposition notes (`utils/constants/hooks/types`): без вынесения — одна точка в `OrdersService`.
+- Manual verification: `npm run build -w apps/api` (pass); вручную: `/trades` — в карточках видно имя кабинета.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
 ### AUD-080
 
 - Status: `done`

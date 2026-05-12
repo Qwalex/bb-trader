@@ -149,6 +149,22 @@ export class OrdersService {
     };
   }
 
+  /** Для API списка сделок: убрать вложенный `cabinet`, добавить плоское имя для UI. */
+  private toTradeListClientRow<
+    T extends {
+      cabinet?: { name: string; slug: string } | null;
+      cabinetId: string | null;
+    },
+  >(item: T): Omit<T, 'cabinet'> & { cabinetName: string | null } {
+    const { cabinet, ...rest } = item;
+    const cabinetName =
+      cabinet?.name?.trim() ||
+      cabinet?.slug?.trim() ||
+      (typeof rest.cabinetId === 'string' ? rest.cabinetId.trim() : '') ||
+      null;
+    return { ...(rest as Omit<T, 'cabinet'>), cabinetName };
+  }
+
   async createSignalRecord(
     signal: SignalDto,
     rawMessage: string | undefined,
@@ -1512,6 +1528,7 @@ export class OrdersService {
         skip: (page - 1) * pageSize,
         take: pageSize,
         include: {
+          cabinet: { select: { name: true, slug: true } },
           orders: true,
           events: {
             orderBy: { createdAt: 'desc' },
@@ -1540,7 +1557,7 @@ export class OrdersService {
     if (!refreshPnlFromExchange) {
       return {
         items: itemsBase.map((item) => ({
-          ...item,
+          ...this.toTradeListClientRow(item),
           finalPnl: item.realizedPnl ?? null,
           pnlBreakdown: null,
         })),
@@ -1603,7 +1620,7 @@ export class OrdersService {
         }
 
         return {
-          ...item,
+          ...this.toTradeListClientRow(item),
           finalPnl,
           pnlBreakdown,
         };
