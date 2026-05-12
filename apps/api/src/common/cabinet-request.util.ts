@@ -1,19 +1,32 @@
+/** Nest/Express: `cabinetId` в query может быть `string[]` при дублях; `String([])` даёт невалидный id. */
+function scalarCabinetToken(raw: unknown): string | undefined {
+  if (raw == null) return undefined;
+  if (Array.isArray(raw)) {
+    for (const x of raw) {
+      const s = scalarCabinetToken(x);
+      if (s) return s;
+    }
+    return undefined;
+  }
+  const s = String(raw).trim();
+  return s || undefined;
+}
+
 export function pickRequestedCabinetId(params: {
-  queryCabinetId?: string | null;
+  queryCabinetId?: unknown;
   headers?: Record<string, string | string[] | undefined>;
   cookies?: Record<string, string | undefined>;
 }): string | undefined {
-  const fromQuery = String(params.queryCabinetId ?? '').trim();
+  const fromQuery = scalarCabinetToken(params.queryCabinetId);
   if (fromQuery) {
     return fromQuery;
   }
   const raw = params.headers?.['x-cabinet-id'];
   const header = Array.isArray(raw) ? raw[0] : raw;
-  const fromHeader = String(header ?? '').trim();
+  const fromHeader = scalarCabinetToken(header);
   if (fromHeader) {
     return fromHeader;
   }
-  const fromCookie = String(params.cookies?.cabinet_id ?? '').trim();
-  return fromCookie || undefined;
+  return scalarCabinetToken(params.cookies?.cabinet_id);
 }
 

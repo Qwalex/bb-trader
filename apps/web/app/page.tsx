@@ -8,6 +8,7 @@ import Link from 'next/link';
 import { cookies } from 'next/headers';
 
 import { fetchJson } from '../lib/api';
+import { searchParamFirst } from '../lib/search-param.util';
 import type { ConnectedGroupItem, DashboardCabinetCard } from './home-dashboard.types';
 
 type Stats = {
@@ -83,7 +84,7 @@ export default async function Home({
   const cabinetIdFromCookie = cookieStore.get('cabinet_id')?.value?.trim() ?? '';
   const sp = await searchParams;
   const source = typeof sp.source === 'string' ? sp.source.trim() : '';
-  const cabinetIdFromQuery = typeof sp.cabinetId === 'string' ? sp.cabinetId.trim() : '';
+  const cabinetIdFromQuery = searchParamFirst(sp.cabinetId);
   const cabinetId = cabinetIdFromQuery || cabinetIdFromCookie;
   let stats: Stats | null = null;
   let pnl: PnlPoint[] = [];

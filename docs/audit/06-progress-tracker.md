@@ -1009,6 +1009,40 @@
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
 
+### AUD-084
+
+- Status: `done`
+- Scope: API/Web — выбранный кабинет игнорировался, всегда показывался один и тот же (первый у пользователя в БД).
+- Files: `apps/api/src/common/cabinet-request.util.ts`, `apps/web/lib/api.ts`, `apps/web/lib/search-param.util.ts`, `apps/web/app/trades/page.tsx`, `apps/web/app/page.tsx`, `docs/audit/06-progress-tracker.md`
+- Findings: при двух `cabinetId` в query (дубль из `q` + `withCabinetQuery`) Nest отдаёт `string[]`; `String([id,id])` давало невалидный id → `resolveCabinetIdForUser` не находил кабинет и падал в `ensureUserDefaultCabinet` (первый кабинет по `createdAt`). На RSC `searchParams.cabinetId` как `string[]` терялся при проверке `typeof === 'string'`.
+- Changes: `pickRequestedCabinetId` — нормализация query/header через первый валидный скаляр; `withCabinetQuery` — не добавлять второй `cabinetId`, если уже есть; `searchParamFirst` для `/` и `/trades`.
+- Decomposition notes (`utils/constants/hooks/types`): `search-param.util.ts` для App Router.
+- Manual verification: `npm run build -w apps/api` и `npm run build -w apps/web` (pass); вручную: два кабинета — `/trades` и дашборд отдают данные выбранного кабинета.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-085
+
+- Status: `done`
+- Scope: Ops — runbook: Railway SSH / env / проверка кабинетов в Postgres.
+- Files: `docs/audit/04-operational-runbooks.md`
+- Findings: отдельных `CABINET_*` в env нет; кабинеты только в БД; на связанном с репо Railway (`railway ssh -s api`) выборка показала БД **без** таблицы `Cabinet` и без `Signal.cabinetId` (устаревшая схема или не тот `DATABASE_URL`/проект).
+- Changes: раздел «Railway: SSH, переменные и кабинеты в БД» с командами `railway ssh`, проверкой `DATABASE_URL`, списком таблиц и `prisma.cabinet.findMany`.
+- Manual verification: `railway ssh -s api` (pass); node + Prisma в контейнере (pass).
+- Docs updated: `04-operational-runbooks.md`, этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-086
+
+- Status: `done`
+- Scope: Web — расхождение `cabinetId` в запросах `/api/backend/cabinets` и данных SSR `/trades`.
+- Files: `apps/web/lib/api.ts`, `docs/audit/04-operational-runbooks.md`, `docs/audit/06-progress-tracker.md`
+- Findings: `getClientCabinetId()` для `fetchJson`/`fetchApiResponse` учитывал только `localStorage`; RSC `/trades` использовал `searchParams` + cookie → в Network видны одни `cabinetId`, список сделок строился по другому контексту.
+- Changes: в браузере `getClientCabinetId` делегирует в `readActiveCabinetIdClient()` (порядок: URL → storage → cookie); в runbook — короткий пункт про симптом и диагностику.
+- Manual verification: `npm run build -w apps/web` (pass); вручную: смена кабинета — `/cabinets` и перезагрузка `/trades` согласованы.
+- Docs updated: `04-operational-runbooks.md`, этот трекер.
+- Linked risks (`SEC-###`): N/A
+
 ### AUD-080
 
 - Status: `done`

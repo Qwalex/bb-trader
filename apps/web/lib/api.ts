@@ -1,9 +1,7 @@
 import { getClientTokenFromCookie, getServerTokenFromCookies } from './api-auth.util';
+import { readActiveCabinetIdClient } from './cabinet-client.util';
 import { normalizeBasePath } from './base-path';
-import {
-  ACTIVE_CABINET_STORAGE_KEY,
-  DEFAULT_INTERNAL_API_BASE,
-} from './api.constants';
+import { DEFAULT_INTERNAL_API_BASE } from './api.constants';
 
 /**
  * Публичный origin веб-приложения (`WEB_APP_ORIGIN`), совпадает с одним из API_CORS_ORIGINS на API.
@@ -32,11 +30,15 @@ export function getApiBase(): string {
   return `${window.location.origin}${basePath}/api/backend`;
 }
 
+/** В браузере: тот же приоритет, что у SSR (URL → storage → cookie), иначе /cabinets и RSC /trades расходятся. */
 function getClientCabinetId(): string | undefined {
   if (typeof window === 'undefined') return undefined;
-  const fromStorage = window.localStorage.getItem(ACTIVE_CABINET_STORAGE_KEY)?.trim();
-  if (fromStorage) return fromStorage;
-  return undefined;
+  try {
+    const id = readActiveCabinetIdClient().trim();
+    return id || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function withCabinetQuery(path: string, cabinetId?: string | null): string {
@@ -44,6 +46,15 @@ export function withCabinetQuery(path: string, cabinetId?: string | null): strin
   if (!id) return path;
   const [baseRaw, hash = ''] = path.split('#', 2);
   const base = baseRaw ?? path;
+  try {
+    const u = new URL(base, 'http://local.invalid');
+    const existing = u.searchParams.getAll('cabinetId');
+    if (existing.includes(id)) {
+      return hash ? `${base}#${hash}` : path;
+    }
+  } catch {
+    // ignore
+  }
   const hasQuery = base.includes('?');
   const next = `${base}${hasQuery ? '&' : '?'}cabinetId=${encodeURIComponent(id)}`;
   return hash ? `${next}#${hash}` : next;
