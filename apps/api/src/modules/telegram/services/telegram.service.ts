@@ -3,8 +3,8 @@ import {
   Inject,
   Injectable,
   Logger,
+  OnApplicationBootstrap,
   OnModuleDestroy,
-  OnModuleInit,
 } from '@nestjs/common';
 import { Context, Telegraf } from 'telegraf';
 
@@ -56,7 +56,7 @@ import {
 import type { ExternalConfirmationResult } from '../types/telegram.types';
 
 @Injectable()
-export class TelegramService implements OnModuleInit, OnModuleDestroy {
+export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger(TelegramService.name);
   private botLaunchRetryTimer: NodeJS.Timeout | null = null;
   private botSyncTimer: NodeJS.Timeout | null = null;
@@ -98,8 +98,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     return this.settings.getDefaultOrderUsd(d?.totalUsd);
   }
 
-  async onModuleInit(): Promise<void> {
-    // Не блокируем bootstrap API: запуск Telegram-ботов и приветственная рассылка могут зависеть от внешней сети.
+  async onApplicationBootstrap(): Promise<void> {
+    // После всех onModuleInit (Prisma $connect, дефолтный кабинет, Settings) — иначе первый sync иногда
+    // не видит TELEGRAM_BOT_TOKEN и ложно логирует «боты выключены». Не блокируем HTTP listen: сеть в фоне.
     void this.initializeBots().catch((e) => {
       this.logger.error(`Telegram init failed: ${formatError(e)}`);
     });
@@ -112,7 +113,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const launched = await this.syncBotsWithCabinetTokens();
     if (launched <= 0) {
       this.logger.warn(
-        'No cabinet has TELEGRAM_BOT_TOKEN in cabinet settings — assistant bots are disabled',
+        'Telegram: на первом sync нет кабинета с непустым TELEGRAM_BOT_TOKEN (настройки/env). Повтор через интервал sync; если токены заданы — проверьте БД и переменные окружения сервиса API.',
       );
       return;
     }

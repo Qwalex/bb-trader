@@ -1293,3 +1293,15 @@
 - Manual verification: `npm run build -w apps/api` (pass); рекомендуется: добавить токен кабинету после старта API — приходит то же сообщение, что и при `TELEGRAM_STARTUP_MESSAGE` / дефолт.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-106
+
+- Status: `done`
+- Scope: Telegram assist — старт long polling после полной инициализации приложения.
+- Files: `apps/api/src/modules/telegram/services/telegram.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: `initializeBots` вызывался из `onModuleInit` параллельно с другими хуками без гарантии порядка; первый `syncBotsWithCabinetTokens` иногда не видел `TELEGRAM_BOT_TOKEN` (ещё не готовы Prisma/кабинет/слой настроек) → ложное предупреждение «боты выключены» при живых токенах.
+- Changes: перенос на `OnApplicationBootstrap`; текст предупреждения при `launched === 0` уточняет первый sync и повтор по интервалу.
+- Decomposition notes (`utils/constants/hooks/types`): N/A.
+- Manual verification: `npm run build -w apps/api` (pass).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
