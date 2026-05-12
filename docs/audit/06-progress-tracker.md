@@ -1305,3 +1305,15 @@
 - Manual verification: `npm run build -w apps/api` (pass).
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-107
+
+- Status: `done`
+- Scope: Telegram assist — очередь и пауза между запусками Telegraf (несколько кабинетов / таймауты launch).
+- Files: `apps/api/src/modules/telegram/services/telegram.service.ts`, `.env.example`, `AGENTS.md`, `docs/audit/06-progress-tracker.md`
+- Findings: подряд несколько `deleteWebhook`+`launch` к Bot API и фоновый `launch` после `Promise.race` timeout повышали риск таймаутов и «залипших» поллеров.
+- Changes: `withTelegramBotLaunchSerialized` — не более одного launch одновременно на процесс; `TELEGRAM_BOT_LAUNCH_STAGGER_MS` (дефолт 2000, `0` — выкл.) — пауза между завершением одной попытки и началом следующей; при ошибке/таймауте — `bot.stop('SIGTERM')`.
+- Decomposition notes (`utils/constants/hooks/types`): N/A.
+- Manual verification: `npm run build -w apps/api` (pass).
+- Docs updated: этот трекер, `AGENTS.md`, `.env.example`.
+- Linked risks (`SEC-###`): N/A

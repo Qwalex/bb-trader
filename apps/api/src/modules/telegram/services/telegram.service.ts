@@ -63,6 +63,10 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
   private cleanupTimer: NodeJS.Timeout | null = null;
   private shuttingDown = false;
   private botSyncInFlight = false;
+  /** Не более одного Telegraf launch одновременно (очередь на весь процесс API). */
+  private botLaunchSerialGate: Promise<void> = Promise.resolve();
+  /** Время завершения последнего deleteWebhook+launch (успех или ошибка) — для `TELEGRAM_BOT_LAUNCH_STAGGER_MS`. */
+  private lastCabinetBotLaunchFinishedAt = 0;
   private readonly launchedBotTokensByCabinet = new Map<string, string>();
   /**
    * Один и тот же TELEGRAM_BOT_TOKEN → один процесс long polling.
@@ -268,48 +272,101 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
     return Math.min(180_000, Math.max(5_000, n));
   }
 
+  /** Пауза между последовательными запусками ботов (мс). `0` — без паузы. Пусто — 2000. */
+  private telegramLaunchStaggerMs(): number {
+    const raw = process.env.TELEGRAM_BOT_LAUNCH_STAGGER_MS?.trim();
+    if (raw === undefined || raw === '') {
+      return 10_000;
+    }
+    const n = Number.parseInt(raw, 10);
+    if (!Number.isFinite(n) || n < 0) {
+      return 2_000;
+    }
+    if (n === 0) {
+      return 0;
+    }
+    return Math.min(120_000, n);
+  }
+
+  private async sleepCabinetLaunchStaggerIfNeeded(): Promise<void> {
+    const stagger = this.telegramLaunchStaggerMs();
+    if (stagger <= 0 || this.lastCabinetBotLaunchFinishedAt <= 0) {
+      return;
+    }
+    const elapsed = Date.now() - this.lastCabinetBotLaunchFinishedAt;
+    const wait = Math.max(0, stagger - elapsed);
+    if (wait > 0) {
+      await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+
+  private async withTelegramBotLaunchSerialized<T>(fn: () => Promise<T>): Promise<T> {
+    const prevGate = this.botLaunchSerialGate;
+    let release!: () => void;
+    this.botLaunchSerialGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await prevGate.catch(() => {});
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
+  }
+
   private async launchCabinetBotWithTimeout(
     bot: Telegraf,
     cabinetId: string,
     cfg: { token: string; name: string },
   ): Promise<void> {
-    const timeoutMs = this.telegramLaunchTimeoutMs();
-    let timeoutHandle: NodeJS.Timeout | null = null;
-    try {
-      const timeout = new Promise<never>((_, reject) => {
-        timeoutHandle = setTimeout(() => {
-          reject(
-            new Error(
-              `Telegram launch timeout after ${timeoutMs}ms (cabinet=${cabinetId})`,
-            ),
-          );
-        }, timeoutMs);
-      });
+    return this.withTelegramBotLaunchSerialized(async () => {
+      await this.sleepCabinetLaunchStaggerIfNeeded();
+      const timeoutMs = this.telegramLaunchTimeoutMs();
+      let timeoutHandle: NodeJS.Timeout | null = null;
+      try {
+        const timeout = new Promise<never>((_, reject) => {
+          timeoutHandle = setTimeout(() => {
+            reject(
+              new Error(
+                `Telegram launch timeout after ${timeoutMs}ms (cabinet=${cabinetId})`,
+              ),
+            );
+          }, timeoutMs);
+        });
 
-      await Promise.race([
-        (async () => {
-          // На части токенов может быть активный webhook; без удаления Telegram блокирует getUpdates (long polling).
-          await bot.telegram.deleteWebhook({ drop_pending_updates: false });
-          await bot.launch();
-          this.botRegistry.addLaunchedBot(cabinetId, bot);
-          this.launchedBotTokensByCabinet.set(cabinetId, cfg.token);
-          const me = await bot.telegram.getMe().catch(() => null);
-          this.logger.log(
-            `Telegram bot started for cabinet=${cabinetId} (${cfg.name}) username=@${me?.username ?? '?'}`,
-          );
-          void this.sendStartupGreetingForCabinet(cabinetId).catch((e) =>
-            this.logger.warn(
-              `sendStartupGreetingForCabinet failed cabinet=${cabinetId}: ${formatError(e)}`,
-            ),
-          );
-        })(),
-        timeout,
-      ]);
-    } finally {
-      if (timeoutHandle) {
-        clearTimeout(timeoutHandle);
+        await Promise.race([
+          (async () => {
+            // На части токенов может быть активный webhook; без удаления Telegram блокирует getUpdates (long polling).
+            await bot.telegram.deleteWebhook({ drop_pending_updates: false });
+            await bot.launch();
+            this.botRegistry.addLaunchedBot(cabinetId, bot);
+            this.launchedBotTokensByCabinet.set(cabinetId, cfg.token);
+            const me = await bot.telegram.getMe().catch(() => null);
+            this.logger.log(
+              `Telegram bot started for cabinet=${cabinetId} (${cfg.name}) username=@${me?.username ?? '?'}`,
+            );
+            void this.sendStartupGreetingForCabinet(cabinetId).catch((e) =>
+              this.logger.warn(
+                `sendStartupGreetingForCabinet failed cabinet=${cabinetId}: ${formatError(e)}`,
+              ),
+            );
+          })(),
+          timeout,
+        ]);
+      } catch (e) {
+        try {
+          bot.stop('SIGTERM');
+        } catch {
+          // ignore
+        }
+        throw e;
+      } finally {
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+        }
+        this.lastCabinetBotLaunchFinishedAt = Date.now();
       }
-    }
+    });
   }
 
   private async resolveStartupGreetingText(): Promise<string> {
