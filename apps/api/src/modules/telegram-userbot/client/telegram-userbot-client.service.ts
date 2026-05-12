@@ -15,6 +15,11 @@ import { SettingsService } from '../../settings/settings.service';
 import {
   TELEGRAM_USERBOT_SESSION_OWNER_USER_ID_KEY,
 } from '../../settings/settings.constants';
+import {
+  TELEGRAM_USERBOT_SESSION_PERSIST_INTERVAL_MS_DEFAULT,
+  TELEGRAM_USERBOT_SESSION_PERSIST_INTERVAL_MS_MAX,
+  TELEGRAM_USERBOT_SESSION_PERSIST_INTERVAL_MS_MIN,
+} from '../telegram-userbot.constants';
 import type { QrState } from '../telegram-userbot.types';
 
 @Injectable()
@@ -36,6 +41,8 @@ export class TelegramUserbotClientService {
       timer: ReturnType<typeof setTimeout>;
     }
   >();
+  /** Периодически синхронизируем StringSession в Setting — иначе после редеплоя строка в БД бывает устаревшей. */
+  private sessionPersistIntervalHandle: ReturnType<typeof setInterval> | null = null;
 
   private inboundHandler: ((event: unknown) => Promise<void>) | null = null;
   private afterAttachHook: (() => Promise<void>) | null = null;
@@ -45,6 +52,77 @@ export class TelegramUserbotClientService {
     private readonly settings: SettingsService,
     private readonly cabinetContext: CabinetContextService,
   ) {}
+
+  private readStringSessionSerialized(client: TelegramClient): string | null {
+    try {
+      const session = client.session as unknown as { save?: () => string };
+      const s = session.save?.();
+      return typeof s === 'string' && s.trim().length > 0 ? s.trim() : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private resolveSessionPersistIntervalMs(): number {
+    const raw = process.env.TELEGRAM_USERBOT_SESSION_PERSIST_INTERVAL_MS?.trim();
+    const n = raw ? Number.parseInt(raw, 10) : Number.NaN;
+    if (!Number.isFinite(n)) {
+      return TELEGRAM_USERBOT_SESSION_PERSIST_INTERVAL_MS_DEFAULT;
+    }
+    return Math.min(
+      TELEGRAM_USERBOT_SESSION_PERSIST_INTERVAL_MS_MAX,
+      Math.max(TELEGRAM_USERBOT_SESSION_PERSIST_INTERVAL_MS_MIN, n),
+    );
+  }
+
+  private clearSessionPersistSchedule(): void {
+    if (this.sessionPersistIntervalHandle) {
+      clearInterval(this.sessionPersistIntervalHandle);
+      this.sessionPersistIntervalHandle = null;
+    }
+  }
+
+  private ensureSessionPersistSchedule(): void {
+    if (this.clientsByUserId.size === 0) {
+      this.clearSessionPersistSchedule();
+      return;
+    }
+    if (this.sessionPersistIntervalHandle) {
+      return;
+    }
+    const ms = this.resolveSessionPersistIntervalMs();
+    this.sessionPersistIntervalHandle = setInterval(() => {
+      void this.persistAllConnectedSessions().catch((e) =>
+        this.logger.warn(`Userbot session persist tick: ${formatError(e)}`),
+      );
+    }, ms);
+    this.logger.log(`Userbot: фоновая запись MTProto-сессии в БД каждые ${ms} мс`);
+  }
+
+  private async persistConnectedSessionStringIfChanged(client: TelegramClient): Promise<void> {
+    const next = this.readStringSessionSerialized(client);
+    if (!next) {
+      return;
+    }
+    const current = (await this.settings.get('TELEGRAM_USERBOT_SESSION'))?.trim() ?? '';
+    if (next === current) {
+      return;
+    }
+    await this.settings.set('TELEGRAM_USERBOT_SESSION', next);
+    this.logger.debug('Userbot: TELEGRAM_USERBOT_SESSION обновлена в БД (GramJS)');
+  }
+
+  private async persistAllConnectedSessions(): Promise<void> {
+    for (const client of this.clientsByUserId.values()) {
+      try {
+        if (await this.isClientAuthorized(client)) {
+          await this.persistConnectedSessionStringIfChanged(client);
+        }
+      } catch (e) {
+        this.logger.warn(`Userbot session persist: ${formatError(e)}`);
+      }
+    }
+  }
 
   setInboundHandler(handler: (event: unknown) => Promise<void>): void {
     this.inboundHandler = handler;
@@ -222,12 +300,16 @@ export class TelegramUserbotClientService {
       return { ok: true, connected: false };
     }
     try {
+      await this.persistConnectedSessionStringIfChanged(client);
       await client.disconnect();
     } finally {
       if (ownerKey) {
         this.clientsByUserId.delete(ownerKey);
         this.messageHandlerRegisteredByUserId.delete(ownerKey);
       }
+    }
+    if (this.clientsByUserId.size === 0) {
+      this.clearSessionPersistSchedule();
     }
     return { ok: true, connected: false };
   }
@@ -411,12 +493,18 @@ export class TelegramUserbotClientService {
   }
 
   async disconnectAll(): Promise<void> {
+    this.clearSessionPersistSchedule();
     for (const userId of Array.from(this.qrPasswordDeferredByUserId.keys())) {
       this.rejectQrPasswordWait(userId, new Error('Сервис останавливается'));
     }
     for (const userId of Array.from(this.clientsByUserId.keys())) {
       const client = this.clientsByUserId.get(userId);
       if (!client) continue;
+      try {
+        await this.persistConnectedSessionStringIfChanged(client);
+      } catch (e) {
+        this.logger.warn(`Userbot session persist before shutdown: ${formatError(e)}`);
+      }
       try {
         await client.disconnect();
       } catch {
@@ -432,6 +520,9 @@ export class TelegramUserbotClientService {
         /* ignore */
       }
     }
+    this.clientsByUserId.clear();
+    this.messageHandlerRegisteredByUserId.clear();
+    this.qrClientByUserId.clear();
   }
 
   private async attachClient(client: TelegramClient, ownerUserId: string): Promise<void> {
@@ -441,6 +532,11 @@ export class TelegramUserbotClientService {
     }
     const prev = this.clientsByUserId.get(owner);
     if (prev && prev !== client) {
+      try {
+        await this.persistConnectedSessionStringIfChanged(prev);
+      } catch (e) {
+        this.logger.warn(`Userbot session persist before replace: ${formatError(e)}`);
+      }
       await prev.disconnect();
       this.messageHandlerRegisteredByUserId.delete(owner);
     }
@@ -457,6 +553,12 @@ export class TelegramUserbotClientService {
     if (this.afterAttachHook) {
       await this.afterAttachHook();
     }
+    try {
+      await this.persistConnectedSessionStringIfChanged(client);
+    } catch (e) {
+      this.logger.warn(`Userbot session persist after attach: ${formatError(e)}`);
+    }
+    this.ensureSessionPersistSchedule();
   }
 
   private async stopQrClient(userId: string | null): Promise<void> {

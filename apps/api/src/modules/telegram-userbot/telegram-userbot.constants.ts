@@ -14,3 +14,10 @@ export const OPENROUTER_BALANCE_NOTIFY_COOLDOWN_MS = 30 * 60_000;
 /** Опрос Telegram после ошибки уровней (validateSignalLevels). */
 export const USERBOT_SIGNAL_LEVELS_EDIT_WATCH_POLL_MS = 25_000;
 export const USERBOT_SIGNAL_LEVELS_EDIT_WATCH_TTL_MS = 90 * 60_000;
+/**
+ * Период записи MTProto StringSession в глобальный Setting (миграция DC и др.).
+ * Задаётся env TELEGRAM_USERBOT_SESSION_PERSIST_INTERVAL_MS (мс), минимум 60000.
+ */
+export const TELEGRAM_USERBOT_SESSION_PERSIST_INTERVAL_MS_DEFAULT = 600_000;
+export const TELEGRAM_USERBOT_SESSION_PERSIST_INTERVAL_MS_MIN = 60_000;
+export const TELEGRAM_USERBOT_SESSION_PERSIST_INTERVAL_MS_MAX = 3_600_000;

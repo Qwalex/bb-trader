@@ -1137,3 +1137,15 @@
 - Manual verification: `npm run build -w apps/api` (pass); после деплоя — ошибка ingest duplicate должна приходить владельцу с привязанным Telegram даже при пустом whitelist (если нужна изоляция только по whitelist — заполнить whitelist и не полагаться на owner).
 - Docs updated: этот трекер, `AGENTS.md`.
 - Linked risks (`SEC-###`): N/A (владелец/участники получают больше сообщений, чем при чистом whitelist-only — это намеренное выравнивание с доступом к боту).
+
+### AUD-093
+
+- Status: `done`
+- Scope: Userbot MTProto — сохранение актуальной StringSession в БД после работы GramJS и перед рестартом процесса.
+- Files: `apps/api/src/modules/telegram-userbot/client/telegram-userbot-client.service.ts`, `apps/api/src/modules/telegram-userbot/telegram-userbot.constants.ts`, `.env.example`, `AGENTS.md`, `docs/audit/06-progress-tracker.md`
+- Findings: строка `TELEGRAM_USERBOT_SESSION` обновлялась в основном при QR; GramJS может менять сессию (DC и т.д.) во время работы — в БД оставалась старая версия → после редеплоя `connectFromStoredSession` получал «Сессия недействительна». Отдельно: несколько реплик API с одной сессией по-прежнему рискуют инвалидировать вход (операционное ограничение).
+- Changes: периодическая запись `session.save()` при авторизованном клиенте (`TELEGRAM_USERBOT_SESSION_PERSIST_INTERVAL_MS`, дефолт 10 мин); запись перед `disconnect`/`disconnectAll` и при замене клиента в `attachClient`; очистка maps в `disconnectAll`; комментарии в `.env.example` и `AGENTS.md` про 1 реплику API.
+- Decomposition notes (`utils/constants/hooks/types`): константы интервала в `telegram-userbot.constants.ts`.
+- Manual verification: `npm run build -w apps/api` (pass); после деплоя при включённом userbot и одной реплике — без QR, если сессия была активна до рестарта и успела сохраниться (интервал или SIGTERM).
+- Docs updated: этот трекер, `AGENTS.md`, `.env.example`.
+- Linked risks (`SEC-###`): N/A
