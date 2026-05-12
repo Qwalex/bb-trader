@@ -394,25 +394,52 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     this.botRegistry.clear();
   }
 
-  private getBotForCabinet(cabinetId: string | null): Telegraf | null {
-    return this.botRegistry.getBotForCabinet(cabinetId);
+  /**
+   * Исходящие уведомления кабинета: Telegraf из реестра (long polling в этом процессе), иначе
+   * временный клиент по TELEGRAM_BOT_TOKEN кабинета — тот же бот, без подмены «primary» другого кабинета;
+   * доставка с реплики API, где нет запущенного getUpdates.
+   */
+  private async getCabinetOutboundTelegraf(cabinetId: string): Promise<Telegraf | null> {
+    const scoped = this.botRegistry.getScopedBotOnly(cabinetId);
+    if (scoped) {
+      return scoped;
+    }
+    const token = await this.cabinetContext.runWithCabinetAsync(
+      cabinetId,
+      async () => String((await this.settings.get('TELEGRAM_BOT_TOKEN')) ?? '').trim(),
+    );
+    if (!token) {
+      return null;
+    }
+    return new Telegraf(token, {
+      handlerTimeout: 180_000,
+    });
   }
 
   private async getBotForTelegramUserId(telegramUserIdRaw: string): Promise<Telegraf | null> {
     const telegramUserId = String(telegramUserIdRaw ?? '').trim();
-    if (!telegramUserId) return this.botRegistry.getPrimaryBot();
+    if (!telegramUserId) {
+      const def = await this.cabinets.getDefaultCabinetId();
+      return def ? await this.getCabinetOutboundTelegraf(def) : null;
+    }
     const authUser = await this.prisma.authUser.findFirst({
       where: { telegramUserId },
       select: { id: true },
     });
-    if (!authUser?.id) return this.botRegistry.getPrimaryBot();
+    if (!authUser?.id) {
+      const def = await this.cabinets.getDefaultCabinetId();
+      return def ? await this.getCabinetOutboundTelegraf(def) : null;
+    }
     const cabinet = await this.prisma.cabinet.findFirst({
       where: { ownerUserId: authUser.id },
       orderBy: { createdAt: 'asc' },
       select: { id: true },
     });
-    if (!cabinet?.id) return this.botRegistry.getPrimaryBot();
-    return this.getBotForCabinet(cabinet.id);
+    if (!cabinet?.id) {
+      const def = await this.cabinets.getDefaultCabinetId();
+      return def ? await this.getCabinetOutboundTelegraf(def) : null;
+    }
+    return await this.getCabinetOutboundTelegraf(cabinet.id);
   }
 
   async sendPasswordResetCode(params: {
@@ -423,7 +450,11 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }): Promise<{ ok: boolean; error?: string }> {
     const bot = await this.getBotForTelegramUserId(params.telegramUserId);
     if (!bot) {
-      return { ok: false, error: 'Telegram bot не запущен' };
+      return {
+        ok: false,
+        error:
+          'Нет TELEGRAM_BOT_TOKEN для кабинета (настройки или env) — код не отправлен',
+      };
     }
     const userId = Number(params.telegramUserId);
     if (!Number.isFinite(userId)) {
@@ -541,59 +572,69 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     rawMessage?: string;
     onResult?: (result: ExternalConfirmationResult) => Promise<void> | void;
   }): Promise<{ ok: boolean; requestId?: string; deliveredTo: number; error?: string }> {
-    const bot = this.getBotForCabinet(this.currentCabinetId());
-    if (!bot) {
-      return { ok: false, deliveredTo: 0, error: 'Telegram bot не запущен' };
-    }
-    const ids = await this.getTelegramNotifyRecipientIds();
-    if (ids.length === 0) {
-      return {
-        ok: false,
-        deliveredTo: 0,
-        error:
-          'Нет получателей уведомлений (TELEGRAM_WHITELIST или Telegram владельца/участников кабинета)',
-      };
-    }
     const cabinetId =
       this.cabinetContext.getCabinetId() ?? (await this.cabinets.getDefaultCabinetId());
-    const requestId = makeExternalRequestKey(cabinetId, params.ingestId);
-    this.conversationState.externalConfirmations.set(requestId, {
-      requestId,
-      cabinetId,
-      ingestId: params.ingestId,
-      signal: params.signal,
-      rawMessage: params.rawMessage,
-      createdAt: Date.now(),
-      onResult: params.onResult,
-    });
-
-    let deliveredTo = 0;
-    const defaultOrderUsd = await this.getResolvedDefaultOrderUsd();
-    const cabinetLabel = await this.resolveCabinetDisplayLabel();
-    const msg =
-      this.cabinetNotifyPlainPrefix(cabinetLabel) +
-      formatExternalSignalTable(params.signal, defaultOrderUsd);
-    for (const uid of ids) {
-      try {
-        await bot.telegram.sendMessage(
-          uid,
-          msg,
-          externalConfirmKeyboard(requestId),
-        );
-        deliveredTo += 1;
-      } catch (e) {
-        this.logger.warn(`requestExternalSignalConfirmation -> ${uid}: ${formatError(e)}`);
+    if (!cabinetId) {
+      return { ok: false, deliveredTo: 0, error: 'Кабинет не выбран' };
+    }
+    return await this.cabinetContext.runWithCabinetAsync(cabinetId, async () => {
+      const bot = await this.getCabinetOutboundTelegraf(cabinetId);
+      if (!bot) {
+        return {
+          ok: false,
+          deliveredTo: 0,
+          error:
+            'Нет TELEGRAM_BOT_TOKEN для кабинета (настройки или env) — уведомление не отправлено',
+        };
       }
-    }
-    if (deliveredTo === 0) {
-      this.conversationState.externalConfirmations.delete(requestId);
-      return {
-        ok: false,
-        deliveredTo: 0,
-        error: 'Не удалось доставить подтверждение ни одному пользователю',
-      };
-    }
-    return { ok: true, requestId, deliveredTo };
+      const ids = await this.getTelegramNotifyRecipientIds();
+      if (ids.length === 0) {
+        return {
+          ok: false,
+          deliveredTo: 0,
+          error:
+            'Нет получателей уведомлений (TELEGRAM_WHITELIST или Telegram владельца/участников кабинета)',
+        };
+      }
+      const requestId = makeExternalRequestKey(cabinetId, params.ingestId);
+      this.conversationState.externalConfirmations.set(requestId, {
+        requestId,
+        cabinetId,
+        ingestId: params.ingestId,
+        signal: params.signal,
+        rawMessage: params.rawMessage,
+        createdAt: Date.now(),
+        onResult: params.onResult,
+      });
+
+      let deliveredTo = 0;
+      const defaultOrderUsd = await this.getResolvedDefaultOrderUsd();
+      const cabinetLabel = await this.resolveCabinetDisplayLabel();
+      const msg =
+        this.cabinetNotifyPlainPrefix(cabinetLabel) +
+        formatExternalSignalTable(params.signal, defaultOrderUsd);
+      for (const uid of ids) {
+        try {
+          await bot.telegram.sendMessage(
+            uid,
+            msg,
+            externalConfirmKeyboard(requestId),
+          );
+          deliveredTo += 1;
+        } catch (e) {
+          this.logger.warn(`requestExternalSignalConfirmation -> ${uid}: ${formatError(e)}`);
+        }
+      }
+      if (deliveredTo === 0) {
+        this.conversationState.externalConfirmations.delete(requestId);
+        return {
+          ok: false,
+          deliveredTo: 0,
+          error: 'Не удалось доставить подтверждение ни одному пользователю',
+        };
+      }
+      return { ok: true, requestId, deliveredTo };
+    });
   }
 
   async notifyUserbotSignalFailure(params: {
@@ -607,88 +648,112 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     error: string;
     missingData?: string[];
   }): Promise<{ ok: boolean; deliveredTo: number; error?: string }> {
-    const cabinetLabel = await this.resolveCabinetDisplayLabel();
-    const msg =
-      this.cabinetNotifyPlainPrefix(cabinetLabel) +
-      formatUserbotSignalFailureMessage(params);
-
-    const bot = this.getBotForCabinet(this.currentCabinetId());
-    if (!bot) {
-      return { ok: false, deliveredTo: 0, error: 'Telegram bot не запущен' };
+    const cabinetId =
+      this.cabinetContext.getCabinetId() ?? (await this.cabinets.getDefaultCabinetId());
+    if (!cabinetId) {
+      return { ok: false, deliveredTo: 0, error: 'Кабинет не выбран' };
     }
-    const ids = await this.getTelegramNotifyRecipientIds();
-    if (ids.length === 0) {
-      return {
-        ok: false,
-        deliveredTo: 0,
-        error:
-          'Нет получателей уведомлений (TELEGRAM_WHITELIST или Telegram владельца/участников кабинета)',
-      };
-    }
+    return await this.cabinetContext.runWithCabinetAsync(cabinetId, async () => {
+      const cabinetLabel = await this.resolveCabinetDisplayLabel();
+      const msg =
+        this.cabinetNotifyPlainPrefix(cabinetLabel) +
+        formatUserbotSignalFailureMessage(params);
 
-    let deliveredTo = 0;
-    for (const uid of ids) {
-      try {
-        await bot.telegram.sendMessage(uid, msg);
-        deliveredTo += 1;
-      } catch (e) {
-        this.logger.warn(`notifyUserbotSignalFailure -> ${uid}: ${formatError(e)}`);
+      const bot = await this.getCabinetOutboundTelegraf(cabinetId);
+      if (!bot) {
+        return {
+          ok: false,
+          deliveredTo: 0,
+          error:
+            'Нет TELEGRAM_BOT_TOKEN для кабинета (настройки или env) — уведомление не отправлено',
+        };
       }
-    }
+      const ids = await this.getTelegramNotifyRecipientIds();
+      if (ids.length === 0) {
+        return {
+          ok: false,
+          deliveredTo: 0,
+          error:
+            'Нет получателей уведомлений (TELEGRAM_WHITELIST или Telegram владельца/участников кабинета)',
+        };
+      }
 
-    if (deliveredTo === 0) {
-      return {
-        ok: false,
-        deliveredTo: 0,
-        error: 'Не удалось доставить ошибку ни одному пользователю',
-      };
-    }
-    return { ok: true, deliveredTo };
+      let deliveredTo = 0;
+      for (const uid of ids) {
+        try {
+          await bot.telegram.sendMessage(uid, msg);
+          deliveredTo += 1;
+        } catch (e) {
+          this.logger.warn(`notifyUserbotSignalFailure -> ${uid}: ${formatError(e)}`);
+        }
+      }
+
+      if (deliveredTo === 0) {
+        return {
+          ok: false,
+          deliveredTo: 0,
+          error: 'Не удалось доставить ошибку ни одному пользователю',
+        };
+      }
+      return { ok: true, deliveredTo };
+    });
   }
 
   /**
    * Короткий тест доставки в Telegram тем же списком получателей, что и оповещения userbot (whitelist ∪ владелец ∪ участники).
    */
   async notifyDiagnosticsPing(): Promise<{ ok: boolean; deliveredTo: number; error?: string }> {
-    const cabinetLabel = await this.resolveCabinetDisplayLabel();
-    const msg =
-      this.cabinetNotifyPlainPrefix(cabinetLabel) +
-      '🧪 Тест уведомлений со страницы «Диагностика».\n\n' +
-      'Если вы видите это сообщение — бот запущен и список получателей для оповещений настроен.';
-
-    const bot = this.getBotForCabinet(this.currentCabinetId());
-    if (!bot) {
-      return { ok: false, deliveredTo: 0, error: 'Telegram bot не запущен' };
+    const cabinetId =
+      this.cabinetContext.getCabinetId() ?? (await this.cabinets.getDefaultCabinetId());
+    if (!cabinetId) {
+      return { ok: false, deliveredTo: 0, error: 'Кабинет не выбран' };
     }
-    const ids = await this.getTelegramNotifyRecipientIds();
-    if (ids.length === 0) {
-      return {
-        ok: false,
-        deliveredTo: 0,
-        error:
-          'Нет получателей уведомлений (TELEGRAM_WHITELIST или Telegram владельца/участников кабинета)',
-      };
-    }
+    return await this.cabinetContext.runWithCabinetAsync(cabinetId, async () => {
+      const cabinetLabel = await this.resolveCabinetDisplayLabel();
+      const msg =
+        this.cabinetNotifyPlainPrefix(cabinetLabel) +
+        '🧪 Тест уведомлений со страницы «Диагностика».\n\n' +
+        'Если вы видите это сообщение — бот запущен и список получателей для оповещений настроен.';
 
-    let deliveredTo = 0;
-    for (const uid of ids) {
-      try {
-        await bot.telegram.sendMessage(uid, msg);
-        deliveredTo += 1;
-      } catch (e) {
-        this.logger.warn(`notifyDiagnosticsPing -> ${uid}: ${formatError(e)}`);
+      const bot = await this.getCabinetOutboundTelegraf(cabinetId);
+      if (!bot) {
+        return {
+          ok: false,
+          deliveredTo: 0,
+          error:
+            'Нет TELEGRAM_BOT_TOKEN для кабинета (настройки или env) — уведомление не отправлено',
+        };
       }
-    }
+      const ids = await this.getTelegramNotifyRecipientIds();
+      if (ids.length === 0) {
+        return {
+          ok: false,
+          deliveredTo: 0,
+          error:
+            'Нет получателей уведомлений (TELEGRAM_WHITELIST или Telegram владельца/участников кабинета)',
+        };
+      }
 
-    if (deliveredTo === 0) {
-      return {
-        ok: false,
-        deliveredTo: 0,
-        error:
-          'Не удалось доставить тест ни одному пользователю (например, диалог с ботом не открыт)',
-      };
-    }
-    return { ok: true, deliveredTo };
+      let deliveredTo = 0;
+      for (const uid of ids) {
+        try {
+          await bot.telegram.sendMessage(uid, msg);
+          deliveredTo += 1;
+        } catch (e) {
+          this.logger.warn(`notifyDiagnosticsPing -> ${uid}: ${formatError(e)}`);
+        }
+      }
+
+      if (deliveredTo === 0) {
+        return {
+          ok: false,
+          deliveredTo: 0,
+          error:
+            'Не удалось доставить тест ни одному пользователю (например, диалог с ботом не открыт)',
+        };
+      }
+      return { ok: true, deliveredTo };
+    });
   }
 
   async notifyUserbotResultWithoutEntry(params: {
@@ -700,45 +765,57 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     resultMessageText: string;
     quotedSnippet?: string;
   }): Promise<{ ok: boolean; deliveredTo: number; error?: string }> {
-    const bot = this.getBotForCabinet(this.currentCabinetId());
-    if (!bot) {
-      return { ok: false, deliveredTo: 0, error: 'Telegram bot не запущен' };
+    const cabinetId =
+      this.cabinetContext.getCabinetId() ?? (await this.cabinets.getDefaultCabinetId());
+    if (!cabinetId) {
+      return { ok: false, deliveredTo: 0, error: 'Кабинет не выбран' };
     }
-    const ids = await this.getTelegramNotifyRecipientIds();
-    if (ids.length === 0) {
-      return {
-        ok: false,
-        deliveredTo: 0,
-        error:
-          'Нет получателей уведомлений (TELEGRAM_WHITELIST или Telegram владельца/участников кабинета)',
-      };
-    }
-    const cabinetLabel = await this.resolveCabinetDisplayLabel();
-    const msg =
-      this.cabinetNotifyHtmlPrefix(cabinetLabel) +
-      formatUserbotResultWithoutEntryHtml(params);
-
-    let deliveredTo = 0;
-    for (const uid of ids) {
-      try {
-        await bot.telegram.sendMessage(uid, msg, {
-          parse_mode: 'HTML',
-          ...staleResultCancelKeyboard(params.signalId),
-        });
-        deliveredTo += 1;
-      } catch (e) {
-        this.logger.warn(`notifyUserbotResultWithoutEntry -> ${uid}: ${formatError(e)}`);
+    return await this.cabinetContext.runWithCabinetAsync(cabinetId, async () => {
+      const bot = await this.getCabinetOutboundTelegraf(cabinetId);
+      if (!bot) {
+        return {
+          ok: false,
+          deliveredTo: 0,
+          error:
+            'Нет TELEGRAM_BOT_TOKEN для кабинета (настройки или env) — уведомление не отправлено',
+        };
       }
-    }
+      const ids = await this.getTelegramNotifyRecipientIds();
+      if (ids.length === 0) {
+        return {
+          ok: false,
+          deliveredTo: 0,
+          error:
+            'Нет получателей уведомлений (TELEGRAM_WHITELIST или Telegram владельца/участников кабинета)',
+        };
+      }
+      const cabinetLabel = await this.resolveCabinetDisplayLabel();
+      const msg =
+        this.cabinetNotifyHtmlPrefix(cabinetLabel) +
+        formatUserbotResultWithoutEntryHtml(params);
 
-    if (deliveredTo === 0) {
-      return {
-        ok: false,
-        deliveredTo: 0,
-        error: 'Не удалось доставить уведомление о result без входа ни одному пользователю',
-      };
-    }
-    return { ok: true, deliveredTo };
+      let deliveredTo = 0;
+      for (const uid of ids) {
+        try {
+          await bot.telegram.sendMessage(uid, msg, {
+            parse_mode: 'HTML',
+            ...staleResultCancelKeyboard(params.signalId),
+          });
+          deliveredTo += 1;
+        } catch (e) {
+          this.logger.warn(`notifyUserbotResultWithoutEntry -> ${uid}: ${formatError(e)}`);
+        }
+      }
+
+      if (deliveredTo === 0) {
+        return {
+          ok: false,
+          deliveredTo: 0,
+          error: 'Не удалось доставить уведомление о result без входа ни одному пользователю',
+        };
+      }
+      return { ok: true, deliveredTo };
+    });
   }
 
   async notifyApiTradeCancelled(params: {
@@ -764,41 +841,53 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (explicitlyOff) {
       return { ok: true, deliveredTo: 0 };
     }
-    const bot = this.getBotForCabinet(this.currentCabinetId());
-    if (!bot) {
-      return { ok: false, deliveredTo: 0, error: 'Telegram bot не запущен' };
+    const cabinetId =
+      this.cabinetContext.getCabinetId() ?? (await this.cabinets.getDefaultCabinetId());
+    if (!cabinetId) {
+      return { ok: false, deliveredTo: 0, error: 'Кабинет не выбран' };
     }
-    const ids = await this.getTelegramNotifyRecipientIds();
-    if (ids.length === 0) {
-      return {
-        ok: false,
-        deliveredTo: 0,
-        error:
-          'Нет получателей уведомлений (TELEGRAM_WHITELIST или Telegram владельца/участников кабинета)',
-      };
-    }
-    const cabinetLabel = await this.resolveCabinetDisplayLabel();
-    const msg =
-      this.cabinetNotifyHtmlPrefix(cabinetLabel) +
-      formatApiTradeCancelledHtml(params);
-
-    let deliveredTo = 0;
-    for (const uid of ids) {
-      try {
-        await bot.telegram.sendMessage(uid, msg, { parse_mode: 'HTML' });
-        deliveredTo += 1;
-      } catch (e) {
-        this.logger.warn(`notifyApiTradeCancelled -> ${uid}: ${formatError(e)}`);
+    return await this.cabinetContext.runWithCabinetAsync(cabinetId, async () => {
+      const bot = await this.getCabinetOutboundTelegraf(cabinetId);
+      if (!bot) {
+        return {
+          ok: false,
+          deliveredTo: 0,
+          error:
+            'Нет TELEGRAM_BOT_TOKEN для кабинета (настройки или env) — уведомление не отправлено',
+        };
       }
-    }
-    if (deliveredTo === 0) {
-      return {
-        ok: false,
-        deliveredTo: 0,
-        error: 'Не удалось доставить уведомление об отмене сделки',
-      };
-    }
-    return { ok: true, deliveredTo };
+      const ids = await this.getTelegramNotifyRecipientIds();
+      if (ids.length === 0) {
+        return {
+          ok: false,
+          deliveredTo: 0,
+          error:
+            'Нет получателей уведомлений (TELEGRAM_WHITELIST или Telegram владельца/участников кабинета)',
+        };
+      }
+      const cabinetLabel = await this.resolveCabinetDisplayLabel();
+      const msg =
+        this.cabinetNotifyHtmlPrefix(cabinetLabel) +
+        formatApiTradeCancelledHtml(params);
+
+      let deliveredTo = 0;
+      for (const uid of ids) {
+        try {
+          await bot.telegram.sendMessage(uid, msg, { parse_mode: 'HTML' });
+          deliveredTo += 1;
+        } catch (e) {
+          this.logger.warn(`notifyApiTradeCancelled -> ${uid}: ${formatError(e)}`);
+        }
+      }
+      if (deliveredTo === 0) {
+        return {
+          ok: false,
+          deliveredTo: 0,
+          error: 'Не удалось доставить уведомление об отмене сделки',
+        };
+      }
+      return { ok: true, deliveredTo };
+    });
   }
 
   async notifyApiTradeLiquidation(params: {
@@ -817,43 +906,55 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (explicitlyOff) {
       return { ok: true, deliveredTo: 0 };
     }
-    const bot = this.getBotForCabinet(this.currentCabinetId());
-    if (!bot) {
-      return { ok: false, deliveredTo: 0, error: 'Telegram bot не запущен' };
+    const cabinetId =
+      this.cabinetContext.getCabinetId() ?? (await this.cabinets.getDefaultCabinetId());
+    if (!cabinetId) {
+      return { ok: false, deliveredTo: 0, error: 'Кабинет не выбран' };
     }
-    const ids = await this.getTelegramNotifyRecipientIds();
-    if (ids.length === 0) {
-      return {
-        ok: false,
-        deliveredTo: 0,
-        error:
-          'Нет получателей уведомлений (TELEGRAM_WHITELIST или Telegram владельца/участников кабинета)',
-      };
-    }
-
-    const cabinetLabel = await this.resolveCabinetDisplayLabel();
-    const msg =
-      this.cabinetNotifyHtmlPrefix(cabinetLabel) +
-      formatApiTradeLiquidationHtml(params);
-
-    let deliveredTo = 0;
-    for (const uid of ids) {
-      try {
-        await bot.telegram.sendMessage(uid, msg, { parse_mode: 'HTML' });
-        deliveredTo += 1;
-      } catch (e) {
-        this.logger.warn(`notifyApiTradeLiquidation -> ${uid}: ${formatError(e)}`);
+    return await this.cabinetContext.runWithCabinetAsync(cabinetId, async () => {
+      const bot = await this.getCabinetOutboundTelegraf(cabinetId);
+      if (!bot) {
+        return {
+          ok: false,
+          deliveredTo: 0,
+          error:
+            'Нет TELEGRAM_BOT_TOKEN для кабинета (настройки или env) — уведомление не отправлено',
+        };
       }
-    }
+      const ids = await this.getTelegramNotifyRecipientIds();
+      if (ids.length === 0) {
+        return {
+          ok: false,
+          deliveredTo: 0,
+          error:
+            'Нет получателей уведомлений (TELEGRAM_WHITELIST или Telegram владельца/участников кабинета)',
+        };
+      }
 
-    if (deliveredTo === 0) {
-      return {
-        ok: false,
-        deliveredTo: 0,
-        error: 'Не удалось доставить уведомление о ликвидации',
-      };
-    }
-    return { ok: true, deliveredTo };
+      const cabinetLabel = await this.resolveCabinetDisplayLabel();
+      const msg =
+        this.cabinetNotifyHtmlPrefix(cabinetLabel) +
+        formatApiTradeLiquidationHtml(params);
+
+      let deliveredTo = 0;
+      for (const uid of ids) {
+        try {
+          await bot.telegram.sendMessage(uid, msg, { parse_mode: 'HTML' });
+          deliveredTo += 1;
+        } catch (e) {
+          this.logger.warn(`notifyApiTradeLiquidation -> ${uid}: ${formatError(e)}`);
+        }
+      }
+
+      if (deliveredTo === 0) {
+        return {
+          ok: false,
+          deliveredTo: 0,
+          error: 'Не удалось доставить уведомление о ликвидации',
+        };
+      }
+      return { ok: true, deliveredTo };
+    });
   }
 
   /**
@@ -907,7 +1008,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       return { ok: false, deliveredTo: 0, error: 'Кабинет для сигнала не найден' };
     }
 
-    return await this.cabinetContext.runWithCabinet(effectiveCabinetId, async () => {
+    return await this.cabinetContext.runWithCabinetAsync(effectiveCabinetId, async () => {
       const raw = (await this.settings.get('TELEGRAM_NOTIFY_HEDGE_OPPOSITE_PLACEMENT'))
         ?.trim()
         .toLowerCase();
@@ -919,9 +1020,14 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         this.cabinetNotifyHtmlPrefix(cabinetLabel) +
         formatHedgeOppositePlacementAuditHtml(params);
 
-      const bot = this.getBotForCabinet(this.currentCabinetId());
+      const bot = await this.getCabinetOutboundTelegraf(effectiveCabinetId);
       if (!bot) {
-        return { ok: false, deliveredTo: 0, error: 'Telegram bot не запущен' };
+        return {
+          ok: false,
+          deliveredTo: 0,
+          error:
+            'Нет TELEGRAM_BOT_TOKEN для кабинета (настройки или env) — уведомление не отправлено',
+        };
       }
       const ids = await this.getTelegramNotifyRecipientIds();
       if (ids.length === 0) {
@@ -986,7 +1092,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    await this.cabinetContext.runWithCabinet(effectiveCabinetId, async () => {
+    await this.cabinetContext.runWithCabinetAsync(effectiveCabinetId, async () => {
       const raw = (await this.settings.get('TELEGRAM_NOTIFY_TRADE_EVENTS'))
         ?.trim()
         .toLowerCase();
@@ -1043,8 +1149,11 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         `\nТип: <code>${escapeTelegramHtml(params.type)}</code>` +
         payloadBlock;
 
-      const bot = this.getBotForCabinet(this.currentCabinetId());
+      const bot = await this.getCabinetOutboundTelegraf(effectiveCabinetId);
       if (!bot) {
+        this.logger.warn(
+          `notifyTradeSignalEvent: нет TELEGRAM_BOT_TOKEN для cabinet=${effectiveCabinetId}`,
+        );
         return;
       }
       const ids = await this.getTelegramNotifyRecipientIds();

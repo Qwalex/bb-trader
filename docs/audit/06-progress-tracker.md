@@ -1221,3 +1221,15 @@
 - Manual verification: `npm run build -w apps/api`, `npm run build -w apps/web` (pass); повторный старт QR до прихода нового токена — «Подготовка QR…», без старого data URL.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-100
+
+- Status: `done`
+- Scope: Разные боты по кабинетам — исходящие уведомления без «чужого» primary и без Telegraf на реплике.
+- Files: `apps/api/src/modules/telegram/services/telegram.service.ts`, `docs/audit/06-progress-tracker.md`, `AGENTS.md`
+- Findings: `getBotForCabinet` в реестре отдавал `primaryBot`, если у кабинета не было scoped-экземпляра в этом процессе — при нескольких кабинетах с разными токенами возможна подмена бота; при нескольких репликах API на «пустой» реплике уведомления не уходили, хотя Bot API доступен по токену.
+- Changes: `getCabinetOutboundTelegraf(cabinetId)` — сначала `getScopedBotOnly`, иначе временный `Telegraf(token)` по `TELEGRAM_BOT_TOKEN` кабинета; все перечисленные notify + `sendPasswordResetCode` / `getBotForTelegramUserId`; `runWithCabinetAsync` для async-тел hedge/trade events и ранее переведённых notify; явный `cabinetId` до колбэка.
+- Decomposition notes (`utils/constants/hooks/types`): N/A (логика в фасаде `TelegramService`).
+- Manual verification: `npm run build -w apps/api` (pass); ручная проверка: тест «Диагностика» и userbot-уведомления с двумя кабинетами / двумя токенами и при необходимости второй реплике API.
+- Docs updated: этот трекер, `AGENTS.md`.
+- Linked risks (`SEC-###`): N/A
