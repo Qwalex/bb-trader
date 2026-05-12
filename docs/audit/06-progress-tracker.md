@@ -972,3 +972,15 @@
 - Manual verification: `npm run build -w apps/api` (pass); деплой при `TELEGRAM_USERBOT_ENABLED` + непустая сессия + известный owner — MTProto поднимается без привязки к выбранному кабинету.
 - Docs updated: этот трекер, `AGENTS.md`.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-079
+
+- Status: `done`
+- Scope: Userbot ingest — изоляция дедупа и pair/cooldown между кабинетами при общих Telegram-группах.
+- Files: `apps/api/prisma/schema.prisma`, `apps/api/prisma/migrations/20260512143000_userbot_signal_hash_cabinet_scope/migration.sql`, `apps/api/src/modules/telegram-userbot/userbot-signal-hash.service.ts`, `apps/api/src/modules/telegram-userbot/ingest/telegram-userbot-ingest-pair-direction.service.ts`, `apps/api/src/modules/telegram-userbot/ingest/telegram-userbot-ingest-pipeline.service.ts`, `apps/api/src/modules/telegram-userbot/ingest/telegram-userbot-ingest-signal-reply.service.ts`, `apps/api/src/modules/telegram-userbot/ingest/telegram-userbot-ingest-signal-lookup.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: `TgUserbotSignalHash` был глобальным по `hash` — второй кабинет с тем же распарсенным сигналом получал `duplicate_signal`; in-memory кулдаун/transition по паре не учитывал `cabinetId`; при отсутствии ALS `findActiveSignal*` мог смотреть все кабинеты.
+- Changes: таблица `TgUserbotSignalHash` с `cabinetId` и `@@unique([cabinetId, hash])`; `release(hash)` по-прежнему снимает hash для всех кабинетов (правка текста сообщения); `releaseForSignalId` — по `(cabinetId, hash)`; pair-direction методы принимают `cabinetId`; `resolvedCabinetScopeWhere` с fallback на дефолтный кабинет.
+- Decomposition notes (`utils/constants/hooks/types`): N/A.
+- Manual verification: `npm run build -w apps/api` (pass); ожидаемо: два кабинета, одна группа, **разные** Bybit-ключи — оба могут зарегистрировать тот же контентный hash; при **одинаковых** ключах Bybit дубликат по бирже остаётся (один аккаунт).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

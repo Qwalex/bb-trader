@@ -5,7 +5,7 @@ import { AppLogService } from '../../app-log/app-log.service';
 import { CLOSE_REOPEN_COOLDOWN_MS } from '../telegram-userbot.constants';
 
 /**
- * Общее состояние ingest: блокировки по паре/направлению и кулдаун после close (pipeline + reply-ветки).
+ * Состояние ingest по паре/направлению и кулдаун после close — в разрезе кабинета (pipeline + reply-ветки).
  */
 @Injectable()
 export class TelegramUserbotIngestPairDirectionService {
@@ -14,15 +14,20 @@ export class TelegramUserbotIngestPairDirectionService {
 
   constructor(private readonly appLog: AppLogService) {}
 
-  private pairDirectionKey(pair: string, direction: 'long' | 'short'): string {
-    return `${normalizeTradingPair(pair)}:${direction}`;
+  private pairDirectionKey(
+    cabinetId: string,
+    pair: string,
+    direction: 'long' | 'short',
+  ): string {
+    return `${cabinetId}:${normalizeTradingPair(pair)}:${direction}`;
   }
 
-  setCloseCooldown(pair: string, direction: 'long' | 'short'): void {
-    const key = this.pairDirectionKey(pair, direction);
+  setCloseCooldown(cabinetId: string, pair: string, direction: 'long' | 'short'): void {
+    const key = this.pairDirectionKey(cabinetId, pair, direction);
     const untilMs = Date.now() + CLOSE_REOPEN_COOLDOWN_MS;
     this.pairDirectionCloseCooldownUntilMs.set(key, untilMs);
     void this.appLog.append('debug', 'telegram', 'Userbot: close cooldown set', {
+      cabinetId,
       pair: normalizeTradingPair(pair),
       direction,
       cooldownMs: CLOSE_REOPEN_COOLDOWN_MS,
@@ -30,8 +35,12 @@ export class TelegramUserbotIngestPairDirectionService {
     });
   }
 
-  getCloseCooldownRemainingMs(pair: string, direction: 'long' | 'short'): number {
-    const key = this.pairDirectionKey(pair, direction);
+  getCloseCooldownRemainingMs(
+    cabinetId: string,
+    pair: string,
+    direction: 'long' | 'short',
+  ): number {
+    const key = this.pairDirectionKey(cabinetId, pair, direction);
     const untilMs = this.pairDirectionCloseCooldownUntilMs.get(key);
     if (!untilMs) {
       return 0;
@@ -45,17 +54,19 @@ export class TelegramUserbotIngestPairDirectionService {
   }
 
   beginPairDirectionTransition(
+    cabinetId: string,
     pair: string,
     direction: 'long' | 'short',
     reason?: string,
   ): void {
-    const key = this.pairDirectionKey(pair, direction);
+    const key = this.pairDirectionKey(cabinetId, pair, direction);
     const prev = this.pairDirectionTransitions.get(key);
     this.pairDirectionTransitions.set(key, {
       count: (prev?.count ?? 0) + 1,
       reason: reason ?? prev?.reason,
     });
     void this.appLog.append('debug', 'telegram', 'Userbot: pair/direction transition started', {
+      cabinetId,
       pair: normalizeTradingPair(pair),
       direction,
       reason: reason ?? null,
@@ -63,8 +74,12 @@ export class TelegramUserbotIngestPairDirectionService {
     });
   }
 
-  endPairDirectionTransition(pair: string, direction: 'long' | 'short'): void {
-    const key = this.pairDirectionKey(pair, direction);
+  endPairDirectionTransition(
+    cabinetId: string,
+    pair: string,
+    direction: 'long' | 'short',
+  ): void {
+    const key = this.pairDirectionKey(cabinetId, pair, direction);
     const prev = this.pairDirectionTransitions.get(key);
     if (!prev) {
       return;
@@ -72,6 +87,7 @@ export class TelegramUserbotIngestPairDirectionService {
     if (prev.count <= 1) {
       this.pairDirectionTransitions.delete(key);
       void this.appLog.append('debug', 'telegram', 'Userbot: pair/direction transition finished', {
+        cabinetId,
         pair: normalizeTradingPair(pair),
         direction,
       });
@@ -82,6 +98,7 @@ export class TelegramUserbotIngestPairDirectionService {
       reason: prev.reason,
     });
     void this.appLog.append('debug', 'telegram', 'Userbot: pair/direction transition decremented', {
+      cabinetId,
       pair: normalizeTradingPair(pair),
       direction,
       lockCount: prev.count - 1,
@@ -89,12 +106,13 @@ export class TelegramUserbotIngestPairDirectionService {
   }
 
   async waitForPairDirectionTransitionIfAny(
+    cabinetId: string,
     pair: string,
     direction: 'long' | 'short',
     timeoutMs = 15_000,
     pollMs = 250,
   ): Promise<{ waited: boolean; timedOut: boolean; waitedMs: number }> {
-    const key = this.pairDirectionKey(pair, direction);
+    const key = this.pairDirectionKey(cabinetId, pair, direction);
     if (!this.pairDirectionTransitions.has(key)) {
       return { waited: false, timedOut: false, waitedMs: 0 };
     }

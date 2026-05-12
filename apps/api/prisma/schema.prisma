@@ -187,8 +187,15 @@ model TgUserbotIngest {
 }
 
 model TgUserbotSignalHash {
-  hash      String   @id
+  id        String   @id @default(cuid())
+  cabinetId String
+  cabinet   Cabinet  @relation(fields: [cabinetId], references: [id], onDelete: Cascade)
+  hash      String
   createdAt DateTime @default(now())
+
+  @@unique([cabinetId, hash])
+  @@index([hash])
+  @@index([cabinetId])
 }
 
 model TgUserbotFilterExample {
@@ -415,6 +422,7 @@ model Cabinet {
   openrouterCosts  OpenrouterGenerationCost[]
   publishGroups    TgUserbotPublishGroup[]
   mirrorMessages   TgUserbotMirrorMessage[]
+  userbotSignalHashes TgUserbotSignalHash[]
 
   @@index([isDefault])
   @@index([ownerUserId, createdAt])

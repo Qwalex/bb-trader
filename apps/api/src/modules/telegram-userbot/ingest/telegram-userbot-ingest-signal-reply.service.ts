@@ -4,6 +4,7 @@ import { normalizeTradingPair, type SignalDto } from '@repo/shared';
 import { formatError } from '../../../common/format-error';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AppLogService } from '../../app-log/app-log.service';
+import { CabinetService } from '../../cabinet/cabinet.service';
 import { BybitService } from '../../bybit/bybit.service';
 import { OrdersService } from '../../orders/orders.service';
 import { SettingsService } from '../../settings/settings.service';
@@ -31,7 +32,18 @@ export class TelegramUserbotIngestSignalReplyService {
     private readonly userbotSettings: TelegramUserbotSettingsService,
     private readonly signalLookup: TelegramUserbotIngestSignalLookupService,
     private readonly pairDirection: TelegramUserbotIngestPairDirectionService,
+    private readonly cabinets: CabinetService,
   ) {}
+
+  private async resolvePairDirectionCabinetId(
+    signalCabinetId: string | null | undefined,
+  ): Promise<string> {
+    const trimmed = signalCabinetId?.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+    return this.cabinets.getDefaultCabinetId();
+  }
 
   private async getBoolSetting(key: string, fallback: boolean): Promise<boolean> {
     const raw = await this.settings.get(key);
@@ -68,7 +80,12 @@ export class TelegramUserbotIngestSignalReplyService {
     const rootSource = lookup.rootSource;
     const prev = lookup.signal;
     const base = this.signalFromDb(prev);
-    const closeCooldownMs = this.pairDirection.getCloseCooldownRemainingMs(base.pair, base.direction);
+    const pairCabinetId = await this.resolvePairDirectionCabinetId(prev.cabinetId);
+    const closeCooldownMs = this.pairDirection.getCloseCooldownRemainingMs(
+      pairCabinetId,
+      base.pair,
+      base.direction,
+    );
     if (closeCooldownMs > 0) {
       return {
         ok: false,
@@ -350,7 +367,13 @@ export class TelegramUserbotIngestSignalReplyService {
     });
 
     const closeSignal = this.signalFromDb(signal);
-    this.pairDirection.beginPairDirectionTransition(closeSignal.pair, closeSignal.direction, 'close flow');
+    const pairCabinetId = await this.resolvePairDirectionCabinetId(signal.cabinetId);
+    this.pairDirection.beginPairDirectionTransition(
+      pairCabinetId,
+      closeSignal.pair,
+      closeSignal.direction,
+      'close flow',
+    );
     try {
       const closed = await this.bybit.closeSignalManually(signal.id);
       if (!closed.ok) {
@@ -359,7 +382,7 @@ export class TelegramUserbotIngestSignalReplyService {
           error: closed.error ?? closed.details ?? 'Не удалось закрыть сделку на Bybit',
         };
       }
-      this.pairDirection.setCloseCooldown(closeSignal.pair, closeSignal.direction);
+      this.pairDirection.setCloseCooldown(pairCabinetId, closeSignal.pair, closeSignal.direction);
       await this.orders.createSignalEvent(signal.id, 'CANCELLED_BY_CHAT', {
         reason: 'Сигнал отменен в чате (closed/cancel)',
         sourceChatId: params.chatId,
@@ -381,7 +404,7 @@ export class TelegramUserbotIngestSignalReplyService {
       );
       return { ok: true };
     } finally {
-      this.pairDirection.endPairDirectionTransition(closeSignal.pair, closeSignal.direction);
+      this.pairDirection.endPairDirectionTransition(pairCabinetId, closeSignal.pair, closeSignal.direction);
     }
   }
 
@@ -517,7 +540,9 @@ export class TelegramUserbotIngestSignalReplyService {
     }
 
     const closeSignal = this.signalFromDb(lookup.signal);
+    const pairCabinetId = await this.resolvePairDirectionCabinetId(lookup.signal.cabinetId);
     this.pairDirection.beginPairDirectionTransition(
+      pairCabinetId,
       closeSignal.pair,
       closeSignal.direction,
       'result stale cancel',
@@ -533,7 +558,7 @@ export class TelegramUserbotIngestSignalReplyService {
             'Не удалось отменить ордера для result без входа',
         };
       }
-      this.pairDirection.setCloseCooldown(closeSignal.pair, closeSignal.direction);
+      this.pairDirection.setCloseCooldown(pairCabinetId, closeSignal.pair, closeSignal.direction);
       await this.orders.createSignalEvent(
         signal.id,
         'USERBOT_RESULT_WITHOUT_ENTRY_CANCELLED',
@@ -547,7 +572,7 @@ export class TelegramUserbotIngestSignalReplyService {
       );
       return { ok: true, mode: 'result_without_entry_cancelled', signalId: signal.id };
     } finally {
-      this.pairDirection.endPairDirectionTransition(closeSignal.pair, closeSignal.direction);
+      this.pairDirection.endPairDirectionTransition(pairCabinetId, closeSignal.pair, closeSignal.direction);
     }
   }
 

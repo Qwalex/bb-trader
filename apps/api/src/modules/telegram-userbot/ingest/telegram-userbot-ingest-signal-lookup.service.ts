@@ -7,6 +7,7 @@ import { formatError } from '../../../common/format-error';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AppLogService } from '../../app-log/app-log.service';
 import { CabinetContextService } from '../../cabinet/cabinet-context.service';
+import { CabinetService } from '../../cabinet/cabinet.service';
 import type { ActiveSignalLookup } from '../telegram-userbot.types';
 import { TelegramUserbotClientService } from '../client/telegram-userbot-client.service';
 import { TelegramUserbotSettingsService } from '../settings/telegram-userbot-settings.service';
@@ -20,6 +21,7 @@ export class TelegramUserbotIngestSignalLookupService {
     private readonly prisma: PrismaService,
     private readonly appLog: AppLogService,
     private readonly cabinetContext: CabinetContextService,
+    private readonly cabinets: CabinetService,
     private readonly userbotClient: TelegramUserbotClientService,
     private readonly userbotSettings: TelegramUserbotSettingsService,
   ) {}
@@ -32,9 +34,12 @@ export class TelegramUserbotIngestSignalLookupService {
     return this.userbotClient.isClientAuthorized(client);
   }
 
-  private cabinetScopeWhere(): { cabinetId?: string } {
-    const cabinetId = this.cabinetContext.getCabinetId();
-    return cabinetId ? { cabinetId } : {};
+  private async resolvedCabinetScopeWhere(): Promise<{ cabinetId: string }> {
+    const fromCtx = this.cabinetContext.getCabinetId();
+    if (fromCtx) {
+      return { cabinetId: fromCtx };
+    }
+    return { cabinetId: await this.cabinets.getDefaultCabinetId() };
   }
 
   async fetchChatMessageMeta(
@@ -76,9 +81,10 @@ export class TelegramUserbotIngestSignalLookupService {
     direction: 'long' | 'short',
   ): Promise<ActiveSignalLookup | null> {
     const wantPair = normalizeTradingPair(pair);
+    const scope = await this.resolvedCabinetScopeWhere();
     const rows = await this.prisma.signal.findMany({
       where: {
-        ...this.cabinetScopeWhere(),
+        ...scope,
         deletedAt: null,
         status: { in: ['ORDERS_PLACED', 'OPEN', 'PARSED'] },
         direction,
@@ -169,9 +175,10 @@ export class TelegramUserbotIngestSignalLookupService {
       params.chatId,
       replyToMessageId!,
     );
+    const scope = await this.resolvedCabinetScopeWhere();
     const signal = await this.prisma.signal.findFirst({
       where: {
-        ...this.cabinetScopeWhere(),
+        ...scope,
         deletedAt: null,
         sourceChatId: params.chatId,
         sourceMessageId: rootSource.messageId,
@@ -247,9 +254,10 @@ export class TelegramUserbotIngestSignalLookupService {
     chatId: string,
     signalExternalId: string,
   ): Promise<ActiveSignalLookup | null> {
+    const scope = await this.resolvedCabinetScopeWhere();
     const row = await (this.prisma as any).signal.findFirst({
       where: {
-        ...this.cabinetScopeWhere(),
+        ...scope,
         deletedAt: null,
         sourceChatId: chatId,
         signalExternalId,
@@ -345,9 +353,10 @@ export class TelegramUserbotIngestSignalLookupService {
     chatId: string,
     messageId: string,
   ): Promise<boolean> {
+    const scope = await this.resolvedCabinetScopeWhere();
     const count = await this.prisma.signal.count({
       where: {
-        ...this.cabinetScopeWhere(),
+        ...scope,
         sourceChatId: chatId,
         sourceMessageId: messageId,
       },
@@ -365,9 +374,10 @@ export class TelegramUserbotIngestSignalLookupService {
     rootStatuses: string[];
     chainMatches: Array<{ messageId: string; total: number; active: number; statuses: string[] }>;
   }> {
+    const scope = await this.resolvedCabinetScopeWhere();
     const rootSignals = await this.prisma.signal.findMany({
       where: {
-        ...this.cabinetScopeWhere(),
+        ...scope,
         sourceChatId: chatId,
         sourceMessageId: rootSourceMessageId,
       },
@@ -385,7 +395,7 @@ export class TelegramUserbotIngestSignalLookupService {
       chainUnique.map(async (messageId) => {
         const rows = await this.prisma.signal.findMany({
           where: {
-            ...this.cabinetScopeWhere(),
+            ...scope,
             sourceChatId: chatId,
             sourceMessageId: messageId,
           },

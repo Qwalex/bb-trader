@@ -116,6 +116,7 @@ export class TelegramUserbotIngestPipelineService {
       });
       return;
     }
+    const effectiveCabinetId = cabinetId ?? (await this.cabinets.getDefaultCabinetId());
     this.appendIngestStageLog('debug', 'Userbot: processing started', ingest, {
       replyToMessageId: meta?.replyToMessageId ?? null,
       textPreview: makeTextPreview(text),
@@ -499,6 +500,7 @@ export class TelegramUserbotIngestPipelineService {
       processingElapsedMs: Date.now() - processingStartedAt.getTime(),
     });
     const transitionWait = await this.pairDirection.waitForPairDirectionTransitionIfAny(
+      effectiveCabinetId,
       signal.pair,
       signal.direction,
     );
@@ -516,6 +518,7 @@ export class TelegramUserbotIngestPipelineService {
       );
     }
     const closeCooldownMs = this.pairDirection.getCloseCooldownRemainingMs(
+      effectiveCabinetId,
       signal.pair,
       signal.direction,
     );
