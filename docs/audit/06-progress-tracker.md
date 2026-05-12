@@ -1173,3 +1173,15 @@
 - Manual verification: на `/settings` при пустом значении ключа переключатель в состоянии «вкл»; сохранение «выкл» даёт `false` и отключает уведомления.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-096
+
+- Status: `done`
+- Scope: Critical webhook — не помечать «Telegram bot не запущен» / отсутствие whitelist как `[CRITICAL API UNAVAILABLE]`.
+- Files: `apps/api/src/modules/telegram-userbot/ingest/telegram-userbot-ingest-pipeline.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: при падении `notifyUserbotSignalFailure` из‑за незапущенного бота для кабинета на `CRITICAL_NOTIFY_URL` уходило сообщение с `api=telegram`, хотя это конфигурация/деплой, а не недоступность Bot API.
+- Changes: для `api === 'telegram'` в `isLikelyApiUnavailable` оставлены только общие сетевые/HTTP-признаки (`common`), без подстрок «telegram bot не запущен» / «telegram_whitelist пуст».
+- Decomposition notes (`utils/constants/hooks/types`): N/A.
+- Manual verification: `npm run build -w apps/api` (pass); при «бот не запущен» — нет POST на critical URL; при ошибке с `timeout`/`econnrefused` в тексте — по-прежнему critical.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A (меньше шума в ops-канале; саму проблему бота по-прежнему видно в логах API и VK-зеркале).

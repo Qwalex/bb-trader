@@ -1302,7 +1302,8 @@ export class TelegramUserbotIngestPipelineService {
   if (api === 'bybit') {
     return common || t.includes('bybit unavailable') || t.includes('bybit');
   }
-  return common || t.includes('telegram bot не запущен') || t.includes('telegram_whitelist пуст');
+  /** telegram: только сетевые/HTTP-сбои Bot API; не CRITICAL: «бот не запущен», пустой whitelist и т.п. */
+  return common;
 }
 
   private async notifyCriticalExternalApiUnavailable(
