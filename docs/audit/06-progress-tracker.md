@@ -1329,3 +1329,15 @@
 - Manual verification: `npm run build -w apps/api` (pass).
 - Docs updated: этот трекер, `AGENTS.md`.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-109
+
+- Status: `done`
+- Scope: Bybit private WS — глобальные ключи `BYBIT_PRIVATE_WS_*` + fallback на дефолтный кабинет; Telegraf — устранение гонки таймаута с фоновым `launch()`.
+- Files: `apps/api/src/modules/bybit/instrument/bybit-client.service.ts`, `apps/api/src/modules/settings/settings.service.ts`, `apps/api/src/modules/telegram/services/telegram.service.ts`, `.env.example`, `AGENTS.md`, `docs/audit/01-env-and-secrets-matrix.md`, `docs/audit/06-progress-tracker.md`
+- Findings: private WS не видел ключи только в `CabinetSetting`; `Promise.race` по таймауту давал ERROR и затем лог «Telegram bot started» из завершившегося позже `bot.launch()`.
+- Changes: `resolveCredentialsForPrivateWs` (приоритет `BYBIT_PRIVATE_WS_*` → `runWithCabinetAsync` дефолтного кабинета → `getBybitCredentials`); секреты в `COMPROMISED_SECRET_KEYS`; в `launchCabinetBotWithTimeout` — флаг `timedOut`, после таймаута не регистрировать бота; дефолт `TELEGRAM_BOT_LAUNCH_STAGGER_MS` при пустом env снова 2000 мс.
+- Decomposition notes (`utils/constants/hooks/types`): N/A.
+- Manual verification: `npm run build -w apps/api` (pass).
+- Docs updated: этот трекер, `AGENTS.md`, `.env.example`, `docs/audit/01-env-and-secrets-matrix.md`.
+- Linked risks (`SEC-###`): N/A

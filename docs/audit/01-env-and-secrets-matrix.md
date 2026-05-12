@@ -15,7 +15,7 @@
 
 ## Required Secret Classes
 
-- Exchange credentials: `BYBIT_API_KEY_*`, `BYBIT_API_SECRET_*`.
+- Exchange credentials: `BYBIT_API_KEY_*`, `BYBIT_API_SECRET_*`; optional global WS-only pair `BYBIT_PRIVATE_WS_API_KEY`, `BYBIT_PRIVATE_WS_API_SECRET` (same rotation rules as API keys).
 - AI provider credentials and endpoints.
 - Telegram/VK bot tokens and admin identifiers.
 - Auth and API shared secrets/tokens.

@@ -276,7 +276,7 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
   private telegramLaunchStaggerMs(): number {
     const raw = process.env.TELEGRAM_BOT_LAUNCH_STAGGER_MS?.trim();
     if (raw === undefined || raw === '') {
-      return 10_000;
+      return 2_000;
     }
     const n = Number.parseInt(raw, 10);
     if (!Number.isFinite(n) || n < 0) {
@@ -323,9 +323,11 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
       await this.sleepCabinetLaunchStaggerIfNeeded();
       const timeoutMs = this.telegramLaunchTimeoutMs();
       let timeoutHandle: NodeJS.Timeout | null = null;
+      let timedOut = false;
       try {
         const timeout = new Promise<never>((_, reject) => {
           timeoutHandle = setTimeout(() => {
+            timedOut = true;
             reject(
               new Error(
                 `Telegram launch timeout after ${timeoutMs}ms (cabinet=${cabinetId})`,
@@ -339,6 +341,14 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
             // На части токенов может быть активный webhook; без удаления Telegram блокирует getUpdates (long polling).
             await bot.telegram.deleteWebhook({ drop_pending_updates: false });
             await bot.launch();
+            if (timedOut) {
+              try {
+                await bot.stop('SIGTERM');
+              } catch {
+                // ignore
+              }
+              return;
+            }
             this.botRegistry.addLaunchedBot(cabinetId, bot);
             this.launchedBotTokensByCabinet.set(cabinetId, cfg.token);
             const me = await bot.telegram.getMe().catch(() => null);

@@ -3,7 +3,15 @@ import { RestClientV5, WebsocketClient } from 'bybit-api';
 
 import { formatError } from '../../../common/format-error';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { CabinetContextService } from '../../cabinet/cabinet-context.service';
+import { CabinetService } from '../../cabinet/cabinet.service';
 import { SettingsService } from '../../settings/settings.service';
+
+type BybitAuthCredentials = {
+  key: string;
+  secret: string;
+  testnet: boolean;
+};
 
 @Injectable()
 export class BybitClientService {
@@ -14,6 +22,8 @@ export class BybitClientService {
   constructor(
     private readonly settings: SettingsService,
     private readonly prisma: PrismaService,
+    private readonly cabinets: CabinetService,
+    private readonly cabinetContext: CabinetContextService,
   ) {}
 
   private static normalizeSettingValue(value: string | undefined): string | undefined {
@@ -31,11 +41,7 @@ export class BybitClientService {
     return unwrapped || undefined;
   }
 
-  async getBybitCredentials(): Promise<{
-    key: string;
-    secret: string;
-    testnet: boolean;
-  } | null> {
+  async getBybitCredentials(): Promise<BybitAuthCredentials | null> {
     const testnet =
       BybitClientService.normalizeSettingValue(
         await this.settings.get('BYBIT_TESTNET'),
@@ -75,6 +81,47 @@ export class BybitClientService {
     });
   }
 
+  /** Глобальные ключи только для private WS (env / глобальный `Setting`), без контекста кабинета. */
+  private async getDedicatedPrivateWsCredentials(): Promise<BybitAuthCredentials | null> {
+    const testnet =
+      BybitClientService.normalizeSettingValue(
+        await this.settings.get('BYBIT_TESTNET'),
+      )?.toLowerCase() === 'true';
+    const key = BybitClientService.normalizeSettingValue(
+      await this.settings.get('BYBIT_PRIVATE_WS_API_KEY'),
+    );
+    const secret = BybitClientService.normalizeSettingValue(
+      await this.settings.get('BYBIT_PRIVATE_WS_API_SECRET'),
+    );
+    if (!key || !secret) {
+      return null;
+    }
+    return { key, secret, testnet };
+  }
+
+  /**
+   * Ключи для единственного глобального private WS: сначала `BYBIT_PRIVATE_WS_*`, затем торговые ключи дефолтного кабинета (UI), затем прежняя глобальная цепочка без кабинета.
+   */
+  private async resolveCredentialsForPrivateWs(): Promise<BybitAuthCredentials | null> {
+    const dedicated = await this.getDedicatedPrivateWsCredentials();
+    if (dedicated) {
+      this.logger.log('bybit private ws: using BYBIT_PRIVATE_WS_* credentials');
+      return dedicated;
+    }
+    const defaultCabinetId = await this.cabinets.getDefaultCabinetId();
+    const fromDefaultCabinet = await this.cabinetContext.runWithCabinetAsync(
+      defaultCabinetId,
+      () => this.getBybitCredentials(),
+    );
+    if (fromDefaultCabinet) {
+      this.logger.log(
+        `bybit private ws: using default cabinet trading keys (cabinet=${defaultCabinetId})`,
+      );
+      return fromDefaultCabinet;
+    }
+    return this.getBybitCredentials();
+  }
+
   /**
    * @returns `true` если WS поднят или осознанно отключён (не повторять); `false` если ключей ещё нет / init упал — можно повторить позже.
    */
@@ -85,7 +132,7 @@ export class BybitClientService {
       return true;
     }
     try {
-      const creds = await this.getBybitCredentials();
+      const creds = await this.resolveCredentialsForPrivateWs();
       if (!creds) {
         this.logger.log('bybit ws disabled: no credentials');
         return false;
