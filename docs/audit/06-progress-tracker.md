@@ -1113,3 +1113,15 @@
 - Manual verification: `npm run build -w apps/api` (pass); при пустом ключе в БД и заданном `TELEGRAM_WHITELIST` в env — ошибка userbot должна уйти в Telegram тем же списком id, что и раньше ожидался из настроек.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-091
+
+- Status: `done`
+- Scope: Правило агента — Railway SSH, уведомление при необходимости авторизации, карта ветка→окружение.
+- Files: `.cursor/rules/railway-diagnostics-and-branches.mdc`, `AGENTS.md`, `docs/audit/06-progress-tracker.md`
+- Findings: N/A (операционная память для агента и людей).
+- Changes: always-on rule; в `AGENTS.md` — краткое резюме и ссылка на правило.
+- Decomposition notes (`utils/constants/hooks/types`): N/A.
+- Manual verification: файлы правки читаемы; дубликатов секции Railway нет.
+- Docs updated: этот трекер, `AGENTS.md`, новое правило.
+- Linked risks (`SEC-###`): N/A (SSH/CLI — только с согласия владельца проекта; секреты в чат не выводить).

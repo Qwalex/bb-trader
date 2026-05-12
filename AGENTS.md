@@ -33,7 +33,9 @@
 
 ### Railway (деплой)
 
-- Два сервиса из одного репозитория: **API** и **Web**; отдельно **PostgreSQL** (New → Database → PostgreSQL, привязать к API).
+- **Ветка → окружение:** `cabinets` → окружение `cabinets`, `master` → `production`, `test` → `test`, `ultra` → `ultra`. В каждом окружении одинаковый набор: **Web**, **API**, **PostgreSQL**.
+- **Диагностика:** при необходимости допустим **Railway SSH** в контейнер сервиса; если требуется авторизация в Railway или недоступен CLI/ключ — агент **уведомляет пользователя** и не продолжает без его участия (см. `.cursor/rules/railway-diagnostics-and-branches.mdc`).
+- Два сервиса приложения из одного репозитория: **API** и **Web**; отдельно **PostgreSQL** (New → Database → PostgreSQL, привязать к API).
 - **Railpack** (билдер по умолчанию на Railway): в корне **`railpack.json`** — Node 22, сборка через **`npm run build -w`** (shared → api / shared → api types → web), старт `start:railway` (без `turbo.json` в образе). Для сервиса **Web** в Variables задать **`RAILPACK_CONFIG_FILE=railpack.web.json`** (путь относительно корня репо). Nixpacks-конфиги удалены из репозитория как неиспользуемые.
 - Если удобнее без JSON: переменные **`RAILPACK_INSTALL_CMD`** (`npm ci`), **`RAILPACK_BUILD_CMD`**, **`RAILPACK_START_CMD`** (см. [Railpack env](https://railpack.com/config/environment-variables)).
 - **Порт и healthcheck:** Railway подставляет **`PORT`**; API слушает **`PORT`**, затем `API_PORT`. В UI сервиса указать **Config-as-code** → **`/railway.api.toml`** и **`/railway.web.toml`** соответственно (health: **`/health`**, таймаут 120 с). У web маршрут `GET /health` в приложении; если задан **`NEXT_BASE_PATH`**, в `railway.web.toml` поправить **`healthcheckPath`** на `/<basePath>/health`. При фильтрации по Host разрешить **`healthcheck.railway.app`** ([док](https://docs.railway.com/deployments/healthchecks)).
