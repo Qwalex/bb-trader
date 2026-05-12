@@ -1269,3 +1269,15 @@
 - Manual verification: `npm run build -w apps/web` (pass).
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-104
+
+- Status: `done`
+- Scope: Userbot — изоляция ручного перечитывания (`reread` / `reread-all`) по кабинету.
+- Files: `apps/api/src/modules/telegram-userbot/telegram-userbot.controller.ts`, `apps/api/src/modules/telegram-userbot/ingest/telegram-userbot-ingest-pipeline.service.ts`, `apps/web/app/telegram-userbot/page.tsx`, `docs/audit/06-progress-tracker.md`
+- Findings: `rereadIngestMessage` и `rereadAllIngestMessages` ставили задачи для всех кабинетов с `listEnabledCabinetIdsForChat(chatId)`; эндпоинты `POST reread/*` не использовали `runWithCabinet` — дубликат/уведомления уходили во все кабинеты на ту же группу.
+- Changes: `runWithCabinet` + `@Query cabinetId` / `@ApiQuery` на обоих POST; один кабинет из `CabinetContextService`, проверка `CabinetTelegramSource` (enabled) для чата; один `enqueueIngestJob`; `reread-all` — ingest с `routes.some(cabinetId)`, поле ответа `skippedNoEnabledSource`; UI userbot — строка в сообщении об успехе.
+- Decomposition notes (`utils/constants/hooks/types`): N/A.
+- Manual verification: `npm run build -w apps/api`, `npm run build -w apps/web` (pass); рекомендуется ручная проверка: два кабинета, одна группа — «перечитать» только из кабинета A не триггерит очередь кабинета B.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

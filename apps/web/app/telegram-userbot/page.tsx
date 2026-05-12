@@ -674,6 +674,7 @@ export default function TelegramUserbotPage() {
                 limit?: number;
                 processed?: number;
                 skippedWithoutText?: number;
+                skippedNoEnabledSource?: number;
                 failed?: number;
                 hasMore?: boolean;
               };
@@ -686,6 +687,7 @@ export default function TelegramUserbotPage() {
                 text:
                   `Перечитано: ${j.processed ?? 0} из ${j.total ?? 0}` +
                   `, пропущено без текста: ${j.skippedWithoutText ?? 0}` +
+                  `, без включённого источника: ${j.skippedNoEnabledSource ?? 0}` +
                   `, ошибок: ${j.failed ?? 0}` +
                   (j.hasMore
                     ? ` (есть ещё сообщения, запустите снова; текущий лимит: ${j.limit ?? 'n/a'})`

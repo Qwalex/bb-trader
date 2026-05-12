@@ -203,13 +203,21 @@ export class TelegramUserbotController {
 
   @ApiOperation({ summary: 'Перечитать ingest-сообщение по ID' })
   @ApiParam({ name: 'ingestId', description: 'ID ingest-записи' })
+  @ApiQuery({ name: 'cabinetId', required: false, description: 'Кабинет (query или x-cabinet-id)' })
   @ApiOkResponse({ description: 'Перечитывание выполнено' })
   @Post('reread/:ingestId')
-  async reread(@Param('ingestId') ingestId: string) {
-    return this.userbot.rereadIngestMessage(ingestId);
+  async reread(
+    @Req() req: AuthReq,
+    @Param('ingestId') ingestId: string,
+    @Query('cabinetId') cabinetId?: string,
+  ) {
+    return this.runWithCabinet(req, cabinetId, () =>
+      this.userbot.rereadIngestMessage(ingestId),
+    );
   }
 
   @ApiOperation({ summary: 'Перечитать batch ingest-сообщений' })
+  @ApiQuery({ name: 'cabinetId', required: false, description: 'Кабинет (query или x-cabinet-id)' })
   @ApiBody({
     schema: {
       type: 'object',
@@ -218,8 +226,14 @@ export class TelegramUserbotController {
   })
   @ApiOkResponse({ description: 'Batch-перечитывание выполнено' })
   @Post('reread-all')
-  async rereadAll(@Body() body?: { limit?: number }) {
-    return this.userbot.rereadAllIngestMessages(body?.limit);
+  async rereadAll(
+    @Req() req: AuthReq,
+    @Query('cabinetId') cabinetId?: string,
+    @Body() body?: { limit?: number },
+  ) {
+    return this.runWithCabinet(req, cabinetId, () =>
+      this.userbot.rereadAllIngestMessages(body?.limit),
+    );
   }
 
   @ApiOperation({ summary: 'Список групп фильтров' })

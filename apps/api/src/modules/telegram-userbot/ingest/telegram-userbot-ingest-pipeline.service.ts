@@ -1044,46 +1044,63 @@ export class TelegramUserbotIngestPipelineService {
       meta = { signalExternalId: extractSignalExternalId(trimmed) };
     }
 
-    const cabinetIds = await this.cabinets.listEnabledCabinetIdsForChat(ingest.chatId);
-    for (const cabinetId of cabinetIds) {
-      const route = await this.prisma.cabinetIngestRoute.upsert({
-        where: { cabinetId_ingestId: { cabinetId, ingestId: ingest.id } },
-        create: {
-          cabinetId,
-          ingestId: ingest.id,
-          chatId: ingest.chatId,
-          classification: 'other',
-          status: 'queued',
-        },
-        update: {
-          chatId: ingest.chatId,
-          classification: 'other',
-          status: 'queued',
-          error: null,
-          aiRequest: null,
-          aiResponse: null,
-        },
-        select: { id: true, cabinetId: true },
-      });
-      this.ingest.enqueueIngestJob({
-        ingest: {
-          id: ingest.id,
-          chatId: ingest.chatId,
-          messageId: ingest.messageId,
-          signalHash: null,
-          status: ingest.status,
-        },
-        text: trimmed.length > USERBOT_INLINE_TEXT_MAX_CHARS ? null : trimmed,
-        textLen: trimmed.length,
-        meta,
-        options: {
-          enforceBalanceGuard: true,
-          source: 'manual-reread',
-          ingestCreatedAt: ingest.createdAt,
-        },
-        route,
-      });
+    const cabinetId = this.cabinetContext.getCabinetId();
+    if (!cabinetId) {
+      return { ok: false, error: 'Кабинет не выбран' };
     }
+    const sourceOk = await this.prisma.cabinetTelegramSource.findFirst({
+      where: {
+        cabinetId,
+        chatId: ingest.chatId,
+        enabled: true,
+      },
+      select: { id: true },
+    });
+    if (!sourceOk) {
+      return {
+        ok: false,
+        error:
+          'У этого кабинета нет включённого источника для данного чата — перечитывание недоступно',
+      };
+    }
+
+    const route = await this.prisma.cabinetIngestRoute.upsert({
+      where: { cabinetId_ingestId: { cabinetId, ingestId: ingest.id } },
+      create: {
+        cabinetId,
+        ingestId: ingest.id,
+        chatId: ingest.chatId,
+        classification: 'other',
+        status: 'queued',
+      },
+      update: {
+        chatId: ingest.chatId,
+        classification: 'other',
+        status: 'queued',
+        error: null,
+        aiRequest: null,
+        aiResponse: null,
+      },
+      select: { id: true, cabinetId: true },
+    });
+    this.ingest.enqueueIngestJob({
+      ingest: {
+        id: ingest.id,
+        chatId: ingest.chatId,
+        messageId: ingest.messageId,
+        signalHash: null,
+        status: ingest.status,
+      },
+      text: trimmed.length > USERBOT_INLINE_TEXT_MAX_CHARS ? null : trimmed,
+      textLen: trimmed.length,
+      meta,
+      options: {
+        enforceBalanceGuard: true,
+        source: 'manual-reread',
+        ingestCreatedAt: ingest.createdAt,
+      },
+      route,
+    });
     return { ok: true };
   }
 
@@ -1092,7 +1109,25 @@ export class TelegramUserbotIngestPipelineService {
       typeof limitRaw === 'number' && Number.isFinite(limitRaw)
         ? Math.max(1, Math.min(500, Math.floor(limitRaw)))
         : 80;
+    const cabinetId = this.cabinetContext.getCabinetId();
+    if (!cabinetId) {
+      return {
+        ok: false,
+        error: 'Кабинет не выбран',
+        total: 0,
+        limit,
+        processed: 0,
+        skippedWithoutText: 0,
+        skippedNoEnabledSource: 0,
+        failed: 0,
+        errors: [],
+        hasMore: false,
+      };
+    }
     const rows = await this.prisma.tgUserbotIngest.findMany({
+      where: {
+        routes: { some: { cabinetId } },
+      },
       orderBy: { createdAt: 'desc' },
       take: limit,
       select: {
@@ -1107,6 +1142,7 @@ export class TelegramUserbotIngestPipelineService {
     });
     let processed = 0;
     let skippedWithoutText = 0;
+    let skippedNoEnabledSource = 0;
     let failed = 0;
     const errors: Array<{ ingestId: string; error: string }> = [];
 
@@ -1140,46 +1176,55 @@ export class TelegramUserbotIngestPipelineService {
         meta = { signalExternalId: extractSignalExternalId(trimmed) };
       }
       try {
-        const cabinetIds = await this.cabinets.listEnabledCabinetIdsForChat(row.chatId);
-        for (const cabinetId of cabinetIds) {
-          const route = await this.prisma.cabinetIngestRoute.upsert({
-            where: { cabinetId_ingestId: { cabinetId, ingestId: row.id } },
-            create: {
-              cabinetId,
-              ingestId: row.id,
-              chatId: row.chatId,
-              classification: 'other',
-              status: 'queued',
-            },
-            update: {
-              chatId: row.chatId,
-              classification: 'other',
-              status: 'queued',
-              error: null,
-              aiRequest: null,
-              aiResponse: null,
-            },
-            select: { id: true, cabinetId: true },
-          });
-          this.ingest.enqueueIngestJob({
-            ingest: {
-              id: row.id,
-              chatId: row.chatId,
-              messageId: row.messageId,
-              signalHash: null,
-              status: row.status,
-            },
-            text: trimmed.length > USERBOT_INLINE_TEXT_MAX_CHARS ? null : trimmed,
-            textLen: trimmed.length,
-            meta,
-            options: {
-              enforceBalanceGuard: true,
-              source: 'manual-reread-all',
-              ingestCreatedAt: row.createdAt,
-            },
-            route,
-          });
+        const sourceOk = await this.prisma.cabinetTelegramSource.findFirst({
+          where: {
+            cabinetId,
+            chatId: row.chatId,
+            enabled: true,
+          },
+          select: { id: true },
+        });
+        if (!sourceOk) {
+          skippedNoEnabledSource += 1;
+          continue;
         }
+        const route = await this.prisma.cabinetIngestRoute.upsert({
+          where: { cabinetId_ingestId: { cabinetId, ingestId: row.id } },
+          create: {
+            cabinetId,
+            ingestId: row.id,
+            chatId: row.chatId,
+            classification: 'other',
+            status: 'queued',
+          },
+          update: {
+            chatId: row.chatId,
+            classification: 'other',
+            status: 'queued',
+            error: null,
+            aiRequest: null,
+            aiResponse: null,
+          },
+          select: { id: true, cabinetId: true },
+        });
+        this.ingest.enqueueIngestJob({
+          ingest: {
+            id: row.id,
+            chatId: row.chatId,
+            messageId: row.messageId,
+            signalHash: null,
+            status: row.status,
+          },
+          text: trimmed.length > USERBOT_INLINE_TEXT_MAX_CHARS ? null : trimmed,
+          textLen: trimmed.length,
+          meta,
+          options: {
+            enforceBalanceGuard: true,
+            source: 'manual-reread-all',
+            ingestCreatedAt: row.createdAt,
+          },
+          route,
+        });
         processed += 1;
       } catch (e) {
         failed += 1;
@@ -1193,6 +1238,7 @@ export class TelegramUserbotIngestPipelineService {
       limit,
       processed,
       skippedWithoutText,
+      skippedNoEnabledSource,
       failed,
       errors: errors.slice(0, 20),
       hasMore: rows.length >= limit,
