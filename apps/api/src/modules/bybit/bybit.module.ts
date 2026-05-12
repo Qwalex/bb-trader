@@ -8,6 +8,9 @@ import { TelegramModule } from '../telegram';
 import { VkModule } from '../vk/vk.module';
 import { WorkerQueueModule } from '../worker-queue/worker-queue.module';
 import { BalanceSnapshotService } from './balance-snapshot.service';
+import { BalanceAlertController } from './balance-alert/balance-alert.controller';
+import { BalanceAlertSchedulerService } from './balance-alert/balance-alert-scheduler.service';
+import { BalanceAlertService } from './balance-alert/balance-alert.service';
 import { BybitController } from './bybit.controller';
 import { BybitService } from './bybit.service';
 import { BybitBalanceInstrumentService } from './instrument/bybit-balance-instrument.service';
@@ -39,7 +42,7 @@ import { BybitTpSlService } from './tpsl/bybit-tpsl.service';
     forwardRef(() => WorkerQueueModule),
     AppLogModule,
   ],
-  controllers: [BybitController],
+  controllers: [BybitController, BalanceAlertController],
   providers: [
     BybitService,
     BybitClientService,
@@ -61,6 +64,8 @@ import { BybitTpSlService } from './tpsl/bybit-tpsl.service';
     BybitRecalcService,
     BybitPollService,
     BalanceSnapshotService,
+    BalanceAlertService,
+    BalanceAlertSchedulerService,
   ],
   exports: [BybitService, BalanceSnapshotService],
 })

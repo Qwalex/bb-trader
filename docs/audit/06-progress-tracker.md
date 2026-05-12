@@ -1089,3 +1089,15 @@
 - Manual verification: `npm run build -w api` (pass).
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-089
+
+- Status: `done`
+- Scope: Пороговые уведомления о equity (totalUsd) по кабинетам на `CRITICAL_NOTIFY_URL` (edge-триггер).
+- Files: `apps/api/prisma/schema.prisma`, `apps/api/prisma/migrations/20260512180000_cabinet_balance_alert_rules/migration.sql`, `apps/api/src/modules/bybit/balance-alert/*`, `apps/api/src/modules/bybit/bybit.module.ts`, `apps/web/app/settings/page.tsx`, `apps/web/app/settings/settings.types.ts`, `.env.example`, `docs/audit/06-progress-tracker.md`
+- Findings: N/A (новая фича по плану).
+- Changes: модель `CabinetBalanceAlertRule`; CRUD `bybit/balance-alerts`; `BalanceAlertSchedulerService` (env `BALANCE_ALERT_ENABLED`, `BALANCE_ALERT_CRON`); cron обходит кабинеты с `runWithCabinet`, сравнивает `getUnifiedUsdtBalanceDetails().totalUsd`, шлёт `postCriticalNotifyText` при переходе в зону порога; секция на `/settings` (режим кабинет).
+- Decomposition notes (`utils/constants/hooks/types`): отдельная папка `balance-alert/` под модулем Bybit; тип строки правила в `settings.types.ts`.
+- Manual verification: `npm run build -w api`, `npm run build -w web` (pass); вручную: CRUD на `/settings`, миграция на стенде `prisma migrate deploy`.
+- Docs updated: этот трекер, `.env.example`.
+- Linked risks (`SEC-###`): N/A (при нескольких репликах API возможен редкий дубликат POST на qnotify без advisory lock).

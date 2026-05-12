@@ -14,7 +14,7 @@ import { EntrySizingControl } from '../components/EntrySizingControl';
 import { fetchApiResponse } from '../../lib/api';
 import { readActiveCabinetIdClient } from '../../lib/cabinet-client.util';
 import { parseStoredEntry, serializeEntry } from '../../lib/entry-sizing';
-import type { PendingChange, Row } from './settings.types';
+import type { BalanceAlertRuleRow, PendingChange, Row } from './settings.types';
 import {
   ADMIN_GLOBAL_KEYS,
   BOOLEAN_KEYS,
@@ -62,6 +62,10 @@ export default function SettingsPage() {
   const [newExcludedSource, setNewExcludedSource] = useState('');
   const [newDiagnosticModel, setNewDiagnosticModel] = useState('');
   const [activeCabinet, setActiveCabinet] = useState<CabinetItem | null>(null);
+  const [balanceAlerts, setBalanceAlerts] = useState<BalanceAlertRuleRow[]>([]);
+  const [balanceAlertBusy, setBalanceAlertBusy] = useState(false);
+  const [newBalanceOp, setNewBalanceOp] = useState<'gt' | 'lt'>('lt');
+  const [newBalanceThreshold, setNewBalanceThreshold] = useState('');
   const scope = !isAdmin && requestedScope === 'account' ? 'cabinet' : requestedScope;
 
   const apiFetchScoped = useCallback(
@@ -103,6 +107,21 @@ export default function SettingsPage() {
     [scope, isAdmin],
   );
 
+  const refreshBalanceAlerts = useCallback(async () => {
+    if (scope !== 'cabinet') {
+      setBalanceAlerts([]);
+      return;
+    }
+    try {
+      const res = await apiFetchScoped('/bybit/balance-alerts');
+      if (!res.ok) throw new Error(String(res.status));
+      const j = (await res.json()) as { items?: BalanceAlertRuleRow[] };
+      setBalanceAlerts(Array.isArray(j.items) ? j.items : []);
+    } catch {
+      setBalanceAlerts([]);
+    }
+  }, [scope, apiFetchScoped]);
+
   const loadSettings = useCallback(async () => {
     try {
       const res = await apiFetchScoped('/settings/effective');
@@ -133,12 +152,17 @@ export default function SettingsPage() {
       } else {
         setActiveCabinet(null);
       }
+      if (scope === 'cabinet') {
+        await refreshBalanceAlerts();
+      } else {
+        setBalanceAlerts([]);
+      }
     } catch {
       setMessage({ type: 'err', text: 'Не удалось загрузить настройки' });
     } finally {
       setLoading(false);
     }
-  }, [apiFetchScoped, scope, activeCabinetId]);
+  }, [apiFetchScoped, scope, activeCabinetId, refreshBalanceAlerts]);
 
   useEffect(() => {
     void (async () => {
@@ -351,6 +375,69 @@ export default function SettingsPage() {
       setMessage({ type: 'err', text: 'Не удалось сбросить базу данных' });
     } finally {
       setResetting(false);
+    }
+  }
+
+  async function addBalanceAlertRule() {
+    const raw = newBalanceThreshold.replace(',', '.').trim();
+    const n = Number.parseFloat(raw);
+    if (!Number.isFinite(n) || n <= 0) {
+      setMessage({ type: 'err', text: 'Укажите положительный порог в USDT' });
+      return;
+    }
+    setBalanceAlertBusy(true);
+    setMessage(null);
+    try {
+      const res = await apiFetchScoped('/bybit/balance-alerts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ operator: newBalanceOp, thresholdUsd: n }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      setNewBalanceThreshold('');
+      setMessage({ type: 'ok', text: 'Правило добавлено' });
+      await refreshBalanceAlerts();
+    } catch {
+      setMessage({ type: 'err', text: 'Не удалось добавить правило' });
+    } finally {
+      setBalanceAlertBusy(false);
+    }
+  }
+
+  async function setBalanceAlertEnabled(id: string, enabled: boolean) {
+    setBalanceAlertBusy(true);
+    setMessage(null);
+    try {
+      const res = await apiFetchScoped(`/bybit/balance-alerts/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      await refreshBalanceAlerts();
+    } catch {
+      setMessage({ type: 'err', text: 'Не удалось обновить правило' });
+    } finally {
+      setBalanceAlertBusy(false);
+    }
+  }
+
+  async function deleteBalanceAlertRule(id: string) {
+    const ok = window.confirm('Удалить это правило уведомления о балансе?');
+    if (!ok) return;
+    setBalanceAlertBusy(true);
+    setMessage(null);
+    try {
+      const res = await apiFetchScoped(`/bybit/balance-alerts/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      setMessage({ type: 'ok', text: 'Правило удалено' });
+      await refreshBalanceAlerts();
+    } catch {
+      setMessage({ type: 'err', text: 'Не удалось удалить правило' });
+    } finally {
+      setBalanceAlertBusy(false);
     }
   }
 
@@ -931,6 +1018,139 @@ export default function SettingsPage() {
             </div>
           </details>
         ))}
+
+        {scope === 'cabinet' ? (
+        <details className="card">
+          <summary className="settingsSectionSummary">Уведомления о балансе (equity USDT)</summary>
+          <div style={{ marginTop: '0.9rem' }}>
+            <p style={{ color: 'var(--muted)', marginBottom: '0.75rem', fontSize: '0.9rem' }}>
+              При пересечении порога API отправляет текст на оперативный канал (CRITICAL_NOTIFY). Сравнение
+              по суммарному equity (totalUsd), как в дневных снимках. Первый успешный опрос после создания
+              правила только выставляет внутреннее состояние без уведомления.
+            </p>
+            <div
+              style={{
+                display: 'flex',
+                gap: '0.5rem',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                marginBottom: '0.85rem',
+              }}
+            >
+              <select
+                value={newBalanceOp}
+                onChange={(e) => setNewBalanceOp(e.target.value === 'gt' ? 'gt' : 'lt')}
+                style={{
+                  padding: '0.45rem',
+                  borderRadius: 4,
+                  border: '1px solid var(--border)',
+                  background: 'var(--card)',
+                  color: 'var(--foreground)',
+                }}
+              >
+                <option value="gt">Equity выше порога (&gt;)</option>
+                <option value="lt">Equity ниже порога (&lt;)</option>
+              </select>
+              <input
+                type="number"
+                min={0.01}
+                step="any"
+                value={newBalanceThreshold}
+                onChange={(e) => setNewBalanceThreshold(e.target.value)}
+                placeholder="Порог, USDT"
+                style={{
+                  width: '140px',
+                  padding: '0.45rem',
+                  borderRadius: 4,
+                  border: '1px solid var(--border)',
+                  background: 'var(--card)',
+                  color: 'var(--foreground)',
+                }}
+              />
+              <button
+                type="button"
+                className="btn"
+                disabled={balanceAlertBusy}
+                onClick={() => void addBalanceAlertRule()}
+              >
+                Добавить правило
+              </button>
+            </div>
+            {balanceAlerts.length === 0 ? (
+              <p style={{ color: 'var(--muted)', fontSize: '0.88rem' }}>Правил пока нет.</p>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
+                <thead>
+                  <tr>
+                    <th
+                      style={{
+                        textAlign: 'left',
+                        padding: '0.35rem',
+                        borderBottom: '1px solid var(--border)',
+                      }}
+                    >
+                      Условие
+                    </th>
+                    <th
+                      style={{
+                        textAlign: 'left',
+                        padding: '0.35rem',
+                        borderBottom: '1px solid var(--border)',
+                      }}
+                    >
+                      Порог USDT
+                    </th>
+                    <th
+                      style={{
+                        textAlign: 'left',
+                        padding: '0.35rem',
+                        borderBottom: '1px solid var(--border)',
+                      }}
+                    >
+                      Вкл
+                    </th>
+                    <th
+                      style={{
+                        textAlign: 'left',
+                        padding: '0.35rem',
+                        borderBottom: '1px solid var(--border)',
+                      }}
+                    />
+                  </tr>
+                </thead>
+                <tbody>
+                  {balanceAlerts.map((r) => (
+                    <tr key={r.id}>
+                      <td style={{ padding: '0.35rem' }}>
+                        {r.operator === 'gt' ? 'Выше порога' : 'Ниже порога'}
+                      </td>
+                      <td style={{ padding: '0.35rem' }}>{r.thresholdUsd}</td>
+                      <td style={{ padding: '0.35rem' }}>
+                        <input
+                          type="checkbox"
+                          checked={r.enabled}
+                          disabled={balanceAlertBusy}
+                          onChange={(e) => void setBalanceAlertEnabled(r.id, e.target.checked)}
+                        />
+                      </td>
+                      <td style={{ padding: '0.35rem' }}>
+                        <button
+                          type="button"
+                          className="btn btnSecondary"
+                          disabled={balanceAlertBusy}
+                          onClick={() => void deleteBalanceAlertRule(r.id)}
+                        >
+                          Удалить
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </details>
+        ) : null}
 
         {scope === 'cabinet' ? (
         <details className="card">

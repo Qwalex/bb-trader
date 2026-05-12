@@ -423,9 +423,27 @@ model Cabinet {
   publishGroups    TgUserbotPublishGroup[]
   mirrorMessages   TgUserbotMirrorMessage[]
   userbotSignalHashes TgUserbotSignalHash[]
+  balanceAlertRules   CabinetBalanceAlertRule[]
 
   @@index([isDefault])
   @@index([ownerUserId, createdAt])
+}
+
+/// Правило уведомления на CRITICAL_NOTIFY_URL при пересечении порога equity (totalUsd) по кабинету.
+model CabinetBalanceAlertRule {
+  id             String   @id @default(cuid())
+  cabinetId      String
+  cabinet        Cabinet  @relation(fields: [cabinetId], references: [id], onDelete: Cascade)
+  /// gt — уведомить когда totalUsd > thresholdUsd; lt — когда totalUsd < thresholdUsd
+  operator       String
+  thresholdUsd   Float
+  enabled        Boolean  @default(true)
+  /// null — ещё не было успешного опроса (первый тик только выставляет состояние, без уведомления)
+  lastSatisfied  Boolean?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([cabinetId, enabled])
 }
 
 model CabinetMember {
