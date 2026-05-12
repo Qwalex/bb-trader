@@ -64,6 +64,15 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private shuttingDown = false;
   private botSyncInFlight = false;
   private readonly launchedBotTokensByCabinet = new Map<string, string>();
+  /**
+   * Один и тот же TELEGRAM_BOT_TOKEN → один процесс long polling.
+   * Middleware читает актуальный список кабинетов отсюда, чтобы ACL и AppLog
+   * не залипали на первом кабинете при reuse Telegraf.
+   */
+  private readonly botTokenCabinetRouting = new Map<
+    string,
+    { cabinetIds: string[] }
+  >();
 
   constructor(
     private readonly settings: SettingsService,
@@ -143,6 +152,28 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         desired.set(cabinet.id, { token, name: cabinet.name });
       }
 
+      const seenRoutingTokens = new Set<string>();
+      for (const [, cfg] of desired.entries()) {
+        seenRoutingTokens.add(cfg.token);
+        let routing = this.botTokenCabinetRouting.get(cfg.token);
+        if (!routing) {
+          routing = { cabinetIds: [] };
+          this.botTokenCabinetRouting.set(cfg.token, routing);
+        }
+        routing.cabinetIds.length = 0;
+      }
+      for (const [cid, cfg] of desired.entries()) {
+        const routing = this.botTokenCabinetRouting.get(cfg.token);
+        if (routing) {
+          routing.cabinetIds.push(cid);
+        }
+      }
+      for (const key of [...this.botTokenCabinetRouting.keys()]) {
+        if (!seenRoutingTokens.has(key)) {
+          this.botTokenCabinetRouting.delete(key);
+        }
+      }
+
       for (const [cabinetId, existingBot] of this.botRegistry.entries()) {
         const wanted = desired.get(cabinetId);
         const launchedToken = this.launchedBotTokensByCabinet.get(cabinetId);
@@ -207,7 +238,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
               this.logger.warn(`Could not reply with error to user: ${String(e)}`),
             );
         });
-        this.registerHandlers(bot, cabinetId);
+        this.registerHandlers(bot, cfg.token);
         try {
           await this.launchCabinetBotWithTimeout(bot, cabinetId, cfg);
         } catch (e) {
@@ -1182,9 +1213,16 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private registerHandlers(telegraf: Telegraf, cabinetId: string): void {
+  private registerHandlers(telegraf: Telegraf, botToken: string): void {
     if (!telegraf) return;
-    this.registerTelegramAccessMiddleware(telegraf, cabinetId);
+    const routing = this.botTokenCabinetRouting.get(botToken);
+    if (!routing || routing.cabinetIds.length === 0) {
+      this.logger.error(
+        `Telegram: нет маршрутизации кабинетов для токена (prefix=${botToken.slice(0, 8)}…) — handlers не зарегистрированы`,
+      );
+      return;
+    }
+    this.registerTelegramAccessMiddleware(telegraf, routing);
     this.registerTelegramMainMenuHandlers(telegraf);
     this.registerTelegramDraftActionHandlers(telegraf);
     this.registerTelegramUserbotActionHandlers(telegraf);
@@ -1193,7 +1231,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
   private registerTelegramAccessMiddleware(
     telegraf: Telegraf,
-    cabinetId: string,
+    routing: { cabinetIds: string[] },
   ): void {
     telegraf.use(async (ctx, next) => {
       const uid = ctx.from?.id;
@@ -1209,17 +1247,27 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         this.logger.debug('TG: no ctx.from — пропуск (канал/системное?)');
         return next();
       }
-      const allowed = await this.cabinetContext.runWithCabinet(cabinetId, () =>
-        this.isAllowed(uid),
-      );
-      if (!allowed) {
+      const candidates = routing.cabinetIds;
+      let chosen: string | null = null;
+      for (const cid of candidates) {
+        const ok = await this.cabinetContext.runWithCabinetAsync(cid, () =>
+          this.isAllowed(uid),
+        );
+        if (ok) {
+          chosen = cid;
+          break;
+        }
+      }
+      if (!chosen) {
         this.logger.warn(
-          `TG: доступ запрещён userId=${uid} cabinet=${cabinetId}. Проверьте TELEGRAM_WHITELIST в настройках кабинета.`,
+          `TG: доступ запрещён userId=${uid} cabinets=${candidates.join(',')}. Проверьте TELEGRAM_WHITELIST в настройках кабинета.`,
         );
         await ctx.reply('Доступ запрещён.');
         return;
       }
-      return this.cabinetContext.runWithCabinet(cabinetId, () => next());
+      return this.cabinetContext.runWithCabinetAsync(chosen, async () => {
+        await next();
+      });
     });
   }
 

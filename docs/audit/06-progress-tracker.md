@@ -1233,3 +1233,15 @@
 - Manual verification: `npm run build -w apps/api` (pass); ручная проверка: тест «Диагностика» и userbot-уведомления с двумя кабинетами / двумя токенами и при необходимости второй реплике API.
 - Docs updated: этот трекер, `AGENTS.md`.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-101
+
+- Status: `done`
+- Scope: AppLog по кабинетам при общем `TELEGRAM_BOT_TOKEN` и ссылка «Логи» в навигации.
+- Files: `apps/api/src/modules/telegram/services/telegram.service.ts`, `apps/api/src/modules/app-log/app-log.service.ts`, `packages/shared/src/nav-menu.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: при reuse одного Telegraf на несколько кабинетов с одним токеном `registerTelegramAccessMiddleware` оставался с `cabinetId` первого запуска → ACL и `AppLog.append` шли в первый кабинет; пункт меню `/logs` без `cabinetAware` не добавлял `cabinetId` в URL.
+- Changes: карта `botTokenCabinetRouting` (актуальный список кабинетов на токен, обновляется каждый sync); middleware перебирает кандидатов и берёт первый, где `isAllowed`; контекст через `runWithCabinetAsync`; в `AppLog.append` снимок `cabinetId` до первого `await`; в `NAV_MENU_ITEMS` у «Логи» — `cabinetAware: true`.
+- Decomposition notes (`utils/constants/hooks/types`): N/A.
+- Manual verification: `npm run build -w apps/api`, `npm run build -w apps/web` (pass); при двух кабинетах с одним токеном — новые записи AppLog в кабинете, для которого пользователь проходит whitelist первым в порядке кабинетов по токену.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

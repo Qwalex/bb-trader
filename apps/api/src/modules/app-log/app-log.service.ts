@@ -189,6 +189,7 @@ export class AppLogService {
     message: string,
     payload?: unknown,
   ): Promise<void> {
+    const cabinetIdForRow = this.cabinetContext.getCabinetId();
     if (!(await this.resolveAppLogWritesEnabled())) {
       return;
     }
@@ -204,7 +205,7 @@ export class AppLogService {
         payload === undefined ? null : stringifyPayload(payload);
       await this.prisma.appLog.create({
         data: {
-          cabinetId: this.cabinetContext.getCabinetId() ?? undefined,
+          cabinetId: cabinetIdForRow ?? undefined,
           level,
           category,
           message,
