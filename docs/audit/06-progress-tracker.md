@@ -1341,3 +1341,15 @@
 - Manual verification: `npm run build -w apps/api` (pass).
 - Docs updated: этот трекер, `AGENTS.md`, `.env.example`, `docs/audit/01-env-and-secrets-matrix.md`.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-110
+
+- Status: `done`
+- Scope: Userbot — ручное перечитывание снимает дедуп по `signalHash`, чтобы не блокировало «Сигнал уже обрабатывался ранее» при пустой бирже.
+- Files: `apps/api/src/modules/telegram-userbot/userbot-signal-hash.service.ts`, `apps/api/src/modules/telegram-userbot/ingest/telegram-userbot-ingest-pipeline.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: дедуп — таблица `TgUserbotSignalHash` (хеш от пары/направления/уровней, не позиция на Bybit); `tryCreate` после первого прохода оставлял запись; `reread` передавал `signalHash: null` в job, но не удалял строку в `TgUserbotSignalHash` и не обнулял `TgUserbotIngest.signalHash` в БД.
+- Changes: `releaseForCabinetAndHash`; для `manual-reread` / `manual-reread-all` перед `tryCreate` — снятие хеша для `effectiveCabinetId`; при постановке в очередь reread — `signalHash: null` на `TgUserbotIngest`.
+- Decomposition notes (`utils/constants/hooks/types`): N/A.
+- Manual verification: `npm run build -w apps/api` (pass); повторный reread того же SUI-сообщения в кабинете — проходит стадию дедупа (при отсутствии других блокировок).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

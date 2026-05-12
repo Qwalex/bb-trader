@@ -61,6 +61,34 @@ export class UserbotSignalHashService {
   }
 
   /**
+   * Снять дедуп-запись для конкретного кабинета и хеша (например при ручном перечитывании сообщения с тем же разбором).
+   */
+  async releaseForCabinetAndHash(cabinetId: string, hash: string): Promise<void> {
+    const cid = String(cabinetId ?? '').trim();
+    const h = String(hash ?? '').trim();
+    if (!cid || !h) {
+      return;
+    }
+    try {
+      const res = await this.prisma.tgUserbotSignalHash.deleteMany({
+        where: { cabinetId: cid, hash: h },
+      });
+      if (res.count > 0) {
+        void this.appLog.append('debug', 'telegram', 'Userbot: released signal hash for cabinet', {
+          signalHash: h,
+          cabinetId: cid,
+        });
+      }
+    } catch (e) {
+      void this.appLog.append('warn', 'telegram', 'Userbot: failed to release signal hash for cabinet', {
+        signalHash: h,
+        cabinetId: cid,
+        error: formatError(e),
+      });
+    }
+  }
+
+  /**
    * Снимает дедуп-хеш после закрытия сделки (любой путь: API, userbot, poll).
    * Без этого повторный сигнал с теми же уровнями считается дубликатом.
    */

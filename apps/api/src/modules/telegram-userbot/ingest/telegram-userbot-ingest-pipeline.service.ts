@@ -687,6 +687,11 @@ export class TelegramUserbotIngestPipelineService {
     }
 
     const signalHash = this.userbotSignalHash.computeHash(signal);
+    const manualReread =
+      options?.source === 'manual-reread' || options?.source === 'manual-reread-all';
+    if (manualReread) {
+      await this.userbotSignalHash.releaseForCabinetAndHash(effectiveCabinetId, signalHash);
+    }
     const canReuseExistingHash =
       ingest.signalHash === signalHash && ingest.status !== 'placed';
     const isNewSignal = canReuseExistingHash
@@ -1083,6 +1088,10 @@ export class TelegramUserbotIngestPipelineService {
       },
       select: { id: true, cabinetId: true },
     });
+    await this.prisma.tgUserbotIngest.update({
+      where: { id: ingest.id },
+      data: { signalHash: null },
+    });
     this.ingest.enqueueIngestJob({
       ingest: {
         id: ingest.id,
@@ -1206,6 +1215,10 @@ export class TelegramUserbotIngestPipelineService {
             aiResponse: null,
           },
           select: { id: true, cabinetId: true },
+        });
+        await this.prisma.tgUserbotIngest.update({
+          where: { id: row.id },
+          data: { signalHash: null },
         });
         this.ingest.enqueueIngestJob({
           ingest: {
