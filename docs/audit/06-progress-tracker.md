@@ -1281,3 +1281,15 @@
 - Manual verification: `npm run build -w apps/api`, `npm run build -w apps/web` (pass); рекомендуется ручная проверка: два кабинета, одна группа — «перечитать» только из кабинета A не триггерит очередь кабинета B.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-105
+
+- Status: `done`
+- Scope: Telegram assist — приветствие при каждом подъёме бота кабинета (не только после первого sync при старте API).
+- Files: `apps/api/src/modules/telegram/services/telegram.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: `sendStartupGreeting` вызывался один раз из `initializeBots` после первого `syncBotsWithCabinetTokens`; при появлении токена позже, после таймаута launch или при reuse одного Telegraf на второй кабинет пользователи не получали стартовое сообщение.
+- Changes: `sendStartupGreetingForCabinet` + `resolveStartupGreetingText`; вызов после успешного `launch` и при attach по общему токену; глобальный вызов из `initializeBots` убран (избежание дубля с per-cabinet); `sendStartupGreeting()` делегирует всем кабинетам для legacy `launchBotWithRetry`.
+- Decomposition notes (`utils/constants/hooks/types`): N/A.
+- Manual verification: `npm run build -w apps/api` (pass); рекомендуется: добавить токен кабинету после старта API — приходит то же сообщение, что и при `TELEGRAM_STARTUP_MESSAGE` / дефолт.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

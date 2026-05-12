@@ -116,7 +116,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       );
       return;
     }
-    await this.sendStartupGreeting();
   }
 
   private startBotSyncLoop(): void {
@@ -217,6 +216,11 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           this.logger.log(
             `Telegram bot: cabinet=${cabinetId} (${cfg.name}) shares running bot instance with same token`,
           );
+          void this.sendStartupGreetingForCabinet(cabinetId).catch((e) =>
+            this.logger.warn(
+              `sendStartupGreetingForCabinet failed cabinet=${cabinetId}: ${formatError(e)}`,
+            ),
+          );
           continue;
         }
 
@@ -292,6 +296,11 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           this.logger.log(
             `Telegram bot started for cabinet=${cabinetId} (${cfg.name}) username=@${me?.username ?? '?'}`,
           );
+          void this.sendStartupGreetingForCabinet(cabinetId).catch((e) =>
+            this.logger.warn(
+              `sendStartupGreetingForCabinet failed cabinet=${cabinetId}: ${formatError(e)}`,
+            ),
+          );
         })(),
         timeout,
       ]);
@@ -302,49 +311,66 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** Уведомление пользователей из whitelist при старте (нужен хотя бы один /start от пользователя ранее). */
-  private async sendStartupGreeting(): Promise<void> {
-    if (this.botRegistry.launchedCount === 0) {
-      return;
-    }
-    const text =
+  private async resolveStartupGreetingText(): Promise<string> {
+    return (
       (await this.settings.get('TELEGRAM_STARTUP_MESSAGE')) ??
       [
         'SignalsBot запущен.',
         'Отправьте сигнал текстом, фото или голосом.',
         'Если данных мало — ответьте на вопросы бота; контекст сохраняется до «Подтвердить».',
         'Команды: /cancel — отменить черновик.',
-      ].join('\n');
+      ].join('\n')
+    );
+  }
 
-    for (const [cabinetId, bot] of this.botRegistry.entries()) {
-      const ids = await this.resolveCabinetTelegramNotifyRecipientIds(cabinetId);
-      if (ids.length === 0) {
-        continue;
-      }
+  /**
+   * Приветствие при подъёме assist-бота кабинета (long polling или присоединение к уже запущенному
+   * экземпляру с тем же токеном). Доставка как у проактивных уведомлений: whitelist ∪ владелец ∪ участники.
+   */
+  private async sendStartupGreetingForCabinet(cabinetId: string): Promise<void> {
+    const bot = this.botRegistry.getScopedBotOnly(cabinetId);
+    if (!bot) {
+      return;
+    }
+    const ids = await this.resolveCabinetTelegramNotifyRecipientIds(cabinetId);
+    if (ids.length === 0) {
+      return;
+    }
+    const text = await this.resolveStartupGreetingText();
+    try {
+      const me = await bot.telegram.getMe();
+      this.logger.log(
+        `sendStartupGreeting: cabinet=${cabinetId} bot @${me.username ?? '?'} (id=${me.id}), users=${ids.join(', ')}`,
+      );
+    } catch (e) {
+      this.logger.error(
+        `sendStartupGreeting: getMe failed cabinet=${cabinetId}: ${e instanceof Error ? e.message : e}`,
+      );
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 500));
+    for (const id of ids) {
       try {
-        const me = await bot.telegram.getMe();
-        this.logger.log(
-          `sendStartupGreeting: cabinet=${cabinetId} bot @${me.username ?? '?'} (id=${me.id}), users=${ids.join(', ')}`,
-        );
+        await bot.telegram.sendMessage(id, text);
       } catch (e) {
-        this.logger.error(
-          `sendStartupGreeting: getMe failed cabinet=${cabinetId}: ${e instanceof Error ? e.message : e}`,
+        const msg = e instanceof Error ? e.message : String(e);
+        this.logger.warn(
+          `Startup greeting failed cabinet=${cabinetId} chat_id=${id}: ${msg}`,
         );
-        continue;
-      }
-      await new Promise((r) => setTimeout(r, 500));
-      for (const id of ids) {
-        try {
-          await bot.telegram.sendMessage(id, text);
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          this.logger.warn(
-            `Startup greeting failed cabinet=${cabinetId} chat_id=${id}: ${msg}`,
-          );
-        }
       }
     }
   }
+
+  /** Уведомление всех кабинетов с запущенным ботом (legacy-путь перезапуска primary). */
+  private async sendStartupGreeting(): Promise<void> {
+    if (this.botRegistry.launchedCount === 0) {
+      return;
+    }
+    for (const [cabinetId] of this.botRegistry.entries()) {
+      await this.sendStartupGreetingForCabinet(cabinetId);
+    }
+  }
+
   /**
    * Как `SettingsService.get('TELEGRAM_WHITELIST')`: сначала CabinetSetting, затем env/глобальные слои.
    * Прямой запрос в Prisma обходил `TELEGRAM_WHITELIST` из окружения — userbot-уведомления молчали, а VK-зеркало (через settings.get) работало.
