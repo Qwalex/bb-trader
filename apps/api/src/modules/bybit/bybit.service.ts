@@ -1,4 +1,10 @@
-import { forwardRef, Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import {
+  forwardRef,
+  Inject,
+  Injectable,
+  Logger,
+  OnApplicationBootstrap,
+} from '@nestjs/common';
 import { RestClientV5 } from 'bybit-api';
 
 import { normalizeTradingPair, type SignalDto } from '@repo/shared';
@@ -51,7 +57,7 @@ import type {
 } from './types/bybit.types';
 
 @Injectable()
-export class BybitService implements OnModuleInit {
+export class BybitService implements OnApplicationBootstrap {
   private readonly logger = new Logger(BybitService.name);
   private readonly staleFlatPollCounts = new Map<string, number>();
   private readonly staleReconcileSuspensions = new Map<string, { count: number; reason?: string }>();
@@ -86,10 +92,17 @@ export class BybitService implements OnModuleInit {
     private readonly exchangeCleanup: BybitExchangeCleanupService,
   ) {}
 
-  onModuleInit(): void {
-    void this.bybitClient.startPrivateWsSync({
-      onWsUpdate: () => this.workers.enqueuePollSweep('bybit-ws-update'),
-    });
+  async onApplicationBootstrap(): Promise<void> {
+    const tryStart = async (): Promise<boolean> =>
+      this.bybitClient.startPrivateWsSync({
+        onWsUpdate: () => this.workers.enqueuePollSweep('bybit-ws-update'),
+      });
+    const ok = await tryStart();
+    if (!ok) {
+      setTimeout(() => {
+        void tryStart();
+      }, 10_000);
+    }
   }
 
   private currentCabinetId(): string | null {

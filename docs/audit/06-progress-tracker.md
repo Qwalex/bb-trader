@@ -1317,3 +1317,15 @@
 - Manual verification: `npm run build -w apps/api` (pass).
 - Docs updated: этот трекер, `AGENTS.md`, `.env.example`.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-108
+
+- Status: `done`
+- Scope: Bybit private WS — старт после готовности приложения и исправление «залипшего» отказа при первом пустом чтении ключей.
+- Files: `apps/api/src/modules/bybit/bybit.service.ts`, `apps/api/src/modules/bybit/instrument/bybit-client.service.ts`, `AGENTS.md`, `docs/audit/06-progress-tracker.md`
+- Findings: `startPrivateWsSync` вызывался из `onModuleInit` и выставлял `wsStarted` до проверки `getBybitCredentials` — при раннем пустом ответе настройки лог «no credentials» и повторная попытка при появлении ключей невозможны.
+- Changes: вызов из `OnApplicationBootstrap`; `wsStarted` только после успешного создания клиента или осознанного отключения (sync off / multi-cabinet); при `no credentials` или ошибке init — `false` и одна отложенная повторная попытка через 10 с из `BybitService`; при ошибке init — попытка `closeAll` и сброс `wsClient`.
+- Decomposition notes (`utils/constants/hooks/types`): N/A.
+- Manual verification: `npm run build -w apps/api` (pass).
+- Docs updated: этот трекер, `AGENTS.md`.
+- Linked risks (`SEC-###`): N/A
