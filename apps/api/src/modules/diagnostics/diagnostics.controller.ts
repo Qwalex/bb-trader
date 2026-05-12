@@ -21,6 +21,7 @@ import {
 } from '@nestjs/swagger';
 
 import { parseCorsOrigins } from '../../common/cors-origins.util';
+import { DiagnosticsNotifyTestService } from './diagnostics-notify-test.service';
 import { DiagnosticsService } from './diagnostics.service';
 import { MemoryDiagnosticsService } from './memory-diagnostics.service';
 import { TradingAiAdvisorService } from './trading-ai-advisor.service';
@@ -32,6 +33,7 @@ export class DiagnosticsController {
     private readonly diagnostics: DiagnosticsService,
     private readonly tradingAdvisor: TradingAiAdvisorService,
     private readonly memoryDiagnostics: MemoryDiagnosticsService,
+    private readonly notifyTest: DiagnosticsNotifyTestService,
     private readonly config: ConfigService,
   ) {}
 
@@ -94,6 +96,25 @@ export class DiagnosticsController {
     if (String(req.auth?.role ?? '').trim().toLowerCase() !== 'admin') {
       throw new ForbiddenException('Admin role required');
     }
+  }
+
+  @ApiOperation({
+    summary:
+      'Тестовое уведомление в Telegram и VK (те же получатели, что при ошибках userbot)',
+  })
+  @ApiForbiddenResponse({ description: 'Запрос не того origin' })
+  @ApiOkResponse({ description: 'Результат отправки по каналам' })
+  @Post('notify-test')
+  async notifyTestPing(
+    @Req() req: { auth?: { role?: string } },
+    @Headers('host') host?: string,
+    @Headers('origin') origin?: string,
+    @Headers('referer') referer?: string,
+    @Headers('sec-fetch-site') secFetchSite?: string,
+  ) {
+    this.assertAdmin(req);
+    this.assertSameOriginBrowserRequest(host, origin, referer, secFetchSite);
+    return this.notifyTest.pingNotifyChannels();
   }
 
   @ApiOperation({ summary: 'Запустить диагностику по последним кейсам' })

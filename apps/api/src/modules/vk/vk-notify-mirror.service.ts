@@ -207,6 +207,44 @@ export class VkNotifyMirrorService {
     }
   }
 
+  /** Тест доставки в VK тем же VK_WHITELIST, что и зеркало ошибок userbot. */
+  async mirrorDiagnosticsPing(): Promise<{ deliveredTo: number; skipped?: string }> {
+    if (!(await this.tokenOk())) {
+      return {
+        deliveredTo: 0,
+        skipped: 'VK выключен (нет или пустой VK_GROUP_ACCESS_TOKEN)',
+      };
+    }
+    const ids = await this.whitelistIds();
+    if (ids.length === 0) {
+      return { deliveredTo: 0, skipped: 'VK_WHITELIST пуст в настройках кабинета и env' };
+    }
+
+    const cabinetLabel = await this.resolveCabinetDisplayLabel();
+    const msg =
+      this.vkCabinetPrefix(cabinetLabel) +
+      '🧪 Тест уведомлений со страницы «Диагностика».\n\n' +
+      'Если вы видите это сообщение — токен группы и VK_WHITELIST настроены.';
+
+    let deliveredTo = 0;
+    for (const uid of ids) {
+      try {
+        await this.vkApi.sendMessage({ peerId: uid, message: msg });
+        deliveredTo += 1;
+      } catch (e) {
+        this.logger.warn(`VK diagnostics ping -> ${uid}: ${String(e)}`);
+      }
+    }
+
+    if (deliveredTo === 0) {
+      return {
+        deliveredTo: 0,
+        skipped: 'Не удалось доставить тест ни одному пользователю VK (см. логи API)',
+      };
+    }
+    return { deliveredTo };
+  }
+
   async mirrorNotifyUserbotResultWithoutEntry(params: {
     ingestId: string;
     chatId: string;

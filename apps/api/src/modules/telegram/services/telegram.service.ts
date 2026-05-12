@@ -628,6 +628,51 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     return { ok: true, deliveredTo };
   }
 
+  /**
+   * Короткий тест доставки в Telegram тем же списком получателей, что и оповещения userbot (whitelist ∪ владелец ∪ участники).
+   */
+  async notifyDiagnosticsPing(): Promise<{ ok: boolean; deliveredTo: number; error?: string }> {
+    const cabinetLabel = await this.resolveCabinetDisplayLabel();
+    const msg =
+      this.cabinetNotifyPlainPrefix(cabinetLabel) +
+      '🧪 Тест уведомлений со страницы «Диагностика».\n\n' +
+      'Если вы видите это сообщение — бот запущен и список получателей для оповещений настроен.';
+
+    const bot = this.getBotForCabinet(this.currentCabinetId());
+    if (!bot) {
+      return { ok: false, deliveredTo: 0, error: 'Telegram bot не запущен' };
+    }
+    const ids = await this.getTelegramNotifyRecipientIds();
+    if (ids.length === 0) {
+      return {
+        ok: false,
+        deliveredTo: 0,
+        error:
+          'Нет получателей уведомлений (TELEGRAM_WHITELIST или Telegram владельца/участников кабинета)',
+      };
+    }
+
+    let deliveredTo = 0;
+    for (const uid of ids) {
+      try {
+        await bot.telegram.sendMessage(uid, msg);
+        deliveredTo += 1;
+      } catch (e) {
+        this.logger.warn(`notifyDiagnosticsPing -> ${uid}: ${formatError(e)}`);
+      }
+    }
+
+    if (deliveredTo === 0) {
+      return {
+        ok: false,
+        deliveredTo: 0,
+        error:
+          'Не удалось доставить тест ни одному пользователю (например, диалог с ботом не открыт)',
+      };
+    }
+    return { ok: true, deliveredTo };
+  }
+
   async notifyUserbotResultWithoutEntry(params: {
     ingestId: string;
     chatId: string;

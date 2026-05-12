@@ -86,6 +86,12 @@ type QueueHealth = {
   };
 };
 
+type NotifyTestResult = {
+  cabinetId: string | null;
+  telegram: { ok: boolean; deliveredTo: number; error?: string };
+  vk: { deliveredTo: number; skipped?: string };
+};
+
 function prettyJson(v: unknown): string {
   try {
     return JSON.stringify(v, null, 2);
@@ -114,6 +120,8 @@ export default function DiagnosticsPage() {
   const [loadingRuns, setLoadingRuns] = useState(true);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [runNowLoading, setRunNowLoading] = useState(false);
+  const [notifyTestLoading, setNotifyTestLoading] = useState(false);
+  const [notifyTestResult, setNotifyTestResult] = useState<NotifyTestResult | null>(null);
   const [limit, setLimit] = useState(5);
   const [error, setError] = useState<string | null>(null);
   const [queueHealth, setQueueHealth] = useState<QueueHealth | null>(null);
@@ -240,6 +248,25 @@ export default function DiagnosticsPage() {
     }
   }
 
+  async function sendNotifyTest() {
+    setNotifyTestLoading(true);
+    setError(null);
+    setNotifyTestResult(null);
+    try {
+      const res = await fetchApiResponse('/diagnostics/notify-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      const data = (await res.json()) as NotifyTestResult;
+      setNotifyTestResult(data);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setNotifyTestLoading(false);
+    }
+  }
+
   const modelResultById = useMemo(() => {
     const map = new Map<string, ModelResultRow>();
     for (const row of details?.modelResults ?? []) {
@@ -290,6 +317,30 @@ export default function DiagnosticsPage() {
             Обновить список запусков
           </button>
         </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: '1rem' }}>
+        <h3 style={{ marginBottom: '0.75rem' }}>Проверка уведомлений Telegram и VK</h3>
+        <p style={{ color: 'var(--muted)', fontSize: '0.88rem', marginBottom: '0.65rem' }}>
+          Отправляет короткое тестовое сообщение тем же списком получателей, что используется при ошибках userbot:
+          Telegram — whitelist и связанные с кабинетом аккаунты; VK —{' '}
+          <code style={{ fontSize: '0.82rem' }}>VK_WHITELIST</code>. Учитывается выбранный в интерфейсе кабинет.
+        </p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => void sendNotifyTest()}
+            disabled={notifyTestLoading}
+          >
+            {notifyTestLoading ? 'Отправка…' : 'Отправить тестовое уведомление'}
+          </button>
+        </div>
+        {notifyTestResult && (
+          <pre style={{ ...payloadStyle, marginBottom: 0, marginTop: '0.75rem' }}>
+            {prettyJson(notifyTestResult)}
+          </pre>
+        )}
       </div>
 
       <div className="card" style={{ marginBottom: '1rem' }}>

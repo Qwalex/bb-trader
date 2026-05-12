@@ -1149,3 +1149,15 @@
 - Manual verification: `npm run build -w apps/api` (pass); после деплоя при включённом userbot и одной реплике — без QR, если сессия была активна до рестарта и успела сохраниться (интервал или SIGTERM).
 - Docs updated: этот трекер, `AGENTS.md`, `.env.example`.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-094
+
+- Status: `done`
+- Scope: Диагностика доставки уведомлений userbot (Telegram + VK) со страницы `/diagnostics`.
+- Files: `apps/api/src/modules/diagnostics/diagnostics.controller.ts`, `apps/api/src/modules/diagnostics/diagnostics.module.ts`, `apps/api/src/modules/diagnostics/diagnostics-notify-test.service.ts`, `apps/api/src/modules/telegram/services/telegram.service.ts`, `apps/api/src/modules/vk/vk-notify-mirror.service.ts`, `apps/web/app/diagnostics/page.tsx`, `docs/auth-protected-routes.md`, `docs/audit/06-progress-tracker.md`
+- Findings: N/A (кнопка для проверки каналов без воспроизведения ошибки пайплайна).
+- Changes: `POST /diagnostics/notify-test` (admin + same-origin); `TelegramService.notifyDiagnosticsPing`, `VkNotifyMirrorService.mirrorDiagnosticsPing`; карточка на `/diagnostics` с ответом JSON (`cabinetId`, `telegram`, `vk`).
+- Decomposition notes (`utils/constants/hooks/types`): отдельный сервис `diagnostics-notify-test.service.ts`.
+- Manual verification: `npm run build -w apps/api`, `npm run build -w apps/web` (pass); админ на `/diagnostics` — кнопка отправляет тест и показывает счётчики или текст ошибки.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A (эндпоинт только admin).

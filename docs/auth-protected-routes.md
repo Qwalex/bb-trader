@@ -27,6 +27,7 @@
 
 ### Diagnostics
 
+- `POST /diagnostics/notify-test`
 - `POST /diagnostics/run-latest`
 - `GET /diagnostics/runs`
 - `GET /diagnostics/runs/:id`

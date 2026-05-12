@@ -4,23 +4,35 @@ import { PrismaModule } from '../../prisma/prisma.module';
 import { BybitModule } from '../bybit/bybit.module';
 import { OrdersModule } from '../orders/orders.module';
 import { SettingsModule } from '../settings/settings.module';
+import { TelegramModule } from '../telegram';
 import { TranscriptModule } from '../transcript/transcript.module';
+import { VkModule } from '../vk/vk.module';
 import { DiagnosticsAiService } from './diagnostics.ai.service';
 import { DiagnosticsController } from './diagnostics.controller';
 import { DiagnosticsMetricsVerifier } from './diagnostics.metrics-verifier';
+import { DiagnosticsNotifyTestService } from './diagnostics-notify-test.service';
 import { DiagnosticsService } from './diagnostics.service';
 import { DiagnosticsTraceBuilder } from './diagnostics.trace-builder';
 import { MemoryDiagnosticsService } from './memory-diagnostics.service';
 import { TradingAiAdvisorService } from './trading-ai-advisor.service';
 
 @Module({
-  imports: [PrismaModule, SettingsModule, OrdersModule, BybitModule, TranscriptModule],
+  imports: [
+    PrismaModule,
+    SettingsModule,
+    OrdersModule,
+    BybitModule,
+    TranscriptModule,
+    TelegramModule,
+    VkModule,
+  ],
   controllers: [DiagnosticsController],
   providers: [
     DiagnosticsService,
     DiagnosticsTraceBuilder,
     DiagnosticsAiService,
     DiagnosticsMetricsVerifier,
+    DiagnosticsNotifyTestService,
     MemoryDiagnosticsService,
     TradingAiAdvisorService,
   ],
