@@ -129,79 +129,97 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
     this.botSyncInFlight = true;
     try {
-    const cabinets = await this.prisma.cabinet.findMany({
-      select: {
-        id: true,
-        name: true,
-        settings: {
-          where: { key: 'TELEGRAM_BOT_TOKEN' },
-          select: { value: true },
-          take: 1,
-        },
-      },
-      orderBy: { createdAt: 'asc' },
-    });
-    const desired = new Map<
-      string,
-      { token: string; name: string }
-    >();
-    for (const cabinet of cabinets) {
-      const token = String(cabinet.settings[0]?.value ?? '').trim();
-      if (!token) continue;
-      desired.set(cabinet.id, { token, name: cabinet.name });
-    }
-
-    for (const [cabinetId, existingBot] of this.botRegistry.entries()) {
-      const wanted = desired.get(cabinetId);
-      const launchedToken = this.launchedBotTokensByCabinet.get(cabinetId);
-      if (wanted && launchedToken === wanted.token) {
-        continue;
-      }
-      try {
-        existingBot.stop('SIGTERM');
-      } catch {
-        // ignore
-      }
-      this.botRegistry.removeCabinetBot(cabinetId);
-      this.launchedBotTokensByCabinet.delete(cabinetId);
-      this.logger.log(`Telegram bot stopped for cabinet=${cabinetId}`);
-    }
-
-    for (const [cabinetId, cfg] of desired.entries()) {
-      if (this.launchedBotTokensByCabinet.get(cabinetId) === cfg.token) {
-        continue;
-      }
-      const bot = new Telegraf(cfg.token, {
-        handlerTimeout: 180_000,
+      const cabinets = await this.prisma.cabinet.findMany({
+        select: { id: true, name: true },
+        orderBy: { createdAt: 'asc' },
       });
-      bot.catch((err, ctx) => {
-        const msg = err instanceof Error ? err.message : String(err);
-        const stack = err instanceof Error ? err.stack : undefined;
-        this.logger.error(
-          `Telegraf unhandled error (cabinet=${cabinetId}): ${msg} updateType=${ctx?.updateType ?? '?'}`,
-          stack,
+      // Эффективный токен как в SettingsService: CabinetSetting → глобальные слои → env.
+      const desired = new Map<string, { token: string; name: string }>();
+      for (const cabinet of cabinets) {
+        const token = await this.cabinetContext.runWithCabinet(cabinet.id, async () =>
+          String((await this.settings.get('TELEGRAM_BOT_TOKEN')) ?? '').trim(),
         );
-        void ctx
-          ?.reply(
-            'Произошла ошибка при обработке сообщения. Проверьте логи сервера (TelegramService).',
-          )
-          .catch((e) =>
-            this.logger.warn(`Could not reply with error to user: ${String(e)}`),
+        if (!token) continue;
+        desired.set(cabinet.id, { token, name: cabinet.name });
+      }
+
+      for (const [cabinetId, existingBot] of this.botRegistry.entries()) {
+        const wanted = desired.get(cabinetId);
+        const launchedToken = this.launchedBotTokensByCabinet.get(cabinetId);
+        if (wanted && launchedToken === wanted.token) {
+          continue;
+        }
+        this.botRegistry.removeCabinetBot(cabinetId);
+        this.launchedBotTokensByCabinet.delete(cabinetId);
+
+        const prevTok = launchedToken;
+        if (
+          prevTok &&
+          ![...desired.values()].some((c) => c.token === prevTok)
+        ) {
+          try {
+            existingBot.stop('SIGTERM');
+          } catch {
+            // ignore
+          }
+          this.logger.log(
+            `Telegram bot stopped: token no longer used by any cabinet (had cabinet=${cabinetId})`,
           );
-      });
-      this.registerHandlers(bot, cabinetId);
-      try {
-        await this.launchCabinetBotWithTimeout(bot, cabinetId, cfg);
-      } catch (e) {
-        this.logger.error(
-          `Telegram bot launch failed for cabinet=${cabinetId}: ${formatError(e)}`,
-        );
+        }
       }
-    }
 
-    const first = this.botRegistry.values().next().value ?? null;
-    this.botRegistry.setPrimaryBot(first);
-    return this.botRegistry.launchedCount;
+      for (const [cabinetId, cfg] of desired.entries()) {
+        if (this.launchedBotTokensByCabinet.get(cabinetId) === cfg.token) {
+          continue;
+        }
+
+        let reuseBot: Telegraf | null = null;
+        for (const [cid, tok] of this.launchedBotTokensByCabinet.entries()) {
+          if (tok === cfg.token) {
+            reuseBot = this.botRegistry.getScopedBotOnly(cid) ?? null;
+            if (reuseBot) break;
+          }
+        }
+        if (reuseBot) {
+          this.botRegistry.addLaunchedBot(cabinetId, reuseBot);
+          this.launchedBotTokensByCabinet.set(cabinetId, cfg.token);
+          this.logger.log(
+            `Telegram bot: cabinet=${cabinetId} (${cfg.name}) shares running bot instance with same token`,
+          );
+          continue;
+        }
+
+        const bot = new Telegraf(cfg.token, {
+          handlerTimeout: 180_000,
+        });
+        bot.catch((err, ctx) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          const stack = err instanceof Error ? err.stack : undefined;
+          this.logger.error(
+            `Telegraf unhandled error (cabinet=${cabinetId}): ${msg} updateType=${ctx?.updateType ?? '?'}`,
+            stack,
+          );
+          void ctx
+            ?.reply(
+              'Произошла ошибка при обработке сообщения. Проверьте логи сервера (TelegramService).',
+            )
+            .catch((e) =>
+              this.logger.warn(`Could not reply with error to user: ${String(e)}`),
+            );
+        });
+        this.registerHandlers(bot, cabinetId);
+        try {
+          await this.launchCabinetBotWithTimeout(bot, cabinetId, cfg);
+        } catch (e) {
+          this.logger.error(
+            `Telegram bot launch failed for cabinet=${cabinetId}: ${formatError(e)}`,
+          );
+        }
+      }
+
+      const first = this.botRegistry.values().next().value ?? null;
+      this.botRegistry.setPrimaryBot(first);
+      return this.botRegistry.launchedCount;
     } finally {
       this.botSyncInFlight = false;
     }

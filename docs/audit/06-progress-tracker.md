@@ -1185,3 +1185,27 @@
 - Manual verification: `npm run build -w apps/api` (pass); при «бот не запущен» — нет POST на critical URL; при ошибке с `timeout`/`econnrefused` в тексте — по-прежнему critical.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A (меньше шума в ops-канале; саму проблему бота по-прежнему видно в логах API и VK-зеркале).
+
+### AUD-097
+
+- Status: `done`
+- Scope: Запуск Telegraf при `TELEGRAM_BOT_TOKEN` из env / глобальных слоёв без строки в `CabinetSetting`.
+- Files: `apps/api/src/modules/telegram/services/telegram.service.ts`, `apps/api/src/modules/telegram/services/telegram-bot-registry.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: `syncBotsWithCabinetTokens` читал токен только из Prisma `cabinet.settings`; `SettingsService.get` подставляет env и `Setting`, из‑за чего токен мог существовать для приложения, а бот не поднимался → «Telegram bot не запущен».
+- Changes: разрешение токена через `runWithCabinet` + `settings.get`; остановка процесса только если токен больше ни одним кабинетом не используется; повторное использование одного экземпляра Telegraf для кабинетов с одним и тем же токеном (одно long polling).
+- Decomposition notes (`utils/constants/hooks/types`): `TelegramBotRegistryService.getScopedBotOnly`.
+- Manual verification: `npm run build -w apps/api` (pass).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): общий токен в нескольких кабинетах — один стек handlers привязан к кабинету первого успешного launch в текущем синке (редкий случай одного env на несколько кабинетов).
+
+### AUD-097
+
+- Status: `done`
+- Scope: Запуск Telegraf при `TELEGRAM_BOT_TOKEN` из env / глобальных слоёв без строки в `CabinetSetting`.
+- Files: `apps/api/src/modules/telegram/services/telegram.service.ts`, `apps/api/src/modules/telegram/services/telegram-bot-registry.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: `syncBotsWithCabinetTokens` читал токен только из Prisma `cabinet.settings`; `SettingsService.get` подставляет env и `Setting`, из‑за чего UI/переменные могли «видеть» токен, а процесс не поднимал бот → «Telegram bot не запущен».
+- Changes: разрешение токена через `runWithCabinet` + `settings.get`; остановка процесса только если токен больше ни одним кабинетом не используется; повторное использование одного экземпляра Telegraf для кабинетов с одним и тем же токеном (одно подключение long polling).
+- Decomposition notes (`utils/constants/hooks/types`): `TelegramBotRegistryService.getScopedBotOnly`.
+- Manual verification: `npm run build -w apps/api` (pass); при токене только в env — после синка бот в реестре; лог при втором кабинете с тем же токеном — share instance.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): общий токен в нескольких кабинетах — один экземпляр handlers привязан к первому поднявшему кабинету в порядке обхода (редкий случай env для нескольких кабинетов).

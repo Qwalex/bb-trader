@@ -23,6 +23,11 @@ export class TelegramBotRegistryService {
     return this.primaryBot;
   }
 
+  /** Экземпляр по кабинету без fallback на primary (синхронизация токенов, reuse одного Telegraf). */
+  getScopedBotOnly(cabinetId: string): Telegraf | undefined {
+    return this.bots.get(cabinetId);
+  }
+
   addLaunchedBot(cabinetId: string, bot: Telegraf): void {
     this.bots.set(cabinetId, bot);
   }
