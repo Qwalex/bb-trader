@@ -7,6 +7,7 @@ import { SessionInfoBar } from './components/SessionInfoBar';
 import Link from 'next/link';
 import { cookies } from 'next/headers';
 
+import { withCabinetPageHref } from '../lib/cabinet-page-href.util';
 import { fetchJson } from '../lib/api';
 import { searchParamFirst } from '../lib/search-param.util';
 import type { ConnectedGroupItem, DashboardCabinetCard } from './home-dashboard.types';
@@ -325,10 +326,11 @@ export default async function Home({
               const isActive =
                 (cabinetId && c.cabinetId === cabinetId) ||
                 (!cabinetId && currentCabinet?.id === c.cabinetId);
-              const href =
+              const hrefBase =
                 source.length > 0
-                  ? `/?cabinetId=${encodeURIComponent(c.cabinetId)}&source=${encodeURIComponent(source)}`
-                  : `/?cabinetId=${encodeURIComponent(c.cabinetId)}`;
+                  ? `/?source=${encodeURIComponent(source)}`
+                  : '/';
+              const href = withCabinetPageHref(hrefBase, c.cabinetId);
               return (
                 <Link
                   key={c.cabinetId}
@@ -451,7 +453,7 @@ export default async function Home({
         </button>
         {source && (
           <Link
-            href="/"
+            href={cabinetId ? withCabinetPageHref('/', cabinetId) : '/'}
             style={{
               alignSelf: 'end',
               padding: '0.45rem 0.9rem',

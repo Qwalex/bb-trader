@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 
 import { NAV_MENU_ITEMS } from '@repo/shared';
 
+import { withCabinetPageHref } from '../../lib/cabinet-page-href.util';
 import { readActiveCabinetIdClient } from '../../lib/cabinet-client.util';
 import { CabinetSwitcher } from './CabinetSwitcher';
 
@@ -59,12 +60,8 @@ function TopNavBody({
     };
   }, []);
 
-  const withCabinet = (path: string): string => {
-    const id = String(linkCabinetId ?? '').trim();
-    if (!id) return path;
-    const hasQuery = path.includes('?');
-    return `${path}${hasQuery ? '&' : '?'}cabinetId=${encodeURIComponent(id)}`;
-  };
+  const withCabinet = (path: string): string =>
+    withCabinetPageHref(path, linkCabinetId);
 
   const visibleItems = NAV_MENU_ITEMS.filter((item) => {
     if (item.adminOnly && !isAdmin) return false;
@@ -78,7 +75,9 @@ function TopNavBody({
 
   return (
     <header className="nav">
-      <Link href="/" className="brand">QSignals</Link>
+      <Link href={withCabinetPageHref('/', linkCabinetId)} className="brand">
+        QSignals
+      </Link>
       <nav className="navLinks">
         {visibleItems.map((item) => (
           <Link

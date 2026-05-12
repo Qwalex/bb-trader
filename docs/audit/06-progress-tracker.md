@@ -1257,3 +1257,15 @@
 - Manual verification: `npm run build -w apps/web` (pass).
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-103
+
+- Status: `done`
+- Scope: Web — единый `cabinetId` в ссылках: дашборд, шапка, навигация между страницами.
+- Files: `apps/web/lib/cabinet-page-href.util.ts`, `apps/web/app/components/TopNav.tsx`, `apps/web/app/page.tsx`, `docs/audit/06-progress-tracker.md`
+- Findings: логотип и «Сброс» на дашборде вели на `/` без `cabinetId`; карточки кабинетов собирали query вручную; ссылки в шапке дублировали логику `?cabinetId=` — риск расхождения с селектом и cookie после смены кабинета.
+- Changes: `withCabinetPageHref`; бренд в `TopNav` и пункты меню через неё; карточки кабинетов на главной и сброс фильтра источника сохраняют выбранный кабинет в URL (middleware по-прежнему дублирует query в cookie для SSR).
+- Decomposition notes (`utils/constants/hooks/types`): выделен `cabinet-page-href.util.ts`.
+- Manual verification: `npm run build -w apps/web` (pass).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
