@@ -292,12 +292,14 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       }
     }
   }
+  /**
+   * Как `SettingsService.get('TELEGRAM_WHITELIST')`: сначала CabinetSetting, затем env/глобальные слои.
+   * Прямой запрос в Prisma обходил `TELEGRAM_WHITELIST` из окружения — userbot-уведомления молчали, а VK-зеркало (через settings.get) работало.
+   */
   private async getWhitelistUserIdsForCabinet(cabinetId: string): Promise<number[]> {
-    const row = await this.prisma.cabinetSetting.findUnique({
-      where: { cabinetId_key: { cabinetId, key: 'TELEGRAM_WHITELIST' } },
-      select: { value: true },
-    });
-    const raw = String(row?.value ?? '').trim();
+    const raw = await this.cabinetContext.runWithCabinet(cabinetId, async () =>
+      String((await this.settings.get('TELEGRAM_WHITELIST')) ?? '').trim(),
+    );
     return parseTelegramWhitelistUserIds(raw);
   }
 

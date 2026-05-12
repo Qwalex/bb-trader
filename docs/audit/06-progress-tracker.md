@@ -1101,3 +1101,15 @@
 - Manual verification: `npm run build -w api`, `npm run build -w web` (pass); вручную: CRUD на `/settings`, миграция на стенде `prisma migrate deploy`.
 - Docs updated: этот трекер, `.env.example`.
 - Linked risks (`SEC-###`): N/A (при нескольких репликах API возможен редкий дубликат POST на qnotify без advisory lock).
+
+### AUD-090
+
+- Status: `done`
+- Scope: Telegram whitelist для уведомлений (userbot failure, digest) — выравнивание с цепочкой `SettingsService.get` и env.
+- Files: `apps/api/src/modules/telegram/services/telegram.service.ts`, `apps/api/src/modules/telegram/services/telegram-digest-scheduler.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: `getWhitelistUserIdsForCabinet` читал только `CabinetSetting` в БД; VK-зеркало использует `settings.get`/`process.env` — при whitelist только в `.env` VK получал сообщения, ассист-бот возвращал `TELEGRAM_WHITELIST пуст`.
+- Changes: разрешение whitelist через `runWithCabinet` + `settings.get('TELEGRAM_WHITELIST')`; дайджест — тот же источник внутри одного `runWithCabinet`.
+- Decomposition notes (`utils/constants/hooks/types`): N/A.
+- Manual verification: `npm run build -w apps/api` (pass); при пустом ключе в БД и заданном `TELEGRAM_WHITELIST` в env — ошибка userbot должна уйти в Telegram тем же списком id, что и раньше ожидался из настроек.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

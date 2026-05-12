@@ -9,6 +9,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { BybitService } from '../../bybit/bybit.service';
 import { CabinetContextService } from '../../cabinet/cabinet-context.service';
 import { OrdersService } from '../../orders/orders.service';
+import { SettingsService } from '../../settings/settings.service';
 import { formatTelegramDailyDigestHtml } from '../utils/telegram-daily-digest-html.util';
 import { splitTelegramHtml } from '../utils/telegram-html.util';
 import { parseTelegramWhitelistUserIds } from '../utils/telegram-whitelist.util';
@@ -26,6 +27,7 @@ export class TelegramDigestSchedulerService implements OnModuleInit, OnModuleDes
     private readonly scheduler: SchedulerRegistry,
     private readonly prisma: PrismaService,
     private readonly cabinetContext: CabinetContextService,
+    private readonly settings: SettingsService,
     private readonly botRegistry: TelegramBotRegistryService,
     private readonly orders: OrdersService,
     private readonly bybit: BybitService,
@@ -87,16 +89,14 @@ export class TelegramDigestSchedulerService implements OnModuleInit, OnModuleDes
   }
 
   private async sendDigestForCabinet(cabinetId: string, bot: Telegraf): Promise<void> {
-    const row = await this.prisma.cabinetSetting.findUnique({
-      where: { cabinetId_key: { cabinetId, key: 'TELEGRAM_WHITELIST' } },
-      select: { value: true },
-    });
-    const ids = parseTelegramWhitelistUserIds(String(row?.value ?? ''));
-    if (ids.length === 0) {
-      return;
-    }
-
     await this.cabinetContext.runWithCabinet(cabinetId, async () => {
+      const ids = parseTelegramWhitelistUserIds(
+        String((await this.settings.get('TELEGRAM_WHITELIST')) ?? '').trim(),
+      );
+      if (ids.length === 0) {
+        return;
+      }
+
       const [cab, digest, tops, details] = await Promise.all([
         this.prisma.cabinet.findUnique({
           where: { id: cabinetId },
