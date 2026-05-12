@@ -61,6 +61,61 @@ export class BybitSignalPlacementService {
     return { cancelledOrderIds, failedOrderIds, errors };
   }
 
+  /**
+   * Пояснение к отказу по minQty; при нескольких лимитах номинал делится.
+   * Процент капитала: база — equity (всего), см. placeSignalOrders.
+   */
+  private buildMinQtySizingHint(params: {
+    balanceDetails: { availableUsd: number; totalUsd: number };
+    signal: SignalDto;
+    leveragedNotional: number;
+    entryCount: number;
+  }): string {
+    const { balanceDetails, signal, leveragedNotional, entryCount } = params;
+    const av = balanceDetails.availableUsd;
+    const tot = balanceDetails.totalUsd;
+    const lines: string[] = [];
+    if (Number.isFinite(tot) && Number.isFinite(av)) {
+      const pct = signal.capitalPercent;
+      const sizingIntro =
+        pct > 100 && signal.orderUsd <= 0
+          ? `Баланс Bybit: equity ~${tot.toFixed(2)} USDT, доступно ~${av.toFixed(2)} USDT. При capitalPercent > 100 номинал = equity×(percent/100).`
+          : `Баланс Bybit: equity ~${tot.toFixed(2)} USDT, доступно ~${av.toFixed(2)} USDT. При capitalPercent 1–100 маржа = equity×(percent/100), номинал = маржа×плечо.`;
+      lines.push(sizingIntro);
+    }
+    lines.push(
+      `Расчёт: номинал позиции ~${leveragedNotional.toFixed(2)} USDT, плечо ${signal.leverage}x, уровней входа (лимитов): ${entryCount}.`,
+    );
+    if (signal.capitalPercent > 0 && signal.orderUsd <= 0) {
+      const lev = signal.leverage > 0 ? signal.leverage : 1;
+      const pct = signal.capitalPercent;
+      if (pct > 100) {
+        lines.push(
+          `Из сигнала: capitalPercent ${pct}% — номинал ~${leveragedNotional.toFixed(2)} USDT (equity×${pct}/100).`,
+        );
+      } else {
+        const marginApprox = leveragedNotional / lev;
+        lines.push(
+          `Из сигнала: ${pct}% от equity как маржа ×${lev}x → номинал ~${leveragedNotional.toFixed(2)} USDT (маржа ~${marginApprox.toFixed(2)} USDT).`,
+        );
+      }
+    } else if (signal.orderUsd > 0) {
+      lines.push(
+        `В сигнале orderUsd=${signal.orderUsd} USDT задаёт номинал; capitalPercent не используется.`,
+      );
+    } else {
+      lines.push(
+        `Размер без orderUsd и capitalPercent в JSON — подставлен дефолт DEFAULT_ORDER_USD из настроек кабинета/глобальных (см. ключ в /settings).`,
+      );
+    }
+    if (entryCount > 1) {
+      lines.push(
+        `При ${entryCount} входах номинал делится между лимитами (не весь объём на первый ордер).`,
+      );
+    }
+    return lines.join(' ');
+  }
+
   private async finalizeFailedPlacement(params: {
     signalId: string;
     error: string;
@@ -265,8 +320,12 @@ export class BybitSignalPlacementService {
         leverage: signal.leverage,
       });
       const balanceDetails = await ports.getUsdtBalanceDetails(client);
-      const balance = balanceDetails.availableUsd;
-      const defaultOrderUsd = await ports.settings.getDefaultOrderUsd(balanceDetails.totalUsd);
+      const totalUsd = balanceDetails.totalUsd;
+      const availableUsd = balanceDetails.availableUsd;
+      /** База для capitalPercent: equity (как в UI «баланс»); иначе fallback на доступно. */
+      const equityForPct =
+        Number.isFinite(totalUsd) && totalUsd > 0 ? totalUsd : availableUsd;
+      const defaultOrderUsd = await ports.settings.getDefaultOrderUsd(totalUsd);
       const minCapitalRaw = await ports.settings.get('MIN_CAPITAL_AMOUNT');
       const minCapitalParsed =
         minCapitalRaw != null && minCapitalRaw.trim() !== '' ? parseFloat(minCapitalRaw) : Number.NaN;
@@ -281,10 +340,10 @@ export class BybitSignalPlacementService {
           leveragedNotional = defaultOrderUsd;
         } else {
           if (pct <= 100) {
-            const margin = balance * (pct / 100);
+            const margin = equityForPct * (pct / 100);
             leveragedNotional = margin * signal.leverage;
           } else {
-            leveragedNotional = balance * (pct / 100);
+            leveragedNotional = equityForPct * (pct / 100);
           }
           if (leveragedNotional < minPercentNotionalUsd) {
             void ports.appLog.append(
@@ -293,7 +352,9 @@ export class BybitSignalPlacementService {
               'placeSignalOrders: percent sizing поднят до минимального номинала',
               {
                 symbol,
-                balance,
+                equityForPct,
+                availableUsd,
+                totalUsd,
                 capitalPercent: signal.capitalPercent,
                 leverage: signal.leverage,
                 calculatedNotional: leveragedNotional,
@@ -411,9 +472,20 @@ export class BybitSignalPlacementService {
               minQty: minQtyNum,
               entries: effectiveEntries.length,
               lastPrice,
+              availableUsd: balanceDetails.availableUsd,
+              totalUsd: balanceDetails.totalUsd,
+              capitalPercent: signal.capitalPercent,
+              leverage: signal.leverage,
+              orderUsd: signal.orderUsd,
             },
           );
-          return { ok: false, error: minQtyErr };
+          const sizingHint = this.buildMinQtySizingHint({
+            balanceDetails,
+            signal,
+            leveragedNotional,
+            entryCount: effectiveEntries.length,
+          });
+          return { ok: false, error: `${minQtyErr}\n\n${sizingHint}` };
         }
       }
 

@@ -95,7 +95,10 @@ export class BybitPlacementValidationService {
       const qtyRaw = notionalSlice / price;
       if (qtyRaw + 1e-12 < minQtyNum) {
         const minUsd = minQtyNum * price;
-        return `Доля номинала на вход ${i + 1} (${notionalSlice.toFixed(2)} USDT) меньше минимального лота для ${symbol}: при цене ~${price.toFixed(2)} нужно не меньше ~${minUsd.toFixed(2)} USDT (мин. количество ${minQtyNum}).`;
+        const singleEntry = effectiveEntries.length === 1;
+        return singleEntry
+          ? `Номинал позиции ${notionalSlice.toFixed(2)} USDT меньше минимального лота для ${symbol}: при цене ~${price.toFixed(2)} нужно не меньше ~${minUsd.toFixed(2)} USDT (мин. количество ${minQtyNum}).`
+          : `Доля номинала на вход ${i + 1} (${notionalSlice.toFixed(2)} USDT) меньше минимального лота для ${symbol}: при цене ~${price.toFixed(2)} нужно не меньше ~${minUsd.toFixed(2)} USDT (мин. количество ${minQtyNum}).`;
       }
     }
     return undefined;

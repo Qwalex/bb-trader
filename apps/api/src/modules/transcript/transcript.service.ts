@@ -639,6 +639,10 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
    * Размер позиции: явный USDT, иначе (legacy) только % от депозита, иначе номинал из настроек DEFAULT_ORDER_USD.
    * При capitalPercent > 100 всегда режим «только процент» (orderUsd в сигнале 0), иначе ложный
    * orderUsd от LLM (часто 100 из примеров в промпте) перекрывает 200%+.
+   * При capitalPercent > 100 номинал на Bybit = equity×(pct/100) без дополнительного ×leverage в формуле (см. placeSignalOrders; база процента — equity счёта, не только «доступно»).
+   * Если модель одновременно вернула 1–100% капитала и orderUsd ≈ дефолту из промпта (часто 6 USDT из
+   * DEFAULT_ORDER_USD), считаем orderUsd шаблонным и используем процент — иначе фикс из JSON полностью
+   * перекрывает % в `placeSignalOrders`.
    */
   private resolveOrderUsd(dto: SignalParseDto, defaultOrderUsd: number): number {
     const capPct = Number(dto.capitalPercent);
@@ -646,6 +650,15 @@ Merge the user's correction into the signal. Keep fields unchanged if the user d
     const ouRaw = Number(dto.orderUsd);
     const ou = Number.isFinite(ouRaw) ? ouRaw : 0;
     if (cap > 100) {
+      return 0;
+    }
+    const def = Number(defaultOrderUsd);
+    const nearDefault =
+      Number.isFinite(def) &&
+      def > 0 &&
+      ou > 0 &&
+      Math.abs(ou - def) <= Math.max(0.01, def * 0.002);
+    if (cap > 0 && cap <= 100 && nearDefault) {
       return 0;
     }
     if (ou > 0) {

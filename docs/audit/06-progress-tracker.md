@@ -1365,3 +1365,51 @@
 - Manual verification: `npm run build -w apps/api` (pass).
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-112
+
+- Status: `done`
+- Scope: Bybit — пояснение minQty: доступный vs equity баланс; формулировка для одного уровня входа.
+- Files: `apps/api/src/modules/bybit/orders/bybit-placement-validation.service.ts`, `apps/api/src/modules/bybit/orders/bybit-signal-placement.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: номинал считается от `availableUsd`; при одном лимите сообщение «Доля номинала на вход 1» вводило в заблуждение (весь номинал позиции); пользователь сравнивал с equity ~21 USDT.
+- Changes: при одном `effectiveEntries` — текст «Номинал позиции …»; при отказе до ордера — блок `buildMinQtySizingHint` + расширенный `appLog`.
+- Decomposition notes (`utils/constants/hooks/types`): N/A.
+- Manual verification: `npm run build -w apps/api` (pass).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-113
+
+- Status: `done`
+- Scope: Размер позиции — дефолт 6 USDT vs %: приоритет `orderUsd` в placement; эвристика в transcript.
+- Files: `apps/api/src/modules/transcript/transcript.service.ts`, `apps/api/src/modules/bybit/orders/bybit-signal-placement.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: в `ENV_FALLBACK` заданы `DEFAULT_ORDER_USD=6` и `MIN_CAPITAL_AMOUNT=6` (пол в БД/env); при `orderUsd>0` в сигнале процент не используется; модель часто оставляет `orderUsd` = числу из промпта вместе с `capitalPercent` из поста.
+- Changes: `resolveOrderUsd`: если `capitalPercent` 1–100 и `orderUsd` ≈ дефолту промпта — `orderUsd`→0 (режим %); расширен текст `buildMinQtySizingHint` для ветки фикса и редкого «без полей».
+- Decomposition notes (`utils/constants/hooks/types`): N/A.
+- Manual verification: `npm run build -w apps/api` (pass).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-114
+
+- Status: `done`
+- Scope: Документация и подсказки minQty — `capitalPercent` > 100 vs плечо.
+- Files: `packages/shared/src/index.ts`, `apps/api/src/modules/bybit/orders/bybit-signal-placement.service.ts`, `apps/api/src/modules/transcript/transcript.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: текст `buildMinQtySizingHint` везде говорил «× плечо = номинал»; при `capitalPercent > 100` в коде номинал = `balance×(pct/100)` без повторного × leverage.
+- Changes: раздельные формулировки для 1–100 и >100; JSDoc `SignalDto.capitalPercent`; комментарий у `resolveOrderUsd`.
+- Decomposition notes (`utils/constants/hooks/types`): N/A.
+- Manual verification: `npm run build -w apps/api` (pass).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-115
+
+- Status: `done`
+- Scope: Bybit placement — `capitalPercent` от equity (`totalUsd`), не от `availableUsd`.
+- Files: `apps/api/src/modules/bybit/orders/bybit-signal-placement.service.ts`, `packages/shared/src/index.ts`, `apps/api/src/modules/transcript/transcript-prompt-builders.util.ts`, `apps/api/src/modules/transcript/transcript.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: 50% от ~21 USDT в UI давали ~10.55 маржи при 1x, но код брал `availableUsd` → заниженный номинал и слайсы.
+- Changes: `equityForPct = totalUsd || availableUsd` для веток `capitalPercent`; подсказки minQty и промпт/JSDoc согласованы с equity; короче текст про `orderUsd`.
+- Decomposition notes (`utils/constants/hooks/types`): N/A.
+- Manual verification: `npm run build -w packages/shared && npm run build -w apps/api` (pass).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): возможен отказ Bybit по марже, если номинал по equity превышает доступное — осознанный компромисс.
