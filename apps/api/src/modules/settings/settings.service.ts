@@ -67,6 +67,40 @@ export class SettingsService {
     return GLOBAL_SHARED_SETTING_KEYS.has(key);
   }
 
+  private static readonly BYBIT_API_KEY_UNIQUE_ACROSS_CABINETS = new Set([
+    'BYBIT_API_KEY_MAINNET',
+    'BYBIT_API_KEY_TESTNET',
+  ]);
+
+  /** Один и тот же Bybit API key не может быть привязан к двум кабинетам (разные торговые изоляции). */
+  private async assertBybitApiKeyUniqueAcrossCabinets(
+    cabinetId: string,
+    key: string,
+    normalized: string,
+  ): Promise<void> {
+    if (!SettingsService.BYBIT_API_KEY_UNIQUE_ACROSS_CABINETS.has(key)) {
+      return;
+    }
+    const trimmed = normalized.trim();
+    if (!trimmed) {
+      return;
+    }
+    const duplicated = await this.prisma.cabinetSetting.findFirst({
+      where: {
+        key,
+        value: trimmed,
+        cabinetId: { not: cabinetId },
+      },
+      select: { cabinetId: true },
+    });
+    if (duplicated) {
+      const net = key === 'BYBIT_API_KEY_TESTNET' ? 'testnet' : 'mainnet';
+      throw new BadRequestException(
+        `Этот Bybit API key (${net}) уже привязан к другому кабинету. У каждого кабинета должны быть разные ключи биржи.`,
+      );
+    }
+  }
+
   private cacheKey(cabinetId: string | null, key: string): string {
     return `${cabinetId ?? '__global__'}:${key}`;
   }
@@ -212,8 +246,12 @@ export class SettingsService {
     try {
       if (key === 'TELEGRAM_BOT_TOKEN') {
         normalized = value.trim();
-      } else
-      if (key === 'TP_SL_STEP_RANGE') {
+      } else if (
+        key === 'BYBIT_API_KEY_MAINNET' ||
+        key === 'BYBIT_API_KEY_TESTNET'
+      ) {
+        normalized = value.trim();
+      } else if (key === 'TP_SL_STEP_RANGE') {
         normalized = normalizeTpSlStepRangeForPersist(value);
       } else if (key === 'TP_SL_STEP_START') {
         normalized = normalizeTpSlStepStartForPersist(value);
@@ -321,6 +359,7 @@ export class SettingsService {
           );
         }
       }
+      await this.assertBybitApiKeyUniqueAcrossCabinets(cabinetId, key, normalized);
       await this.prisma.cabinetSetting.upsert({
         where: { cabinetId_key: { cabinetId, key } },
         create: { cabinetId, key, value: normalized },

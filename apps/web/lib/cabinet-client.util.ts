@@ -17,5 +17,10 @@ export function readActiveCabinetIdClient(): string {
     .map((p) => p.trim())
     .find((p) => p.startsWith('cabinet_id='))
     ?.split('=')[1];
-  return fromCookie ? decodeURIComponent(fromCookie).trim() : '';
+  if (!fromCookie) return '';
+  try {
+    return decodeURIComponent(fromCookie).trim();
+  } catch {
+    return fromCookie.trim();
+  }
 }

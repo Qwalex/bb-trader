@@ -984,3 +984,38 @@
 - Manual verification: `npm run build -w apps/api` (pass); ожидаемо: два кабинета, одна группа, **разные** Bybit-ключи — оба могут зарегистрировать тот же контентный hash; при **одинаковых** ключах Bybit дубликат по бирже остаётся (один аккаунт).
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-081
+
+- Status: `done`
+- Scope: Уведомления Telegram и зеркало VK — явная подпись кабинета (имя из БД).
+- Files: `apps/api/src/modules/cabinet/cabinet.service.ts`, `apps/api/src/modules/telegram/services/telegram.service.ts`, `apps/api/src/modules/vk/vk-notify-mirror.service.ts`, `apps/api/src/modules/telegram-userbot/ingest/telegram-userbot-ingest-pipeline.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: при нескольких кабинетах и общем whitelist сложно понять, к какому кабинету относится сообщение; webhook `[CRITICAL API UNAVAILABLE]` не содержал кабинет.
+- Changes: `CabinetService.getCabinetDisplayLabel`; префикс «Кабинет: …» в Telegram (HTML/plain по типу сообщения) и в `VkNotifyMirrorService` для всех зеркалируемых сценариев; контекст кабинета + fallback на дефолтный id; в `notifyCriticalExternalApiUnavailable` — строки `cabinetId` / `cabinet` и дедуп по `cabinetId`.
+- Decomposition notes (`utils/constants/hooks/types`): подпись в `CabinetService`, префиксы — приватные хелперы сервисов уведомлений.
+- Manual verification: `npm run build -w apps/api` (pass).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-080
+
+- Status: `done`
+- Scope: Настройки — запрет одинакового Bybit API key в двух кабинетах.
+- Files: `apps/api/src/modules/settings/settings.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: один и тот же ключ в `CabinetSetting` у разных кабинетов давал общую биржу и ложные «дубликаты» сигналов при разной логике UI.
+- Changes: при `set` для `BYBIT_API_KEY_MAINNET` / `BYBIT_API_KEY_TESTNET` — trim значения и проверка уникальности значения ключа между кабинетами; `BadRequestException`, если ключ уже сохранён у другого кабинета (аналогично `TELEGRAM_BOT_TOKEN`).
+- Manual verification: `npm run build -w apps/api` (pass).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-082
+
+- Status: `done`
+- Scope: Web — `/trades`: смена кабинета не обновляла список сделок.
+- Files: `apps/web/app/trades/trades-filters.tsx`, `apps/web/app/trades/page.tsx`, `apps/web/app/components/CabinetSwitcher.tsx`, `apps/web/lib/cabinet-client.util.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: клиентский `router.replace` при правках фильтров собирал query без `cabinetId`, SSR подставлял только cookie — возможна рассинхронизация с выбранным кабинетом; переключатель кабинета полагался на `useEffect` для cookie до навигации.
+- Changes: в конце `replaceQuery` и при «Сброс» закрепляется `cabinetId` из URL или `readActiveCabinetIdClient()`; `CabinetSwitcher` синхронно пишет cookie/localStorage перед `location.assign`; `export const dynamic = 'force-dynamic'` на странице сделок; безопасный `decodeURIComponent` в `readActiveCabinetIdClient`.
+- Decomposition notes (`utils/constants/hooks/types`): переиспользован существующий `cabinet-client.util`.
+- Manual verification: `npm run build -w apps/web` (ожидается pass); вручную: два кабинета, `/trades`, смена кабинета и смена фильтра/сброс — список и total соответствуют кабинету.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

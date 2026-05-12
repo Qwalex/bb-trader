@@ -62,6 +62,27 @@ export class CabinetService implements OnModuleInit {
     return created.id;
   }
 
+  /** Подпись для уведомлений: имя кабинета из БД или его id. */
+  async getCabinetDisplayLabel(cabinetId: string): Promise<string> {
+    let id = String(cabinetId ?? '').trim();
+    if (!id) {
+      id = await this.getDefaultCabinetId();
+    }
+    try {
+      const row = await this.prisma.cabinet.findUnique({
+        where: { id },
+        select: { name: true },
+      });
+      const name = row?.name?.trim();
+      if (name && name.length > 0) {
+        return name;
+      }
+    } catch {
+      // ignore
+    }
+    return id;
+  }
+
   async resolveCabinetId(preferred?: string | null): Promise<string> {
     const requested = String(preferred ?? '').trim();
     if (requested) {

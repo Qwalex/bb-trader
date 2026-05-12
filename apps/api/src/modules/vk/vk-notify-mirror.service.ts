@@ -6,6 +6,8 @@ import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 
 import type { SignalDto } from '@repo/shared';
 
+import { CabinetContextService } from '../cabinet/cabinet-context.service';
+import { CabinetService } from '../cabinet/cabinet.service';
 import { BybitService } from '../bybit/bybit.service';
 import { SettingsService } from '../settings/settings.service';
 
@@ -34,6 +36,8 @@ export class VkNotifyMirrorService {
 
   constructor(
     private readonly settings: SettingsService,
+    private readonly cabinetContext: CabinetContextService,
+    private readonly cabinets: CabinetService,
     @Inject(forwardRef(() => BybitService))
     private readonly bybit: BybitService,
     private readonly vkApi: VkApiClient,
@@ -49,6 +53,16 @@ export class VkNotifyMirrorService {
 
   private async tokenOk(): Promise<boolean> {
     return this.vkBot.vkEnabled();
+  }
+
+  private async resolveCabinetDisplayLabel(): Promise<string> {
+    const cabinetId =
+      this.cabinetContext.getCabinetId() ?? (await this.cabinets.getDefaultCabinetId());
+    return this.cabinets.getCabinetDisplayLabel(cabinetId);
+  }
+
+  private vkCabinetPrefix(label: string): string {
+    return `Кабинет: ${label}\n\n`;
   }
 
   private async whitelistIds(): Promise<number[]> {
@@ -110,7 +124,9 @@ export class VkNotifyMirrorService {
 
     const bal = await this.bybit.getUnifiedUsdtBalanceDetails();
     const def = await this.settings.getDefaultOrderUsd(bal?.totalUsd);
-    const msg = vkFormatExternalSignalTable(params.signal, def);
+    const cabinetLabel = await this.resolveCabinetDisplayLabel();
+    const msg =
+      this.vkCabinetPrefix(cabinetLabel) + vkFormatExternalSignalTable(params.signal, def);
     const kb = this.externalConfirmKb(params.ingestId);
 
     this.vkBot.registerVkExternalConfirmation({
@@ -170,7 +186,9 @@ export class VkNotifyMirrorService {
       params.groupTitle && params.groupTitle.trim().length > 0
         ? `Группа / канал: ${params.groupTitle.trim()}\n`
         : `Источник (chatId): ${params.chatId}\n`;
+    const cabinetLabel = await this.resolveCabinetDisplayLabel();
     const msg =
+      this.vkCabinetPrefix(cabinetLabel) +
       `Ошибка обработки сигнала из группы\n` +
       sourceLine +
       `Токен: ${params.token}\n` +
@@ -209,7 +227,9 @@ export class VkNotifyMirrorService {
     const quoteBody = (params.quotedSnippet ?? '').trim();
     const quoteBlock =
       quoteBody.length > 0 ? `\n\nЦитата из группы:\n${quoteBody}\n` : '\n';
+    const cabinetLabel = await this.resolveCabinetDisplayLabel();
     const msg =
+      this.vkCabinetPrefix(cabinetLabel) +
       `Возможно ваш ордер для монеты ${pair} не актуален\n` +
       sourceLine +
       `\nПолучен результат:\n${resultBody}` +
@@ -263,7 +283,9 @@ export class VkNotifyMirrorService {
         ? `${params.capitalPercent}% от депозита`
         : `$${params.orderUsd} USDT`;
     const reasonLine = params.reason ? `\nПричина: ${params.reason}` : '';
+    const cabinetLabel = await this.resolveCabinetDisplayLabel();
     const msg =
+      this.vkCabinetPrefix(cabinetLabel) +
       `Сделка отменена\n` +
       `Пара: ${(params.pair ?? '').trim().toUpperCase()}\n` +
       `ID сделки: ${params.signalId}\n` +

@@ -1275,7 +1275,10 @@ export class TelegramUserbotIngestPipelineService {
   if (!this.isLikelyApiUnavailable(params.error, api)) {
     return;
   }
-  const dedupKey = `${api}:${params.chatId ?? 'n/a'}:${params.stage ?? 'n/a'}`;
+  const cabinetId =
+    this.cabinetContext.getCabinetId() ?? (await this.cabinets.getDefaultCabinetId());
+  const cabinetLabel = await this.cabinets.getCabinetDisplayLabel(cabinetId);
+  const dedupKey = `${api}:${cabinetId}:${params.chatId ?? 'n/a'}:${params.stage ?? 'n/a'}`;
   const now = Date.now();
   const prev = this.lastCriticalNotifyAtByKey.get(dedupKey) ?? 0;
   if (now - prev < 60_000) {
@@ -1284,6 +1287,8 @@ export class TelegramUserbotIngestPipelineService {
   this.lastCriticalNotifyAtByKey.set(dedupKey, now);
   const text =
     `[CRITICAL API UNAVAILABLE]\n` +
+    `cabinetId=${cabinetId}\n` +
+    `cabinet=${cabinetLabel}\n` +
     `api=${api}\n` +
     `ingestId=${params.ingestId ?? 'n/a'}\n` +
     `chatId=${params.chatId ?? 'n/a'}\n` +

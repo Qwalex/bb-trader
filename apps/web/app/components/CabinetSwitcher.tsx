@@ -74,9 +74,11 @@ export function CabinetSwitcher({ compact = false }: { compact?: boolean }) {
         onChange={(e) => {
           const next = e.target.value;
           setSelected(next);
+          localStorage.setItem(STORAGE_KEY, next);
+          document.cookie = `cabinet_id=${encodeURIComponent(next)}; path=/; max-age=31536000; SameSite=Lax`;
           const url = new URL(window.location.href);
           url.searchParams.set('cabinetId', next);
-          window.location.href = url.toString();
+          window.location.assign(url.toString());
         }}
       >
         {items.map((item) => (

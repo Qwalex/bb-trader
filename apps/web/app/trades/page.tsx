@@ -7,6 +7,9 @@ import { RecalcClosedPnlButton } from './recalc-closed-pnl-button';
 import { TradesList } from './trades-list';
 import { TradesFilters } from './trades-filters';
 
+/** Список сделок зависит от кабинета (cookie/query); без этого возможен устаревший RSC-кэш при смене контекста. */
+export const dynamic = 'force-dynamic';
+
 type Order = {
   id: string;
   orderKind: string;

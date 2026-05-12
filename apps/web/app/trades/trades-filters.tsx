@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
+import { readActiveCabinetIdClient } from '../../lib/cabinet-client.util';
+
 type Props = {
   sourceOptions: string[];
 };
@@ -14,6 +16,16 @@ function normalizePairInput(v: string): string {
 
 function cleanString(v: string): string {
   return v.trim();
+}
+
+function resolveCabinetIdForQuery(sp: ReturnType<typeof useSearchParams>): string {
+  const fromSp = cleanString(sp.get('cabinetId') ?? '');
+  if (fromSp) return fromSp;
+  try {
+    return readActiveCabinetIdClient();
+  } catch {
+    return '';
+  }
 }
 
 export function TradesFilters({ sourceOptions }: Props) {
@@ -115,6 +127,10 @@ export function TradesFilters({ sourceOptions }: Props) {
       else q.delete('martingaleSteps');
       q.delete('page');
     }
+
+    const cabinetForQuery = resolveCabinetIdForQuery(sp);
+    if (cabinetForQuery) q.set('cabinetId', cabinetForQuery);
+    else q.delete('cabinetId');
 
     const qs = q.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname);
@@ -293,7 +309,11 @@ export function TradesFilters({ sourceOptions }: Props) {
           setSortBy('createdAt');
           setRefreshPnl(false);
           setMartingaleSteps(false);
-          router.replace(pathname);
+          const q = new URLSearchParams();
+          const cabinetForQuery = resolveCabinetIdForQuery(sp);
+          if (cabinetForQuery) q.set('cabinetId', cabinetForQuery);
+          const qs = q.toString();
+          router.replace(qs ? `${pathname}?${qs}` : pathname);
         }}
       >
         Сброс

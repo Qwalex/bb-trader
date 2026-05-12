@@ -442,6 +442,20 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     return this.cabinetContext.getCabinetId();
   }
 
+  private async resolveCabinetDisplayLabel(): Promise<string> {
+    const cabinetId =
+      this.currentCabinetId() ?? (await this.cabinets.getDefaultCabinetId());
+    return this.cabinets.getCabinetDisplayLabel(cabinetId);
+  }
+
+  private cabinetNotifyHtmlPrefix(label: string): string {
+    return `<b>Кабинет:</b> <code>${escapeTelegramHtml(label)}</code>\n\n`;
+  }
+
+  private cabinetNotifyPlainPrefix(label: string): string {
+    return `Кабинет: ${label}\n\n`;
+  }
+
   private async getWhitelistUserIds(): Promise<number[]> {
     const cabinetId = this.currentCabinetId();
     if (!cabinetId) {
@@ -479,7 +493,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     let deliveredTo = 0;
     const defaultOrderUsd = await this.getResolvedDefaultOrderUsd();
-    const msg = formatExternalSignalTable(params.signal, defaultOrderUsd);
+    const cabinetLabel = await this.resolveCabinetDisplayLabel();
+    const msg =
+      this.cabinetNotifyPlainPrefix(cabinetLabel) +
+      formatExternalSignalTable(params.signal, defaultOrderUsd);
     for (const uid of ids) {
       try {
         await bot.telegram.sendMessage(
@@ -523,7 +540,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       return { ok: false, deliveredTo: 0, error: 'TELEGRAM_WHITELIST пуст' };
     }
 
-    const msg = formatUserbotSignalFailureMessage(params);
+    const cabinetLabel = await this.resolveCabinetDisplayLabel();
+    const msg =
+      this.cabinetNotifyPlainPrefix(cabinetLabel) +
+      formatUserbotSignalFailureMessage(params);
 
     let deliveredTo = 0;
     for (const uid of ids) {
@@ -562,7 +582,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (ids.length === 0) {
       return { ok: false, deliveredTo: 0, error: 'TELEGRAM_WHITELIST пуст' };
     }
-    const msg = formatUserbotResultWithoutEntryHtml(params);
+    const cabinetLabel = await this.resolveCabinetDisplayLabel();
+    const msg =
+      this.cabinetNotifyHtmlPrefix(cabinetLabel) +
+      formatUserbotResultWithoutEntryHtml(params);
 
     let deliveredTo = 0;
     for (const uid of ids) {
@@ -618,7 +641,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (ids.length === 0) {
       return { ok: false, deliveredTo: 0, error: 'TELEGRAM_WHITELIST пуст' };
     }
-    const msg = formatApiTradeCancelledHtml(params);
+    const cabinetLabel = await this.resolveCabinetDisplayLabel();
+    const msg =
+      this.cabinetNotifyHtmlPrefix(cabinetLabel) +
+      formatApiTradeCancelledHtml(params);
 
     let deliveredTo = 0;
     for (const uid of ids) {
@@ -664,7 +690,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       return { ok: false, deliveredTo: 0, error: 'TELEGRAM_WHITELIST пуст' };
     }
 
-    const msg = formatApiTradeLiquidationHtml(params);
+    const cabinetLabel = await this.resolveCabinetDisplayLabel();
+    const msg =
+      this.cabinetNotifyHtmlPrefix(cabinetLabel) +
+      formatApiTradeLiquidationHtml(params);
 
     let deliveredTo = 0;
     for (const uid of ids) {
@@ -736,7 +765,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (ids.length === 0) {
       return { ok: false, deliveredTo: 0, error: 'TELEGRAM_WHITELIST пуст' };
     }
-    const msg = formatHedgeOppositePlacementAuditHtml(params);
+    const cabinetLabel = await this.resolveCabinetDisplayLabel();
+    const msg =
+      this.cabinetNotifyHtmlPrefix(cabinetLabel) +
+      formatHedgeOppositePlacementAuditHtml(params);
     let deliveredTo = 0;
     for (const uid of ids) {
       try {
@@ -830,7 +862,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       payloadBlock = `\n<pre>${escapeTelegramHtml(clipped)}</pre>`;
     }
 
+    const cabinetLabel = await this.resolveCabinetDisplayLabel();
     const msg =
+      this.cabinetNotifyHtmlPrefix(cabinetLabel) +
       `<b>${escapeTelegramHtml(title)}</b>\n` +
       `Сделка: <code>${escapeTelegramHtml(params.signalId)}</code>` +
       pairLine +
