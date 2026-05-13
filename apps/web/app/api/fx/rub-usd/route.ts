@@ -4,6 +4,11 @@ import { NextResponse } from 'next/server';
 const CBR_DAILY_JSON = 'https://www.cbr-xml-daily.ru/daily_json.js';
 /** Официальная выгрузка ЦБ РФ — чаще открывается с Railway и других облаков. */
 const CBR_XML_DAILY = 'https://www.cbr.ru/scripts/XML_daily.asp';
+/**
+ * Международный fallback: курс RUB за 1 USD (агрегат, не официальный курс ЦБ).
+ * Бесплатный tier без ключа; условия: https://www.exchangerate-api.com/terms
+ */
+const EXCHANGE_RATE_API_USD = 'https://api.exchangerate-api.com/v4/latest/USD';
 
 const FETCH_TIMEOUT_MS = 12_000;
 
@@ -59,6 +64,19 @@ async function fetchRubFromXml(): Promise<{ rubPerUsd: number; date: string } | 
   return parseUsdFromCbrXml(text);
 }
 
+async function fetchRubFromExchangeRateApi(): Promise<{ rubPerUsd: number; date: string } | null> {
+  const res = await fetch(EXCHANGE_RATE_API_USD, {
+    next: { revalidate: 3600 },
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
+  if (!res.ok) return null;
+  const data = (await res.json()) as { date?: string; rates?: { RUB?: unknown } };
+  const rub = parseCbrNumber(data?.rates?.RUB);
+  if (!Number.isFinite(rub) || rub <= 0) return null;
+  return { rubPerUsd: rub, date: String(data?.date ?? '') };
+}
+
 export async function GET() {
   try {
     const fromJson = await fetchRubFromJson();
@@ -82,6 +100,20 @@ export async function GET() {
         rubPerUsd: fromXml.rubPerUsd,
         date: fromXml.date,
         source: 'cbr-ru-xml',
+      });
+    }
+  } catch {
+    /* пробуем международный агрегатор */
+  }
+
+  try {
+    const fromIntl = await fetchRubFromExchangeRateApi();
+    if (fromIntl) {
+      return NextResponse.json({
+        ok: true as const,
+        rubPerUsd: fromIntl.rubPerUsd,
+        date: fromIntl.date,
+        source: 'exchangerate-api',
       });
     }
   } catch {

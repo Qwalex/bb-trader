@@ -1626,7 +1626,7 @@
 - Status: `done`
 - Scope: Web `/leverage-calculator` — прочие расходы в месяц с того же счёта; макс. постоянное доп. снятие без ухода C в минус на горизонте; пресет и снимок для ИИ.
 - Files: `apps/web/app/leverage-calculator/leverage-calculator-page.util.ts`, `LeverageCalculatorClient.tsx`, `leverage-calculator-preset.util.ts`, `leverage-calculator-page.types.ts`, `leverage-calculator-ai.util.ts`, `apps/web/app/api/fx/rub-usd/route.ts`, `docs/audit/06-progress-tracker.md`
-- Changes: `simulateLeverageLoan` уже учитывал X и D; `computeMaxExtraMonthlyWithdrawalUsd` + поля outlook; UI-поле и метрики; траектории с X; пресет `otherMonthlyExpensesUsd`; `OUTLOOK_SNAPSHOT_KEYS`; подсказка в `computeLeverageStrategyHints`. Дополнительно: резервный курс ₽/USD (ручной ввод + `NEXT_PUBLIC_LEVERAGE_RUB_PER_USD`), уточнённые предупреждения по аннуитету; `GET /api/fx/rub-usd` — fallback на официальный XML ЦБ (`cbr.ru`), таймаут исходящего fetch.
+- Changes: `simulateLeverageLoan` уже учитывал X и D; `computeMaxExtraMonthlyWithdrawalUsd` + поля outlook; UI-поле и метрики; траектории с X; пресет `otherMonthlyExpensesUsd`; `OUTLOOK_SNAPSHOT_KEYS`; подсказка в `computeLeverageStrategyHints`. Дополнительно: резервный курс ₽/USD (ручной ввод + `NEXT_PUBLIC_LEVERAGE_RUB_PER_USD`), уточнённые предупреждения по аннуитету; `GET /api/fx/rub-usd` — цепочка: JSON cbr-xml-daily → XML `cbr.ru` → международный `api.exchangerate-api.com/v4/latest/USD` (`rates.RUB`), таймаут fetch; в UI помечается не-ЦБ источник.
 - Manual verification: `npm run check-types -w web`.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A

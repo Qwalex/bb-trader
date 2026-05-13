@@ -118,6 +118,8 @@ export function LeverageCalculatorClient({
   const [rubPerUsd, setRubPerUsd] = useState<number | null>(null);
   const [fxStatus, setFxStatus] = useState<'idle' | 'loading' | 'ok' | 'err'>('idle');
   const [fxDate, setFxDate] = useState<string | null>(null);
+  /** Источник ответа `/api/fx/rub-usd` при успехе (различаем ЦБ и международный fallback). */
+  const [fxBackendSource, setFxBackendSource] = useState<string | null>(null);
   const [manualRubPerUsdText, setManualRubPerUsdText] = useState('');
   const [inputCurrency, setInputCurrency] = useState<LeverageInputCurrency>(() => {
     const p = parseLeveragePresetJson(initialPresetJson) ?? DEFAULT_LEVERAGE_PRESET;
@@ -136,10 +138,12 @@ export function LeverageCalculatorClient({
         if (j.ok && typeof j.rubPerUsd === 'number' && j.rubPerUsd > 0) {
           setRubPerUsd(j.rubPerUsd);
           setFxDate(j.date ?? null);
+          setFxBackendSource(typeof j.source === 'string' ? j.source : null);
           setFxStatus('ok');
         } else {
           setRubPerUsd(null);
           setFxDate(null);
+          setFxBackendSource(null);
           setFxStatus('err');
         }
       })
@@ -147,6 +151,7 @@ export function LeverageCalculatorClient({
         if (!alive) return;
         setRubPerUsd(null);
         setFxDate(null);
+        setFxBackendSource(null);
         setFxStatus('err');
       });
     return () => {
@@ -164,12 +169,14 @@ export function LeverageCalculatorClient({
       ? rubPerUsd
       : manualRubParsed ?? (LEVERAGE_RUB_PER_USD_ENV != null && LEVERAGE_RUB_PER_USD_ENV > 0 ? LEVERAGE_RUB_PER_USD_ENV : null);
 
-  const rubRateSource: 'cbr' | 'manual' | 'env' | 'none' = useMemo(() => {
-    if (rubPerUsd != null && rubPerUsd > 0) return 'cbr';
+  const rubRateSource: 'cbr' | 'intl' | 'manual' | 'env' | 'none' = useMemo(() => {
+    if (rubPerUsd != null && rubPerUsd > 0) {
+      return fxBackendSource === 'exchangerate-api' ? 'intl' : 'cbr';
+    }
     if (manualRubParsed != null) return 'manual';
     if (LEVERAGE_RUB_PER_USD_ENV != null && LEVERAGE_RUB_PER_USD_ENV > 0) return 'env';
     return 'none';
-  }, [rubPerUsd, manualRubParsed]);
+  }, [rubPerUsd, manualRubParsed, fxBackendSource]);
 
   useEffect(() => {
     const p = parseLeveragePresetJson(initialPresetJson) ?? DEFAULT_LEVERAGE_PRESET;
@@ -612,21 +619,32 @@ export function LeverageCalculatorClient({
           <p className="leverageMuted">
             Значения пишутся в настройку аккаунта <code>{LEVERAGE_CALCULATOR_PRESET_KEY}</code> и
             подставляются при следующем визите. Суммы кредита в БД сохраняются в USDT; при вводе в ₽ они
-            переводятся по курсу ЦБ РФ для расчётов.
+            переводятся по курсу (приоритетно данные ЦБ РФ, при недоступности — справочный международный курс к
+            USDT).
           </p>
           <p className="leverageMuted" style={{ marginTop: '0.35rem' }}>
-            {fxStatus === 'loading' ? 'Загрузка курса USD (ЦБ РФ: json или xml)…' : null}
+            {fxStatus === 'loading' ? 'Загрузка курса USD (ЦБ или резервный источник)…' : null}
             {rubPerUsdSafe != null ? (
               <>
                 Справочно: 1 USD = {rubPerUsdSafe.toLocaleString('ru-RU', { maximumFractionDigits: 4 })} ₽
                 {rubRateSource === 'cbr' && fxDate ? ` (дата курса ЦБ ${fxDate})` : null}
+                {rubRateSource === 'intl' ? (
+                  <>
+                    {fxDate ? ` (дата ${fxDate}, ` : ' ('}
+                    справочный курс{' '}
+                    <a href="https://www.exchangerate-api.com/" target="_blank" rel="noreferrer noopener">
+                      exchangerate-api.com
+                    </a>
+                    , не официальный курс ЦБ РФ)
+                  </>
+                ) : null}
                 {rubRateSource === 'manual' ? ' (введён вручную)' : null}
-                {rubRateSource === 'env' ? ' (из NEXT_PUBLIC_LEVERAGE_RUB_PER_USD — API ЦБ недоступен)' : null}.
+                {rubRateSource === 'env' ? ' (из NEXT_PUBLIC_LEVERAGE_RUB_PER_USD — API курса недоступен)' : null}.
               </>
             ) : null}
             {fxStatus === 'err' && rubPerUsdSafe == null ? (
               <>
-                Не удалось получить курс ЦБ — введите резервный курс ₽ за 1 USDT ниже или задайте{' '}
+                Не удалось получить курс (ЦБ и резервные источники) — введите резервный курс ₽ за 1 USDT ниже или задайте{' '}
                 <code>NEXT_PUBLIC_LEVERAGE_RUB_PER_USD</code> в окружении Web, иначе доступен только ввод
                 сумм кредита в USDT. Пока курса нет, поля кредита в расчёте — только в USDT; ожидание
                 «рублей без деления на курс» давало бы неверные L и M и могло вешать предупреждения про
