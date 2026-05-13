@@ -527,7 +527,7 @@ a:hover {
 
 .dashboardMetricsGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 0.65rem;
   margin-bottom: 1.1rem;
 }
@@ -2002,7 +2002,7 @@ h1.pageTitle {
 }
 
 .tradeCardRich {
-  background: linear-gradient(#7a93b236, #e3dcff14);
+  background: linear-gradient(145deg,#1a2332f2,#0f1419e0);
 }
 
 .tradeDirBadge {

@@ -578,10 +578,10 @@ export default async function Home({
                 ? `${aprRealized.toFixed(1)}%`
                 : '—'}
             </div>
-            <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
+            {/* <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
               Простая годовая: (ΣPnL ÷ equity) × (365 / T), T = {statsPeriodDays} дн. (окно
               статистики). Без equity — прочерк.
-            </p>
+            </p> */}
           </div>
           <div className="card">
             <h3>APY{source ? ' (источник)' : ''}</h3>
@@ -590,9 +590,9 @@ export default async function Home({
                 ? `${apyRealized.toFixed(1)}%`
                 : '—'}
             </div>
-            <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
+            {/* <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
               Сложная годовая: (1 + ΣPnL/equity)^(365/T) − 1 за тот же период T.
-            </p>
+            </p> */}
           </div>
           <div className="card">
             <h3>Закрыто{source ? ' (источник)' : ''}</h3>
@@ -627,30 +627,30 @@ export default async function Home({
             <div className="value">{stats.closedPerDayAvg.toFixed(2)}</div>
           </div>
           <div className="card">
-            <h3>Баланс через 1 день</h3>
+            <h3>1 день</h3>
             <div className="value">
               {balanceDay != null && Number.isFinite(balanceDay)
                 ? `${balanceDay.toFixed(2)}$`
                 : '—'}
             </div>
-            <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
+            {/* <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
               EV/сделка: {evPerTrade.toFixed(2)} · WR {wr.toFixed(1)}% · ожид. PnL/день:{' '}
               {Number.isFinite(expectedPnlPerDay) ? expectedPnlPerDay.toFixed(2) : '—'} USDT
-            </p>
+            </p> */}
           </div>
           <div className="card">
-            <h3>Баланс через 7 дней</h3>
+            <h3>7 дней</h3>
             <div className="value">
               {balanceWeek != null && Number.isFinite(balanceWeek)
                 ? `${balanceWeek.toFixed(2)}$`
                 : '—'}
             </div>
-            <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
+            {/* <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
               Сложный %: equity × (1+r)^n, r = PnL/день ÷ equity
-            </p>
+            </p> */}
           </div>
           <div className="card">
-            <h3>Баланс через 30 дней</h3>
+            <h3>30 дней</h3>
             <div className="value">
               {balanceMonth != null && Number.isFinite(balanceMonth)
                 ? `${balanceMonth.toFixed(2)}$`
@@ -658,7 +658,7 @@ export default async function Home({
             </div>
           </div>
           <div className="card">
-            <h3>Баланс через 365 дней</h3>
+            <h3>365 дней</h3>
             <div className="value">
               {balanceYear != null && Number.isFinite(balanceYear)
                 ? `${balanceYear.toFixed(2)}$`
@@ -666,7 +666,7 @@ export default async function Home({
             </div>
           </div>
           <div className="card">
-            <h3>Баланс (Bybit)</h3>
+            <h3>Баланс</h3>
             <div className="value">
               {guard?.totalBalanceUsd != null ? `${guard.totalBalanceUsd.toFixed(2)}$` : '—'}
             </div>
@@ -675,12 +675,12 @@ export default async function Home({
             </p>
           </div>
           <div className="card">
-            <h3>Доступный баланс (Bybit)</h3>
+            <h3>Доступный баланс</h3>
             <div className="value">
               {guard?.balanceUsd != null ? `${guard.balanceUsd.toFixed(2)}$` : '—'}
             </div>
             <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
-              Порог автоторговли: {(guard?.minBalanceUsd ?? 3).toFixed(2)}$
+              Порог: {(guard?.minBalanceUsd ?? 3).toFixed(2)}$
             </p>
           </div>
           </div>
