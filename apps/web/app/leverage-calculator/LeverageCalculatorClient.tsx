@@ -12,8 +12,12 @@ import {
   serializeLeveragePreset,
   LEVERAGE_CALCULATOR_PRESET_KEY,
 } from './leverage-calculator-preset.util';
-import type { LeverageCalculatorPresetV1 } from './leverage-calculator-page.types';
-import type { LeverageCalcMode } from './leverage-calculator-page.util';
+import type { LeverageCalculatorPresetV1, LeverageCalculatorPayload } from './leverage-calculator-page.types';
+import type { LeverageCalcMode, LeverageLoanPaymentTiming } from './leverage-calculator-page.util';
+import {
+  buildLeverageAiAdviceRequest,
+} from './leverage-calculator-ai.util';
+import type { LeverageCalculatorAiAdviceResponse } from './leverage-calculator-ai.types';
 import {
   buildMonthlyCapitalTrajectory,
   buildMonthlyCapitalTrajectoryEarly,
@@ -29,14 +33,7 @@ import {
   todayIsoDateOnly,
 } from './leverage-calculator-page.util';
 
-export type LeverageCalculatorPayload = {
-  equityUsd: number | null;
-  expectedPnlPerDayUsd: number | null;
-  realizedPnlPerDayUsd: number | null;
-  statsPeriodDaysMax: number | null;
-  totalPnlUsd: number;
-  cabinetCount: number;
-};
+export type { LeverageCalculatorPayload } from './leverage-calculator-page.types';
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'err';
 
@@ -72,6 +69,10 @@ export function LeverageCalculatorClient({
     const p = parseLeveragePresetJson(initialPresetJson) ?? DEFAULT_LEVERAGE_PRESET;
     return p.mode;
   });
+  const [loanPaymentTiming, setLoanPaymentTiming] = useState<LeverageLoanPaymentTiming>(() => {
+    const p = parseLeveragePresetJson(initialPresetJson) ?? DEFAULT_LEVERAGE_PRESET;
+    return p.loanPaymentTiming;
+  });
   const [loanStartIso, setLoanStartIso] = useState(() => {
     const p = parseLeveragePresetJson(initialPresetJson) ?? DEFAULT_LEVERAGE_PRESET;
     const s = String(p.loanStartIso ?? '').trim();
@@ -91,6 +92,9 @@ export function LeverageCalculatorClient({
   });
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [aiUserComment, setAiUserComment] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiResult, setAiResult] = useState<LeverageCalculatorAiAdviceResponse | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipPersistOnce = useRef(true);
 
@@ -101,6 +105,7 @@ export function LeverageCalculatorClient({
     setTermYears(String(p.termYears));
     setHorizonAfter(String(p.horizonMonthsAfterLoan));
     setMode(p.mode);
+    setLoanPaymentTiming(p.loanPaymentTiming);
     setLoanStartIso(
       /^\d{4}-\d{2}-\d{2}$/.test(String(p.loanStartIso ?? '').trim())
         ? String(p.loanStartIso).trim()
@@ -149,6 +154,7 @@ export function LeverageCalculatorClient({
       loan,
       horizonMonthsAfterLoan,
       earlyPayoff: earlyPayoffForOutlook,
+      loanPaymentTiming,
     });
   }, [
     equityNum,
@@ -158,6 +164,7 @@ export function LeverageCalculatorClient({
     loan,
     horizonMonthsAfterLoan,
     earlyPayoffForOutlook,
+    loanPaymentTiming,
   ]);
 
   const strategyHints = useMemo(() => (outlook ? computeLeverageStrategyHints(outlook) : []), [outlook]);
@@ -236,8 +243,9 @@ export function LeverageCalculatorClient({
       termMonths: loan.termMonths,
       horizonMonthsAfter: horizonMonthsAfterLoan,
       rDaily,
+      loanPaymentTiming,
     });
-  }, [equityNum, rDaily, loan, horizonMonthsAfterLoan]);
+  }, [equityNum, rDaily, loan, horizonMonthsAfterLoan, loanPaymentTiming]);
 
   const trajectoryEarly = useMemo(() => {
     if (
@@ -262,8 +270,9 @@ export function LeverageCalculatorClient({
       horizonMonthsAfter: horizonMonthsAfterLoan,
       rDaily,
       early: earlyPayoffForOutlook,
+      loanPaymentTiming,
     });
-  }, [equityNum, rDaily, loan, horizonMonthsAfterLoan, earlyPayoffForOutlook]);
+  }, [equityNum, rDaily, loan, horizonMonthsAfterLoan, earlyPayoffForOutlook, loanPaymentTiming]);
 
   const trajectoryWithCompare = useMemo(() => {
     if (trajectory.length === 0 || rDaily == null || !Number.isFinite(rDaily) || rDaily <= -1) {
@@ -317,6 +326,58 @@ export function LeverageCalculatorClient({
     [cabinetIdForApi],
   );
 
+  const runLeverageAi = useCallback(async () => {
+    if (!outlook) return;
+    setAiLoading(true);
+    setAiResult(null);
+    try {
+      const body = buildLeverageAiAdviceRequest({
+        mode,
+        horizonMonthsAfterLoan,
+        loan,
+        earlyPayoffEnabled,
+        earlyPayoffForOutlook: earlyPayoffEnabled ? earlyPayoffForOutlook : null,
+        payload,
+        outlook,
+        verdict: leverageBorrowVerdict
+          ? { tone: leverageBorrowVerdict.tone, lead: leverageBorrowVerdict.lead }
+          : null,
+        hints: strategyHints,
+        warnings: outlook.warnings,
+        userComment: aiUserComment,
+      });
+      const res = await fetchJson<LeverageCalculatorAiAdviceResponse>(
+        '/orders/leverage-calculator-ai-advice',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        },
+        cabinetIdForApi,
+      );
+      setAiResult(res);
+    } catch (e) {
+      setAiResult({
+        ok: false,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      setAiLoading(false);
+    }
+  }, [
+    outlook,
+    mode,
+    horizonMonthsAfterLoan,
+    loan,
+    earlyPayoffEnabled,
+    earlyPayoffForOutlook,
+    payload,
+    leverageBorrowVerdict,
+    strategyHints,
+    aiUserComment,
+    cabinetIdForApi,
+  ]);
+
   useEffect(() => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
@@ -330,6 +391,7 @@ export function LeverageCalculatorClient({
         termYears: Number.parseFloat(termYears.replace(',', '.')) || 0,
         horizonMonthsAfterLoan: Number.parseInt(horizonAfter, 10) || 0,
         mode,
+        loanPaymentTiming,
         loanStartIso,
         earlyPayoffEnabled,
         earlyPayoffAfterMonth: Number.parseInt(earlyPayoffAfterMonth, 10) || 1,
@@ -356,6 +418,7 @@ export function LeverageCalculatorClient({
     termYears,
     horizonAfter,
     mode,
+    loanPaymentTiming,
     loanStartIso,
     earlyPayoffEnabled,
     earlyPayoffAfterMonth,
@@ -370,8 +433,9 @@ export function LeverageCalculatorClient({
           <h1 className="leverageTitle">Кредит и доходность по всем кабинетам</h1>
           <p className="leverageLead">
             Сводка с дашборда: суммарный equity, ожидаемый и грубо реализованный PnL в день. Займ
-            увеличивает торговый капитал; ниже — когда по календарю заканчивается срок кредита,
-            оценка потоков, сравнение с ростом только на своих средствах E и график капитала.
+            добавляется к торговому счёту (C₀ = E + L); платёж M каждый месяц списывается с того же
+            остатка, а не «снаружи». Ниже — календарь договора, потоки, сравнение с ростом только на E и
+            график капитала.
           </p>
         </div>
         <div className="leverageSaveBadge" data-state={saveState}>
@@ -464,6 +528,31 @@ export function LeverageCalculatorClient({
               />
             </label>
           </div>
+          <fieldset className="leverageModeFieldset" style={{ marginTop: '1rem' }}>
+            <legend>Порядок месяца: платёж M и доходность на едином счёте</legend>
+            <label>
+              <input
+                type="radio"
+                name="lev-loan-timing"
+                checked={loanPaymentTiming === 'after_monthly_return'}
+                onChange={() => setLoanPaymentTiming('after_monthly_return')}
+              />{' '}
+              Сначала рост на весь остаток месяца, затем M (типично: M с итога на счёте)
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="lev-loan-timing"
+                checked={loanPaymentTiming === 'before_monthly_return'}
+                onChange={() => setLoanPaymentTiming('before_monthly_return')}
+              />{' '}
+              Сначала M, затем рост на остаток (консервативнее, если списание в начале периода)
+            </label>
+            <p className="leverageMuted" style={{ marginTop: '0.65rem', marginBottom: 0 }}>
+              Пример: E = 100, L = 1000 → на старте C = 1100; каждый месяц с этого же C уходит M (как
+              погашение с торгового баланса).
+            </p>
+          </fieldset>
           <fieldset className="leverageModeFieldset">
             <legend>База для доходности r = PnL_день ÷ equity</legend>
             <label>
@@ -748,6 +837,55 @@ export function LeverageCalculatorClient({
               termMonths={loan.termMonths}
               earlyCloseMonth={earlyCloseMonthForChart}
             />
+          </section>
+
+          <section className="card leverageSpaced leverageAiPanel">
+            <h2 className="leverageSectionTitle">Рекомендации ИИ</h2>
+            <p className="leverageMuted">
+              В запрос уходит текущий снимок полей и расчётов страницы. Нужны ключ и модель OpenRouter в
+              настройках: <code>OPENROUTER_API_KEY</code>, приоритетно{' '}
+              <code>OPENROUTER_MODEL_AI_ADVISOR</code>, иначе <code>OPENROUTER_MODEL_TEXT</code> /{' '}
+              <code>OPENROUTER_MODEL_DEFAULT</code>.
+            </p>
+            <label style={{ display: 'block', marginTop: '0.85rem' }}>
+              <span className="leverageFieldLabel">Комментарий для ИИ (необязательно)</span>
+              <textarea
+                className="leverageAiTextarea"
+                rows={3}
+                maxLength={800}
+                value={aiUserComment}
+                onChange={(e) => setAiUserComment(e.target.value)}
+                placeholder="Например: планирую досрочное через полгода, какие риски?"
+              />
+            </label>
+            <div style={{ marginTop: '0.85rem' }}>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => void runLeverageAi()}
+                disabled={aiLoading}
+              >
+                {aiLoading ? 'ИИ отвечает…' : 'Получить рекомендации ИИ'}
+              </button>
+            </div>
+            {aiResult && !aiResult.ok ? (
+              <p className="msg err" style={{ marginTop: '0.85rem' }}>
+                {aiResult.error}
+              </p>
+            ) : null}
+            {aiResult?.ok ? (
+              <div className="leverageAiResult" style={{ marginTop: '1rem' }}>
+                <p style={{ margin: 0, lineHeight: 1.55, fontSize: '0.98rem' }}>{aiResult.summary}</p>
+                <ul className="leverageFactList" style={{ marginTop: '0.75rem' }}>
+                  {aiResult.points.map((pt, idx) => (
+                    <li key={idx}>{pt}</li>
+                  ))}
+                </ul>
+                <p className="leverageFootnote" style={{ marginTop: '0.85rem' }}>
+                  {aiResult.disclaimer}
+                </p>
+              </div>
+            ) : null}
           </section>
         </>
       )}

@@ -1590,3 +1590,23 @@
 - Manual verification: `npm run check-types -w web`.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-131
+
+- Status: `done`
+- Scope: ИИ-рекомендации по сценарию кредита на `/leverage-calculator` (OpenRouter, пользователь с сессией).
+- Files: `apps/api/src/modules/orders/leverage-ai-advisor.service.ts`, `apps/api/src/modules/orders/leverage-ai-advisor.types.ts`, `apps/api/src/modules/orders/orders.controller.ts`, `apps/api/src/modules/orders/orders.module.ts`, `apps/web/app/leverage-calculator/*`, `docs/auth-protected-routes.md`, `docs/audit/06-progress-tracker.md`
+- Changes: `POST /orders/leverage-calculator-ai-advice` — JSON-снимок с клиента, ответ `{ summary, points, disclaimer }`; модель AI_ADVISOR с fallback TEXT/DEFAULT; UI кнопка + textarea; `LeverageCalculatorPayload` вынесен в `leverage-calculator-page.types.ts`.
+- Manual verification: `npm run build -w apps/api`, `npm run check-types -w web`, eslint по новым web-файлам.
+- Docs updated: `auth-protected-routes.md`, этот трекер.
+- Linked risks (`SEC-###`): N/A — тело запроса только числа/текст пользователя, без секретов; расход OpenRouter как у других вызовов.
+
+### AUD-132
+
+- Status: `done`
+- Scope: Web `/leverage-calculator` — платёж M с единого счёта E+L; выбор порядка шага месяца; пресет и снимок для ИИ.
+- Files: `apps/web/app/leverage-calculator/leverage-calculator-page.util.ts`, `LeverageCalculatorClient.tsx`, `leverage-calculator-preset.util.ts`, `leverage-calculator-page.types.ts`, `leverage-calculator-ai.util.ts`, `docs/audit/06-progress-tracker.md`
+- Changes: `simulateLeverageLoan` / `computeLeverageOutlook` с `loanPaymentTiming` (после доходности месяца vs до); траектории и график; радио в UI; поле в `LeverageCalculatorPresetV1`; `loanPaymentTiming` в `outlookSnapshot` для ИИ.
+- Manual verification: `npm run check-types -w web`.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

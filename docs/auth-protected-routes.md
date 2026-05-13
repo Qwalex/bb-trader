@@ -46,6 +46,9 @@
 
 ### Orders
 
+- `GET /orders/dashboard-cabinets`
+- `GET /orders/dashboard-activity`
+- `POST /orders/leverage-calculator-ai-advice`
 - `GET /orders/stats`
 - `GET /orders/pnl-series`
 - `GET /orders/trades`

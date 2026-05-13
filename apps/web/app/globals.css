@@ -2833,6 +2833,21 @@ h1.pageTitle {
   font-weight: 650;
 }
 
+.leverageAiPanel .leverageAiTextarea {
+  width: 100%;
+  margin-top: 0.35rem;
+  padding: 0.55rem 0.65rem;
+  font-size: 0.92rem;
+  line-height: 1.45;
+  color: var(--foreground);
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  resize: vertical;
+  min-height: 4.5rem;
+  box-sizing: border-box;
+}
+
 .leverageFootnote {
   margin: 0.85rem 0 0;
   font-size: 0.8rem;

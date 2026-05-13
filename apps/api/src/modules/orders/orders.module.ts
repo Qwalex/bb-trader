@@ -6,6 +6,7 @@ import { TelegramModule } from '../telegram';
 import { TelegramUserbotModule } from '../telegram-userbot/telegram-userbot.module';
 import { UserbotSignalHashModule } from '../telegram-userbot/userbot-signal-hash.module';
 import { OrdersController } from './orders.controller';
+import { LeverageAiAdvisorService } from './leverage-ai-advisor.service';
 import { OrdersService } from './orders.service';
 
 @Module({
@@ -17,7 +18,7 @@ import { OrdersService } from './orders.service';
     UserbotSignalHashModule,
   ],
   controllers: [OrdersController],
-  providers: [OrdersService],
+  providers: [OrdersService, LeverageAiAdvisorService],
   exports: [OrdersService],
 })
 export class OrdersModule {}

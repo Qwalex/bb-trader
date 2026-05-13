@@ -3,7 +3,7 @@ import {
   PRESET_JSON_MAX_LEN,
 } from './leverage-calculator-page.constants';
 import type { LeverageCalculatorPresetV1 } from './leverage-calculator-page.types';
-import type { LeverageCalcMode } from './leverage-calculator-page.util';
+import type { LeverageCalcMode, LeverageLoanPaymentTiming } from './leverage-calculator-page.util';
 import { todayIsoDateOnly } from './leverage-calculator-page.util';
 
 export const DEFAULT_LEVERAGE_PRESET: LeverageCalculatorPresetV1 = {
@@ -13,6 +13,7 @@ export const DEFAULT_LEVERAGE_PRESET: LeverageCalculatorPresetV1 = {
   termYears: 2,
   horizonMonthsAfterLoan: 12,
   mode: 'expected',
+  loanPaymentTiming: 'after_monthly_return',
   loanStartIso: '',
   earlyPayoffEnabled: false,
   earlyPayoffAfterMonth: 6,
@@ -28,6 +29,10 @@ function isMode(x: unknown): x is LeverageCalcMode {
   return x === 'expected' || x === 'realized';
 }
 
+function isLoanPaymentTiming(x: unknown): x is LeverageLoanPaymentTiming {
+  return x === 'after_monthly_return' || x === 'before_monthly_return';
+}
+
 /** Разбор JSON из БД; при ошибке — null. */
 export function parseLeveragePresetJson(raw: string | undefined | null): LeverageCalculatorPresetV1 | null {
   const t = String(raw ?? '').trim();
@@ -40,6 +45,9 @@ export function parseLeveragePresetJson(raw: string | undefined | null): Leverag
     const termYears = clamp(Number(j.termYears), 0.08, 80);
     const horizonMonthsAfterLoan = clamp(Math.round(Number(j.horizonMonthsAfterLoan)), 0, 600);
     const mode: LeverageCalcMode = isMode(j.mode) ? j.mode : 'expected';
+    const loanPaymentTiming: LeverageLoanPaymentTiming = isLoanPaymentTiming(j.loanPaymentTiming)
+      ? j.loanPaymentTiming
+      : 'after_monthly_return';
     let loanStartIso = typeof j.loanStartIso === 'string' ? j.loanStartIso.trim() : '';
     if (!/^\d{4}-\d{2}-\d{2}$/.test(loanStartIso)) {
       loanStartIso = todayIsoDateOnly();
@@ -54,6 +62,7 @@ export function parseLeveragePresetJson(raw: string | undefined | null): Leverag
       termYears,
       horizonMonthsAfterLoan,
       mode,
+      loanPaymentTiming,
       loanStartIso,
       earlyPayoffEnabled,
       earlyPayoffAfterMonth,
@@ -70,6 +79,7 @@ export function buildPresetFromFormState(input: {
   termYears: number;
   horizonMonthsAfterLoan: number;
   mode: LeverageCalcMode;
+  loanPaymentTiming: LeverageLoanPaymentTiming;
   loanStartIso: string;
   earlyPayoffEnabled: boolean;
   earlyPayoffAfterMonth: number;
@@ -86,6 +96,7 @@ export function buildPresetFromFormState(input: {
     termYears: clamp(input.termYears, 0.08, 80),
     horizonMonthsAfterLoan: clamp(Math.round(input.horizonMonthsAfterLoan), 0, 600),
     mode: input.mode,
+    loanPaymentTiming: input.loanPaymentTiming,
     loanStartIso,
     earlyPayoffEnabled: input.earlyPayoffEnabled,
     earlyPayoffAfterMonth: clamp(Math.round(input.earlyPayoffAfterMonth), 1, 600),

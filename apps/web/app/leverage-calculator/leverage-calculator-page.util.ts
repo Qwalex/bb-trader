@@ -1,10 +1,18 @@
 /**
  * Модель: дневная доходность r = G/E (как блок «перспектива» на главной),
  * G — выбранная база (ожидаемый PnL/день по EV или реализованный / max(period)).
- * После привлечения займа капитал C₀ = E + L, валовый PnL/день масштабируется: G×(C/E).
+ * Старт на счёте: C₀ = E + L (свои средства + заём на том же торговом балансе).
+ * Платёж M по кредиту всегда списывается с этого же счёта, а не «снаружи».
+ *
+ * Два режима дискретного месяца (30 дней = (1+r)³⁰):
+ * - `after_monthly_return`: сначала C←C·f (доходность на весь остаток), затем C←C−M — M с **итога** месяца на счёте.
+ * - `before_monthly_return`: сначала C←C−M (сняли платёж с текущего счёта), затем C←C·f — консервативнее, если банк списывает в начале периода.
  */
 
 export type LeverageCalcMode = 'expected' | 'realized';
+
+/** Как в месячном шаге совмещаются платёж M и начисление r на едином счёте E+L. */
+export type LeverageLoanPaymentTiming = 'after_monthly_return' | 'before_monthly_return';
 
 export type LeverageLoanParams = {
   principalUsd: number;
@@ -68,6 +76,9 @@ export type LeverageOutlook = {
   earlyCloseoutVsAnnuityTailUsd: number | null;
   wentNegativeDuringLoanEarly: boolean;
 
+  /** Как в симуляции совмещаются M и r (см. `LeverageLoanPaymentTiming`). */
+  loanPaymentTiming: LeverageLoanPaymentTiming;
+
   warnings: string[];
 };
 
@@ -108,9 +119,8 @@ export type LoanSimResult = {
 };
 
 /**
- * Месячная дискретизация: рост C←C·f, затем вычитаются платежи.
- * Стандарт: M каждый месяц 1..termMonths.
- * Досрочно: M в 1..k−1, в месяц k — M+closeout, далее 0 до конца «контрактного» окна и горизонта.
+ * Месячная дискретизация на **едином счёте** C (начало C₀=E+L). Платёж M уменьшает тот же C.
+ * Порядок шага задаётся `loanPaymentTiming` (см. описание в шапке файла).
  */
 export function simulateLeverageLoan(opts: {
   equityUsd: number;
@@ -120,6 +130,7 @@ export function simulateLeverageLoan(opts: {
   horizonMonthsAfter: number;
   rDaily: number;
   early: LeverageEarlyPayoffParams | null;
+  loanPaymentTiming?: LeverageLoanPaymentTiming;
 }): LoanSimResult {
   const E = Number.isFinite(opts.equityUsd) ? Math.max(0, opts.equityUsd) : 0;
   const L = Number.isFinite(opts.loanPrincipalUsd) ? Math.max(0, opts.loanPrincipalUsd) : 0;
@@ -134,6 +145,7 @@ export function simulateLeverageLoan(opts: {
 
   const f = monthGrowthFactorFromRDaily(rDaily);
   const totalSim = termM + horizon;
+  const timing: LeverageLoanPaymentTiming = opts.loanPaymentTiming ?? 'after_monthly_return';
 
   let closeMonth = 0;
   let closeout = 0;
@@ -176,7 +188,11 @@ export function simulateLeverageLoan(opts: {
       }
     }
 
-    C = C * f - payment;
+    if (timing === 'before_monthly_return') {
+      C = (C - payment) * f;
+    } else {
+      C = C * f - payment;
+    }
     paid += payment;
     if (C < 0 && !wentNegative) {
       wentNegative = true;
@@ -196,9 +212,11 @@ export function computeLeverageOutlook(params: {
   /** Месяцев после последнего платежа по кредиту — «перспектива». */
   horizonMonthsAfterLoan: number;
   earlyPayoff?: LeverageEarlyPayoffParams | null;
+  loanPaymentTiming?: LeverageLoanPaymentTiming;
 }): LeverageOutlook {
   const warnings: string[] = [];
   const ep = params.earlyPayoff ?? null;
+  const paymentTiming: LeverageLoanPaymentTiming = params.loanPaymentTiming ?? 'after_monthly_return';
   const { mode, loan } = params;
   const E = Number.isFinite(params.equityUsd) ? Math.max(0, params.equityUsd) : 0;
   const L = Number.isFinite(loan.principalUsd) ? Math.max(0, loan.principalUsd) : 0;
@@ -293,6 +311,7 @@ export function computeLeverageOutlook(params: {
           horizonMonthsAfter: horizonAfter,
           rDaily,
           early: null,
+          loanPaymentTiming: paymentTiming,
         })
       : null;
 
@@ -356,6 +375,7 @@ export function computeLeverageOutlook(params: {
         horizonMonthsAfter: horizonAfter,
         rDaily,
         early: { closeAfterMonth: ep.closeAfterMonth, closeoutUsd: closeout },
+        loanPaymentTiming: paymentTiming,
       });
       wentNegativeDuringLoanEarly = earlySim.wentNegativeDuringLoan;
       if (wentNegativeDuringLoanEarly) {
@@ -405,6 +425,7 @@ export function computeLeverageOutlook(params: {
     capitalHorizonEarlyVsStandardUsd,
     earlyCloseoutVsAnnuityTailUsd,
     wentNegativeDuringLoanEarly,
+    loanPaymentTiming: paymentTiming,
     warnings,
   };
 }
@@ -498,7 +519,7 @@ export function equityOnlyCapitalAtMonth(equityUsd: number, rDaily: number, mont
 }
 
 /**
- * Месячная дискретизация: при фазе loan — C←C·(1+r)³⁰−M, после — только рост (стандартный график).
+ * Месячная траектория капитала C на едином счёте (см. `simulateLeverageLoan`).
  */
 export function buildMonthlyCapitalTrajectory(opts: {
   equityUsd: number;
@@ -507,6 +528,7 @@ export function buildMonthlyCapitalTrajectory(opts: {
   termMonths: number;
   horizonMonthsAfter: number;
   rDaily: number;
+  loanPaymentTiming?: LeverageLoanPaymentTiming;
 }): TrajectoryPoint[] {
   const sim = simulateLeverageLoan({ ...opts, early: null });
   return sim.trajectory;
@@ -521,6 +543,7 @@ export function buildMonthlyCapitalTrajectoryEarly(opts: {
   horizonMonthsAfter: number;
   rDaily: number;
   early: LeverageEarlyPayoffParams;
+  loanPaymentTiming?: LeverageLoanPaymentTiming;
 }): TrajectoryPoint[] {
   const sim = simulateLeverageLoan(opts);
   return sim.trajectory;

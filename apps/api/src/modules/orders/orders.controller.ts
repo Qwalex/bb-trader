@@ -21,6 +21,7 @@ import {
 } from '@nestjs/swagger';
 
 import { OrdersService } from './orders.service';
+import { LeverageAiAdvisorService } from './leverage-ai-advisor.service';
 import { pickRequestedCabinetId } from '../../common/cabinet-request.util';
 import { CabinetContextService } from '../cabinet/cabinet-context.service';
 import { CabinetService } from '../cabinet/cabinet.service';
@@ -37,6 +38,7 @@ export class OrdersController {
     private readonly orders: OrdersService,
     private readonly cabinets: CabinetService,
     private readonly cabinetContext: CabinetContextService,
+    private readonly leverageAi: LeverageAiAdvisorService,
   ) {}
 
   private parsePositiveInt(raw: string | undefined, fallback: number, max: number): number {
@@ -71,6 +73,27 @@ export class OrdersController {
   async dashboardCabinets(@Req() req: AuthReq) {
     const userId = String(req.auth?.userId ?? '').trim() || null;
     return this.orders.getDashboardCabinetsOverviewForUser(userId);
+  }
+
+  @ApiOperation({
+    summary: 'ИИ-рекомендации по сценарию кредита (калькулятор плеча)',
+    description:
+      'Принимает JSON-снимок с клиента (параметры кредита, equity, агрегаты outlook). Требуется авторизация. Использует OPENROUTER_API_KEY и модель OPENROUTER_MODEL_AI_ADVISOR (или TEXT/DEFAULT).',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      description: 'Снимок калькулятора — см. `LeverageCalculatorAiAdviceRequest` в API.',
+    },
+  })
+  @ApiOkResponse({ description: 'Рекомендации или ошибка конфигурации ИИ' })
+  @Post('leverage-calculator-ai-advice')
+  async leverageCalculatorAiAdvice(@Req() req: AuthReq, @Body() body: unknown) {
+    const userId = String(req.auth?.userId ?? '').trim();
+    if (!userId) {
+      return { ok: false, error: 'Требуется авторизация.' };
+    }
+    return this.leverageAi.generateAdvice(body);
   }
 
   @ApiOperation({
