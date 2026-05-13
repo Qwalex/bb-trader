@@ -712,11 +712,11 @@ export function LeverageCalculatorClient({
                 </span>
               </div>
               <div className="leverageMetric">
-                <span className="leverageMetricLabel">Валовый PnL / месяц (старт)</span>
+                <span className="leverageMetricLabel">Валовый PnL, 1-й месяц (дискретно)</span>
                 <span className="leverageMetricVal">{formatUsd(outlook.grossMonthlyStartUsd)}</span>
               </div>
               <div className="leverageMetric">
-                <span className="leverageMetricLabel">Чистый поток / месяц после платежа</span>
+                <span className="leverageMetricLabel">Чистый прирост за 1-й месяц (как в симуляции)</span>
                 <span className="leverageMetricVal">{formatUsd(outlook.netMonthlyStartUsd)}</span>
               </div>
               <div className="leverageMetric">

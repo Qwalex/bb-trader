@@ -35,7 +35,12 @@ export type LeverageOutlook = {
   loanPrincipalUsd: number;
   capitalWithLoanUsd: number;
   grossDailyStartUsd: number | null;
+  /**
+   * Валовый торговый результат за первый дискретный месяц: база × ((1+r)³⁰−1),
+   * база = C₀ при «после доходности» и (C₀−M) при «сначала M» — как в `simulateLeverageLoan`.
+   */
   grossMonthlyStartUsd: number | null;
+  /** Изменение капитала за первый месяц (конец − старт), как в симуляции. */
   netMonthlyStartUsd: number | null;
   dailyLoanBurdenUsd: number;
   /** Капитал C, при котором 30×(G/E)×C = M (месячный валовой = платёж). */
@@ -265,10 +270,29 @@ export function computeLeverageOutlook(params: {
     E > 0 && basePnlPerDayUsd != null && Number.isFinite(basePnlPerDayUsd)
       ? (basePnlPerDayUsd * C0) / E
       : null;
-  const grossMonthlyStartUsd =
-    grossDailyStartUsd != null ? grossDailyStartUsd * DAYS_PER_MONTH : null;
-  const netMonthlyStartUsd =
-    grossMonthlyStartUsd != null ? grossMonthlyStartUsd - M : null;
+
+  let grossMonthlyStartUsd: number | null = null;
+  let netMonthlyStartUsd: number | null = null;
+  if (rDaily != null && Number.isFinite(rDaily) && rDaily > -1 && C0 > 0) {
+    const f = monthGrowthFactorFromRDaily(rDaily);
+    if (paymentTiming === 'before_monthly_return') {
+      const base = C0 - M;
+      grossMonthlyStartUsd = base > 0 ? base * (f - 1) : null;
+      netMonthlyStartUsd = (C0 - M) * f - C0;
+    } else {
+      grossMonthlyStartUsd = C0 * (f - 1);
+      netMonthlyStartUsd = C0 * f - M - C0;
+    }
+    if (grossMonthlyStartUsd != null && !Number.isFinite(grossMonthlyStartUsd)) {
+      grossMonthlyStartUsd = null;
+    }
+    if (!Number.isFinite(netMonthlyStartUsd)) {
+      netMonthlyStartUsd = null;
+    }
+  } else if (grossDailyStartUsd != null) {
+    grossMonthlyStartUsd = grossDailyStartUsd * DAYS_PER_MONTH;
+    netMonthlyStartUsd = grossMonthlyStartUsd - M;
+  }
 
   const dailyLoanBurdenUsd = M > 0 ? M / DAYS_PER_MONTH : 0;
 
@@ -292,7 +316,7 @@ export function computeLeverageOutlook(params: {
     monthsToRecoverOverpayment = null;
     if (netMonthlyStartUsd != null && netMonthlyStartUsd <= 0) {
       warnings.push(
-        'При стартовых параметрах ожидаемый чистый месячный поток неположителен — переплата по кредиту не окупается в линейной модели.',
+        'При стартовых параметрах чистый прирост капитала за первый месяц (как в дискретной симуляции) неположителен — переплата по кредиту в упрощённой оценке «месяцев до окупаемости» не считается.',
       );
     }
   }
@@ -440,7 +464,7 @@ export function computeLeverageStrategyHints(o: LeverageOutlook): string[] {
   }
   if (o.netMonthlyStartUsd != null && o.netMonthlyStartUsd <= 0) {
     hints.push(
-      'Чистый месячный поток при старте неположителен: платёж съедает масштабированный PnL — риск «кредит тянет вниз»; меньший L, ниже ставка/платёж или более высокий r на том же E выглядят безопаснее.',
+      'Чистый прирост за первый дискретный месяц неположителен: платёж съедает прирост при той же схеме шага, что и симуляция — смотрите траекторию и предупреждения.',
     );
   }
   if (o.earlyPayoffComparable) {

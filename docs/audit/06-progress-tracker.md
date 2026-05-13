@@ -1606,7 +1606,7 @@
 - Status: `done`
 - Scope: Web `/leverage-calculator` — платёж M с единого счёта E+L; выбор порядка шага месяца; пресет и снимок для ИИ.
 - Files: `apps/web/app/leverage-calculator/leverage-calculator-page.util.ts`, `LeverageCalculatorClient.tsx`, `leverage-calculator-preset.util.ts`, `leverage-calculator-page.types.ts`, `leverage-calculator-ai.util.ts`, `docs/audit/06-progress-tracker.md`
-- Changes: `simulateLeverageLoan` / `computeLeverageOutlook` с `loanPaymentTiming` (после доходности месяца vs до); траектории и график; радио в UI; поле в `LeverageCalculatorPresetV1`; `loanPaymentTiming` в `outlookSnapshot` для ИИ.
+- Changes: `simulateLeverageLoan` / `computeLeverageOutlook` с `loanPaymentTiming` (после доходности месяца vs до); траектории и график; радио в UI; поле в `LeverageCalculatorPresetV1`; `loanPaymentTiming` в `outlookSnapshot` для ИИ; `grossMonthlyStartUsd` / `netMonthlyStartUsd` согласованы с первым дискретным месяцем (не 30×день), чтобы не противоречить вердикту по горизонту.
 - Manual verification: `npm run check-types -w web`.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
