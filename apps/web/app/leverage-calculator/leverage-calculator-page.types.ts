@@ -31,4 +31,8 @@ export type LeverageCalculatorPresetV1 = {
   /** Месяц (1..T−1), в конце которого M + closeout и долг закрыт. */
   earlyPayoffAfterMonth?: number;
   earlyCloseoutUsd?: number;
+  /** Постоянный взнос на торговый счёт в месяц (USDT в БД). */
+  monthlyContributionUsd?: number;
+  /** Целевой капитал C на конец горизонта симуляции (USDT в БД). */
+  targetCapitalUsd?: number;
 };

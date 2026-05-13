@@ -1630,3 +1630,13 @@
 - Manual verification: `npm run check-types -w web`.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-135
+
+- Status: `done`
+- Scope: Web `/leverage-calculator` — постоянный ежемесячный взнос на счёт; целевой капитал C на конец горизонта; оценка минимального взноса для цели; пресет и снимок для ИИ.
+- Files: `apps/web/app/leverage-calculator/leverage-calculator-page.util.ts`, `LeverageCalculatorClient.tsx`, `leverage-calculator-preset.util.ts`, `leverage-calculator-page.types.ts`, `leverage-calculator-ai.util.ts`, `docs/audit/06-progress-tracker.md`
+- Changes: симуляция и траектории с `monthlyContributionUsd`; `computeMinMonthlyContributionForTargetUsd`; поля outlook и подсказки в `computeLeverageStrategyHints`; UI поля, метрики, автосохранение пресета.
+- Manual verification: `npm run check-types -w web`.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

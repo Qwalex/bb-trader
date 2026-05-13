@@ -110,6 +110,14 @@ export function LeverageCalculatorClient({
     const p = parseLeveragePresetJson(initialPresetJson) ?? DEFAULT_LEVERAGE_PRESET;
     return String(p.earlyCloseoutUsd ?? 0);
   });
+  const [monthlyContribution, setMonthlyContribution] = useState(() => {
+    const p = parseLeveragePresetJson(initialPresetJson) ?? DEFAULT_LEVERAGE_PRESET;
+    return String(p.monthlyContributionUsd ?? 0);
+  });
+  const [targetCapital, setTargetCapital] = useState(() => {
+    const p = parseLeveragePresetJson(initialPresetJson) ?? DEFAULT_LEVERAGE_PRESET;
+    return String(p.targetCapitalUsd ?? 0);
+  });
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [aiUserComment, setAiUserComment] = useState('');
@@ -200,11 +208,15 @@ export function LeverageCalculatorClient({
       setMonthly(String(Math.round(p.monthlyPaymentUsd * rubPerUsdSafe)));
       setOtherMonthly(String(Math.round((p.otherMonthlyExpensesUsd ?? 0) * rubPerUsdSafe)));
       setEarlyCloseoutUsd(String(Math.round((p.earlyCloseoutUsd ?? 0) * rubPerUsdSafe)));
+      setMonthlyContribution(String(Math.round((p.monthlyContributionUsd ?? 0) * rubPerUsdSafe)));
+      setTargetCapital(String(Math.round((p.targetCapitalUsd ?? 0) * rubPerUsdSafe)));
     } else {
       setPrincipal(String(p.principalUsd));
       setMonthly(String(p.monthlyPaymentUsd));
       setOtherMonthly(String(p.otherMonthlyExpensesUsd ?? 0));
       setEarlyCloseoutUsd(String(p.earlyCloseoutUsd ?? 0));
+      setMonthlyContribution(String(p.monthlyContributionUsd ?? 0));
+      setTargetCapital(String(p.targetCapitalUsd ?? 0));
     }
     skipPersistOnce.current = true;
   }, [initialPresetJson, rubPerUsdSafe]);
@@ -222,6 +234,15 @@ export function LeverageCalculatorClient({
   const otherMonthlyExpensesUsd = useMemo(
     () => loanFieldUsd(otherMonthly, inputCurrency, rubPerUsdSafe),
     [otherMonthly, inputCurrency, rubPerUsdSafe],
+  );
+
+  const monthlyContributionUsd = useMemo(
+    () => loanFieldUsd(monthlyContribution, inputCurrency, rubPerUsdSafe),
+    [monthlyContribution, inputCurrency, rubPerUsdSafe],
+  );
+  const targetCapitalUsd = useMemo(
+    () => loanFieldUsd(targetCapital, inputCurrency, rubPerUsdSafe),
+    [targetCapital, inputCurrency, rubPerUsdSafe],
   );
 
   const horizonMonthsAfterLoan = useMemo(() => {
@@ -260,6 +281,8 @@ export function LeverageCalculatorClient({
       earlyPayoff: earlyPayoffForOutlook,
       loanPaymentTiming,
       otherMonthlyExpensesUsd,
+      monthlyContributionUsd,
+      targetCapitalUsd,
     });
   }, [
     equityNum,
@@ -271,6 +294,8 @@ export function LeverageCalculatorClient({
     earlyPayoffForOutlook,
     loanPaymentTiming,
     otherMonthlyExpensesUsd,
+    monthlyContributionUsd,
+    targetCapitalUsd,
   ]);
 
   const strategyHints = useMemo(() => (outlook ? computeLeverageStrategyHints(outlook) : []), [outlook]);
@@ -356,8 +381,17 @@ export function LeverageCalculatorClient({
       rDaily,
       loanPaymentTiming,
       otherMonthlyExpensesUsd,
+      monthlyContributionUsd,
     });
-  }, [equityNum, rDaily, loan, horizonMonthsAfterLoan, loanPaymentTiming, otherMonthlyExpensesUsd]);
+  }, [
+    equityNum,
+    rDaily,
+    loan,
+    horizonMonthsAfterLoan,
+    loanPaymentTiming,
+    otherMonthlyExpensesUsd,
+    monthlyContributionUsd,
+  ]);
 
   const trajectoryEarly = useMemo(() => {
     if (
@@ -384,8 +418,18 @@ export function LeverageCalculatorClient({
       early: earlyPayoffForOutlook,
       loanPaymentTiming,
       otherMonthlyExpensesUsd,
+      monthlyContributionUsd,
     });
-  }, [equityNum, rDaily, loan, horizonMonthsAfterLoan, earlyPayoffForOutlook, loanPaymentTiming, otherMonthlyExpensesUsd]);
+  }, [
+    equityNum,
+    rDaily,
+    loan,
+    horizonMonthsAfterLoan,
+    earlyPayoffForOutlook,
+    loanPaymentTiming,
+    otherMonthlyExpensesUsd,
+    monthlyContributionUsd,
+  ]);
 
   const trajectoryWithCompare = useMemo(() => {
     if (trajectory.length === 0 || rDaily == null || !Number.isFinite(rDaily) || rDaily <= -1) {
@@ -511,6 +555,8 @@ export function LeverageCalculatorClient({
         earlyPayoffEnabled,
         earlyPayoffAfterMonth: Number.parseInt(earlyPayoffAfterMonth, 10) || 1,
         earlyCloseoutUsd: loanFieldUsd(earlyCloseoutUsd, inputCurrency, rubPerUsdSafe),
+        monthlyContributionUsd: loanFieldUsd(monthlyContribution, inputCurrency, rubPerUsdSafe),
+        targetCapitalUsd: loanFieldUsd(targetCapital, inputCurrency, rubPerUsdSafe),
       });
       setSaveState('saving');
       setSaveMsg(null);
@@ -539,6 +585,8 @@ export function LeverageCalculatorClient({
     earlyPayoffEnabled,
     earlyPayoffAfterMonth,
     earlyCloseoutUsd,
+    monthlyContribution,
+    targetCapital,
     inputCurrency,
     rubPerUsdSafe,
     manualRubPerUsdText,
@@ -554,15 +602,30 @@ export function LeverageCalculatorClient({
         setMonthly(String(Math.round(loanFieldUsd(monthly, 'USD', null) * rubPerUsdSafe)));
         setOtherMonthly(String(Math.round(loanFieldUsd(otherMonthly, 'USD', null) * rubPerUsdSafe)));
         setEarlyCloseoutUsd(String(Math.round(loanFieldUsd(earlyCloseoutUsd, 'USD', null) * rubPerUsdSafe)));
+        setMonthlyContribution(
+          String(Math.round(loanFieldUsd(monthlyContribution, 'USD', null) * rubPerUsdSafe)),
+        );
+        setTargetCapital(String(Math.round(loanFieldUsd(targetCapital, 'USD', null) * rubPerUsdSafe)));
       } else {
         setPrincipal(String(loanFieldUsd(principal, 'RUB', rubPerUsdSafe).toFixed(2)));
         setMonthly(String(loanFieldUsd(monthly, 'RUB', rubPerUsdSafe).toFixed(2)));
         setOtherMonthly(String(loanFieldUsd(otherMonthly, 'RUB', rubPerUsdSafe).toFixed(2)));
         setEarlyCloseoutUsd(String(loanFieldUsd(earlyCloseoutUsd, 'RUB', rubPerUsdSafe).toFixed(2)));
+        setMonthlyContribution(String(loanFieldUsd(monthlyContribution, 'RUB', rubPerUsdSafe).toFixed(2)));
+        setTargetCapital(String(loanFieldUsd(targetCapital, 'RUB', rubPerUsdSafe).toFixed(2)));
       }
       setInputCurrency(next);
     },
-    [inputCurrency, rubPerUsdSafe, principal, monthly, otherMonthly, earlyCloseoutUsd],
+    [
+      inputCurrency,
+      rubPerUsdSafe,
+      principal,
+      monthly,
+      otherMonthly,
+      earlyCloseoutUsd,
+      monthlyContribution,
+      targetCapital,
+    ],
   );
 
   const moneyUnit = inputCurrency === 'RUB' ? '₽' : 'USDT';
@@ -722,6 +785,25 @@ export function LeverageCalculatorClient({
                 inputMode="decimal"
                 value={otherMonthly}
                 onChange={(e) => setOtherMonthly(e.target.value)}
+              />
+            </label>
+            <label>
+              <span className="leverageFieldLabel">Взнос на счёт каждый месяц, {moneyUnit}</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={monthlyContribution}
+                onChange={(e) => setMonthlyContribution(e.target.value)}
+              />
+            </label>
+            <label>
+              <span className="leverageFieldLabel">Цель: капитал C на конец горизонта, {moneyUnit}</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={targetCapital}
+                onChange={(e) => setTargetCapital(e.target.value)}
+                placeholder="например 1000000"
               />
             </label>
             <label>
@@ -929,7 +1011,9 @@ export function LeverageCalculatorClient({
             <p className="leverageMuted" style={{ margin: '0.5rem 0 0.85rem' }}>
               Ставка по кредиту — обратный расчёт из введённых L, M и срока T (месяцев), если платёж
               соответствует классическому аннуитету; при другой схеме договора цифра может не совпадать с
-              банком.
+              банком. Цель C и оценка минимального взноса относятся к концу полного горизонта симуляции
+              (срок кредита в месяцах + поле «месяцев после кредита»), при постоянном взносе на тот же счёт
+              каждый месяц.
             </p>
             <div className="leverageMetricsGrid">
               <div className="leverageMetric">
@@ -972,6 +1056,34 @@ export function LeverageCalculatorClient({
                 <span className="leverageMetricLabel">Прочие расходы в месяц (с того же счёта)</span>
                 <span className="leverageMetricVal">
                   <DualUsdRub usd={outlook.otherMonthlyExpensesUsd} rubPerUsd={rubPerUsdSafe} />
+                </span>
+              </div>
+              <div className="leverageMetric">
+                <span className="leverageMetricLabel">Взнос на счёт в месяц</span>
+                <span className="leverageMetricVal">
+                  <DualUsdRub usd={outlook.monthlyContributionUsd} rubPerUsd={rubPerUsdSafe} />
+                </span>
+              </div>
+              <div className="leverageMetric">
+                <span className="leverageMetricLabel">Цель C (конец горизонта)</span>
+                <span className="leverageMetricVal">
+                  {outlook.targetCapitalUsd > 0 ? (
+                    <DualUsdRub usd={outlook.targetCapitalUsd} rubPerUsd={rubPerUsdSafe} />
+                  ) : (
+                    '—'
+                  )}
+                </span>
+              </div>
+              <div className="leverageMetric">
+                <span className="leverageMetricLabel">Мин. взнос/мес для цели C (оценка)</span>
+                <span className="leverageMetricVal">
+                  {outlook.targetCapitalUsd > 0 &&
+                  outlook.minMonthlyContributionForTargetUsd != null &&
+                  Number.isFinite(outlook.minMonthlyContributionForTargetUsd) ? (
+                    <DualUsdRub usd={outlook.minMonthlyContributionForTargetUsd} rubPerUsd={rubPerUsdSafe} />
+                  ) : (
+                    '—'
+                  )}
                 </span>
               </div>
               <div className="leverageMetric">

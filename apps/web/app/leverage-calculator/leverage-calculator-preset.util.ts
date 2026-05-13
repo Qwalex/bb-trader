@@ -20,6 +20,8 @@ export const DEFAULT_LEVERAGE_PRESET: LeverageCalculatorPresetV1 = {
   earlyPayoffEnabled: false,
   earlyPayoffAfterMonth: 6,
   earlyCloseoutUsd: 0,
+  monthlyContributionUsd: 0,
+  targetCapitalUsd: 0,
 };
 
 function clamp(n: number, min: number, max: number): number {
@@ -63,6 +65,8 @@ export function parseLeveragePresetJson(raw: string | undefined | null): Leverag
     const earlyPayoffEnabled = j.earlyPayoffEnabled === true;
     const earlyPayoffAfterMonth = clamp(Math.round(Number(j.earlyPayoffAfterMonth)), 1, 600);
     const earlyCloseoutUsd = clamp(Number(j.earlyCloseoutUsd), 0, 1e9);
+    const monthlyContributionUsd = clamp(Number(j.monthlyContributionUsd ?? 0), 0, 1e9);
+    const targetCapitalUsd = clamp(Number(j.targetCapitalUsd ?? 0), 0, 1e12);
     return {
       v: 1,
       principalUsd,
@@ -77,6 +81,8 @@ export function parseLeveragePresetJson(raw: string | undefined | null): Leverag
       earlyPayoffEnabled,
       earlyPayoffAfterMonth,
       earlyCloseoutUsd,
+      monthlyContributionUsd,
+      targetCapitalUsd,
     };
   } catch {
     return null;
@@ -96,6 +102,8 @@ export function buildPresetFromFormState(input: {
   earlyPayoffEnabled: boolean;
   earlyPayoffAfterMonth: number;
   earlyCloseoutUsd: number;
+  monthlyContributionUsd: number;
+  targetCapitalUsd: number;
 }): LeverageCalculatorPresetV1 {
   let loanStartIso = input.loanStartIso.trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(loanStartIso)) {
@@ -115,6 +123,8 @@ export function buildPresetFromFormState(input: {
     earlyPayoffEnabled: input.earlyPayoffEnabled,
     earlyPayoffAfterMonth: clamp(Math.round(input.earlyPayoffAfterMonth), 1, 600),
     earlyCloseoutUsd: clamp(input.earlyCloseoutUsd, 0, 1e9),
+    monthlyContributionUsd: clamp(input.monthlyContributionUsd, 0, 1e9),
+    targetCapitalUsd: clamp(input.targetCapitalUsd, 0, 1e12),
   };
 }
 

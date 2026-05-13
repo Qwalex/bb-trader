@@ -37,6 +37,9 @@ const OUTLOOK_SNAPSHOT_KEYS = [
   'loanEffectiveAnnualRate',
   'otherMonthlyExpensesUsd',
   'maxExtraMonthlyWithdrawalUsd',
+  'monthlyContributionUsd',
+  'targetCapitalUsd',
+  'minMonthlyContributionForTargetUsd',
 ] as const;
 
 function pickOutlookSnapshot(o: LeverageOutlook): Record<string, unknown> {
