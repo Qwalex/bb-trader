@@ -27,6 +27,8 @@ import type { LeverageCalculatorAiAdviceResponse } from './leverage-calculator-a
 import {
   formatRubAmount,
   loanFieldUsd,
+  parseMoneyInput,
+  readLeverageRubPerUsdFromEnv,
   type RubUsdRateResponse,
 } from './leverage-calculator-fx.util';
 import {
@@ -50,6 +52,9 @@ type SaveState = 'idle' | 'saving' | 'saved' | 'err';
 
 /** Порог USDT: ниже по модулю считаем «около нуля» для вердикта в карточке. */
 const LEVERAGE_VERDICT_EPS_USD = 5;
+
+/** RUB за 1 USD из `NEXT_PUBLIC_LEVERAGE_RUB_PER_USD`, если API ЦБ недоступен. */
+const LEVERAGE_RUB_PER_USD_ENV = readLeverageRubPerUsdFromEnv();
 
 export function LeverageCalculatorClient({
   payload,
@@ -113,44 +118,13 @@ export function LeverageCalculatorClient({
   const [rubPerUsd, setRubPerUsd] = useState<number | null>(null);
   const [fxStatus, setFxStatus] = useState<'idle' | 'loading' | 'ok' | 'err'>('idle');
   const [fxDate, setFxDate] = useState<string | null>(null);
+  const [manualRubPerUsdText, setManualRubPerUsdText] = useState('');
   const [inputCurrency, setInputCurrency] = useState<LeverageInputCurrency>(() => {
     const p = parseLeveragePresetJson(initialPresetJson) ?? DEFAULT_LEVERAGE_PRESET;
     return p.inputCurrency;
   });
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipPersistOnce = useRef(true);
-
-  useEffect(() => {
-    const p = parseLeveragePresetJson(initialPresetJson) ?? DEFAULT_LEVERAGE_PRESET;
-    const want: LeverageInputCurrency = p.inputCurrency === 'RUB' ? 'RUB' : 'USD';
-    const effective: LeverageInputCurrency =
-      want === 'RUB' && (rubPerUsd == null || rubPerUsd <= 0) ? 'USD' : want;
-    setInputCurrency(effective);
-    setTermYears(String(p.termYears));
-    setHorizonAfter(String(p.horizonMonthsAfterLoan));
-    setMode(p.mode);
-    setLoanPaymentTiming(p.loanPaymentTiming);
-    setLoanStartIso(
-      /^\d{4}-\d{2}-\d{2}$/.test(String(p.loanStartIso ?? '').trim())
-        ? String(p.loanStartIso).trim()
-        : todayIsoDateOnly(),
-    );
-    setEarlyPayoffEnabled(p.earlyPayoffEnabled === true);
-    setEarlyPayoffAfterMonth(String(p.earlyPayoffAfterMonth ?? 6));
-
-    if (effective === 'RUB' && rubPerUsd != null && rubPerUsd > 0) {
-      setPrincipal(String(Math.round(p.principalUsd * rubPerUsd)));
-      setMonthly(String(Math.round(p.monthlyPaymentUsd * rubPerUsd)));
-      setOtherMonthly(String(Math.round((p.otherMonthlyExpensesUsd ?? 0) * rubPerUsd)));
-      setEarlyCloseoutUsd(String(Math.round((p.earlyCloseoutUsd ?? 0) * rubPerUsd)));
-    } else {
-      setPrincipal(String(p.principalUsd));
-      setMonthly(String(p.monthlyPaymentUsd));
-      setOtherMonthly(String(p.otherMonthlyExpensesUsd ?? 0));
-      setEarlyCloseoutUsd(String(p.earlyCloseoutUsd ?? 0));
-    }
-    skipPersistOnce.current = true;
-  }, [initialPresetJson, rubPerUsd]);
 
   useEffect(() => {
     let alive = true;
@@ -180,7 +154,53 @@ export function LeverageCalculatorClient({
     };
   }, []);
 
-  const rubPerUsdSafe = rubPerUsd != null && rubPerUsd > 0 ? rubPerUsd : null;
+  const manualRubParsed = useMemo(() => {
+    const v = parseMoneyInput(manualRubPerUsdText);
+    return Number.isFinite(v) && v > 0 ? v : null;
+  }, [manualRubPerUsdText]);
+
+  const rubPerUsdSafe: number | null =
+    rubPerUsd != null && rubPerUsd > 0
+      ? rubPerUsd
+      : manualRubParsed ?? (LEVERAGE_RUB_PER_USD_ENV != null && LEVERAGE_RUB_PER_USD_ENV > 0 ? LEVERAGE_RUB_PER_USD_ENV : null);
+
+  const rubRateSource: 'cbr' | 'manual' | 'env' | 'none' = useMemo(() => {
+    if (rubPerUsd != null && rubPerUsd > 0) return 'cbr';
+    if (manualRubParsed != null) return 'manual';
+    if (LEVERAGE_RUB_PER_USD_ENV != null && LEVERAGE_RUB_PER_USD_ENV > 0) return 'env';
+    return 'none';
+  }, [rubPerUsd, manualRubParsed]);
+
+  useEffect(() => {
+    const p = parseLeveragePresetJson(initialPresetJson) ?? DEFAULT_LEVERAGE_PRESET;
+    const want: LeverageInputCurrency = p.inputCurrency === 'RUB' ? 'RUB' : 'USD';
+    const effective: LeverageInputCurrency = want === 'RUB' && rubPerUsdSafe == null ? 'USD' : want;
+    setInputCurrency(effective);
+    setTermYears(String(p.termYears));
+    setHorizonAfter(String(p.horizonMonthsAfterLoan));
+    setMode(p.mode);
+    setLoanPaymentTiming(p.loanPaymentTiming);
+    setLoanStartIso(
+      /^\d{4}-\d{2}-\d{2}$/.test(String(p.loanStartIso ?? '').trim())
+        ? String(p.loanStartIso).trim()
+        : todayIsoDateOnly(),
+    );
+    setEarlyPayoffEnabled(p.earlyPayoffEnabled === true);
+    setEarlyPayoffAfterMonth(String(p.earlyPayoffAfterMonth ?? 6));
+
+    if (effective === 'RUB' && rubPerUsdSafe != null) {
+      setPrincipal(String(Math.round(p.principalUsd * rubPerUsdSafe)));
+      setMonthly(String(Math.round(p.monthlyPaymentUsd * rubPerUsdSafe)));
+      setOtherMonthly(String(Math.round((p.otherMonthlyExpensesUsd ?? 0) * rubPerUsdSafe)));
+      setEarlyCloseoutUsd(String(Math.round((p.earlyCloseoutUsd ?? 0) * rubPerUsdSafe)));
+    } else {
+      setPrincipal(String(p.principalUsd));
+      setMonthly(String(p.monthlyPaymentUsd));
+      setOtherMonthly(String(p.otherMonthlyExpensesUsd ?? 0));
+      setEarlyCloseoutUsd(String(p.earlyCloseoutUsd ?? 0));
+    }
+    skipPersistOnce.current = true;
+  }, [initialPresetJson, rubPerUsdSafe]);
 
   const equityNum = payload.equityUsd != null && payload.equityUsd > 0 ? payload.equityUsd : 0;
 
@@ -514,6 +534,7 @@ export function LeverageCalculatorClient({
     earlyCloseoutUsd,
     inputCurrency,
     rubPerUsdSafe,
+    manualRubPerUsdText,
     persistPreset,
   ]);
 
@@ -594,17 +615,38 @@ export function LeverageCalculatorClient({
             переводятся по курсу ЦБ РФ для расчётов.
           </p>
           <p className="leverageMuted" style={{ marginTop: '0.35rem' }}>
-            {fxStatus === 'loading' ? 'Загрузка курса USD (ЦБ РФ, cbr-xml-daily.ru)…' : null}
-            {fxStatus === 'ok' && rubPerUsdSafe != null ? (
+            {fxStatus === 'loading' ? 'Загрузка курса USD (ЦБ РФ: json или xml)…' : null}
+            {rubPerUsdSafe != null ? (
               <>
                 Справочно: 1 USD = {rubPerUsdSafe.toLocaleString('ru-RU', { maximumFractionDigits: 4 })} ₽
-                {fxDate ? ` (дата курса ${fxDate})` : ''}.
+                {rubRateSource === 'cbr' && fxDate ? ` (дата курса ЦБ ${fxDate})` : null}
+                {rubRateSource === 'manual' ? ' (введён вручную)' : null}
+                {rubRateSource === 'env' ? ' (из NEXT_PUBLIC_LEVERAGE_RUB_PER_USD — API ЦБ недоступен)' : null}.
               </>
             ) : null}
-            {fxStatus === 'err' ? (
-              <>Не удалось получить курс ЦБ — доступен только ввод сумм кредита в USDT.</>
+            {fxStatus === 'err' && rubPerUsdSafe == null ? (
+              <>
+                Не удалось получить курс ЦБ — введите резервный курс ₽ за 1 USDT ниже или задайте{' '}
+                <code>NEXT_PUBLIC_LEVERAGE_RUB_PER_USD</code> в окружении Web, иначе доступен только ввод
+                сумм кредита в USDT. Пока курса нет, поля кредита в расчёте — только в USDT; ожидание
+                «рублей без деления на курс» давало бы неверные L и M и могло вешать предупреждения про
+                аннуитет.
+              </>
             ) : null}
           </p>
+          {fxStatus !== 'loading' && fxStatus !== 'idle' && rubPerUsd == null && LEVERAGE_RUB_PER_USD_ENV == null ? (
+            <label className="leverageMuted" style={{ display: 'block', marginTop: '0.5rem' }}>
+              <span className="leverageFieldLabel">Резерв: ₽ за 1 USDT (если ЦБ недоступен)</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={manualRubPerUsdText}
+                onChange={(e) => setManualRubPerUsdText(e.target.value)}
+                placeholder="например 95.5"
+                style={{ marginTop: '0.25rem', maxWidth: '12rem' }}
+              />
+            </label>
+          ) : null}
           <fieldset className="leverageModeFieldset" style={{ marginTop: '0.5rem' }}>
             <legend>Валюта ввода сумм кредита</legend>
             <label>
@@ -616,7 +658,7 @@ export function LeverageCalculatorClient({
               />{' '}
               USDT (как на счёте Bybit)
             </label>
-            <label>
+            <label title={rubPerUsdSafe == null ? 'Нужен курс ₽/USDT: ЦБ, резервное поле или NEXT_PUBLIC_LEVERAGE_RUB_PER_USD' : undefined}>
               <input
                 type="radio"
                 name="lev-input-ccy"
@@ -624,7 +666,7 @@ export function LeverageCalculatorClient({
                 onChange={() => commitInputCurrency('RUB')}
                 disabled={rubPerUsdSafe == null}
               />{' '}
-              ₽ (пересчёт в USDT по курсу ЦБ)
+              ₽ (пересчёт в USDT по курсу ЦБ, резервному полю или NEXT_PUBLIC_LEVERAGE_RUB_PER_USD)
             </label>
           </fieldset>
           <div

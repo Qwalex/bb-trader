@@ -19,6 +19,18 @@ export function parseMoneyInput(raw: string): number {
   return Number.parseFloat(String(raw ?? '').replace(',', '.')) || 0;
 }
 
+/**
+ * Резервный курс RUB за 1 USD для страницы кредитного калькулятора, если `GET /api/fx/rub-usd` недоступен
+ * (сеть, блокировка внешнего API и т.п.). Задаётся при сборке Next.js.
+ */
+export function readLeverageRubPerUsdFromEnv(): number | null {
+  if (typeof process === 'undefined' || process.env == null) return null;
+  const raw = process.env.NEXT_PUBLIC_LEVERAGE_RUB_PER_USD;
+  if (raw == null || String(raw).trim() === '') return null;
+  const v = Number.parseFloat(String(raw).replace(',', '.'));
+  return Number.isFinite(v) && v > 0 ? v : null;
+}
+
 /** Сумма в USDT из поля ввода: при валюте RUB — делим на курс. */
 export function loanFieldUsd(
   raw: string,
