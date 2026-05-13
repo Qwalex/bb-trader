@@ -6,10 +6,12 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import type { Prisma } from '@prisma/client';
 import { normalizeTradingPair, type SignalDto } from '@repo/shared';
 import { TelegramClient } from 'telegram';
 
+import { postCriticalNotifyText } from '../../common/critical-notify.util';
 import { formatError } from '../../common/format-error';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppLogService } from '../app-log/app-log.service';
@@ -640,6 +642,58 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       'Userbot: владелец сессии не задан (TELEGRAM_USERBOT_SESSION_OWNER_USER_ID) и в БД не один AuthUser — восстановление без явного владельца пропущено',
     );
     return null;
+  }
+
+  /**
+   * Те же предпосылки, что у watchdog/старта: userbot включён в настройках и есть строка сессии.
+   * Без кабинетного контекста — глобальное состояние процесса API.
+   */
+  private async isGlobalUserbotDisconnectedWhileExpected(): Promise<
+    false | { reason: string }
+  > {
+    const [enabled, session] = await Promise.all([
+      this.getBoolSetting('TELEGRAM_USERBOT_ENABLED', false),
+      this.settings.get('TELEGRAM_USERBOT_SESSION'),
+    ]);
+    if (!enabled || !session?.trim()) {
+      return false;
+    }
+    const ownerId = await this.resolveSessionOwnerUserIdForRestore();
+    if (!ownerId) {
+      return {
+        reason:
+          'не задан владелец сессии (TELEGRAM_USERBOT_SESSION_OWNER_USER_ID; при нескольких AuthUser нужен явный владелец)',
+      };
+    }
+    const client = this.userbotClient.getClientForOwnerUserId(ownerId);
+    const connected = Boolean(
+      client && (await this.userbotClient.isClientAuthorized(client)),
+    );
+    if (connected) {
+      return false;
+    }
+    return { reason: 'MTProto-клиент не поднят или не авторизован в этом процессе API' };
+  }
+
+  /**
+   * Пока userbot ожидаемо должен быть онлайн, но GramJS не подключён — каждую минуту POST на CRITICAL_NOTIFY_URL.
+   * Выкл.: `TELEGRAM_USERBOT_DISCONNECTED_CRITICAL_CRON=false`.
+   */
+  @Cron(CronExpression.EVERY_MINUTE)
+  async criticalNotifyIfUserbotDisconnected(): Promise<void> {
+    if (
+      String(process.env.TELEGRAM_USERBOT_DISCONNECTED_CRITICAL_CRON ?? '')
+        .trim()
+        .toLowerCase() === 'false'
+    ) {
+      return;
+    }
+    const down = await this.isGlobalUserbotDisconnectedWhileExpected();
+    if (!down) {
+      return;
+    }
+    const text = `[CRITICAL userbot] Userbot не подключён: ${down.reason}. Проверьте /telegram-userbot и логи API. ${new Date().toISOString()}`;
+    await postCriticalNotifyText(text, (m) => this.logger.warn(m));
   }
 
   async updateChat(

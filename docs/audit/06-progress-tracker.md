@@ -1664,3 +1664,13 @@
 - Manual verification: `npm run build -w apps/api` (pass); на стенде — в логах API видны фазы и при сбое `activePhase`; при кратковременной недоступности Bot API — повторный sync по backoff; `/logs` — warn по запуску при сбоях и info при восстановлении.
 - Docs updated: этот трекер, `04-operational-runbooks.md`.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-138
+
+- Status: `done`
+- Scope: Повторяющееся critical-уведомление при отключённом userbot при ожидаемой работе (включён флаг и есть сессия).
+- Files: `apps/api/src/modules/telegram-userbot/telegram-userbot.service.ts`, `.env.example`, `docs/audit/06-progress-tracker.md`, `AGENTS.md`
+- Changes: `@Cron(EVERY_MINUTE)` + `postCriticalNotifyText` при `TELEGRAM_USERBOT_ENABLED` и непустой `TELEGRAM_USERBOT_SESSION`, но без авторизованного MTProto для владельца сессии (или без разрешённого владельца); выкл. env `TELEGRAM_USERBOT_DISCONNECTED_CRITICAL_CRON=false`.
+- Manual verification: `npm run build -w apps/api`.
+- Docs updated: этот трекер, `AGENTS.md`, `.env.example`.
+- Linked risks (`SEC-###`): при нескольких репликах API — дублирование минутных POST (как и для других cron); без секретов в теле уведомления.
