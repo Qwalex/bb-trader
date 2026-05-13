@@ -217,45 +217,87 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
         }
       }
 
+      /** Один Bot API токен = один long polling; иначе второй `launch()` зависает на 60+ с. */
+      const tokenToCabinetIds = new Map<string, string[]>();
       for (const [cabinetId, cfg] of desired.entries()) {
-        if (this.launchedBotTokensByCabinet.get(cabinetId) === cfg.token) {
+        const list = tokenToCabinetIds.get(cfg.token);
+        if (list) {
+          list.push(cabinetId);
+        } else {
+          tokenToCabinetIds.set(cfg.token, [cabinetId]);
+        }
+      }
+
+      const attachSharedTokenCabinets = (
+        landed: Telegraf,
+        token: string,
+        cabinetIds: string[],
+        skipCabinetId: string | null,
+      ): void => {
+        for (const cid of cabinetIds) {
+          if (skipCabinetId && cid === skipCabinetId) {
+            continue;
+          }
+          if (this.launchedBotTokensByCabinet.get(cid) === token) {
+            continue;
+          }
+          const cfg = desired.get(cid);
+          if (!cfg) continue;
+          this.resetCabinetLaunchFailureTracking(cid);
+          this.botRegistry.addLaunchedBot(cid, landed);
+          this.launchedBotTokensByCabinet.set(cid, token);
+          this.logger.log(
+            `Telegram bot: cabinet=${cid} (${cfg.name}) syncId=${syncId} shares running bot instance with same token`,
+          );
+          void this.sendStartupGreetingForCabinet(cid).catch((e) =>
+            this.logger.warn(
+              `sendStartupGreetingForCabinet failed cabinet=${cid}: ${formatError(e)}`,
+            ),
+          );
+        }
+      };
+
+      for (const [token, cabinetIds] of tokenToCabinetIds.entries()) {
+        const allReady = cabinetIds.every(
+          (cid) => this.launchedBotTokensByCabinet.get(cid) === token,
+        );
+        if (allReady) {
           continue;
         }
 
         let reuseBot: Telegraf | null = null;
-        for (const [cid, tok] of this.launchedBotTokensByCabinet.entries()) {
-          if (tok === cfg.token) {
+        for (const cid of cabinetIds) {
+          if (this.launchedBotTokensByCabinet.get(cid) === token) {
             reuseBot = this.botRegistry.getScopedBotOnly(cid) ?? null;
             if (reuseBot) break;
           }
         }
         if (reuseBot) {
-          this.resetCabinetLaunchFailureTracking(cabinetId);
-          this.botRegistry.addLaunchedBot(cabinetId, reuseBot);
-          this.launchedBotTokensByCabinet.set(cabinetId, cfg.token);
-          this.logger.log(
-            `Telegram bot: cabinet=${cabinetId} (${cfg.name}) syncId=${syncId} shares running bot instance with same token`,
-          );
-          void this.sendStartupGreetingForCabinet(cabinetId).catch((e) =>
-            this.logger.warn(
-              `sendStartupGreetingForCabinet failed cabinet=${cabinetId}: ${formatError(e)}`,
-            ),
-          );
+          attachSharedTokenCabinets(reuseBot, token, cabinetIds, null);
           continue;
         }
 
-        const bot = new Telegraf(cfg.token, {
+        const leaderId = cabinetIds[0];
+        if (!leaderId) {
+          continue;
+        }
+        const leaderCfg = desired.get(leaderId);
+        if (!leaderCfg) {
+          continue;
+        }
+
+        const bot = new Telegraf(token, {
           handlerTimeout: 180_000,
         });
         bot.catch((err, ctx) => {
           const msg = err instanceof Error ? err.message : String(err);
           const stack = err instanceof Error ? err.stack : undefined;
           this.logger.error(
-            `Telegraf unhandled error (cabinet=${cabinetId}): ${msg} updateType=${ctx?.updateType ?? '?'}`,
+            `Telegraf unhandled error (tokenLeaderCabinet=${leaderId}): ${msg} updateType=${ctx?.updateType ?? '?'}`,
             stack,
           );
           void this.appLog.append('error', 'telegram', 'Telegraf unhandled error', {
-            cabinetId,
+            cabinetId: leaderId,
             errorMessage: msg,
             updateType: ctx?.updateType ?? '?',
             stack: stack ? stack.slice(0, 800) : undefined,
@@ -268,14 +310,23 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
               this.logger.warn(`Could not reply with error to user: ${String(e)}`),
             );
         });
-        this.registerHandlers(bot, cfg.token);
+        this.registerHandlers(bot, token);
+        if (cabinetIds.length > 1) {
+          this.logger.log(
+            `Telegram bot: один launch для токена, кабинетов=${cabinetIds.length} syncId=${syncId} leader=${leaderId} (${leaderCfg.name})`,
+          );
+        }
         try {
-          await this.launchCabinetBotWithTimeout(bot, cabinetId, cfg, syncId);
+          await this.launchCabinetBotWithTimeout(bot, leaderId, leaderCfg, syncId);
+          const landed = this.botRegistry.getScopedBotOnly(leaderId);
+          if (landed) {
+            attachSharedTokenCabinets(landed, token, cabinetIds, leaderId);
+          }
         } catch {
-          const fc = (this.cabinetLaunchConsecutiveFailures.get(cabinetId) ?? 0) + 1;
-          this.cabinetLaunchConsecutiveFailures.set(cabinetId, fc);
-          this.cabinetLaunchRecoveryPending.add(cabinetId);
-          this.scheduleCabinetLaunchRetryAfterFailure(cabinetId);
+          const fc = (this.cabinetLaunchConsecutiveFailures.get(leaderId) ?? 0) + 1;
+          this.cabinetLaunchConsecutiveFailures.set(leaderId, fc);
+          this.cabinetLaunchRecoveryPending.add(leaderId);
+          this.scheduleCabinetLaunchRetryAfterFailure(leaderId);
         }
       }
 
