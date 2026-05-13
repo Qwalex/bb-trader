@@ -90,6 +90,11 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
   private readonly cabinetLaunchConsecutiveFailures = new Map<string, number>();
   /** После ошибки в AppLog — при следующем успехе пишем info «recovered». */
   private readonly cabinetLaunchRecoveryPending = new Set<string>();
+  /**
+   * Long polling: следующий `getUpdates` после батча ждёт завершения всех обработчиков.
+   * Разбор сигнала (LLM) уводим в фон и сериализуем по userId, чтобы команды не залипали за минуты.
+   */
+  private readonly telegramHeavyInboundByUserId = new Map<number, Promise<unknown>>();
 
   constructor(
     private readonly settings: SettingsService,
@@ -754,6 +759,7 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
     }
     this.launchedBotTokensByCabinet.clear();
     this.botRegistry.clear();
+    this.telegramHeavyInboundByUserId.clear();
   }
 
   /**
@@ -895,6 +901,39 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
       select: { id: true },
     });
     return Boolean(linkedUser?.id);
+  }
+
+  /**
+   * Не блокирует compositor Telegraf: `handler` выполняется под контекстом кабинета и в очереди на userId.
+   */
+  private scheduleTelegramHeavyInbound(
+    uid: number,
+    cabinetId: string,
+    label: string,
+    ctx: Context,
+    handler: () => Promise<void>,
+  ): void {
+    const prev = this.telegramHeavyInboundByUserId.get(uid) ?? Promise.resolve();
+    const job = prev
+      .then(() => this.cabinetContext.runWithCabinetAsync(cabinetId, handler))
+      .catch(async (e) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        this.logger.error(
+          `Telegram deferred inbound (${label}) userId=${uid}: ${msg}`,
+          e instanceof Error ? e.stack : undefined,
+        );
+        try {
+          await ctx.reply(`Ошибка бота: ${msg}`);
+        } catch (replyErr) {
+          this.logger.warn(`TG deferred ctx.reply failed: ${formatError(replyErr)}`);
+        }
+      });
+    this.telegramHeavyInboundByUserId.set(uid, job);
+    void job.finally(() => {
+      if (this.telegramHeavyInboundByUserId.get(uid) === job) {
+        this.telegramHeavyInboundByUserId.delete(uid);
+      }
+    });
   }
 
   private async runWithUserCabinet<T>(userId: number, fn: () => Promise<T>): Promise<T> {
@@ -1588,12 +1627,20 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
         return next();
       }
       const candidates = routing.cabinetIds;
+      const linkedAuth = await this.prisma.authUser.findFirst({
+        where: { telegramUserId: String(uid) },
+        select: { id: true },
+      });
+      const authOk = Boolean(linkedAuth?.id);
+      const whitelistByCabinet = await Promise.all(
+        candidates.map(async (cid) => ({
+          cid,
+          whitelist: await this.getWhitelistUserIdsForCabinet(cid),
+        })),
+      );
       let chosen: string | null = null;
-      for (const cid of candidates) {
-        const ok = await this.cabinetContext.runWithCabinetAsync(cid, () =>
-          this.isAllowed(uid),
-        );
-        if (ok) {
+      for (const { cid, whitelist } of whitelistByCabinet) {
+        if (whitelist.includes(uid) || authOk) {
           chosen = cid;
           break;
         }
@@ -2025,38 +2072,72 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
           return;
         }
 
+        const scopedCabinetId = this.currentCabinetId();
+        if (!scopedCabinetId) {
+          await ctx.reply('Внутренняя ошибка: нет контекста кабинета.');
+          return;
+        }
+
         if (this.conversationState.drafts.has(uid)) {
           const draft = this.conversationState.getActiveDraft(uid)!;
           if (draft.phase === 'collecting') {
             this.logger.log(`TG text: continue draft userId=${uid}`);
-            const res = await this.transcript.continueSignalDraft(
-              draft.partial ?? {},
-              draft.userTurns,
-              text,
-              await this.draftFlow.buildTelegramTranscriptOverrides(),
+            this.scheduleTelegramHeavyInbound(
+              uid,
+              scopedCabinetId,
+              'text_draft_collect',
+              ctx,
+              async () => {
+                void ctx.sendChatAction('typing').catch(() => undefined);
+                const res = await this.transcript.continueSignalDraft(
+                  draft.partial ?? {},
+                  draft.userTurns,
+                  text,
+                  await this.draftFlow.buildTelegramTranscriptOverrides(),
+                );
+                await this.draftFlow.handleParseResult(ctx, res, text);
+              },
             );
-            await this.draftFlow.handleParseResult(ctx, res, text);
             return;
           }
           if (draft.phase === 'ready' && draft.signal) {
+            const signal = draft.signal;
             this.logger.log(`TG text: correction draft userId=${uid}`);
-            const res = await this.transcript.applyCorrection(
-              draft.signal,
-              text,
-              await this.draftFlow.buildTelegramTranscriptOverrides(),
+            this.scheduleTelegramHeavyInbound(
+              uid,
+              scopedCabinetId,
+              'text_draft_correct',
+              ctx,
+              async () => {
+                void ctx.sendChatAction('typing').catch(() => undefined);
+                const res = await this.transcript.applyCorrection(
+                  signal,
+                  text,
+                  await this.draftFlow.buildTelegramTranscriptOverrides(),
+                );
+                await this.draftFlow.handleParseResult(ctx, res, text);
+              },
             );
-            await this.draftFlow.handleParseResult(ctx, res, text);
             return;
           }
         }
 
-        this.logger.log(`TG text: new signal parse userId=${uid}`);
-        const res = await this.transcript.parse(
-          'text',
-          { text },
-          await this.draftFlow.buildTelegramTranscriptOverrides(),
+        this.logger.log(`TG text: new signal parse userId=${uid} (deferred)`);
+        this.scheduleTelegramHeavyInbound(
+          uid,
+          scopedCabinetId,
+          'text_new_signal',
+          ctx,
+          async () => {
+            void ctx.sendChatAction('typing').catch(() => undefined);
+            const res = await this.transcript.parse(
+              'text',
+              { text },
+              await this.draftFlow.buildTelegramTranscriptOverrides(),
+            );
+            await this.draftFlow.handleParseResult(ctx, res, text);
+          },
         );
-        await this.draftFlow.handleParseResult(ctx, res, text);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         this.logger.error(`TG text handler: ${msg}`, e instanceof Error ? e.stack : undefined);
@@ -2077,7 +2158,12 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
       const link = await ctx.telegram.getFileLink(best.file_id);
       const buf = await fetch(link.href).then((r) => r.arrayBuffer());
       const base64 = Buffer.from(buf).toString('base64');
-      this.logger.log(`TG photo: parse userId=${uid}`);
+      const scopedCabinetId = this.currentCabinetId();
+      if (!scopedCabinetId) {
+        await ctx.reply('Внутренняя ошибка: нет контекста кабинета.');
+        return;
+      }
+      this.logger.log(`TG photo: parse userId=${uid} (deferred)`);
       const draft = this.conversationState.getActiveDraft(uid);
       const continuation =
         draft?.phase === 'collecting' || draft?.phase === 'ready'
@@ -2091,16 +2177,19 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
               },
             }
           : {};
-      const res = await this.transcript.parse(
-        'image',
-        {
-          imageBase64: base64,
-          imageMime: 'image/jpeg',
-          ...continuation,
-        },
-        await this.draftFlow.buildTelegramTranscriptOverrides(),
-      );
-      await this.draftFlow.handleParseResult(ctx, res, '[photo]');
+      this.scheduleTelegramHeavyInbound(uid, scopedCabinetId, 'photo_parse', ctx, async () => {
+        void ctx.sendChatAction('typing').catch(() => undefined);
+        const res = await this.transcript.parse(
+          'image',
+          {
+            imageBase64: base64,
+            imageMime: 'image/jpeg',
+            ...continuation,
+          },
+          await this.draftFlow.buildTelegramTranscriptOverrides(),
+        );
+        await this.draftFlow.handleParseResult(ctx, res, '[photo]');
+      });
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         this.logger.error(`TG photo handler: ${msg}`, e instanceof Error ? e.stack : undefined);
@@ -2120,7 +2209,12 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
       const link = await ctx.telegram.getFileLink(fileId);
       const buf = await fetch(link.href).then((r) => r.arrayBuffer());
       const base64 = Buffer.from(buf).toString('base64');
-      this.logger.log(`TG voice: parse userId=${uid}`);
+      const scopedCabinetId = this.currentCabinetId();
+      if (!scopedCabinetId) {
+        await ctx.reply('Внутренняя ошибка: нет контекста кабинета.');
+        return;
+      }
+      this.logger.log(`TG voice: parse userId=${uid} (deferred)`);
       const draft = this.conversationState.getActiveDraft(uid);
       const continuation =
         draft?.phase === 'collecting' || draft?.phase === 'ready'
@@ -2134,16 +2228,19 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
               },
             }
           : {};
-      const res = await this.transcript.parse(
-        'audio',
-        {
-          audioBase64: base64,
-          audioMime: 'audio/ogg',
-          ...continuation,
-        },
-        await this.draftFlow.buildTelegramTranscriptOverrides(),
-      );
-      await this.draftFlow.handleParseResult(ctx, res, '[voice]');
+      this.scheduleTelegramHeavyInbound(uid, scopedCabinetId, 'voice_parse', ctx, async () => {
+        void ctx.sendChatAction('typing').catch(() => undefined);
+        const res = await this.transcript.parse(
+          'audio',
+          {
+            audioBase64: base64,
+            audioMime: 'audio/ogg',
+            ...continuation,
+          },
+          await this.draftFlow.buildTelegramTranscriptOverrides(),
+        );
+        await this.draftFlow.handleParseResult(ctx, res, '[voice]');
+      });
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         this.logger.error(`TG voice handler: ${msg}`, e instanceof Error ? e.stack : undefined);

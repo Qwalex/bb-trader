@@ -18,7 +18,6 @@ import {
   replyTelegramHtmlChunks,
   splitTelegramHtml,
   startOfToday,
-  todayDateKey,
 } from '../utils/telegram-html.util';
 import {
   buildTradesNumberKeyboard,
@@ -55,29 +54,26 @@ export class TelegramChatMenuService {
     ctx: Context,
     opts?: { edit?: { chatId: number; messageId: number } },
   ): Promise<void> {
-    const details = await this.bybit.getUnifiedUsdtBalanceDetails();
+    const [details, bundle] = await Promise.all([
+      this.bybit.getUnifiedUsdtBalanceDetails(),
+      this.orders.getTelegramMenuSummaryBundle(),
+    ]);
     const balStr =
       details !== undefined && Number.isFinite(details.availableUsd)
         ? `баланс ${details.totalUsd.toFixed(2)} · доступный баланс ${details.availableUsd.toFixed(2)} USDT`
         : '—';
-    const stats = await this.orders.getDashboardStats();
-    const pnlDay = await this.orders.getPnlSeries('day');
-    const todayKey = todayDateKey();
-    const todayRow = pnlDay.find((p) => p.date === todayKey);
-    const todayPnlStr =
-      todayRow !== undefined ? todayRow.pnl.toFixed(2) : '—';
-    const top = await this.orders.getTopSources({ limit: 5 });
-    const best = top.bestWinrate;
-    const worst = top.worstWinrate;
+    const todayPnlStr = bundle.todayPnl.toFixed(2);
+    const best = bundle.bestWinrate;
+    const worst = bundle.worstWinrate;
     let lines =
       `<b>📊 Сводка</b>\n` +
       `<i>Как на дашборде · все источники</i>\n\n` +
       `<b>💵 USDT</b> (Bybit)\n<code>${escapeTelegramHtml(balStr)}</code>\n\n` +
       `<b>📅 PnL за сегодня</b> (закрытые)\n<code>${escapeTelegramHtml(todayPnlStr)}</code>\n\n` +
-      `<b>📈 Winrate</b>\n<code>${stats.winrate.toFixed(1)}%</code>\n\n` +
-      `<b>Σ PnL всего</b>\n<code>${stats.totalPnl.toFixed(2)}</code>\n\n` +
-      `<b>Закрыто</b> · ${stats.totalClosed} <i>(W ${stats.wins} / L ${stats.losses})</i>\n` +
-      `<b>Открытые сигналы</b> · ${stats.openSignals}\n`;
+      `<b>📈 Winrate</b>\n<code>${bundle.winrate.toFixed(1)}%</code>\n\n` +
+      `<b>Σ PnL всего</b>\n<code>${bundle.totalPnl.toFixed(2)}</code>\n\n` +
+      `<b>Закрыто</b> · ${bundle.totalClosed} <i>(W ${bundle.wins} / L ${bundle.losses})</i>\n` +
+      `<b>Открытые сигналы</b> · ${bundle.openSignals}\n`;
     if (best) {
       lines +=
         `\n────────────\n<b>▲ Лучший WR</b> по источнику\n` +

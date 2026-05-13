@@ -158,6 +158,194 @@ export class OrdersService {
     };
   }
 
+  /**
+   * Как в getDashboardStats / getSourceStats: сигнал учитывается, если `!excluded.has(String(source ?? ''))`.
+   */
+  private sourceNotExcludedWhere(excluded: Set<string>): Prisma.SignalWhereInput {
+    if (excluded.size === 0) {
+      return {};
+    }
+    const orParts: Prisma.SignalWhereInput[] = [];
+    for (const k of excluded) {
+      if (k === '') {
+        orParts.push({ source: null });
+        orParts.push({ source: '' });
+      } else {
+        orParts.push({ source: k });
+      }
+    }
+    return { NOT: { OR: orParts } };
+  }
+
+  private startOfTodayLocal(): Date {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+
+  /**
+   * Компактные агрегаты для Telegram «Сводка» — без findMany по всей истории сигналов
+   * (иначе при десятках тысяч сделок ответ занимает минуты).
+   */
+  async getTelegramMenuSummaryBundle(): Promise<{
+    winrate: number;
+    wins: number;
+    losses: number;
+    totalClosed: number;
+    totalPnl: number;
+    openSignals: number;
+    todayPnl: number;
+    bestWinrate: { source: string | null; winrate: number; wL: string } | null;
+    worstWinrate: { source: string | null; winrate: number; wL: string } | null;
+  }> {
+    const [excluded, statsResetAt] = await Promise.all([
+      this.getExcludedSourcesSet(),
+      this.getStatsResetAt(),
+    ]);
+    const srcEx = this.sourceNotExcludedWhere(excluded);
+    const closedCommon = {
+      deletedAt: null,
+      status: {
+        in: ['CLOSED_WIN', 'CLOSED_LOSS', 'CLOSED_MIXED'],
+      },
+      ...(statsResetAt ? { closedAt: { gte: statsResetAt } } : {}),
+      ...srcEx,
+    };
+    const dayStart = this.startOfTodayLocal();
+    const dayEnd = new Date(dayStart.getTime() + 86_400_000);
+    const todayClosedFrom = new Date(
+      Math.max(dayStart.getTime(), statsResetAt?.getTime() ?? dayStart.getTime()),
+    );
+    const closedTodayWhere = {
+      ...closedCommon,
+      closedAt: {
+        gte: todayClosedFrom,
+        lt: dayEnd,
+      },
+    };
+
+    const [closedByStatus, openSignals, todayAgg, bySourceStatus] = await Promise.all([
+      this.prisma.signal.groupBy({
+        by: ['status'],
+        where: this.withCabinetScope(closedCommon),
+        _count: { _all: true },
+        _sum: { realizedPnl: true },
+      }),
+      this.prisma.signal.count({
+        where: this.withCabinetScope({
+          deletedAt: null,
+          status: { in: ['PENDING', 'ORDERS_PLACED', 'OPEN', 'PARSED'] },
+          ...(statsResetAt ? { createdAt: { gte: statsResetAt } } : {}),
+          ...srcEx,
+        }),
+      }),
+      this.prisma.signal.aggregate({
+        where: this.withCabinetScope(closedTodayWhere),
+        _sum: { realizedPnl: true },
+      }),
+      this.prisma.signal.groupBy({
+        by: ['source', 'status'],
+        where: this.withCabinetScope(closedCommon),
+        _count: { _all: true },
+        _sum: { realizedPnl: true },
+      }),
+    ]);
+
+    let wins = 0;
+    let losses = 0;
+    let totalPnl = 0;
+    for (const row of closedByStatus) {
+      const n = row._count._all;
+      totalPnl += row._sum.realizedPnl ?? 0;
+      if (row.status === 'CLOSED_WIN') wins += n;
+      else if (row.status === 'CLOSED_LOSS') losses += n;
+    }
+    const totalClosed = wins + losses;
+    const winrate = computeWinratePercent(wins, losses);
+    const todayPnl = todayAgg._sum.realizedPnl ?? 0;
+
+    type Acc = { wins: number; losses: number; source: string | null; totalPnl: number };
+    const perSource = new Map<string, Acc>();
+    const keyOf = (s: string | null) => (s != null && s.trim().length > 0 ? s : '—');
+    for (const row of bySourceStatus) {
+      if (excluded.has(String(row.source ?? ''))) {
+        continue;
+      }
+      const key = keyOf(row.source);
+      const src = key === '—' ? null : key;
+      let acc = perSource.get(key);
+      if (!acc) {
+        acc = { wins: 0, losses: 0, source: src, totalPnl: 0 };
+        perSource.set(key, acc);
+      }
+      const n = row._count._all;
+      acc.totalPnl += row._sum.realizedPnl ?? 0;
+      if (row.status === 'CLOSED_WIN') acc.wins += n;
+      else if (row.status === 'CLOSED_LOSS') acc.losses += n;
+    }
+
+    type WrRow = { source: string | null; wins: number; losses: number; totalPnl: number };
+    const wrRows: WrRow[] = [];
+    for (const acc of perSource.values()) {
+      if (acc.wins + acc.losses === 0) continue;
+      wrRows.push({
+        source: acc.source,
+        wins: acc.wins,
+        losses: acc.losses,
+        totalPnl: acc.totalPnl,
+      });
+    }
+    const byWin = [...wrRows].sort((a, b) => {
+      const wrA = computeWinratePercent(a.wins, a.losses);
+      const wrB = computeWinratePercent(b.wins, b.losses);
+      if (wrB !== wrA) return wrB - wrA;
+      const aDec = a.wins + a.losses;
+      const bDec = b.wins + b.losses;
+      if (bDec !== aDec) return bDec - aDec;
+      return b.totalPnl - a.totalPnl;
+    });
+    const bestWinrate =
+      byWin.length > 0
+        ? {
+            source: byWin[0]!.source,
+            winrate: computeWinratePercent(byWin[0]!.wins, byWin[0]!.losses),
+            wL: `${byWin[0]!.wins} / ${byWin[0]!.losses}`,
+          }
+        : null;
+    const byWorst = [...wrRows].sort((a, b) => {
+      const wrA = computeWinratePercent(a.wins, a.losses);
+      const wrB = computeWinratePercent(b.wins, b.losses);
+      if (wrA !== wrB) return wrA - wrB;
+      const aDec = a.wins + a.losses;
+      const bDec = b.wins + b.losses;
+      if (bDec !== aDec) return bDec - aDec;
+      return a.totalPnl - b.totalPnl;
+    });
+    let worstWinrate =
+      byWorst.length > 0
+        ? {
+            source: byWorst[0]!.source,
+            winrate: computeWinratePercent(byWorst[0]!.wins, byWorst[0]!.losses),
+            wL: `${byWorst[0]!.wins} / ${byWorst[0]!.losses}`,
+          }
+        : null;
+    if (bestWinrate && worstWinrate && bestWinrate.source === worstWinrate.source) {
+      worstWinrate = null;
+    }
+
+    return {
+      winrate,
+      wins,
+      losses,
+      totalClosed,
+      totalPnl,
+      openSignals,
+      todayPnl,
+      bestWinrate,
+      worstWinrate,
+    };
+  }
+
   /** Для API списка сделок: убрать вложенный `cabinet`, добавить плоское имя для UI. */
   private toTradeListClientRow<
     T extends {

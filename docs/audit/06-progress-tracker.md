@@ -1684,3 +1684,25 @@
 - Manual verification: `npm run build -w apps/api`.
 - Docs updated: этот трекер, `AGENTS.md`, `.env.example`.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-141
+
+- Status: `done`
+- Scope: Telegram «Сводка» — убрать многоминутные задержки из-за `findMany` по всей истории сигналов.
+- Files: `apps/api/src/modules/orders/orders.service.ts`, `apps/api/src/modules/telegram/services/telegram-chat-menu.service.ts`, `docs/audit/06-progress-tracker.md`
+- Changes: `getTelegramMenuSummaryBundle()` — агрегаты Prisma (`groupBy`, `count`, `aggregate`) + фильтр исключённых источников как в дашборде; `handleMenuSummary` — `Promise.all` Bybit + bundle вместо `getDashboardStats` / `getPnlSeries` / `getTopSources`.
+- Manual verification: `npm run build -w apps/api`; ручная проверка «Сводка» в боте — время ответа секунды, цифры согласованы с дашбордом по тем же правилам (STATS_RESET_AT, SOURCE_EXCLUDE_LIST).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-142
+
+- Status: `done`
+- Scope: Долгий ответ бота на все команды (в т.ч. `/start`) из-за long polling и тяжёлого разбора сигнала; ускорение ACL и горячего пути настроек.
+- Files: `apps/api/src/modules/telegram/services/telegram.service.ts`, `apps/api/src/modules/settings/settings.service.ts`, `docs/audit/06-progress-tracker.md`, `AGENTS.md`
+- Findings: Telegraf v4 при polling делает `await Promise.all(updates.map(handleUpdate))` — пока не завершится разбор сигнала (LLM), следующий батч `getUpdates` не запрашивается; middleware ACL вызывал `isAllowed` по очереди кабинетов с повторным `authUser.findFirst` на каждый кабинет; `Settings.get` при попадании в кэш всё равно вызывал `resolveCurrentUserId()` (лишний round-trip к БД при промахе owner cache).
+- Changes: разбор текста/фото/голоса — `scheduleTelegramHeavyInbound` (очередь по userId, `runWithCabinetAsync`, ответ об ошибке в чат); typing внутри отложенной задачи; ACL middleware — один запрос AuthUser + `Promise.all` whitelist по кабинетам; `Settings.get` — ранний `readCache` до `resolveCurrentUserId`; очистка карты очереди в `onModuleDestroy`.
+- Decomposition notes (`utils/constants/hooks/types`): логика остаётся в `telegram.service.ts` (узкая правка поведения polling).
+- Manual verification: `npm run build -w apps/api`; после деплоя — при долгом разборе сигнала команды `/start`, `/menu`, кнопки меню отвечают без ожидания LLM; ответ по сигналу приходит из очереди по порядку сообщений пользователя.
+- Docs updated: этот трекер, `AGENTS.md`.
+- Linked risks (`SEC-###`): N/A

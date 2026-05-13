@@ -156,6 +156,10 @@ export class SettingsService {
 
   async get(key: string): Promise<string | undefined> {
     const cabinetId = this.currentCabinetId();
+    const cachedHit = this.readCache(cabinetId, key);
+    if (cachedHit !== null) {
+      return cachedHit;
+    }
     const ownerUserId = await this.resolveCurrentUserId();
     const cached = this.readCache(cabinetId, key);
     if (cached !== null) {
