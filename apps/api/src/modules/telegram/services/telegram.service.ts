@@ -271,7 +271,7 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
         this.registerHandlers(bot, cfg.token);
         try {
           await this.launchCabinetBotWithTimeout(bot, cabinetId, cfg, syncId);
-        } catch (e) {
+        } catch {
           const fc = (this.cabinetLaunchConsecutiveFailures.get(cabinetId) ?? 0) + 1;
           this.cabinetLaunchConsecutiveFailures.set(cabinetId, fc);
           this.cabinetLaunchRecoveryPending.add(cabinetId);
