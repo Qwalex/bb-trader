@@ -84,10 +84,68 @@ export type LeverageOutlook = {
   /** Как в симуляции совмещаются M и r (см. `LeverageLoanPaymentTiming`). */
   loanPaymentTiming: LeverageLoanPaymentTiming;
 
+  /**
+   * Подразумеваемая ставка кредита из пары (L, M, срок), если платёж — ровный аннуитет:
+   * M = L·i(1+i)ⁿ/((1+i)ⁿ−1), i — месячная; null если комбинация несовместима.
+   */
+  loanImpliedMonthlyRate: number | null;
+  /** Номинальная годовая: 12·i (в долях единицы, для отображения ×100). */
+  loanNominalApr: number | null;
+  /** Эффективная годовая: (1+i)¹²−1. */
+  loanEffectiveAnnualRate: number | null;
+
   warnings: string[];
 };
 
 const DAYS_PER_MONTH = 30;
+
+/**
+ * Месячная ставка i из аннуитета: M = L · i(1+i)ⁿ / ((1+i)ⁿ − 1).
+ * При M ≤ L/n безположительного i нет (платёж не покрывает даже равномерное погашение тела без %%).
+ */
+export function impliedMonthlyRateFromAnnuity(
+  principalUsd: number,
+  monthlyPaymentUsd: number,
+  termMonths: number,
+): number | null {
+  const L = Number.isFinite(principalUsd) ? Math.max(0, principalUsd) : 0;
+  const M = Number.isFinite(monthlyPaymentUsd) ? Math.max(0, monthlyPaymentUsd) : 0;
+  const n = Math.max(0, Math.floor(Number.isFinite(termMonths) ? termMonths : 0));
+  if (!(L > 0 && M > 0 && n >= 1)) return null;
+
+  const ratio = M / L;
+  const minInterestFree = 1 / n;
+  if (ratio < minInterestFree - 1e-12) return null;
+  if (ratio <= minInterestFree + 1e-14) return 0;
+
+  const paymentFactor = (i: number): number => {
+    if (i <= 1e-14) return minInterestFree;
+    const ip1 = 1 + i;
+    const p = Math.pow(ip1, n);
+    return (i * p) / (p - 1);
+  };
+
+  let lo = 0;
+  let hi = 0.01;
+  while (paymentFactor(hi) < ratio && hi < 50) {
+    hi *= 2;
+  }
+  if (paymentFactor(hi) < ratio) return null;
+
+  for (let k = 0; k < 120; k++) {
+    const mid = (lo + hi) / 2;
+    const f = paymentFactor(mid);
+    if (Math.abs(f - ratio) <= Math.max(ratio * 1e-12, 1e-14)) return mid;
+    if (f < ratio) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+export function formatPercentRate(n: number | null | undefined, digits = 2): string {
+  if (n == null || !Number.isFinite(n)) return '—';
+  return `${(n * 100).toFixed(digits)} %`;
+}
 
 export function monthGrowthFactorFromRDaily(rDaily: number): number {
   return Math.pow(1 + rDaily, DAYS_PER_MONTH);
@@ -309,6 +367,18 @@ export function computeLeverageOutlook(params: {
   const totalPaidUsd = M * termM;
   const overpaymentUsd = totalPaidUsd - L;
 
+  const iMonth = impliedMonthlyRateFromAnnuity(L, M, termM);
+  const loanImpliedMonthlyRate = iMonth != null && Number.isFinite(iMonth) ? iMonth : null;
+  const loanNominalApr = loanImpliedMonthlyRate != null ? loanImpliedMonthlyRate * 12 : null;
+  const loanEffectiveAnnualRate =
+    loanImpliedMonthlyRate != null ? Math.pow(1 + loanImpliedMonthlyRate, 12) - 1 : null;
+
+  if (L > 0 && M > 0 && termM >= 1 && iMonth === null && M / L < 1 / termM - 1e-12) {
+    warnings.push(
+      'Платёж меньше L/T — для классического аннуитета комбинация несовместима; подразумеваемая годовая ставка по кредиту не выведена.',
+    );
+  }
+
   let monthsToRecoverOverpayment: number | null = null;
   if (overpaymentUsd > 0 && netMonthlyStartUsd != null && netMonthlyStartUsd > 1e-6) {
     monthsToRecoverOverpayment = Math.ceil(overpaymentUsd / netMonthlyStartUsd);
@@ -450,6 +520,9 @@ export function computeLeverageOutlook(params: {
     earlyCloseoutVsAnnuityTailUsd,
     wentNegativeDuringLoanEarly,
     loanPaymentTiming: paymentTiming,
+    loanImpliedMonthlyRate,
+    loanNominalApr,
+    loanEffectiveAnnualRate,
     warnings,
   };
 }

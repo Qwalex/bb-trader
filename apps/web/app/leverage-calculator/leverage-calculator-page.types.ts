@@ -1,5 +1,7 @@
 import type { LeverageCalcMode, LeverageLoanPaymentTiming } from './leverage-calculator-page.util';
 
+export type LeverageInputCurrency = 'USD' | 'RUB';
+
 export type LeverageCalculatorPayload = {
   equityUsd: number | null;
   expectedPnlPerDayUsd: number | null;
@@ -11,6 +13,8 @@ export type LeverageCalculatorPayload = {
 
 export type LeverageCalculatorPresetV1 = {
   v: 1;
+  /** Валюта ввода сумм кредита в форме; в настройках всегда хранятся USDT-числа. */
+  inputCurrency: LeverageInputCurrency;
   principalUsd: number;
   monthlyPaymentUsd: number;
   termYears: number;

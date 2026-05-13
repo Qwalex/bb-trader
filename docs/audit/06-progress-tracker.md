@@ -1606,7 +1606,17 @@
 - Status: `done`
 - Scope: Web `/leverage-calculator` — платёж M с единого счёта E+L; выбор порядка шага месяца; пресет и снимок для ИИ.
 - Files: `apps/web/app/leverage-calculator/leverage-calculator-page.util.ts`, `LeverageCalculatorClient.tsx`, `leverage-calculator-preset.util.ts`, `leverage-calculator-page.types.ts`, `leverage-calculator-ai.util.ts`, `docs/audit/06-progress-tracker.md`
-- Changes: `simulateLeverageLoan` / `computeLeverageOutlook` с `loanPaymentTiming` (после доходности месяца vs до); траектории и график; радио в UI; поле в `LeverageCalculatorPresetV1`; `loanPaymentTiming` в `outlookSnapshot` для ИИ; `grossMonthlyStartUsd` / `netMonthlyStartUsd` согласованы с первым дискретным месяцем (не 30×день), чтобы не противоречить вердикту по горизонту.
+- Changes: `simulateLeverageLoan` / `computeLeverageOutlook` с `loanPaymentTiming`; траектории и график; радио в UI; поле в пресете; `loanPaymentTiming` в `outlookSnapshot`; `grossMonthlyStartUsd` / `netMonthlyStartUsd` согласованы с первым дискретным месяцем; подразумеваемая ставка кредита из аннуитета (L, M, T) — `impliedMonthlyRateFromAnnuity`, поля `loanImpliedMonthlyRate` / `loanNominalApr` / `loanEffectiveAnnualRate` в outlook, блок в UI и в снимке для ИИ.
 - Manual verification: `npm run check-types -w web`.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-133
+
+- Status: `done`
+- Scope: Web `/leverage-calculator` — ввод сумм кредита в ₽ с конвертацией в USDT по курсу ЦБ; дублирование сумм в ₽ в UI и тултипе графика.
+- Files: `apps/web/app/api/fx/rub-usd/route.ts`, `apps/web/app/leverage-calculator/leverage-calculator-fx.util.ts`, `leverage-calculator-dual-money.tsx`, `LeverageCalculatorClient.tsx`, `LeverageCalculatorCharts.tsx`, `leverage-calculator-preset.util.ts`, `leverage-calculator-page.types.ts`, `docs/audit/06-progress-tracker.md`
+- Changes: прокси курса `GET /api/fx/rub-usd` (cbr-xml-daily.ru, revalidate 1 ч); пресет `inputCurrency`; расчёты и сохранение в USDT; `DualUsdRub` / `DualUsdRubSigned`.
+- Manual verification: `npm run check-types -w web`; smoke `fetch` к cbr-xml-daily.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): зависимость от внешнего публичного API ЦБ (доступность/формат); без секретов.

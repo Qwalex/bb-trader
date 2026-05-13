@@ -14,6 +14,7 @@ import {
 } from 'recharts';
 
 import type { TrajectoryPoint } from './leverage-calculator-page.util';
+import { formatRubAmount } from './leverage-calculator-fx.util';
 
 export type LeverageTrajectoryChartPoint = TrajectoryPoint & {
   /** Тот же r, только стартовый E и без займа/платежей: E·(1+r)³⁰ᵐ. */
@@ -28,6 +29,8 @@ type Props = {
   termMonths: number;
   /** Месяц, в конце которого в сценарии досрочного закрыт долг (для вертикали). */
   earlyCloseMonth: number | null;
+  /** Курс ЦБ: рублей за 1 USD — для подписи в подсказке графика. */
+  rubPerUsd: number | null;
 };
 
 function formatK(v: number): string {
@@ -37,7 +40,7 @@ function formatK(v: number): string {
   return v.toFixed(0);
 }
 
-export function LeverageCalculatorCharts({ data, termMonths, earlyCloseMonth }: Props) {
+export function LeverageCalculatorCharts({ data, termMonths, earlyCloseMonth, rubPerUsd }: Props) {
   const [chartReady, setChartReady] = useState(false);
   useEffect(() => {
     setChartReady(true);
@@ -133,10 +136,12 @@ export function LeverageCalculatorCharts({ data, termMonths, earlyCloseMonth }: 
                           : name === 'cumulativePaidEarlyUsd'
                             ? 'Выплачено Σ (досрочно)'
                             : String(name ?? '');
-                return [
-                  Number.isFinite(n) ? `${n.toFixed(2)} USDT` : '—',
-                  label,
-                ];
+                const usdStr = Number.isFinite(n) ? `${n.toFixed(2)} USDT` : '—';
+                const rub =
+                  rubPerUsd != null && rubPerUsd > 0 && Number.isFinite(n)
+                    ? formatRubAmount(n * rubPerUsd, 0)
+                    : null;
+                return [rub ? `${usdStr} (~ ${rub})` : usdStr, label];
               }}
             />
             <Legend />
