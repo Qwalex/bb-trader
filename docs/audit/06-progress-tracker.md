@@ -1701,8 +1701,30 @@
 - Scope: Долгий ответ бота на все команды (в т.ч. `/start`) из-за long polling и тяжёлого разбора сигнала; ускорение ACL и горячего пути настроек.
 - Files: `apps/api/src/modules/telegram/services/telegram.service.ts`, `apps/api/src/modules/settings/settings.service.ts`, `docs/audit/06-progress-tracker.md`, `AGENTS.md`
 - Findings: Telegraf v4 при polling делает `await Promise.all(updates.map(handleUpdate))` — пока не завершится разбор сигнала (LLM), следующий батч `getUpdates` не запрашивается; middleware ACL вызывал `isAllowed` по очереди кабинетов с повторным `authUser.findFirst` на каждый кабинет; `Settings.get` при попадании в кэш всё равно вызывал `resolveCurrentUserId()` (лишний round-trip к БД при промахе owner cache).
-- Changes: разбор текста/фото/голоса — `scheduleTelegramHeavyInbound` (очередь по userId, `runWithCabinetAsync`, ответ об ошибке в чат); typing внутри отложенной задачи; ACL middleware — один запрос AuthUser + `Promise.all` whitelist по кабинетам; `Settings.get` — ранний `readCache` до `resolveCurrentUserId`; очистка карты очереди в `onModuleDestroy`.
+- Changes: разбор текста/фото/голоса — `scheduleTelegramHeavyInbound` (очередь по паре кабинет+userId, см. AUD-144; `runWithCabinetAsync`, ответ об ошибке в чат); typing внутри отложенной задачи; ACL middleware — один запрос AuthUser + `Promise.all` whitelist по кабинетам; `Settings.get` — ранний `readCache` до `resolveCurrentUserId`; очистка карты очереди в `onModuleDestroy`.
 - Decomposition notes (`utils/constants/hooks/types`): логика остаётся в `telegram.service.ts` (узкая правка поведения polling).
 - Manual verification: `npm run build -w apps/api`; после деплоя — при долгом разборе сигнала команды `/start`, `/menu`, кнопки меню отвечают без ожидания LLM; ответ по сигналу приходит из очереди по порядку сообщений пользователя.
+- Docs updated: этот трекер, `AGENTS.md`.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-143
+
+- Status: `done`
+- Scope: Несколько кабинетов с разными ботами — отвечает быстро только один, остальные «висят» до таймаута launch.
+- Files: `apps/api/src/modules/telegram/services/telegram.service.ts`, `.env.example`, `docs/audit/06-progress-tracker.md`, `AGENTS.md`
+- Findings: `withTelegramBotLaunchSerialized` оборачивал `await bot.launch()`; в Telegraf 4 long polling `launch()` ждёт бесконечный цикл `getUpdates` → глобальный gate не отпускался до `Promise.race` с `TELEGRAM_BOT_LAUNCH_TIMEOUT_MS`, остальные токены стояли в очереди.
+- Changes: под сериализацией только `deleteWebhook` + stagger; перед polling — `getMe` с таймаутом (`TELEGRAM_BOT_LAUNCH_TIMEOUT_MS`), регистрация в реестре, затем `void bot.launch().catch(...)`; при ошибке polling — `unlinkTelegrafFromAllCabinets` + retry; лог `launch_complete` без ожидания конца `getUpdates`.
+- Manual verification: `npm run build -w apps/api`; после деплоя — в логах подряд `launch_complete` для всех кабинетов с токеном; все боты принимают сообщения без минутной очереди на «второй» токен.
+- Docs updated: этот трекер, `AGENTS.md`.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-144
+
+- Status: `done`
+- Scope: Несколько ботов кабинетов «по очереди оживают»; когда один шустро обрабатывает сигнал, остальные висят при одном и том же Telegram-пользователе.
+- Files: `apps/api/src/modules/telegram/services/telegram.service.ts`, `docs/audit/06-progress-tracker.md`, `AGENTS.md`
+- Findings: `scheduleTelegramHeavyInbound` сериализовал LLM-разбор только по `ctx.from.id` — один user id на все кабинеты, общая цепочка `Promise.then` для всех ботов этого пользователя.
+- Changes: ключ очереди `${cabinetId}:${uid}` (`telegramHeavyInboundChains`); логи с `cabinetId`; в `AGENTS.md` уточнена семантика очереди.
+- Manual verification: `npm run build -w apps/api`; один Telegram-аккаунт пишет двум ботам разных кабинетов — разбор/ответы не блокируют друг друга ожиданием LLM в «чужом» кабинете.
 - Docs updated: этот трекер, `AGENTS.md`.
 - Linked risks (`SEC-###`): N/A
