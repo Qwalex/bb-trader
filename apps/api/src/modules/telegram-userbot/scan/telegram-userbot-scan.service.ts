@@ -9,6 +9,7 @@ import { CabinetService } from '../../cabinet/cabinet.service';
 import { TelegramUserbotClientService } from '../client/telegram-userbot-client.service';
 import { TelegramUserbotIngestService } from '../ingest/telegram-userbot-ingest.service';
 import {
+  USERBOT_LAST_SEEN_MESSAGE_IDS_MAX,
   USERBOT_MAX_MESSAGE_AGE_MINUTES_DEFAULT,
   USERBOT_POLL_FETCH_LIMIT,
 } from '../telegram-userbot.constants';
@@ -50,6 +51,11 @@ export class TelegramUserbotScanService {
     const prev = this.lastSeenMessageIds.get(chatId) ?? 0;
     if (messageId > prev) {
       this.lastSeenMessageIds.set(chatId, messageId);
+    }
+    while (this.lastSeenMessageIds.size > USERBOT_LAST_SEEN_MESSAGE_IDS_MAX) {
+      const oldest = this.lastSeenMessageIds.keys().next().value;
+      if (oldest === undefined) break;
+      this.lastSeenMessageIds.delete(oldest);
     }
   }
 

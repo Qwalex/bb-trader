@@ -1,4 +1,6 @@
 export const USERBOT_POLL_INTERVAL_MS = 2000;
+/** Верхняя граница `lastSeenMessageIds` в памяти (защита от роста Map по числу chatId). */
+export const USERBOT_LAST_SEEN_MESSAGE_IDS_MAX = 4000;
 export const USERBOT_POLL_FETCH_LIMIT = 20;
 export const USERBOT_PROCESSING_CONCURRENCY = 4;
 export const USERBOT_MAX_QUEUE_DEFAULT = 300;

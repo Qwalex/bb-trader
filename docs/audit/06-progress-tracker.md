@@ -1520,3 +1520,15 @@
 - Manual verification: `npm run build -w apps/web`, `npm run check-types -w apps/web`.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-125
+
+- Status: `done`
+- Scope: API — снижение расхода памяти (RSS/heap): переиспользование Bybit REST-клиента и потолок Map в userbot-scan.
+- Files: `apps/api/src/modules/bybit/instrument/bybit-client.service.ts`, `apps/api/src/modules/telegram-userbot/telegram-userbot.constants.ts`, `apps/api/src/modules/telegram-userbot/scan/telegram-userbot-scan.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: каждый `getClient()` создавал новый `RestClientV5` при частом poll; `lastSeenMessageIds` рос без лимита по числу уникальных `chatId`.
+- Changes: кэш одного `RestClientV5` на ключ кабинета (`AsyncLocalStorage`) с отпечатком ключей (SHA-256, без логов); при смене ключей — dispose предыдущего экземпляра (best-effort `close`/`closeAll`); после превышения `USERBOT_LAST_SEEN_MESSAGE_IDS_MAX` вытеснение старейших записей из Map.
+- Decomposition notes: константа в `telegram-userbot.constants.ts`.
+- Manual verification: `npm run build -w apps/api`; сценарий смены API key в настройках — следующий запрос должен поднять новый клиент без удержания старого в Map.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

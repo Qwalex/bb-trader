@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { Injectable, Logger } from '@nestjs/common';
 import { RestClientV5, WebsocketClient } from 'bybit-api';
 
@@ -18,6 +20,11 @@ export class BybitClientService {
   private readonly logger = new Logger(BybitClientService.name);
   private wsClient: WebsocketClient | null = null;
   private wsStarted = false;
+  /** Один REST-клиент на кабинет при неизменных ключах — снижает аллокации и RSS при частом poll. */
+  private readonly restClientByCabinet = new Map<
+    string,
+    { fingerprint: string; client: RestClientV5 }
+  >();
 
   constructor(
     private readonly settings: SettingsService,
@@ -69,16 +76,56 @@ export class BybitClientService {
     return { key, secret, testnet };
   }
 
+  private static tradingCredentialsFingerprint(creds: BybitAuthCredentials): string {
+    return createHash('sha256')
+      .update(`${creds.testnet ? '1' : '0'}\0${creds.key}\0${creds.secret}`, 'utf8')
+      .digest('hex');
+  }
+
+  private restClientCabinetKey(): string {
+    return this.cabinetContext.getCabinetId() ?? '__global__';
+  }
+
+  private disposeRestClient(client: RestClientV5): void {
+    const c = client as unknown as { closeAll?: () => void; close?: () => void };
+    try {
+      c.closeAll?.();
+    } catch {
+      // ignore
+    }
+    try {
+      c.close?.();
+    } catch {
+      // ignore
+    }
+  }
+
   async getClient(): Promise<RestClientV5 | null> {
     const creds = await this.getBybitCredentials();
     if (!creds) {
       return null;
     }
-    return new RestClientV5({
+    const cabinetKey = this.restClientCabinetKey();
+    const fingerprint = BybitClientService.tradingCredentialsFingerprint(creds);
+    let entry = this.restClientByCabinet.get(cabinetKey);
+    if (entry?.fingerprint === fingerprint) {
+      return entry.client;
+    }
+    const client = new RestClientV5({
       key: creds.key,
       secret: creds.secret,
       testnet: creds.testnet,
     });
+    entry = this.restClientByCabinet.get(cabinetKey);
+    if (entry?.fingerprint === fingerprint) {
+      this.disposeRestClient(client);
+      return entry.client;
+    }
+    if (entry) {
+      this.disposeRestClient(entry.client);
+    }
+    this.restClientByCabinet.set(cabinetKey, { fingerprint, client });
+    return client;
   }
 
   /** Глобальные ключи только для private WS (env / глобальный `Setting`), без контекста кабинета. */
