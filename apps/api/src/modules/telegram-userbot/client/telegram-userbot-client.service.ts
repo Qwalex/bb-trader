@@ -47,6 +47,8 @@ export class TelegramUserbotClientService {
       timer: ReturnType<typeof setTimeout>;
     }
   >();
+  /** GramJS может вызывать `onError` много раз подряд — гейт, чтобы один раз залогировать и остановить QR-клиент. */
+  private readonly qrAuthTerminalHandledByUserId = new Set<string>();
   /** Периодически синхронизируем StringSession в Setting — иначе после редеплоя строка в БД бывает устаревшей. */
   private sessionPersistIntervalHandle: ReturnType<typeof setInterval> | null = null;
 
@@ -200,6 +202,11 @@ export class TelegramUserbotClientService {
     });
   }
 
+  private clearUserbotQrAuthErrorGate(userId: string | null): void {
+    if (!userId) return;
+    this.qrAuthTerminalHandledByUserId.delete(userId);
+  }
+
   private rejectQrPasswordWait(userId: string | null, err: Error): void {
     if (!userId) return;
     const w = this.qrPasswordDeferredByUserId.get(userId);
@@ -351,6 +358,7 @@ export class TelegramUserbotClientService {
       const qrNow = this.getQrStateForUser(ownerUserId);
       if (qrNow.phase === 'error' || qrNow.phase === 'cancelled') {
         await this.stopQrClient(ownerUserId);
+        this.clearUserbotQrAuthErrorGate(ownerUserId);
         this.qrTaskByUserId.delete(ownerUserId);
       } else {
         return { ok: true, message: 'QR-вход уже запущен.', qr: qrNow };
@@ -367,6 +375,7 @@ export class TelegramUserbotClientService {
       creds = await this.getApiCreds();
       const clientOptions = await this.getTelegramClientOptions();
       await this.stopQrClient(ownerUserId);
+      this.clearUserbotQrAuthErrorGate(ownerUserId);
       qrClient = new TelegramClient(
         new StringSession(''),
         creds.apiId,
@@ -413,14 +422,25 @@ export class TelegramUserbotClientService {
           { apiId: creds.apiId, apiHash: creds.apiHash },
           {
             onError: async (err: unknown) => {
+              if (this.qrAuthTerminalHandledByUserId.has(ownerUserId)) {
+                return false;
+              }
+              this.qrAuthTerminalHandledByUserId.add(ownerUserId);
               const raw = formatError(err);
               const msg = formatUserbotQrAuthErrorForUser(raw);
-              this.logger.warn(`Userbot QR onError: ${raw}`);
+              if (/cannot send requests while disconnected/i.test(raw)) {
+                this.logger.warn(
+                  `Userbot QR: потеряно соединение с Telegram (GramJS), вход по QR прерван.`,
+                );
+              } else {
+                this.logger.warn(`Userbot QR onError: ${raw}`);
+              }
               this.setQrStateForUser(ownerUserId, {
                 phase: 'error',
                 error: msg,
                 ...QR_STATE_VISUAL_CLEAR,
               });
+              void this.stopQrClient(ownerUserId);
               return false;
             },
             qrCode: async (code: { token: Buffer }) => {
@@ -494,6 +514,7 @@ export class TelegramUserbotClientService {
         await this.stopQrClient(ownerUserId);
       } finally {
         this.rejectQrPasswordWait(ownerUserId, new Error('Вход по QR завершён'));
+        this.clearUserbotQrAuthErrorGate(ownerUserId);
         this.qrTaskByUserId.delete(ownerUserId);
       }
     })();
@@ -521,6 +542,7 @@ export class TelegramUserbotClientService {
     const ownerUserId = await this.getOwnerUserId();
     this.rejectQrPasswordWait(ownerUserId, new Error('Вход по QR отменён'));
     await this.stopQrClient(ownerUserId);
+    this.clearUserbotQrAuthErrorGate(ownerUserId);
     if (ownerUserId) {
       this.qrTaskByUserId.delete(ownerUserId);
       this.setQrStateForUser(ownerUserId, {

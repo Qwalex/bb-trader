@@ -5,6 +5,10 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { EntrySizingControl } from '../components/EntrySizingControl';
 import { UserbotMessageCard } from '../components/UserbotMessageCard';
 import {
+  TELEGRAM_USERBOT_PAGE_POLL_MS_QR_ONLY,
+  TELEGRAM_USERBOT_PAGE_POLL_MS_WHEN_CONNECTED,
+} from './telegram-userbot-page.constants';
+import {
   buildTelegramUserbotApiUrl,
   telegramUserbotApiFetch,
 } from './telegram-userbot-page.util';
@@ -23,6 +27,9 @@ export default function TelegramUserbotPage() {
   const buildApiUrl = buildTelegramUserbotApiUrl;
   const apiFetch = telegramUserbotApiFetch;
   const [status, setStatus] = useState<BotStatus | null>(null);
+  /** Актуальное состояние для колбэка setInterval (иначе — устаревшее замыкание и лишние запросы). */
+  const statusForPollRef = useRef<BotStatus | null>(null);
+  statusForPollRef.current = status;
   const [chats, setChats] = useState<UserbotChat[]>([]);
   const [metrics, setMetrics] = useState<TodayMetrics | null>(null);
   const [sourceStatsBySource, setSourceStatsBySource] = useState<
@@ -251,9 +258,28 @@ export default function TelegramUserbotPage() {
     if (!qrVisible && !status?.connected) {
       return;
     }
-    const t = setInterval(() => {
-      void (async () => {
-        try {
+    let cancelled = false;
+    let inFlight = false;
+
+    const qrPhaseNeedsPoll = (s: BotStatus | null) =>
+      s?.qr.phase === 'waiting_scan' ||
+      s?.qr.phase === 'starting' ||
+      s?.qr.phase === 'need_password' ||
+      s?.qr.phase === 'completing_login';
+
+    const tick = async () => {
+      if (cancelled || inFlight) return;
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        return;
+      }
+      const snap = statusForPollRef.current;
+      const connectedNow = Boolean(snap?.connected);
+      if (!qrPhaseNeedsPoll(snap) && !connectedNow) {
+        return;
+      }
+      inFlight = true;
+      try {
+        if (connectedNow) {
           const [qrRes, metricsRes] = await Promise.all([
             apiFetch('/telegram-userbot/qr/status'),
             apiFetch('/telegram-userbot/metrics/today'),
@@ -273,12 +299,37 @@ export default function TelegramUserbotPage() {
               : prev,
           );
           setMetrics(m);
-        } catch {
-          // ignore transient polling errors
+        } else {
+          const qrRes = await apiFetch('/telegram-userbot/qr/status');
+          if (!qrRes.ok) {
+            return;
+          }
+          const j = (await qrRes.json()) as { qr?: BotStatus['qr']; connected?: boolean };
+          setStatus((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  connected: j.connected ?? prev.connected,
+                  qr: j.qr ?? prev.qr,
+                }
+              : prev,
+          );
         }
-      })();
-    }, 1800);
-    return () => clearInterval(t);
+      } catch {
+        // ignore transient polling errors
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    const ms = status?.connected
+      ? TELEGRAM_USERBOT_PAGE_POLL_MS_WHEN_CONNECTED
+      : TELEGRAM_USERBOT_PAGE_POLL_MS_QR_ONLY;
+    const t = setInterval(() => void tick(), ms);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
   }, [qrVisible, status?.connected]);
 
   async function runAction(key: string, fn: () => Promise<void>) {
@@ -308,7 +359,18 @@ export default function TelegramUserbotPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: pwd }),
       });
-      const j = (await res.json()) as { ok?: boolean; error?: string };
+      let j: { ok?: boolean; error?: string } = {};
+      try {
+        j = (await res.json()) as { ok?: boolean; error?: string };
+      } catch {
+        if (!res.ok) {
+          throw new Error(
+            res.status === 502
+              ? 'Сервер временно недоступен (502). Подождите и повторите — не отправляйте пароль несколько раз подряд.'
+              : `Ошибка ответа сервера (${res.status})`,
+          );
+        }
+      }
       if (!res.ok || !j.ok) {
         throw new Error(j.error ?? `Ошибка (${res.status})`);
       }

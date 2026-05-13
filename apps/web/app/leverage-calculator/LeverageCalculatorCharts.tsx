@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   CartesianGrid,
   Legend,
@@ -15,9 +15,19 @@ import {
 
 import type { TrajectoryPoint } from './leverage-calculator-page.util';
 
+export type LeverageTrajectoryChartPoint = TrajectoryPoint & {
+  /** Тот же r, только стартовый E и без займа/платежей: E·(1+r)³⁰ᵐ. */
+  equityOnlyCapitalUsd: number;
+  /** Капитал при досрочном закрытии (если сценарий задан). */
+  capitalEarlyUsd?: number;
+  cumulativePaidEarlyUsd?: number;
+};
+
 type Props = {
-  data: TrajectoryPoint[];
+  data: LeverageTrajectoryChartPoint[];
   termMonths: number;
+  /** Месяц, в конце которого в сценарии досрочного закрыт долг (для вертикали). */
+  earlyCloseMonth: number | null;
 };
 
 function formatK(v: number): string {
@@ -27,11 +37,21 @@ function formatK(v: number): string {
   return v.toFixed(0);
 }
 
-export function LeverageCalculatorCharts({ data, termMonths }: Props) {
+export function LeverageCalculatorCharts({ data, termMonths, earlyCloseMonth }: Props) {
   const [chartReady, setChartReady] = useState(false);
   useEffect(() => {
     setChartReady(true);
   }, []);
+
+  const hasEarlyCapital = useMemo(
+    () => data.some((row) => row.capitalEarlyUsd != null && Number.isFinite(row.capitalEarlyUsd)),
+    [data],
+  );
+  const hasEarlyCumulative = useMemo(
+    () =>
+      data.some((row) => row.cumulativePaidEarlyUsd != null && Number.isFinite(row.cumulativePaidEarlyUsd)),
+    [data],
+  );
 
   if (data.length < 2) {
     return (
@@ -45,17 +65,28 @@ export function LeverageCalculatorCharts({ data, termMonths }: Props) {
     ...row,
     monthLabel: row.month === 0 ? 'Старт' : `М${row.month}`,
     capitalUsd: Number.isFinite(row.capitalUsd) ? row.capitalUsd : 0,
+    equityOnlyCapitalUsd: Number.isFinite(row.equityOnlyCapitalUsd) ? row.equityOnlyCapitalUsd : 0,
     cumulativePaidUsd: Number.isFinite(row.cumulativePaidUsd) ? row.cumulativePaidUsd : 0,
+    capitalEarlyUsd:
+      row.capitalEarlyUsd != null && Number.isFinite(row.capitalEarlyUsd) ? row.capitalEarlyUsd : undefined,
+    cumulativePaidEarlyUsd:
+      row.cumulativePaidEarlyUsd != null && Number.isFinite(row.cumulativePaidEarlyUsd)
+        ? row.cumulativePaidEarlyUsd
+        : undefined,
   }));
 
   const endLoanLabel = termMonths <= 0 ? 'Старт' : `М${termMonths}`;
+  const earlyLabel =
+    earlyCloseMonth != null && earlyCloseMonth > 0 && earlyCloseMonth < termMonths
+      ? `М${earlyCloseMonth}`
+      : null;
 
   if (!chartReady) {
     return (
       <div className="leverageCharts">
         <div
           className="chartWrap"
-          style={{ height: 320, minHeight: 320, width: '100%', minWidth: 0 }}
+          style={{ height: 360, minHeight: 360, width: '100%', minWidth: 0 }}
           aria-busy="true"
         />
       </div>
@@ -64,8 +95,8 @@ export function LeverageCalculatorCharts({ data, termMonths }: Props) {
 
   return (
     <div className="leverageCharts">
-      <div className="chartWrap" style={{ height: 320, minHeight: 320, width: '100%', minWidth: 0 }}>
-        <ResponsiveContainer width="100%" height="100%" minWidth={120} minHeight={280}>
+      <div className="chartWrap" style={{ height: 360, minHeight: 360, width: '100%', minWidth: 0 }}>
+        <ResponsiveContainer width="100%" height="100%" minWidth={120} minHeight={300}>
           <LineChart data={chartData} margin={{ top: 8, right: 16, left: 4, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
             <XAxis dataKey="monthLabel" tick={{ fill: 'var(--muted)', fontSize: 11 }} />
@@ -92,10 +123,16 @@ export function LeverageCalculatorCharts({ data, termMonths }: Props) {
                 const n = typeof value === 'number' ? value : Number(value);
                 const label =
                   name === 'capitalUsd'
-                    ? 'Капитал (модель)'
-                    : name === 'cumulativePaidUsd'
-                      ? 'Выплачено банку Σ'
-                      : String(name ?? '');
+                    ? 'Капитал (по графику)'
+                    : name === 'capitalEarlyUsd'
+                      ? 'Капитал (досрочно)'
+                      : name === 'equityOnlyCapitalUsd'
+                        ? 'Только свой капитал E'
+                        : name === 'cumulativePaidUsd'
+                          ? 'Выплачено Σ (по графику)'
+                          : name === 'cumulativePaidEarlyUsd'
+                            ? 'Выплачено Σ (досрочно)'
+                            : String(name ?? '');
                 return [
                   Number.isFinite(n) ? `${n.toFixed(2)} USDT` : '—',
                   label,
@@ -113,30 +150,77 @@ export function LeverageCalculatorCharts({ data, termMonths }: Props) {
                 ifOverflow="extendDomain"
               />
             ) : null}
+            {earlyLabel && chartData.some((d) => d.monthLabel === earlyLabel) ? (
+              <ReferenceLine
+                yAxisId="left"
+                x={earlyLabel}
+                stroke="#fbbf24"
+                strokeDasharray="3 6"
+                label={{ value: 'досрочное', fill: 'var(--muted)', fontSize: 11 }}
+                ifOverflow="extendDomain"
+              />
+            ) : null}
             <Line
               yAxisId="left"
               type="monotone"
               dataKey="capitalUsd"
-              name="Капитал"
+              name="Капитал (по графику)"
               stroke="#7dd3fc"
               strokeWidth={2}
+              dot={false}
+            />
+            {hasEarlyCapital ? (
+              <Line
+                yAxisId="left"
+                type="monotone"
+                dataKey="capitalEarlyUsd"
+                name="Капитал (досрочно)"
+                stroke="#fcd34d"
+                strokeWidth={2}
+                strokeDasharray="4 3"
+                dot={false}
+                connectNulls
+              />
+            ) : null}
+            <Line
+              yAxisId="left"
+              type="monotone"
+              dataKey="equityOnlyCapitalUsd"
+              name="Только E (без займа)"
+              stroke="#86efac"
+              strokeWidth={2}
+              strokeDasharray="6 4"
               dot={false}
             />
             <Line
               yAxisId="right"
               type="monotone"
               dataKey="cumulativePaidUsd"
-              name="Выплачено Σ"
+              name="Выплачено Σ (график)"
               stroke="#c4b5fd"
               strokeWidth={2}
               dot={false}
             />
+            {hasEarlyCumulative ? (
+              <Line
+                yAxisId="right"
+                type="monotone"
+                dataKey="cumulativePaidEarlyUsd"
+                name="Выплачено Σ (досрочно)"
+                stroke="#f9a8d4"
+                strokeWidth={2}
+                strokeDasharray="5 3"
+                dot={false}
+                connectNulls
+              />
+            ) : null}
           </LineChart>
         </ResponsiveContainer>
       </div>
       <p className="leverageFootnote">
-        Слева — капитал на счёте (оценка). Справа — накопленные платежи по кредиту; вертикальная
-        линия — последний месяц выплат по введённому сроку.
+        Слева — капитал по графику, при досрочном (если задан) и контроль «только E» на тех же r.
+        Справа — накопленные выплаты банку: полный график и досрочный. Жёлтая вертикаль — месяц
+        закрытия долга при досрочном; голубая — конец договорного срока без досрочного.
       </p>
     </div>
   );

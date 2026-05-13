@@ -16,6 +16,9 @@ export function formatUserbotQrAuthErrorForUser(technical: string): string {
   if (t.includes('SESSION_PASSWORD_NEEDED')) {
     return 'Требуется облачный пароль (2FA). Введите пароль в форме на странице userbot.';
   }
+  if (t.includes('CANNOT SEND REQUESTS WHILE DISCONNECTED')) {
+    return 'Соединение с Telegram потеряно. Отмените вход по QR и начните заново.';
+  }
   return technical;
 }
 

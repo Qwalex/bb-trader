@@ -12,6 +12,12 @@ export type LeverageLoanParams = {
   termMonths: number;
 };
 
+/** Досрочное закрытие: в конце месяца `closeAfterMonth` платим M + closeoutUsd, далее без долга. */
+export type LeverageEarlyPayoffParams = {
+  closeAfterMonth: number;
+  closeoutUsd: number;
+};
+
 export type LeverageOutlook = {
   mode: LeverageCalcMode;
   /** G или R — выбранная база USDT/день при капитале E. */
@@ -36,7 +42,32 @@ export type LeverageOutlook = {
   capitalAfterLoanUsd: number | null;
   /** Горизонт после кредита: capitalAfter × (1+r)^30n без платежа. */
   capitalAfterHorizonUsd: number | null;
+  /**
+   * Тот же горизонт месяцев, но без займа: только E, сложный процент E·(1+r)³⁰ᵐ, без платежей.
+   * Сравнение «что было бы на своих» при той же оценке r.
+   */
+  equityOnlyAfterLoanUsd: number | null;
+  equityOnlyAfterHorizonUsd: number | null;
+  /** Капитал с займом минус сценарий только на E (конец срока кредита). */
+  deltaAfterLoanVsEquityOnlyUsd: number | null;
+  /** То же на полном горизонте симуляции (после кредита + horizon). */
+  deltaHorizonVsEquityOnlyUsd: number | null;
   wentNegativeDuringLoan: boolean;
+
+  /** Включён и валиден сценарий досрочного (срок ≥ 2 мес., месяц 1..term−1). */
+  earlyPayoffComparable: boolean;
+  /** Капитал на конец горизонта при досрочном закрытии. */
+  capitalAfterHorizonEarlyUsd: number | null;
+  /** Всего ушло банку при досрочном (M·k + closeout). */
+  totalPaidEarlyUsd: number | null;
+  /** Полный график M·T минус факт при досрочном (+ = меньше заплатили банку). */
+  bankCashflowSavingsVsFullScheduleUsd: number | null;
+  /** Капитал на горизонте: досрочный минус по графику. */
+  capitalHorizonEarlyVsStandardUsd: number | null;
+  /** M·(T−k) − closeout: + если разовый выход дешевле, чем платить все оставшиеся M (грубая аннуитетная оценка). */
+  earlyCloseoutVsAnnuityTailUsd: number | null;
+  wentNegativeDuringLoanEarly: boolean;
+
   warnings: string[];
 };
 
@@ -63,6 +94,99 @@ function pickBasePnlPerDay(
   return r;
 }
 
+export type TrajectoryPoint = {
+  month: number;
+  capitalUsd: number;
+  cumulativePaidUsd: number;
+  phase: 'loan' | 'after';
+};
+
+export type LoanSimResult = {
+  trajectory: TrajectoryPoint[];
+  totalPaidUsd: number;
+  wentNegativeDuringLoan: boolean;
+};
+
+/**
+ * Месячная дискретизация: рост C←C·f, затем вычитаются платежи.
+ * Стандарт: M каждый месяц 1..termMonths.
+ * Досрочно: M в 1..k−1, в месяц k — M+closeout, далее 0 до конца «контрактного» окна и горизонта.
+ */
+export function simulateLeverageLoan(opts: {
+  equityUsd: number;
+  loanPrincipalUsd: number;
+  monthlyPaymentUsd: number;
+  termMonths: number;
+  horizonMonthsAfter: number;
+  rDaily: number;
+  early: LeverageEarlyPayoffParams | null;
+}): LoanSimResult {
+  const E = Number.isFinite(opts.equityUsd) ? Math.max(0, opts.equityUsd) : 0;
+  const L = Number.isFinite(opts.loanPrincipalUsd) ? Math.max(0, opts.loanPrincipalUsd) : 0;
+  const M = Number.isFinite(opts.monthlyPaymentUsd) ? Math.max(0, opts.monthlyPaymentUsd) : 0;
+  const termM = Math.max(0, Math.floor(opts.termMonths));
+  const horizon = Math.max(0, Math.floor(opts.horizonMonthsAfter));
+  const rDaily = opts.rDaily;
+
+  if (!(E > 0 && L >= 0 && Number.isFinite(rDaily) && rDaily > -1)) {
+    return { trajectory: [], totalPaidUsd: 0, wentNegativeDuringLoan: false };
+  }
+
+  const f = monthGrowthFactorFromRDaily(rDaily);
+  const totalSim = termM + horizon;
+
+  let closeMonth = 0;
+  let closeout = 0;
+  const early = opts.early;
+  if (early && termM >= 2 && M > 0) {
+    const k = Math.floor(early.closeAfterMonth);
+    if (k >= 1 && k < termM) {
+      closeMonth = k;
+      closeout = Number.isFinite(early.closeoutUsd) ? Math.max(0, early.closeoutUsd) : 0;
+    }
+  }
+
+  let C = E + L;
+  const out: TrajectoryPoint[] = [{ month: 0, capitalUsd: C, cumulativePaidUsd: 0, phase: 'loan' }];
+  let paid = 0;
+  let wentNegative = false;
+
+  for (let m = 1; m <= totalSim; m++) {
+    let payment = 0;
+    let phase: 'loan' | 'after' = 'after';
+
+    if (closeMonth > 0) {
+      if (m < closeMonth) {
+        payment = M;
+        phase = 'loan';
+      } else if (m === closeMonth) {
+        payment = M + closeout;
+        phase = 'loan';
+      } else {
+        payment = 0;
+        phase = m <= termM ? 'after' : 'after';
+      }
+    } else if (termM > 0) {
+      if (m <= termM) {
+        payment = M;
+        phase = 'loan';
+      } else {
+        payment = 0;
+        phase = 'after';
+      }
+    }
+
+    C = C * f - payment;
+    paid += payment;
+    if (C < 0 && !wentNegative) {
+      wentNegative = true;
+    }
+    out.push({ month: m, capitalUsd: C, cumulativePaidUsd: paid, phase });
+  }
+
+  return { trajectory: out, totalPaidUsd: paid, wentNegativeDuringLoan: wentNegative };
+}
+
 export function computeLeverageOutlook(params: {
   equityUsd: number;
   expectedPnlPerDayUsd: number | null | undefined;
@@ -71,8 +195,10 @@ export function computeLeverageOutlook(params: {
   loan: LeverageLoanParams;
   /** Месяцев после последнего платежа по кредиту — «перспектива». */
   horizonMonthsAfterLoan: number;
+  earlyPayoff?: LeverageEarlyPayoffParams | null;
 }): LeverageOutlook {
   const warnings: string[] = [];
+  const ep = params.earlyPayoff ?? null;
   const { mode, loan } = params;
   const E = Number.isFinite(params.equityUsd) ? Math.max(0, params.equityUsd) : 0;
   const L = Number.isFinite(loan.principalUsd) ? Math.max(0, loan.principalUsd) : 0;
@@ -157,29 +283,96 @@ export function computeLeverageOutlook(params: {
   let capitalAfterHorizonUsd: number | null = null;
   let wentNegativeDuringLoan = false;
 
+  const stdSim =
+    rDaily != null && rDaily > -1 && C0 > 0 && termM > 0 && Number.isFinite(M) && E > 0 && basePnlPerDayUsd != null
+      ? simulateLeverageLoan({
+          equityUsd: E,
+          loanPrincipalUsd: L,
+          monthlyPaymentUsd: M,
+          termMonths: termM,
+          horizonMonthsAfter: horizonAfter,
+          rDaily,
+          early: null,
+        })
+      : null;
+
+  if (stdSim) {
+    wentNegativeDuringLoan = stdSim.wentNegativeDuringLoan;
+    if (wentNegativeDuringLoan) {
+      warnings.push('В дискретной месячной модели капитал ушёл ниже нуля до конца срока кредита.');
+    }
+    const ptEndLoan = stdSim.trajectory[termM];
+    capitalAfterLoanUsd = ptEndLoan != null ? ptEndLoan.capitalUsd : null;
+    const ptHorizon = stdSim.trajectory[termM + horizonAfter];
+    capitalAfterHorizonUsd = ptHorizon != null ? ptHorizon.capitalUsd : null;
+  }
+
+  let equityOnlyAfterLoanUsd: number | null = null;
+  let equityOnlyAfterHorizonUsd: number | null = null;
+  if (rDaily != null && rDaily > -1 && E > 0 && termM > 0) {
+    const fEq = monthGrowthFactorFromRDaily(rDaily);
+    equityOnlyAfterLoanUsd = E * Math.pow(fEq, termM);
+    equityOnlyAfterHorizonUsd = E * Math.pow(fEq, termM + horizonAfter);
+  }
+
+  let deltaAfterLoanVsEquityOnlyUsd: number | null = null;
+  let deltaHorizonVsEquityOnlyUsd: number | null = null;
+  if (capitalAfterLoanUsd != null && equityOnlyAfterLoanUsd != null) {
+    deltaAfterLoanVsEquityOnlyUsd = capitalAfterLoanUsd - equityOnlyAfterLoanUsd;
+  }
+  if (capitalAfterHorizonUsd != null && equityOnlyAfterHorizonUsd != null) {
+    deltaHorizonVsEquityOnlyUsd = capitalAfterHorizonUsd - equityOnlyAfterHorizonUsd;
+  }
+
+  let earlyPayoffComparable = false;
+  let capitalAfterHorizonEarlyUsd: number | null = null;
+  let totalPaidEarlyUsd: number | null = null;
+  let bankCashflowSavingsVsFullScheduleUsd: number | null = null;
+  let capitalHorizonEarlyVsStandardUsd: number | null = null;
+  let earlyCloseoutVsAnnuityTailUsd: number | null = null;
+  let wentNegativeDuringLoanEarly = false;
+
   if (
+    ep &&
+    stdSim &&
     rDaily != null &&
     rDaily > -1 &&
-    C0 > 0 &&
-    termM > 0 &&
-    Number.isFinite(M) &&
-    E > 0 &&
-    basePnlPerDayUsd != null
+    termM >= 2 &&
+    ep.closeAfterMonth >= 1 &&
+    ep.closeAfterMonth < termM
   ) {
-    const f = monthGrowthFactorFromRDaily(rDaily);
-    let C = C0;
-    for (let m = 0; m < termM; m++) {
-      C = C * f - M;
-      if (C < 0) {
-        wentNegativeDuringLoan = true;
-        warnings.push('В дискретной месячной модели капитал ушёл ниже нуля до конца срока кредита.');
-        break;
+    const closeout = Number.isFinite(ep.closeoutUsd) ? Math.max(0, ep.closeoutUsd) : 0;
+    if (closeout <= 0) {
+      warnings.push(
+        'Досрочное погашение: укажите разовый платёж при закрытии (остаток долга и комиссии банка по договору).',
+      );
+    } else {
+      earlyPayoffComparable = true;
+      const earlySim = simulateLeverageLoan({
+        equityUsd: E,
+        loanPrincipalUsd: L,
+        monthlyPaymentUsd: M,
+        termMonths: termM,
+        horizonMonthsAfter: horizonAfter,
+        rDaily,
+        early: { closeAfterMonth: ep.closeAfterMonth, closeoutUsd: closeout },
+      });
+      wentNegativeDuringLoanEarly = earlySim.wentNegativeDuringLoan;
+      if (wentNegativeDuringLoanEarly) {
+        warnings.push('Досрочный сценарий: капитал ушёл ниже нуля в модели — проверьте платежи и closeout.');
       }
+      const last = earlySim.trajectory[termM + horizonAfter];
+      capitalAfterHorizonEarlyUsd = last != null ? last.capitalUsd : null;
+      totalPaidEarlyUsd = earlySim.totalPaidUsd;
+      bankCashflowSavingsVsFullScheduleUsd = M * termM - earlySim.totalPaidUsd;
+      if (capitalAfterHorizonUsd != null && capitalAfterHorizonEarlyUsd != null) {
+        capitalHorizonEarlyVsStandardUsd = capitalAfterHorizonEarlyUsd - capitalAfterHorizonUsd;
+      }
+      const tail = M * (termM - ep.closeAfterMonth);
+      earlyCloseoutVsAnnuityTailUsd = tail - closeout;
     }
-    capitalAfterLoanUsd = C;
-    if (!wentNegativeDuringLoan && horizonAfter > 0) {
-      capitalAfterHorizonUsd = C * Math.pow(f, horizonAfter);
-    }
+  } else if (ep && termM > 0 && termM < 2) {
+    warnings.push('Досрочное погашение в модели доступно при сроке кредита не меньше 2 месяцев.');
   }
 
   return {
@@ -200,9 +393,80 @@ export function computeLeverageOutlook(params: {
     monthsToRecoverOverpayment,
     capitalAfterLoanUsd,
     capitalAfterHorizonUsd,
+    equityOnlyAfterLoanUsd,
+    equityOnlyAfterHorizonUsd,
+    deltaAfterLoanVsEquityOnlyUsd,
+    deltaHorizonVsEquityOnlyUsd,
     wentNegativeDuringLoan,
+    earlyPayoffComparable,
+    capitalAfterHorizonEarlyUsd,
+    totalPaidEarlyUsd,
+    bankCashflowSavingsVsFullScheduleUsd,
+    capitalHorizonEarlyVsStandardUsd,
+    earlyCloseoutVsAnnuityTailUsd,
+    wentNegativeDuringLoanEarly,
     warnings,
   };
+}
+
+/** Короткие подсказки по цифрам модели (не индивидуальная инвестконсультация). */
+export function computeLeverageStrategyHints(o: LeverageOutlook): string[] {
+  const hints: string[] = [];
+  if (o.deltaHorizonVsEquityOnlyUsd != null && o.deltaHorizonVsEquityOnlyUsd < 0) {
+    hints.push(
+      'На выбранном горизонте при текущей оценке r сценарий без займа (только E) даёт больший капитал, чем с кредитом по графику — смысл займа в модели сомнителен, если r не занижен.',
+    );
+  }
+  if (o.netMonthlyStartUsd != null && o.netMonthlyStartUsd <= 0) {
+    hints.push(
+      'Чистый месячный поток при старте неположителен: платёж съедает масштабированный PnL — риск «кредит тянет вниз»; меньший L, ниже ставка/платёж или более высокий r на том же E выглядят безопаснее.',
+    );
+  }
+  if (o.earlyPayoffComparable) {
+    if (
+      o.bankCashflowSavingsVsFullScheduleUsd != null &&
+      o.bankCashflowSavingsVsFullScheduleUsd > 1e-6
+    ) {
+      hints.push(
+        'При введённом досрочном вы платите банку меньше, чем по полному графику M·T — по денежному потоку к банку сценарий выгоднее (без учёта альтернативной доходности этих денег).',
+      );
+    }
+    if (o.earlyCloseoutVsAnnuityTailUsd != null && o.earlyCloseoutVsAnnuityTailUsd > 1e-6) {
+      hints.push(
+        'Разовый платёж при закрытии ниже суммы оставшихся аннуитетных M по модели — относительно этой грубой оценки досрочное «дешевле», чем продолжать платить до конца срока.',
+      );
+    }
+    if (
+      o.capitalHorizonEarlyVsStandardUsd != null &&
+      o.capitalHorizonEarlyVsStandardUsd > 1e-6 &&
+      o.rDaily != null &&
+      o.rDaily > 0
+    ) {
+      hints.push(
+        'На конец горизонта капитал при досрочном выше, чем при выплате по графику: раньше сняли долговую нагрузку — больше месяцев чистого роста при том же r.',
+      );
+    }
+    if (
+      o.capitalHorizonEarlyVsStandardUsd != null &&
+      o.capitalHorizonEarlyVsStandardUsd < -1e-6
+    ) {
+      hints.push(
+        'На конец горизонта досрочный даёт меньший капитал, чем полный график: разовый выход сильно съедает торговый счёт — имеет смысл сравнить closeout с выгодой от досрочного в договоре или перенести закрытие на более поздний месяц.',
+      );
+    }
+  } else if (
+    o.loanPrincipalUsd > 0 &&
+    o.rDaily != null &&
+    o.rDaily > 0 &&
+    o.deltaHorizonVsEquityOnlyUsd != null &&
+    o.deltaHorizonVsEquityOnlyUsd > 0
+  ) {
+    hints.push(
+      'Если банк предлагает досрочное с суммой меньше оставшихся платежей по графику, внесите её в блок «досрочно» и сравните капитал на горизонте с полным графиком.',
+    );
+  }
+
+  return hints;
 }
 
 export function formatUsd(n: number | null | undefined, digits = 2): string {
@@ -210,20 +474,31 @@ export function formatUsd(n: number | null | undefined, digits = 2): string {
   return `${n.toFixed(digits)} USDT`;
 }
 
+/** Дельты: со знаком «+» / «−» для сравнения сценариев. */
+export function formatUsdSigned(n: number | null | undefined, digits = 2): string {
+  if (n == null || !Number.isFinite(n)) return '—';
+  const sign = n > 0 ? '+' : n < 0 ? '−' : '';
+  return `${sign}${Math.abs(n).toFixed(digits)} USDT`;
+}
+
 export function formatMonths(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return '—';
   return `${n} мес.`;
 }
 
-export type TrajectoryPoint = {
-  month: number;
-  capitalUsd: number;
-  cumulativePaidUsd: number;
-  phase: 'loan' | 'after';
-};
+/**
+ * Капитал только на собственных средствах E при той же r: месяц m → E·(1+r)³⁰ᵐ (без займа и без платежей).
+ */
+export function equityOnlyCapitalAtMonth(equityUsd: number, rDaily: number, month: number): number {
+  const E = Number.isFinite(equityUsd) ? Math.max(0, equityUsd) : 0;
+  const m = Math.max(0, Math.floor(Number.isFinite(month) ? month : 0));
+  if (!(E > 0 && Number.isFinite(rDaily) && rDaily > -1)) return Number.NaN;
+  const f = monthGrowthFactorFromRDaily(rDaily);
+  return E * Math.pow(f, m);
+}
 
 /**
- * Месячная дискретизация: при фазе loan — C←C·(1+r)³⁰−M, после — только рост.
+ * Месячная дискретизация: при фазе loan — C←C·(1+r)³⁰−M, после — только рост (стандартный график).
  */
 export function buildMonthlyCapitalTrajectory(opts: {
   equityUsd: number;
@@ -233,30 +508,22 @@ export function buildMonthlyCapitalTrajectory(opts: {
   horizonMonthsAfter: number;
   rDaily: number;
 }): TrajectoryPoint[] {
-  const { equityUsd: E, loanPrincipalUsd: L, monthlyPaymentUsd: M, termMonths, horizonMonthsAfter, rDaily } =
-    opts;
-  if (!(E > 0 && L >= 0 && Number.isFinite(rDaily) && rDaily > -1)) {
-    return [];
-  }
-  const f = monthGrowthFactorFromRDaily(rDaily);
-  const totalMonths = Math.max(0, termMonths) + Math.max(0, horizonMonthsAfter);
-  let C = E + L;
-  const out: TrajectoryPoint[] = [
-    { month: 0, capitalUsd: C, cumulativePaidUsd: 0, phase: 'loan' },
-  ];
-  let paid = 0;
-  const tm = Math.max(0, Math.floor(termMonths));
-  for (let m = 1; m <= totalMonths; m++) {
-    if (m <= tm) {
-      C = C * f - M;
-      paid += M;
-      out.push({ month: m, capitalUsd: C, cumulativePaidUsd: paid, phase: 'loan' });
-    } else {
-      C = C * f;
-      out.push({ month: m, capitalUsd: C, cumulativePaidUsd: paid, phase: 'after' });
-    }
-  }
-  return out;
+  const sim = simulateLeverageLoan({ ...opts, early: null });
+  return sim.trajectory;
+}
+
+/** Траектория с досрочным закрытием (для графика). */
+export function buildMonthlyCapitalTrajectoryEarly(opts: {
+  equityUsd: number;
+  loanPrincipalUsd: number;
+  monthlyPaymentUsd: number;
+  termMonths: number;
+  horizonMonthsAfter: number;
+  rDaily: number;
+  early: LeverageEarlyPayoffParams;
+}): TrajectoryPoint[] {
+  const sim = simulateLeverageLoan(opts);
+  return sim.trajectory;
 }
 
 /** Дата последнего месяца договора: старт + termMonths (упрощённо). */

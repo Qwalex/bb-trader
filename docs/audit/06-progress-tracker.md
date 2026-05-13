@@ -1532,3 +1532,61 @@
 - Manual verification: `npm run build -w apps/api`; сценарий смены API key в настройках — следующий запрос должен поднять новый клиент без удержания старого в Map.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-126
+
+- Status: `done`
+- Scope: Userbot QR (GramJS) — лимит логов Railway при `Cannot send requests while disconnected`.
+- Files: `apps/api/src/modules/telegram-userbot/client/telegram-userbot-client.service.ts`, `apps/api/src/modules/telegram-userbot/utils/telegram-userbot-qr-auth-error.util.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: `signInUserWithQrCode` `onError` вызывался многократно; каждый раз `logger.warn` → сотни строк/сек и rate limit 500 msg/s на Railway.
+- Changes: гейт `qrAuthTerminalHandledByUserId` (один раз лог + UI state + `stopQrClient`); для обрыва соединения — одно предупреждение без повторения сырого текста; сброс гейта при новом старте QR, отмене и `finally` задачи; текст для UI в `formatUserbotQrAuthErrorForUser`.
+- Decomposition notes: без новых файлов.
+- Manual verification: `npm run build -w apps/api`.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-127
+
+- Status: `done`
+- Scope: Web `/telegram-userbot` — меньше фонового poll при неподключённом userbot и устойчивее обработка 502 на `qr/password`.
+- Files: `apps/web/app/telegram-userbot/page.tsx`, `apps/web/app/telegram-userbot/telegram-userbot-page.constants.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: интервал ~1.8 с + устаревшее замыкание `status` в `setInterval` давали лишние параллельные запросы; до подключения опрашивались и `qr/status`, и `metrics/today`; при 502 на POST пароль — падение на `res.json()`.
+- Changes: `statusForPollRef` для актуального статуса в тике; без `connected` — только `qr/status`, интервал 4.5 с; с `connected` — параллельно status + today, 5 с; `inFlight`, пропуск тика при скрытой вкладке; безопасный разбор ответа POST и сообщение для 502; константы интервалов в `telegram-userbot-page.constants.ts`.
+- Decomposition notes: константы страницы — отдельный `*-page.constants.ts`.
+- Manual verification: `npm run build -w apps/web`.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-128
+
+- Status: `done`
+- Scope: Web `/leverage-calculator` — сравнение с ростом только на собственном equity (без займа) на графике и в метриках.
+- Files: `apps/web/app/leverage-calculator/leverage-calculator-page.util.ts`, `apps/web/app/leverage-calculator/LeverageCalculatorCharts.tsx`, `apps/web/app/leverage-calculator/LeverageCalculatorClient.tsx`, `docs/audit/06-progress-tracker.md`
+- Findings: пользователю не хватало контрольной кривой E·(1+r)³⁰ᵐ при той же оценке r для решения о целесообразности кредита.
+- Changes: поля outlook `equityOnlyAfterLoanUsd` / `equityOnlyAfterHorizonUsd` и дельты к сценарию со займом; `equityOnlyCapitalAtMonth`, `formatUsdSigned`; вторая линия на графике («только E»); подписи и сноска.
+- Decomposition notes: логика в `leverage-calculator-page.util.ts`, тип точки графика экспортирован из `LeverageCalculatorCharts.tsx`.
+- Manual verification: `npm run check-types -w web`; визуально — две линии капитала и новые KPI на странице.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-129
+
+- Status: `done`
+- Scope: Web `/leverage-calculator` — досрочное погашение, сравнение с полным графиком, подсказки по схеме займа.
+- Files: `apps/web/app/leverage-calculator/leverage-calculator-page.util.ts`, `apps/web/app/leverage-calculator/LeverageCalculatorCharts.tsx`, `apps/web/app/leverage-calculator/LeverageCalculatorClient.tsx`, `apps/web/app/leverage-calculator/leverage-calculator-preset.util.ts`, `apps/web/app/leverage-calculator/leverage-calculator-page.types.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: нужна оценка выгодности досрочного и ориентиры по заёмной схеме в той же упрощённой модели.
+- Changes: `simulateLeverageLoan` (единый цикл); параметры досрочного в пресете; KPI и график (капитал и Σ выплат досрочно vs график); экономия vs M·T и M·(T−k)−closeout; `computeLeverageStrategyHints`; дата досрочного в боковой карточке.
+- Decomposition notes: симуляция в `leverage-calculator-page.util.ts`.
+- Manual verification: `npm run check-types -w web`, eslint по файлам калькулятора.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-130
+
+- Status: `done`
+- Scope: Web `/leverage-calculator` — вердикт «займ vs только E» в карточке `leverageHighlight`.
+- Files: `apps/web/app/leverage-calculator/LeverageCalculatorClient.tsx`, `apps/web/app/globals.css`, `docs/audit/06-progress-tracker.md`
+- Changes: блок с тоном win/lose/neutral, крупная дельта на горизонте, подстрочники по концу кредита и досрочному; стили `.leverageVerdict*`.
+- Manual verification: `npm run check-types -w web`.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

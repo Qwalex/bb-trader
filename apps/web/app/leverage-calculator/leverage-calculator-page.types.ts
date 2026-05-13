@@ -9,4 +9,9 @@ export type LeverageCalculatorPresetV1 = {
   mode: LeverageCalcMode;
   /** ISO YYYY-MM-DD — от неё считается дата «закрытия» договора. */
   loanStartIso: string;
+  /** Досрочное погашение в симуляции (остаток + комиссии — ввод пользователя). */
+  earlyPayoffEnabled?: boolean;
+  /** Месяц (1..T−1), в конце которого M + closeout и долг закрыт. */
+  earlyPayoffAfterMonth?: number;
+  earlyCloseoutUsd?: number;
 };
