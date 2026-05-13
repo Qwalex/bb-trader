@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import {
   CartesianGrid,
   Legend,
@@ -27,6 +28,11 @@ function formatK(v: number): string {
 }
 
 export function LeverageCalculatorCharts({ data, termMonths }: Props) {
+  const [chartReady, setChartReady] = useState(false);
+  useEffect(() => {
+    setChartReady(true);
+  }, []);
+
   if (data.length < 2) {
     return (
       <p className="leverageMuted" style={{ margin: 0 }}>
@@ -38,24 +44,40 @@ export function LeverageCalculatorCharts({ data, termMonths }: Props) {
   const chartData = data.map((row) => ({
     ...row,
     monthLabel: row.month === 0 ? 'Старт' : `М${row.month}`,
+    capitalUsd: Number.isFinite(row.capitalUsd) ? row.capitalUsd : 0,
+    cumulativePaidUsd: Number.isFinite(row.cumulativePaidUsd) ? row.cumulativePaidUsd : 0,
   }));
 
   const endLoanLabel = termMonths <= 0 ? 'Старт' : `М${termMonths}`;
 
+  if (!chartReady) {
+    return (
+      <div className="leverageCharts">
+        <div
+          className="chartWrap"
+          style={{ height: 320, minHeight: 320, width: '100%', minWidth: 0 }}
+          aria-busy="true"
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="leverageCharts">
-      <div className="chartWrap" style={{ height: 320 }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={chartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+      <div className="chartWrap" style={{ height: 320, minHeight: 320, width: '100%', minWidth: 0 }}>
+        <ResponsiveContainer width="100%" height="100%" minWidth={120} minHeight={280}>
+          <LineChart data={chartData} margin={{ top: 8, right: 16, left: 4, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
             <XAxis dataKey="monthLabel" tick={{ fill: 'var(--muted)', fontSize: 11 }} />
             <YAxis
               yAxisId="left"
+              width={52}
               tick={{ fill: 'var(--muted)', fontSize: 11 }}
               tickFormatter={formatK}
             />
             <YAxis
               yAxisId="right"
+              width={52}
               orientation="right"
               tick={{ fill: 'var(--muted)', fontSize: 11 }}
               tickFormatter={formatK}
@@ -81,18 +103,16 @@ export function LeverageCalculatorCharts({ data, termMonths }: Props) {
               }}
             />
             <Legend />
-            {termMonths > 0 && chartData.some((d) => d.monthLabel === endLoanLabel) && (
+            {termMonths > 0 && chartData.some((d) => d.monthLabel === endLoanLabel) ? (
               <ReferenceLine
+                yAxisId="left"
                 x={endLoanLabel}
                 stroke="var(--accent)"
                 strokeDasharray="4 4"
-                label={{
-                  value: 'конец кредита',
-                  fill: 'var(--muted)',
-                  fontSize: 11,
-                }}
+                label={{ value: 'конец кредита', fill: 'var(--muted)', fontSize: 11 }}
+                ifOverflow="extendDomain"
               />
-            )}
+            ) : null}
             <Line
               yAxisId="left"
               type="monotone"

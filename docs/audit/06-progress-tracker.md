@@ -1485,6 +1485,18 @@
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A (прогноз EV как на главной, не инвестиционная рекомендация).
 
+### AUD-122
+
+- Status: `done`
+- Scope: Главная — визуальное выделение зоны «текущий кабинет» после формы фильтров (метрики, todo, графики, топы, PnL, экспозиция).
+- Files: `apps/web/app/page.tsx`, `apps/web/app/globals.css`, `docs/audit/06-progress-tracker.md`
+- Findings: контент после фильтров визуально сливался с остальной страницей; карточки метрик на глобальном `.card` отличались от блоков «Кабинеты» / «Все кабинеты».
+- Changes: обёртка `section.dashboardActiveCabinetSection` с шапкой (имя кабинета, подсказка, фильтр источника); стили панели, `dashboardMetricsGrid`, переопределения `.card`/`.chartWrap`/`.tableWrap` внутри секции; классы `dashboardActiveSubheading`, `dashboardActiveChartBlock`, `dashboardActiveFootnote`; адаптив padding/высота графиков.
+- Decomposition notes (`utils/constants/hooks/types`): только разметка главной и CSS.
+- Manual verification: `npm run build -w apps/web`; проверка в браузере — секция после «Показать», сетка топов и графики внутри панели.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
 ### AUD-123
 
 - Status: `done`
@@ -1497,14 +1509,14 @@
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
 
-### AUD-122
+### AUD-124
 
 - Status: `done`
-- Scope: Главная — визуальное выделение зоны «текущий кабинет» после формы фильтров (метрики, todo, графики, топы, PnL, экспозиция).
-- Files: `apps/web/app/page.tsx`, `apps/web/app/globals.css`, `docs/audit/06-progress-tracker.md`
-- Findings: контент после фильтров визуально сливался с остальной страницей; карточки метрик на глобальном `.card` отличались от блоков «Кабинеты» / «Все кабинеты».
-- Changes: обёртка `section.dashboardActiveCabinetSection` с шапкой (имя кабинета, подсказка, фильтр источника); стили панели, `dashboardMetricsGrid`, переопределения `.card`/`.chartWrap`/`.tableWrap` внутри секции; классы `dashboardActiveSubheading`, `dashboardActiveChartBlock`, `dashboardActiveFootnote`; адаптив padding/высота графиков.
-- Decomposition notes (`utils/constants/hooks/types`): только разметка главной и CSS.
-- Manual verification: `npm run build -w apps/web`; проверка в браузере — секция после «Показать», сетка топов и графики внутри панели.
+- Scope: `/leverage-calculator` — падение клиента (Recharts «Invariant failed»).
+- Files: `apps/web/app/leverage-calculator/LeverageCalculatorCharts.tsx`, `docs/audit/06-progress-tracker.md`
+- Findings: двойная ось Y + `ResponsiveContainer` при SSR/первом кадре с нулевой шириной или нестабильной вёрстке; возможны нечисловые точки траектории.
+- Changes: рендер графика только после `useEffect` (клиентский mount); `minWidth`/`minHeight` у контейнера и `ResponsiveContainer`; фиксированная `width` у обеих осей Y; `yAxisId` у `ReferenceLine`; `ifOverflow="extendDomain"`; санитизация `capitalUsd` / `cumulativePaidUsd` в данных.
+- Decomposition notes: без выноса.
+- Manual verification: `npm run build -w apps/web`, `npm run check-types -w apps/web`.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
