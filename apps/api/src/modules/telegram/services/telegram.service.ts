@@ -963,6 +963,32 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
     });
   }
 
+  /**
+   * Рассылка в несколько chatId: часть получателей без /start или с блокировкой бота — ожидаемо;
+   * не путаем с фатальной ошибкой, если остальным доставка прошла.
+   */
+  private logTelegramBroadcastRecipientError(
+    label: string,
+    uid: number,
+    e: unknown,
+  ): void {
+    const fe = formatError(e);
+    const low = fe.toLowerCase();
+    const benignPrivate =
+      low.includes('chat not found') ||
+      low.includes('bot was blocked by the user') ||
+      low.includes('blocked by user') ||
+      low.includes('user is deactivated') ||
+      low.includes('peer_id_invalid');
+    if (benignPrivate) {
+      this.logger.log(
+        `${label}: пропуск chatId=${uid} (${fe}). Обычно: не открыт диалог с этим ботом (/start) или блокировка; другие получатели списка могут получить сообщение.`,
+      );
+      return;
+    }
+    this.logger.warn(`${label} -> ${uid}: ${fe}`);
+  }
+
   private async runWithUserCabinet<T>(userId: number, fn: () => Promise<T>): Promise<T> {
     const cabinetId = await this.cabinets.resolveCabinetForTelegramUser(userId);
     return this.cabinetContext.runWithCabinet(cabinetId, fn);
@@ -1050,7 +1076,7 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
           );
           deliveredTo += 1;
         } catch (e) {
-          this.logger.warn(`requestExternalSignalConfirmation -> ${uid}: ${formatError(e)}`);
+          this.logTelegramBroadcastRecipientError('requestExternalSignalConfirmation', uid, e);
         }
       }
       if (deliveredTo === 0) {
@@ -1112,7 +1138,7 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
           await bot.telegram.sendMessage(uid, msg);
           deliveredTo += 1;
         } catch (e) {
-          this.logger.warn(`notifyUserbotSignalFailure -> ${uid}: ${formatError(e)}`);
+          this.logTelegramBroadcastRecipientError('notifyUserbotSignalFailure', uid, e);
         }
       }
 
@@ -1168,7 +1194,7 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
           await bot.telegram.sendMessage(uid, msg);
           deliveredTo += 1;
         } catch (e) {
-          this.logger.warn(`notifyDiagnosticsPing -> ${uid}: ${formatError(e)}`);
+          this.logTelegramBroadcastRecipientError('notifyDiagnosticsPing', uid, e);
         }
       }
 
@@ -1231,7 +1257,7 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
           });
           deliveredTo += 1;
         } catch (e) {
-          this.logger.warn(`notifyUserbotResultWithoutEntry -> ${uid}: ${formatError(e)}`);
+          this.logTelegramBroadcastRecipientError('notifyUserbotResultWithoutEntry', uid, e);
         }
       }
 
@@ -1304,7 +1330,7 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
           await bot.telegram.sendMessage(uid, msg, { parse_mode: 'HTML' });
           deliveredTo += 1;
         } catch (e) {
-          this.logger.warn(`notifyApiTradeCancelled -> ${uid}: ${formatError(e)}`);
+          this.logTelegramBroadcastRecipientError('notifyApiTradeCancelled', uid, e);
         }
       }
       if (deliveredTo === 0) {
@@ -1370,7 +1396,7 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
           await bot.telegram.sendMessage(uid, msg, { parse_mode: 'HTML' });
           deliveredTo += 1;
         } catch (e) {
-          this.logger.warn(`notifyApiTradeLiquidation -> ${uid}: ${formatError(e)}`);
+          this.logTelegramBroadcastRecipientError('notifyApiTradeLiquidation', uid, e);
         }
       }
 
@@ -1472,7 +1498,7 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
           await bot.telegram.sendMessage(uid, msg, { parse_mode: 'HTML' });
           deliveredTo += 1;
         } catch (e) {
-          this.logger.warn(`notifyHedgeOppositePlacementAudit -> ${uid}: ${formatError(e)}`);
+          this.logTelegramBroadcastRecipientError('notifyHedgeOppositePlacementAudit', uid, e);
         }
       }
       if (deliveredTo === 0) {
@@ -1593,7 +1619,7 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
         try {
           await bot.telegram.sendMessage(uid, msg, { parse_mode: 'HTML' });
         } catch (e) {
-          this.logger.warn(`notifyTradeSignalEvent -> ${uid}: ${formatError(e)}`);
+          this.logTelegramBroadcastRecipientError('notifyTradeSignalEvent', uid, e);
         }
       }
     });
