@@ -4,6 +4,7 @@ import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions';
 import * as QRCode from 'qrcode';
 
+import { postCriticalNotifyText } from '../../../common/critical-notify.util';
 import { formatError } from '../../../common/format-error';
 import { PrismaService } from '../../../prisma/prisma.service';
 import {
@@ -16,10 +17,14 @@ import {
   TELEGRAM_USERBOT_SESSION_OWNER_USER_ID_KEY,
 } from '../../settings/settings.constants';
 import {
+  TELEGRAM_USERBOT_AUTH_KEY_DUPLICATE_BACKOFF_MS_DEFAULT,
+  TELEGRAM_USERBOT_AUTH_KEY_DUPLICATE_BACKOFF_MS_MAX,
+  TELEGRAM_USERBOT_AUTH_KEY_DUPLICATE_BACKOFF_MS_MIN,
   TELEGRAM_USERBOT_SESSION_PERSIST_INTERVAL_MS_DEFAULT,
   TELEGRAM_USERBOT_SESSION_PERSIST_INTERVAL_MS_MAX,
   TELEGRAM_USERBOT_SESSION_PERSIST_INTERVAL_MS_MIN,
 } from '../telegram-userbot.constants';
+import { isTelegramAuthKeyDuplicatedError } from '../utils/telegram-userbot-mtproto-error.util';
 import type { QrState } from '../telegram-userbot.types';
 
 /** Сброс визуальных полей QR: при `{ ...prev, ...next }` иначе остаются старый data URL и ссылки. */
@@ -47,6 +52,10 @@ export class TelegramUserbotClientService {
       timer: ReturnType<typeof setTimeout>;
     }
   >();
+  /** После 406 AUTH_KEY_DUPLICATED — не спамить Telegram reconnect (watchdog/старт). */
+  private authKeyDuplicateBackoffUntilMs = 0;
+  private lastAuthKeyDuplicateCriticalNotifyAt = 0;
+
   /** GramJS может вызывать `onError` много раз подряд — гейт, чтобы один раз залогировать и остановить QR-клиент. */
   private readonly qrAuthTerminalHandledByUserId = new Set<string>();
   /** Периодически синхронизируем StringSession в Setting — иначе после редеплоя строка в БД бывает устаревшей. */
@@ -244,6 +253,36 @@ export class TelegramUserbotClientService {
     return this.clientsByUserId.size;
   }
 
+  /** Пока действует backoff после AUTH_KEY_DUPLICATED — внешний код не должен считать это «просто offline». */
+  isAuthKeyDuplicateBackoffActive(): boolean {
+    return Date.now() < this.authKeyDuplicateBackoffUntilMs;
+  }
+
+  private resolveAuthKeyDuplicateBackoffMs(): number {
+    const raw = process.env.TELEGRAM_USERBOT_AUTH_KEY_DUPLICATE_BACKOFF_MS?.trim();
+    const n = raw ? Number.parseInt(raw, 10) : Number.NaN;
+    if (!Number.isFinite(n)) {
+      return TELEGRAM_USERBOT_AUTH_KEY_DUPLICATE_BACKOFF_MS_DEFAULT;
+    }
+    return Math.min(
+      TELEGRAM_USERBOT_AUTH_KEY_DUPLICATE_BACKOFF_MS_MAX,
+      Math.max(TELEGRAM_USERBOT_AUTH_KEY_DUPLICATE_BACKOFF_MS_MIN, n),
+    );
+  }
+
+  private notifyAuthKeyDuplicatedCriticalOnce(backoffMs: number): void {
+    const now = Date.now();
+    if (now - this.lastAuthKeyDuplicateCriticalNotifyAt < backoffMs) {
+      return;
+    }
+    this.lastAuthKeyDuplicateCriticalNotifyAt = now;
+    const mins = Math.max(1, Math.round(backoffMs / 60_000));
+    const text =
+      `[CRITICAL userbot] AUTH_KEY_DUPLICATED (406): та же MTProto-сессия уже активна в другом процессе (вторая реплика API, параллельный локальный запуск и т.п.). ` +
+      `На этом инстансе повторный connect приостановлен на ~${mins} мин. Оставьте одну реплику с userbot или отключите сессию в лишних процессах. ${new Date().toISOString()}`;
+    void postCriticalNotifyText(text, (m) => this.logger.warn(m));
+  }
+
   *clientsEntries(): IterableIterator<[string, TelegramClient]> {
     yield* this.clientsByUserId.entries();
   }
@@ -261,6 +300,14 @@ export class TelegramUserbotClientService {
           ok: false,
           error:
             'Не удалось определить владельца сессии userbot. Войдите по QR из кабинета или задайте TELEGRAM_USERBOT_SESSION_OWNER_USER_ID.',
+        };
+      }
+      if (this.isAuthKeyDuplicateBackoffActive()) {
+        const leftMs = Math.max(0, this.authKeyDuplicateBackoffUntilMs - Date.now());
+        const mins = Math.max(1, Math.ceil(leftMs / 60_000));
+        return {
+          ok: false,
+          error: `Повторное подключение userbot отложено (~${mins} мин.) после AUTH_KEY_DUPLICATED: одна MTProto-сессия не может быть активна в двух процессах одновременно.`,
         };
       }
       const creds = await this.getApiCreds();
@@ -301,6 +348,19 @@ export class TelegramUserbotClientService {
         }
       }
       const msg = formatError(e);
+      if (isTelegramAuthKeyDuplicatedError(e)) {
+        const backoffMs = this.resolveAuthKeyDuplicateBackoffMs();
+        this.authKeyDuplicateBackoffUntilMs = Date.now() + backoffMs;
+        this.notifyAuthKeyDuplicatedCriticalOnce(backoffMs);
+        const mins = Math.max(1, Math.round(backoffMs / 60_000));
+        this.logger.warn(
+          `connectFromStoredSession: AUTH_KEY_DUPLICATED — сессия уже используется другим процессом. Повторные попытки приостановлены на ~${mins} мин. (см. CRITICAL уведомление). raw=${msg}`,
+        );
+        return {
+          ok: false,
+          error: `Дублирование MTProto-сессии (AUTH_KEY_DUPLICATED): та же сессия уже подключена в другом месте (вторая реплика API или параллельный запуск). Используйте один инстанс с userbot; повторный вход на этом инстансе отложен на ~${mins} мин.`,
+        };
+      }
       this.logger.error(`connectFromStoredSession failed: ${msg}`);
       return { ok: false, error: msg };
     }
@@ -600,6 +660,7 @@ export class TelegramUserbotClientService {
   }
 
   private async attachClient(client: TelegramClient, ownerUserId: string): Promise<void> {
+    this.authKeyDuplicateBackoffUntilMs = 0;
     const owner = String(ownerUserId ?? '').trim();
     if (!owner) {
       throw new BadRequestException('Пользователь не определен для userbot');

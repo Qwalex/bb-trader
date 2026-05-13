@@ -1674,3 +1674,13 @@
 - Manual verification: `npm run build -w apps/api`.
 - Docs updated: этот трекер, `AGENTS.md`, `.env.example`.
 - Linked risks (`SEC-###`): при нескольких репликах API — дублирование минутных POST (как и для других cron); без секретов в теле уведомления.
+
+### AUD-139
+
+- Status: `done`
+- Scope: Корректная обработка MTProto `406 AUTH_KEY_DUPLICATED` при `connectFromStoredSession` (backoff, human-readable ошибка, critical notify без спама watchdog/cron).
+- Files: `apps/api/src/modules/telegram-userbot/client/telegram-userbot-client.service.ts`, `utils/telegram-userbot-mtproto-error.util.ts`, `telegram-userbot.constants.ts`, `telegram-userbot.service.ts`, `.env.example`, `docs/audit/06-progress-tracker.md`, `AGENTS.md`
+- Changes: детект `AUTH_KEY_DUPLICATED`; backoff `TELEGRAM_USERBOT_AUTH_KEY_DUPLICATE_BACKOFF_MS`; разовый POST на CRITICAL в пределах окна backoff; `attachClient` сбрасывает backoff; watchdog не вызывает connect в backoff; минутный critical «offline» не дублирует сценарий дубликата ключа.
+- Manual verification: `npm run build -w apps/api`.
+- Docs updated: этот трекер, `AGENTS.md`, `.env.example`.
+- Linked risks (`SEC-###`): N/A

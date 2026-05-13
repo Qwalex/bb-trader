@@ -562,6 +562,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     }
     const ownerId = await this.resolveSessionOwnerUserIdForRestore();
     if (!ownerId) return;
+    if (this.userbotClient.isAuthKeyDuplicateBackoffActive()) {
+      return;
+    }
     const client = this.userbotClient.getClientForOwnerUserId(ownerId);
     const connectedNow = Boolean(client && (await this.userbotClient.isClientAuthorized(client)));
     if (connectedNow) {
@@ -656,6 +659,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       this.settings.get('TELEGRAM_USERBOT_SESSION'),
     ]);
     if (!enabled || !session?.trim()) {
+      return false;
+    }
+    if (this.userbotClient.isAuthKeyDuplicateBackoffActive()) {
       return false;
     }
     const ownerId = await this.resolveSessionOwnerUserIdForRestore();
