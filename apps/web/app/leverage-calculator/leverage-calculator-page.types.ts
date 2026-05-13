@@ -17,6 +17,8 @@ export type LeverageCalculatorPresetV1 = {
   inputCurrency: LeverageInputCurrency;
   principalUsd: number;
   monthlyPaymentUsd: number;
+  /** Прочие фиксированные расходы в месяц с того же счёта (USDT в БД). */
+  otherMonthlyExpensesUsd?: number;
   termYears: number;
   horizonMonthsAfterLoan: number;
   mode: LeverageCalcMode;

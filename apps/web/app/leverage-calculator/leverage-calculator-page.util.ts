@@ -94,6 +94,14 @@ export type LeverageOutlook = {
   /** Эффективная годовая: (1+i)¹²−1. */
   loanEffectiveAnnualRate: number | null;
 
+  /** Прочие фиксированные расходы с того же счёта каждый месяц (весь горизонт симуляции). */
+  otherMonthlyExpensesUsd: number;
+  /**
+   * Максимум постоянного дополнительного снятия в месяц (тот же счёт), при котором капитал C
+   * не опускается ниже нуля ни в одном месяце на полном горизонте; учитывается текущий сценарий досрочного (если валиден).
+   */
+  maxExtraMonthlyWithdrawalUsd: number | null;
+
   warnings: string[];
 };
 
@@ -181,8 +189,82 @@ export type LoanSimResult = {
   wentNegativeDuringLoan: boolean;
 };
 
+const TRAJ_SAFE_EPS = 1e-6;
+const MAX_EXTRA_MONTHLY_USD = 5e7;
+
+function trajectoryNeverNegative(sim: LoanSimResult): boolean {
+  if (sim.trajectory.length === 0) return false;
+  return sim.trajectory.every((p) => p.capitalUsd >= -TRAJ_SAFE_EPS);
+}
+
 /**
- * Месячная дискретизация на **едином счёте** C (начало C₀=E+L). Платёж M уменьшает тот же C.
+ * Максимум постоянного дополнительного снятия D (USDT/мес) с того же счёта, что и торговый капитал,
+ * при фиксированных M, прочих расходах X и выбранном графике кредита (в т.ч. досрочном), так что
+ * C ≥ 0 в каждом месяце на всём горизонте term+horizon. Если при D=0 уже есть отрицательный C — 0.
+ */
+export function computeMaxExtraMonthlyWithdrawalUsd(opts: {
+  equityUsd: number;
+  loanPrincipalUsd: number;
+  monthlyPaymentUsd: number;
+  termMonths: number;
+  horizonMonthsAfter: number;
+  rDaily: number;
+  early: LeverageEarlyPayoffParams | null;
+  loanPaymentTiming: LeverageLoanPaymentTiming;
+  otherMonthlyExpensesUsd: number;
+}): number | null {
+  const X = Math.max(0, opts.otherMonthlyExpensesUsd);
+  const base = {
+    equityUsd: opts.equityUsd,
+    loanPrincipalUsd: opts.loanPrincipalUsd,
+    monthlyPaymentUsd: opts.monthlyPaymentUsd,
+    termMonths: opts.termMonths,
+    horizonMonthsAfter: opts.horizonMonthsAfter,
+    rDaily: opts.rDaily,
+    early: opts.early,
+    loanPaymentTiming: opts.loanPaymentTiming,
+    otherMonthlyExpensesUsd: X,
+    extraMonthlyWithdrawalUsd: 0,
+  };
+
+  const ok = (d: number): boolean =>
+    trajectoryNeverNegative(simulateLeverageLoan({ ...base, extraMonthlyWithdrawalUsd: d }));
+
+  if (!ok(0)) return 0;
+
+  let lo = 0;
+  let hi = Math.max(1, opts.monthlyPaymentUsd + X);
+
+  if (ok(hi)) {
+    lo = hi;
+    while (lo < MAX_EXTRA_MONTHLY_USD - TRAJ_SAFE_EPS) {
+      const nxt = Math.min(MAX_EXTRA_MONTHLY_USD, lo * 2);
+      if (!ok(nxt)) {
+        hi = nxt;
+        break;
+      }
+      if (nxt >= MAX_EXTRA_MONTHLY_USD - TRAJ_SAFE_EPS) {
+        return MAX_EXTRA_MONTHLY_USD;
+      }
+      lo = nxt;
+    }
+    if (ok(lo) && lo >= MAX_EXTRA_MONTHLY_USD - TRAJ_SAFE_EPS) {
+      return MAX_EXTRA_MONTHLY_USD;
+    }
+  }
+
+  for (let i = 0; i < 80; i++) {
+    if (hi - lo < TRAJ_SAFE_EPS) break;
+    const mid = (lo + hi) / 2;
+    if (ok(mid)) lo = mid;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/**
+ * Месячная дискретизация на **едином счёте** C (начало C₀=E+L). Платёж M уменьшает тот же C;
+ * при заданных X и Dextra каждый месяц дополнительно списываются X и Dextra (прочие / доп. снятие).
  * Порядок шага задаётся `loanPaymentTiming` (см. описание в шапке файла).
  */
 export function simulateLeverageLoan(opts: {
@@ -194,10 +276,18 @@ export function simulateLeverageLoan(opts: {
   rDaily: number;
   early: LeverageEarlyPayoffParams | null;
   loanPaymentTiming?: LeverageLoanPaymentTiming;
+  /** Прочие расходы с того же счёта каждый месяц (весь горизонт), не входят в «выплачено банку». */
+  otherMonthlyExpensesUsd?: number;
+  /** Дополнительное постоянное снятие с того же счёта каждый месяц (поиск максимума). */
+  extraMonthlyWithdrawalUsd?: number;
 }): LoanSimResult {
   const E = Number.isFinite(opts.equityUsd) ? Math.max(0, opts.equityUsd) : 0;
   const L = Number.isFinite(opts.loanPrincipalUsd) ? Math.max(0, opts.loanPrincipalUsd) : 0;
   const M = Number.isFinite(opts.monthlyPaymentUsd) ? Math.max(0, opts.monthlyPaymentUsd) : 0;
+  const Xraw = opts.otherMonthlyExpensesUsd;
+  const X = Xraw != null && Number.isFinite(Xraw) ? Math.max(0, Xraw) : 0;
+  const Draw = opts.extraMonthlyWithdrawalUsd;
+  const Dextra = Draw != null && Number.isFinite(Draw) ? Math.max(0, Draw) : 0;
   const termM = Math.max(0, Math.floor(opts.termMonths));
   const horizon = Math.max(0, Math.floor(opts.horizonMonthsAfter));
   const rDaily = opts.rDaily;
@@ -251,12 +341,15 @@ export function simulateLeverageLoan(opts: {
       }
     }
 
+    const bankPayment = payment;
+    const totalOut = bankPayment + X + Dextra;
+
     if (timing === 'before_monthly_return') {
-      C = (C - payment) * f;
+      C = (C - totalOut) * f;
     } else {
-      C = C * f - payment;
+      C = C * f - totalOut;
     }
-    paid += payment;
+    paid += bankPayment;
     if (C < 0 && !wentNegative) {
       wentNegative = true;
     }
@@ -276,14 +369,20 @@ export function computeLeverageOutlook(params: {
   horizonMonthsAfterLoan: number;
   earlyPayoff?: LeverageEarlyPayoffParams | null;
   loanPaymentTiming?: LeverageLoanPaymentTiming;
+  /** Прочие фиксированные расходы USDT/мес с того же счёта (весь горизонт симуляции). */
+  otherMonthlyExpensesUsd?: number;
 }): LeverageOutlook {
   const warnings: string[] = [];
   const ep = params.earlyPayoff ?? null;
+  const closeoutEp =
+    ep != null && Number.isFinite(ep.closeoutUsd) ? Math.max(0, ep.closeoutUsd) : 0;
   const paymentTiming: LeverageLoanPaymentTiming = params.loanPaymentTiming ?? 'after_monthly_return';
   const { mode, loan } = params;
   const E = Number.isFinite(params.equityUsd) ? Math.max(0, params.equityUsd) : 0;
   const L = Number.isFinite(loan.principalUsd) ? Math.max(0, loan.principalUsd) : 0;
   const M = Number.isFinite(loan.monthlyPaymentUsd) ? Math.max(0, loan.monthlyPaymentUsd) : 0;
+  const Xraw = params.otherMonthlyExpensesUsd;
+  const X = Xraw != null && Number.isFinite(Xraw) ? Math.max(0, Xraw) : 0;
   const termM = Math.max(0, Math.floor(Number.isFinite(loan.termMonths) ? loan.termMonths : 0));
   const horizonAfter = Math.max(
     0,
@@ -334,12 +433,12 @@ export function computeLeverageOutlook(params: {
   if (rDaily != null && Number.isFinite(rDaily) && rDaily > -1 && C0 > 0) {
     const f = monthGrowthFactorFromRDaily(rDaily);
     if (paymentTiming === 'before_monthly_return') {
-      const base = C0 - M;
+      const base = C0 - M - X;
       grossMonthlyStartUsd = base > 0 ? base * (f - 1) : null;
-      netMonthlyStartUsd = (C0 - M) * f - C0;
+      netMonthlyStartUsd = (C0 - M - X) * f - C0;
     } else {
       grossMonthlyStartUsd = C0 * (f - 1);
-      netMonthlyStartUsd = C0 * f - M - C0;
+      netMonthlyStartUsd = C0 * f - M - X - C0;
     }
     if (grossMonthlyStartUsd != null && !Number.isFinite(grossMonthlyStartUsd)) {
       grossMonthlyStartUsd = null;
@@ -349,7 +448,7 @@ export function computeLeverageOutlook(params: {
     }
   } else if (grossDailyStartUsd != null) {
     grossMonthlyStartUsd = grossDailyStartUsd * DAYS_PER_MONTH;
-    netMonthlyStartUsd = grossMonthlyStartUsd - M;
+    netMonthlyStartUsd = grossMonthlyStartUsd - M - X;
   }
 
   const dailyLoanBurdenUsd = M > 0 ? M / DAYS_PER_MONTH : 0;
@@ -406,6 +505,8 @@ export function computeLeverageOutlook(params: {
           rDaily,
           early: null,
           loanPaymentTiming: paymentTiming,
+          otherMonthlyExpensesUsd: X,
+          extraMonthlyWithdrawalUsd: 0,
         })
       : null;
 
@@ -454,7 +555,7 @@ export function computeLeverageOutlook(params: {
     ep.closeAfterMonth >= 1 &&
     ep.closeAfterMonth < termM
   ) {
-    const closeout = Number.isFinite(ep.closeoutUsd) ? Math.max(0, ep.closeoutUsd) : 0;
+    const closeout = closeoutEp;
     if (closeout <= 0) {
       warnings.push(
         'Досрочное погашение: укажите разовый платёж при закрытии (остаток долга и комиссии банка по договору).',
@@ -470,6 +571,8 @@ export function computeLeverageOutlook(params: {
         rDaily,
         early: { closeAfterMonth: ep.closeAfterMonth, closeoutUsd: closeout },
         loanPaymentTiming: paymentTiming,
+        otherMonthlyExpensesUsd: X,
+        extraMonthlyWithdrawalUsd: 0,
       });
       wentNegativeDuringLoanEarly = earlySim.wentNegativeDuringLoan;
       if (wentNegativeDuringLoanEarly) {
@@ -487,6 +590,33 @@ export function computeLeverageOutlook(params: {
     }
   } else if (ep && termM > 0 && termM < 2) {
     warnings.push('Досрочное погашение в модели доступно при сроке кредита не меньше 2 месяцев.');
+  }
+
+  let maxExtraMonthlyWithdrawalUsd: number | null = null;
+  if (
+    rDaily != null &&
+    rDaily > -1 &&
+    C0 > 0 &&
+    termM > 0 &&
+    Number.isFinite(M) &&
+    E > 0 &&
+    basePnlPerDayUsd != null
+  ) {
+    const earlyForMax: LeverageEarlyPayoffParams | null =
+      earlyPayoffComparable && ep
+        ? { closeAfterMonth: ep.closeAfterMonth, closeoutUsd: closeoutEp }
+        : null;
+    maxExtraMonthlyWithdrawalUsd = computeMaxExtraMonthlyWithdrawalUsd({
+      equityUsd: E,
+      loanPrincipalUsd: L,
+      monthlyPaymentUsd: M,
+      termMonths: termM,
+      horizonMonthsAfter: horizonAfter,
+      rDaily,
+      early: earlyForMax,
+      loanPaymentTiming: paymentTiming,
+      otherMonthlyExpensesUsd: X,
+    });
   }
 
   return {
@@ -523,6 +653,8 @@ export function computeLeverageOutlook(params: {
     loanImpliedMonthlyRate,
     loanNominalApr,
     loanEffectiveAnnualRate,
+    otherMonthlyExpensesUsd: X,
+    maxExtraMonthlyWithdrawalUsd,
     warnings,
   };
 }
@@ -538,6 +670,15 @@ export function computeLeverageStrategyHints(o: LeverageOutlook): string[] {
   if (o.netMonthlyStartUsd != null && o.netMonthlyStartUsd <= 0) {
     hints.push(
       'Чистый прирост за первый дискретный месяц неположителен: платёж съедает прирост при той же схеме шага, что и симуляция — смотрите траекторию и предупреждения.',
+    );
+  }
+  if (
+    o.maxExtraMonthlyWithdrawalUsd != null &&
+    Number.isFinite(o.maxExtraMonthlyWithdrawalUsd) &&
+    o.maxExtraMonthlyWithdrawalUsd > 1e-6
+  ) {
+    hints.push(
+      `По дискретной модели на весь горизонт (M, прочие расходы и валидный досрочный, если включён) можно добавить постоянное снятие примерно до ${o.maxExtraMonthlyWithdrawalUsd.toFixed(2)} USDT/мес, не опуская капитал C ниже нуля ни в одном месяце.`,
     );
   }
   if (o.earlyPayoffComparable) {
@@ -626,8 +767,9 @@ export function buildMonthlyCapitalTrajectory(opts: {
   horizonMonthsAfter: number;
   rDaily: number;
   loanPaymentTiming?: LeverageLoanPaymentTiming;
+  otherMonthlyExpensesUsd?: number;
 }): TrajectoryPoint[] {
-  const sim = simulateLeverageLoan({ ...opts, early: null });
+  const sim = simulateLeverageLoan({ ...opts, early: null, extraMonthlyWithdrawalUsd: 0 });
   return sim.trajectory;
 }
 
@@ -641,8 +783,9 @@ export function buildMonthlyCapitalTrajectoryEarly(opts: {
   rDaily: number;
   early: LeverageEarlyPayoffParams;
   loanPaymentTiming?: LeverageLoanPaymentTiming;
+  otherMonthlyExpensesUsd?: number;
 }): TrajectoryPoint[] {
-  const sim = simulateLeverageLoan(opts);
+  const sim = simulateLeverageLoan({ ...opts, extraMonthlyWithdrawalUsd: 0 });
   return sim.trajectory;
 }
 

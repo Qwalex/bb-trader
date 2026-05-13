@@ -68,6 +68,10 @@ export function LeverageCalculatorClient({
     const p = parseLeveragePresetJson(initialPresetJson) ?? DEFAULT_LEVERAGE_PRESET;
     return String(p.monthlyPaymentUsd);
   });
+  const [otherMonthly, setOtherMonthly] = useState(() => {
+    const p = parseLeveragePresetJson(initialPresetJson) ?? DEFAULT_LEVERAGE_PRESET;
+    return String(p.otherMonthlyExpensesUsd ?? 0);
+  });
   const [termYears, setTermYears] = useState(() => {
     const p = parseLeveragePresetJson(initialPresetJson) ?? DEFAULT_LEVERAGE_PRESET;
     return String(p.termYears);
@@ -137,10 +141,12 @@ export function LeverageCalculatorClient({
     if (effective === 'RUB' && rubPerUsd != null && rubPerUsd > 0) {
       setPrincipal(String(Math.round(p.principalUsd * rubPerUsd)));
       setMonthly(String(Math.round(p.monthlyPaymentUsd * rubPerUsd)));
+      setOtherMonthly(String(Math.round((p.otherMonthlyExpensesUsd ?? 0) * rubPerUsd)));
       setEarlyCloseoutUsd(String(Math.round((p.earlyCloseoutUsd ?? 0) * rubPerUsd)));
     } else {
       setPrincipal(String(p.principalUsd));
       setMonthly(String(p.monthlyPaymentUsd));
+      setOtherMonthly(String(p.otherMonthlyExpensesUsd ?? 0));
       setEarlyCloseoutUsd(String(p.earlyCloseoutUsd ?? 0));
     }
     skipPersistOnce.current = true;
@@ -186,6 +192,11 @@ export function LeverageCalculatorClient({
     return { principalUsd: L, monthlyPaymentUsd: M, termMonths };
   }, [principal, monthly, termYears, inputCurrency, rubPerUsdSafe]);
 
+  const otherMonthlyExpensesUsd = useMemo(
+    () => loanFieldUsd(otherMonthly, inputCurrency, rubPerUsdSafe),
+    [otherMonthly, inputCurrency, rubPerUsdSafe],
+  );
+
   const horizonMonthsAfterLoan = useMemo(() => {
     const h = Number.parseInt(horizonAfter, 10);
     return Number.isFinite(h) ? Math.max(0, h) : 0;
@@ -221,6 +232,7 @@ export function LeverageCalculatorClient({
       horizonMonthsAfterLoan,
       earlyPayoff: earlyPayoffForOutlook,
       loanPaymentTiming,
+      otherMonthlyExpensesUsd,
     });
   }, [
     equityNum,
@@ -231,6 +243,7 @@ export function LeverageCalculatorClient({
     horizonMonthsAfterLoan,
     earlyPayoffForOutlook,
     loanPaymentTiming,
+    otherMonthlyExpensesUsd,
   ]);
 
   const strategyHints = useMemo(() => (outlook ? computeLeverageStrategyHints(outlook) : []), [outlook]);
@@ -315,8 +328,9 @@ export function LeverageCalculatorClient({
       horizonMonthsAfter: horizonMonthsAfterLoan,
       rDaily,
       loanPaymentTiming,
+      otherMonthlyExpensesUsd,
     });
-  }, [equityNum, rDaily, loan, horizonMonthsAfterLoan, loanPaymentTiming]);
+  }, [equityNum, rDaily, loan, horizonMonthsAfterLoan, loanPaymentTiming, otherMonthlyExpensesUsd]);
 
   const trajectoryEarly = useMemo(() => {
     if (
@@ -342,8 +356,9 @@ export function LeverageCalculatorClient({
       rDaily,
       early: earlyPayoffForOutlook,
       loanPaymentTiming,
+      otherMonthlyExpensesUsd,
     });
-  }, [equityNum, rDaily, loan, horizonMonthsAfterLoan, earlyPayoffForOutlook, loanPaymentTiming]);
+  }, [equityNum, rDaily, loan, horizonMonthsAfterLoan, earlyPayoffForOutlook, loanPaymentTiming, otherMonthlyExpensesUsd]);
 
   const trajectoryWithCompare = useMemo(() => {
     if (trajectory.length === 0 || rDaily == null || !Number.isFinite(rDaily) || rDaily <= -1) {
@@ -459,6 +474,7 @@ export function LeverageCalculatorClient({
       const preset = buildPresetFromFormState({
         principalUsd: loanFieldUsd(principal, inputCurrency, rubPerUsdSafe),
         monthlyPaymentUsd: loanFieldUsd(monthly, inputCurrency, rubPerUsdSafe),
+        otherMonthlyExpensesUsd: loanFieldUsd(otherMonthly, inputCurrency, rubPerUsdSafe),
         termYears: Number.parseFloat(termYears.replace(',', '.')) || 0,
         horizonMonthsAfterLoan: Number.parseInt(horizonAfter, 10) || 0,
         mode,
@@ -487,6 +503,7 @@ export function LeverageCalculatorClient({
   }, [
     principal,
     monthly,
+    otherMonthly,
     termYears,
     horizonAfter,
     mode,
@@ -507,15 +524,17 @@ export function LeverageCalculatorClient({
       if (next === 'RUB') {
         setPrincipal(String(Math.round(loanFieldUsd(principal, 'USD', null) * rubPerUsdSafe)));
         setMonthly(String(Math.round(loanFieldUsd(monthly, 'USD', null) * rubPerUsdSafe)));
+        setOtherMonthly(String(Math.round(loanFieldUsd(otherMonthly, 'USD', null) * rubPerUsdSafe)));
         setEarlyCloseoutUsd(String(Math.round(loanFieldUsd(earlyCloseoutUsd, 'USD', null) * rubPerUsdSafe)));
       } else {
         setPrincipal(String(loanFieldUsd(principal, 'RUB', rubPerUsdSafe).toFixed(2)));
         setMonthly(String(loanFieldUsd(monthly, 'RUB', rubPerUsdSafe).toFixed(2)));
+        setOtherMonthly(String(loanFieldUsd(otherMonthly, 'RUB', rubPerUsdSafe).toFixed(2)));
         setEarlyCloseoutUsd(String(loanFieldUsd(earlyCloseoutUsd, 'RUB', rubPerUsdSafe).toFixed(2)));
       }
       setInputCurrency(next);
     },
-    [inputCurrency, rubPerUsdSafe, principal, monthly, earlyCloseoutUsd],
+    [inputCurrency, rubPerUsdSafe, principal, monthly, otherMonthly, earlyCloseoutUsd],
   );
 
   const moneyUnit = inputCurrency === 'RUB' ? '₽' : 'USDT';
@@ -634,6 +653,15 @@ export function LeverageCalculatorClient({
                 inputMode="decimal"
                 value={monthly}
                 onChange={(e) => setMonthly(e.target.value)}
+              />
+            </label>
+            <label>
+              <span className="leverageFieldLabel">Прочие расходы в месяц, {moneyUnit}</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={otherMonthly}
+                onChange={(e) => setOtherMonthly(e.target.value)}
               />
             </label>
             <label>
@@ -881,6 +909,23 @@ export function LeverageCalculatorClient({
                 </span>
               </div>
               <div className="leverageMetric">
+                <span className="leverageMetricLabel">Прочие расходы в месяц (с того же счёта)</span>
+                <span className="leverageMetricVal">
+                  <DualUsdRub usd={outlook.otherMonthlyExpensesUsd} rubPerUsd={rubPerUsdSafe} />
+                </span>
+              </div>
+              <div className="leverageMetric">
+                <span className="leverageMetricLabel">Макс. доп. снятие в месяц (C не ниже нуля)</span>
+                <span className="leverageMetricVal">
+                  {outlook.maxExtraMonthlyWithdrawalUsd != null &&
+                  Number.isFinite(outlook.maxExtraMonthlyWithdrawalUsd) ? (
+                    <DualUsdRub usd={outlook.maxExtraMonthlyWithdrawalUsd} rubPerUsd={rubPerUsdSafe} />
+                  ) : (
+                    '—'
+                  )}
+                </span>
+              </div>
+              <div className="leverageMetric">
                 <span className="leverageMetricLabel">Переплата (выплаты − тело)</span>
                 <span className="leverageMetricVal">
                   <DualUsdRub usd={outlook.overpaymentUsd} rubPerUsd={rubPerUsdSafe} />
@@ -1005,7 +1050,9 @@ export function LeverageCalculatorClient({
             <p className="leverageFootnote" style={{ marginTop: '0.75rem' }}>
               «Только E» — тот же коэффициент r, но стартовый капитал равен equity без привлечения L и
               без ежемесячных платежей M: чистый контрольный сценарий «остаться на своих» при той же
-              оценке доходности.
+              оценке доходности. Прочие расходы и «макс. доп. снятие» считаются с того же счёта, что и M;
+              доп. снятие — постоянная сумма сверх M и прочих расходов на весь горизонт симуляции (по
+              дискретным месяцам), при валидном досрочном учитывается и он.
             </p>
             <p className="leverageFootnote" style={{ marginTop: '1.25rem' }}>
               Модель: каждый месяц капитал × (1 + r)³⁰ минус платёж; r не меняется. Реальность:

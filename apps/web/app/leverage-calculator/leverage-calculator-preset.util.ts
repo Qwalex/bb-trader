@@ -10,6 +10,7 @@ export const DEFAULT_LEVERAGE_PRESET: LeverageCalculatorPresetV1 = {
   v: 1,
   principalUsd: 650,
   monthlyPaymentUsd: 40,
+  otherMonthlyExpensesUsd: 0,
   termYears: 2,
   horizonMonthsAfterLoan: 12,
   mode: 'expected',
@@ -47,6 +48,7 @@ export function parseLeveragePresetJson(raw: string | undefined | null): Leverag
     if (j.v !== 1) return null;
     const principalUsd = clamp(Number(j.principalUsd), 0, 1e9);
     const monthlyPaymentUsd = clamp(Number(j.monthlyPaymentUsd), 0, 1e9);
+    const otherMonthlyExpensesUsd = clamp(Number(j.otherMonthlyExpensesUsd ?? 0), 0, 1e9);
     const termYears = clamp(Number(j.termYears), 0.08, 80);
     const horizonMonthsAfterLoan = clamp(Math.round(Number(j.horizonMonthsAfterLoan)), 0, 600);
     const mode: LeverageCalcMode = isMode(j.mode) ? j.mode : 'expected';
@@ -65,6 +67,7 @@ export function parseLeveragePresetJson(raw: string | undefined | null): Leverag
       v: 1,
       principalUsd,
       monthlyPaymentUsd,
+      otherMonthlyExpensesUsd,
       termYears,
       horizonMonthsAfterLoan,
       mode,
@@ -83,6 +86,7 @@ export function parseLeveragePresetJson(raw: string | undefined | null): Leverag
 export function buildPresetFromFormState(input: {
   principalUsd: number;
   monthlyPaymentUsd: number;
+  otherMonthlyExpensesUsd: number;
   termYears: number;
   horizonMonthsAfterLoan: number;
   mode: LeverageCalcMode;
@@ -101,6 +105,7 @@ export function buildPresetFromFormState(input: {
     v: 1,
     principalUsd: clamp(input.principalUsd, 0, 1e9),
     monthlyPaymentUsd: clamp(input.monthlyPaymentUsd, 0, 1e9),
+    otherMonthlyExpensesUsd: clamp(input.otherMonthlyExpensesUsd, 0, 1e9),
     termYears: clamp(input.termYears, 0.08, 80),
     horizonMonthsAfterLoan: clamp(Math.round(input.horizonMonthsAfterLoan), 0, 600),
     mode: input.mode,
