@@ -24,6 +24,14 @@ import type {
   DashboardCabinetCardDto,
   DashboardCabinetsOverviewDto,
 } from './orders-dashboard-cabinets.types';
+import type { DashboardActivityItemDto } from './orders-dashboard-activity.types';
+import {
+  DASHBOARD_ACTIVITY_INGEST_STATUSES,
+  mapIngestRouteToActivity,
+  mapSignalCloseToActivity,
+  mapSignalOpenToActivity,
+} from './orders-dashboard-activity.util';
+import { buildDashboardCabinetsSummary } from './orders-dashboard-summary.util';
 import type { ActiveSignalTradeSnapshot } from './orders-active-signal-snapshot.types';
 import type { OrdersDailyDigestModel } from './orders-digest.types';
 import { parseStringList } from './orders-source.util';
@@ -827,7 +835,7 @@ export class OrdersService {
   ): Promise<DashboardCabinetsOverviewDto> {
     const userId = String(userIdRaw ?? '').trim();
     if (!userId) {
-      return { items: [] };
+      return { items: [], summary: buildDashboardCabinetsSummary([]) };
     }
     const cabinets = await this.cabinets.listCabinetsForUser(userId);
     const items: DashboardCabinetCardDto[] = [];
@@ -896,6 +904,24 @@ export class OrdersService {
             `getDashboardCabinetsOverviewForUser: баланс недоступен cabinet=${c.id}: ${formatError(e)}`,
           );
         }
+        const balanceGuard =
+          userbotStatus &&
+          typeof userbotStatus === 'object' &&
+          'balanceGuard' in userbotStatus &&
+          userbotStatus.balanceGuard &&
+          typeof userbotStatus.balanceGuard === 'object'
+            ? {
+                minBalanceUsd: Number(userbotStatus.balanceGuard.minBalanceUsd),
+                balanceUsd: userbotStatus.balanceGuard.balanceUsd ?? null,
+                totalBalanceUsd: userbotStatus.balanceGuard.totalBalanceUsd ?? null,
+                paused: Boolean(userbotStatus.balanceGuard.paused),
+                ...(typeof userbotStatus.balanceGuard.reason === 'string' &&
+                userbotStatus.balanceGuard.reason.trim().length > 0
+                  ? { reason: userbotStatus.balanceGuard.reason }
+                  : {}),
+              }
+            : undefined;
+
         return {
           cabinetId: c.id,
           slug: c.slug,
@@ -913,11 +939,167 @@ export class OrdersService {
           totalPnl: stats.totalPnl,
           totalBalanceUsd,
           availableBalanceUsd,
+          balanceGuard,
         };
       });
       items.push(row);
     }
-    return { items };
+    return { items, summary: buildDashboardCabinetsSummary(items) };
+  }
+
+  /**
+   * Лента событий по всем кабинетам пользователя: userbot (маршруты ingest) и сигналы за окно времени.
+   */
+  async getDashboardActivityForUser(
+    userIdRaw: string | null | undefined,
+    params?: { hours?: number; limit?: number },
+  ): Promise<{ items: DashboardActivityItemDto[] }> {
+    const userId = String(userIdRaw ?? '').trim();
+    if (!userId) {
+      return { items: [] };
+    }
+    const hoursRaw = params?.hours ?? 24;
+    const hours = Math.min(Math.max(Number.isFinite(hoursRaw) ? Math.trunc(hoursRaw) : 24, 1), 168);
+    const limitRaw = params?.limit ?? 80;
+    const limit = Math.min(Math.max(Number.isFinite(limitRaw) ? Math.trunc(limitRaw) : 80, 1), 150);
+    const since = new Date(Date.now() - hours * 3600 * 1000);
+
+    const cabinets = await this.cabinets.listCabinetsForUser(userId);
+    const cabinetIds = cabinets.map((c) => c.id);
+    const nameById = new Map(cabinets.map((c) => [c.id, c.name]));
+    if (cabinetIds.length === 0) {
+      return { items: [] };
+    }
+
+    const [routes, signals] = await Promise.all([
+      this.prisma.cabinetIngestRoute.findMany({
+        where: {
+          cabinetId: { in: cabinetIds },
+          updatedAt: { gte: since },
+          status: { in: [...DASHBOARD_ACTIVITY_INGEST_STATUSES] },
+        },
+        orderBy: { updatedAt: 'desc' },
+        take: Math.min(100, limit + 40),
+        select: {
+          cabinetId: true,
+          status: true,
+          error: true,
+          updatedAt: true,
+          createdAt: true,
+          chatId: true,
+          signalId: true,
+          ingest: { select: { messageId: true, text: true } },
+        },
+      }),
+      this.prisma.signal.findMany({
+        where: {
+          cabinetId: { in: cabinetIds },
+          deletedAt: null,
+          OR: [{ createdAt: { gte: since } }, { closedAt: { gte: since } }],
+        },
+        orderBy: { updatedAt: 'desc' },
+        take: 120,
+        select: {
+          id: true,
+          cabinetId: true,
+          pair: true,
+          direction: true,
+          status: true,
+          realizedPnl: true,
+          source: true,
+          createdAt: true,
+          closedAt: true,
+        },
+      }),
+    ]);
+
+    const signalIds = [
+      ...new Set(
+        routes.map((r) => r.signalId).filter((id): id is string => Boolean(id && id.trim())),
+      ),
+    ];
+    const signalMeta =
+      signalIds.length > 0
+        ? await this.prisma.signal.findMany({
+            where: { id: { in: signalIds } },
+            select: { id: true, pair: true, direction: true },
+          })
+        : [];
+    const pairBySignalId = new Map(
+      signalMeta.map((s) => [s.id, { pair: s.pair, direction: s.direction }]),
+    );
+
+    const out: DashboardActivityItemDto[] = [];
+
+    for (const r of routes) {
+      const cabName = r.cabinetId ? nameById.get(r.cabinetId) ?? 'Кабинет' : 'Кабинет';
+      const linked = r.signalId ? pairBySignalId.get(r.signalId) : undefined;
+      out.push(
+        mapIngestRouteToActivity({
+          cabinetId: r.cabinetId,
+          cabinetName: cabName,
+          status: r.status,
+          chatId: r.chatId,
+          messageId: r.ingest?.messageId ?? null,
+          textPreview: r.ingest?.text ?? '',
+          error: r.error,
+          updatedAt: r.updatedAt,
+          pair: linked?.pair ?? null,
+          direction: linked?.direction ?? null,
+        }),
+      );
+    }
+
+    const closedStatuses = new Set(['CLOSED_WIN', 'CLOSED_LOSS', 'CLOSED_MIXED']);
+
+    for (const s of signals) {
+      const cid = s.cabinetId;
+      if (!cid) continue;
+      const cabName = nameById.get(cid) ?? 'Кабинет';
+      if (s.createdAt >= since) {
+        out.push(
+          mapSignalOpenToActivity({
+            cabinetId: cid,
+            cabinetName: cabName,
+            pair: s.pair,
+            direction: s.direction,
+            status: s.status,
+            source: s.source,
+            createdAt: s.createdAt,
+          }),
+        );
+      }
+      if (
+        s.closedAt &&
+        s.closedAt >= since &&
+        closedStatuses.has(String(s.status ?? '').trim())
+      ) {
+        out.push(
+          mapSignalCloseToActivity({
+            cabinetId: cid,
+            cabinetName: cabName,
+            pair: s.pair,
+            direction: s.direction,
+            status: s.status,
+            realizedPnl: s.realizedPnl,
+            closedAt: s.closedAt,
+          }),
+        );
+      }
+    }
+
+    out.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+    const dedup = new Set<string>();
+    const merged: DashboardActivityItemDto[] = [];
+    for (const row of out) {
+      const key = `${row.kind}|${row.at}|${row.cabinetId}|${row.title}|${row.subtitle ?? ''}`;
+      if (dedup.has(key)) continue;
+      dedup.add(key);
+      merged.push(row);
+      if (merged.length >= limit) break;
+    }
+
+    return { items: merged };
   }
 
   async getDashboardStats(params?: { source?: string }) {

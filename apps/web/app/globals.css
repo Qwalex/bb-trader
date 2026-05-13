@@ -362,6 +362,204 @@ a:hover {
   word-break: break-all;
 }
 
+/* Сводка по всем кабинетам + лента за 24 ч */
+.dashboardCrossSection {
+  border-radius: 14px;
+  border: 1px solid rgba(59, 130, 246, 0.22);
+  background: linear-gradient(165deg, rgba(22, 32, 48, 0.92), rgba(12, 16, 24, 0.94));
+  padding: 1.15rem 1.25rem 1.25rem;
+  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.25);
+}
+
+.dashboardCrossHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.dashboardCrossTitle {
+  margin-bottom: 0.25rem;
+}
+
+.dashboardCrossHint {
+  margin-bottom: 0;
+}
+
+.dashboardCrossTradesLink {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+  padding: 0.35rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  align-self: center;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.dashboardCrossTradesLink:hover {
+  background: rgba(59, 130, 246, 0.12);
+  border-color: rgba(59, 130, 246, 0.55);
+}
+
+.dashboardCrossKpiGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.65rem;
+  margin-bottom: 1.25rem;
+}
+
+.dashboardCrossKpi {
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.2);
+  padding: 0.65rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-height: 4.25rem;
+}
+
+.dashboardCrossKpiAccent {
+  border-color: rgba(59, 130, 246, 0.35);
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.dashboardCrossKpiWarn {
+  border-color: rgba(251, 191, 36, 0.45);
+  background: rgba(120, 53, 15, 0.15);
+}
+
+.dashboardCrossKpiLabel {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.dashboardCrossKpiValue {
+  font-size: 1.05rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboardCrossKpiNeg {
+  color: #f87171;
+}
+
+.dashboardCrossKpiMeta {
+  font-size: 0.72rem;
+  color: var(--muted);
+  line-height: 1.3;
+}
+
+.dashboardActivityWrap {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 1rem;
+}
+
+.dashboardActivityHeading {
+  font-size: 0.95rem;
+  font-weight: 700;
+  margin: 0 0 0.65rem;
+  letter-spacing: 0.02em;
+}
+
+.dashboardActivityEmpty {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.dashboardActivityList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.dashboardActivityRow {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr;
+  gap: 0.65rem 0.85rem;
+  align-items: start;
+  padding: 0.55rem 0.65rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.dashboardActivityTime {
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.35;
+}
+
+.dashboardActivityBody {
+  min-width: 0;
+}
+
+.dashboardActivityTop {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.65rem;
+  align-items: baseline;
+  margin-bottom: 0.15rem;
+}
+
+.dashboardActivityKind {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+
+.dashboardActivityCabinet {
+  font-size: 0.72rem;
+  color: #93c5fd;
+  font-weight: 600;
+}
+
+.dashboardActivityTitle {
+  font-size: 0.88rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.dashboardActivitySubtitle {
+  font-size: 0.76rem;
+  color: var(--muted);
+  line-height: 1.4;
+  margin-top: 0.2rem;
+  word-break: break-word;
+}
+
+.dashboardActivityTone_ok {
+  border-left: 3px solid #34d399;
+}
+
+.dashboardActivityTone_warn {
+  border-left: 3px solid #fbbf24;
+}
+
+.dashboardActivityTone_err {
+  border-left: 3px solid #f87171;
+}
+
+.dashboardActivityTone_info {
+  border-left: 3px solid rgba(59, 130, 246, 0.65);
+}
+
 .dashboardTodoCard {
   position: sticky;
   top: 1rem;

@@ -8,6 +8,8 @@ import {
   buildTelegramUserbotApiUrl,
   telegramUserbotApiFetch,
 } from './telegram-userbot-page.util';
+import { fetchApiResponse } from '../../lib/api';
+import { readActiveCabinetIdClient } from '../../lib/cabinet-client.util';
 import type { EntrySizingMode } from '../../lib/entry-sizing';
 import { parseStoredEntry, serializeEntry } from '../../lib/entry-sizing';
 import type {
@@ -44,6 +46,7 @@ export default function TelegramUserbotPage() {
     Record<string, { mode: EntrySizingMode; amount: string }>
   >({});
   const [qrCloudPassword, setQrCloudPassword] = useState('');
+  const [activeCabinetName, setActiveCabinetName] = useState<string | null>(null);
 
   const qrVisible = useMemo(
     () =>
@@ -180,11 +183,12 @@ export default function TelegramUserbotPage() {
   }
 
   async function loadAll() {
-    const [statusRes, chatsRes, metricsRes, settingsRes] = await Promise.all([
+    const [statusRes, chatsRes, metricsRes, settingsRes, cabinetsRes] = await Promise.all([
       apiFetch('/telegram-userbot/status'),
       apiFetch('/telegram-userbot/chats'),
       apiFetch('/telegram-userbot/metrics/today'),
       apiFetch('/settings/effective'),
+      fetchApiResponse('/cabinets'),
     ]);
     const [s, c, m, raw] = await Promise.all([
       parseJsonIfOk<BotStatus>(statusRes, 'Не удалось загрузить статус userbot'),
@@ -195,6 +199,23 @@ export default function TelegramUserbotPage() {
         'Не удалось загрузить настройки',
       ),
     ]);
+    if (cabinetsRes.ok) {
+      try {
+        const cabJson = (await cabinetsRes.json()) as {
+          items?: { id: string; name: string; isDefault: boolean }[];
+        };
+        const list = Array.isArray(cabJson.items) ? cabJson.items : [];
+        const activeId = readActiveCabinetIdClient().trim();
+        const hit = activeId
+          ? list.find((x) => x.id === activeId)
+          : list.find((x) => x.isDefault) ?? list[0];
+        setActiveCabinetName(hit?.name?.trim() ? hit.name : null);
+      } catch {
+        setActiveCabinetName(null);
+      }
+    } else {
+      setActiveCabinetName(null);
+    }
     setStatus(s as BotStatus);
     const chatsList = c as UserbotChat[];
     setChats(chatsList);
@@ -382,10 +403,19 @@ export default function TelegramUserbotPage() {
         </p>
       )}
       {status?.balanceGuard?.paused && (
-        <p className="msg err" style={{ marginBottom: '1rem' }}>
-          {status.balanceGuard.reason ??
-            `Автоматическая установка ордеров приостановлена: доступный баланс ниже порога ${(status?.balanceGuard?.minBalanceUsd ?? 3).toFixed(2)}$`}
-        </p>
+        <div className="msg err" style={{ marginBottom: '1rem' }}>
+          <p style={{ margin: 0 }}>
+            <strong>
+              Кабинет «{activeCabinetName?.trim() ? activeCabinetName : 'текущий'}»:
+            </strong>{' '}
+            {status.balanceGuard.reason ??
+              `Автоматическая установка ордеров приостановлена: доступный баланс ниже порога ${(status?.balanceGuard?.minBalanceUsd ?? 3).toFixed(2)}$`}
+          </p>
+          <p style={{ margin: '0.5rem 0 0', fontSize: '0.95em', opacity: 0.95 }}>
+            Порог и баланс Bybit считаются только для этого кабинета; другие кабинеты не блокируются
+            этим сообщением.
+          </p>
+        </div>
       )}
       <div className="card" style={{ marginBottom: '1rem' }}>
         <h3 style={{ marginBottom: '0.5rem' }}>Статус</h3>
@@ -445,6 +475,9 @@ export default function TelegramUserbotPage() {
         </div>
         {status?.balanceGuard?.paused && (
           <p className="msg err" style={{ marginTop: '0.5rem' }}>
+            <strong>
+              Кабинет «{activeCabinetName?.trim() ? activeCabinetName : 'текущий'}»:
+            </strong>{' '}
             {status.balanceGuard.reason ??
               `Автоматическая установка ордеров приостановлена: доступный баланс ниже порога ${(status?.balanceGuard?.minBalanceUsd ?? 3).toFixed(2)}$`}
           </p>

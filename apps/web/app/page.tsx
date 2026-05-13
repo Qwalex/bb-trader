@@ -1,3 +1,4 @@
+import { DashboardCrossCabinetSection } from './components/DashboardCrossCabinetSection';
 import { BalanceChart, type BalancePoint } from './components/BalanceChart';
 import { DashboardTodoList, type DashboardTodoItem } from './components/DashboardTodoList';
 import { PnlChart } from './components/PnlChart';
@@ -10,7 +11,12 @@ import { cookies } from 'next/headers';
 import { withCabinetPageHref } from '../lib/cabinet-page-href.util';
 import { fetchJson } from '../lib/api';
 import { searchParamFirst } from '../lib/search-param.util';
-import type { ConnectedGroupItem, DashboardCabinetCard } from './home-dashboard.types';
+import type {
+  ConnectedGroupItem,
+  DashboardActivityItem,
+  DashboardCabinetCard,
+  DashboardCabinetsSummary,
+} from './home-dashboard.types';
 
 type Stats = {
   source?: string | null;
@@ -95,6 +101,8 @@ export default async function Home({
   let authMe: AuthMe | null = null;
   let cabinetItems: CabinetItem[] = [];
   let dashboardCabinetCards: DashboardCabinetCard[] = [];
+  let dashboardCabinetsSummary: DashboardCabinetsSummary | null = null;
+  let dashboardActivityItems: DashboardActivityItem[] = [];
   let connectedGroups: ConnectedGroupItem[] = [];
   let err: string | null = null;
   const q = new URLSearchParams();
@@ -203,14 +211,25 @@ export default async function Home({
     // Userbot status is optional for dashboard render.
   }
   try {
-    const dc = await fetchJson<{ items?: DashboardCabinetCard[] }>(
-      '/orders/dashboard-cabinets',
+    const dc = await fetchJson<{
+      items?: DashboardCabinetCard[];
+      summary?: DashboardCabinetsSummary;
+    }>('/orders/dashboard-cabinets', undefined, cabinetId);
+    dashboardCabinetCards = Array.isArray(dc.items) ? dc.items : [];
+    dashboardCabinetsSummary = dc.summary ?? null;
+  } catch {
+    dashboardCabinetCards = [];
+    dashboardCabinetsSummary = null;
+  }
+  try {
+    const act = await fetchJson<{ items?: DashboardActivityItem[] }>(
+      '/orders/dashboard-activity?hours=24&limit=80',
       undefined,
       cabinetId,
     );
-    dashboardCabinetCards = Array.isArray(dc.items) ? dc.items : [];
+    dashboardActivityItems = Array.isArray(act.items) ? act.items : [];
   } catch {
-    dashboardCabinetCards = [];
+    dashboardActivityItems = [];
   }
   try {
     const cg = await fetchJson<{ items?: ConnectedGroupItem[] }>(
@@ -308,11 +327,26 @@ export default async function Home({
         </p>
       )}
       {guard?.paused && (
-        <p className="msg err" style={{ marginBottom: '1rem' }}>
-          {guard.reason ??
-            `Автоматическая установка ордеров приостановлена: доступный баланс ниже порога ${guard.minBalanceUsd.toFixed(2)}$`}
-        </p>
+        <div className="msg err" style={{ marginBottom: '1rem' }}>
+          <p style={{ margin: 0 }}>
+            <strong>
+              Кабинет «{currentCabinet?.name?.trim() ? currentCabinet.name : 'текущий'}»:
+            </strong>{' '}
+            {guard.reason ??
+              `Автоматическая установка ордеров приостановлена: доступный баланс ниже порога ${guard.minBalanceUsd.toFixed(2)}$`}
+          </p>
+          <p style={{ margin: '0.5rem 0 0', fontSize: '0.95em', opacity: 0.95 }}>
+            Порог и баланс считаются только для выбранного кабинета (его ключи Bybit). Остальные
+            кабинеты не блокируются этим сообщением — статус по каждому см. в карточках ниже.
+          </p>
+        </div>
       )}
+
+      <DashboardCrossCabinetSection
+        summary={dashboardCabinetsSummary ?? undefined}
+        activityItems={dashboardActivityItems}
+        cabinetIdForLinks={currentCabinet?.id ?? (cabinetId.trim() ? cabinetId : null)}
+      />
 
       {dashboardCabinetCards.length > 0 && (
         <section className="dashboardSection" style={{ marginBottom: '1.5rem' }}>
@@ -348,6 +382,17 @@ export default async function Home({
                       <div className="dashboardCabinetWarningTitle">❗ Требуются действия</div>
                       <div className="dashboardCabinetWarningList">
                         {c.setupWarnings.join(' ')}
+                      </div>
+                    </div>
+                  ) : null}
+                  {c.balanceGuard?.paused ? (
+                    <div className="dashboardCabinetWarning">
+                      <div className="dashboardCabinetWarningTitle">
+                        ❗ Автоторговля из userbot приостановлена
+                      </div>
+                      <div className="dashboardCabinetWarningList">
+                        {c.balanceGuard.reason ??
+                          `Доступный баланс ниже порога ${c.balanceGuard.minBalanceUsd.toFixed(2)}$`}
                       </div>
                     </div>
                   ) : null}

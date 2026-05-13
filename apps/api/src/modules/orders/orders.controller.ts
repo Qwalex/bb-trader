@@ -64,13 +64,36 @@ export class OrdersController {
   @ApiOperation({
     summary: 'Сводка по кабинетам для дашборда',
     description:
-      'По каждому кабинету пользователя: W/L, winrate, PnL, баланс Bybit (если ключи заданы). Без привязки к текущему кабинету в query.',
+      'По каждому кабинету пользователя: W/L, winrate, PnL, баланс Bybit (если ключи заданы). Поле `summary` — агрегаты по всем карточкам. Без привязки к текущему кабинету в query.',
   })
-  @ApiOkResponse({ description: 'Карточки кабинетов' })
+  @ApiOkResponse({ description: 'Карточки кабинетов и сводка' })
   @Get('dashboard-cabinets')
   async dashboardCabinets(@Req() req: AuthReq) {
     const userId = String(req.auth?.userId ?? '').trim() || null;
     return this.orders.getDashboardCabinetsOverviewForUser(userId);
+  }
+
+  @ApiOperation({
+    summary: 'Лента активности по всем кабинетам',
+    description:
+      'События userbot (маршруты ingest) и сигналов за окно времени; для дашборда.',
+  })
+  @ApiQuery({ name: 'hours', required: false, description: 'Глубина окна, 1–168 (по умолчанию 24)' })
+  @ApiQuery({ name: 'limit', required: false, description: 'Макс. число записей, 1–150 (по умолчанию 80)' })
+  @ApiOkResponse({ description: 'Список событий' })
+  @Get('dashboard-activity')
+  async dashboardActivity(
+    @Req() req: AuthReq,
+    @Query('hours') hours?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const userId = String(req.auth?.userId ?? '').trim() || null;
+    const h = hours ? Number.parseInt(hours, 10) : undefined;
+    const l = limit ? Number.parseInt(limit, 10) : undefined;
+    return this.orders.getDashboardActivityForUser(userId, {
+      hours: Number.isFinite(h) ? h : undefined,
+      limit: Number.isFinite(l) ? l : undefined,
+    });
   }
 
   @ApiOperation({ summary: 'Сводная статистика по сделкам' })

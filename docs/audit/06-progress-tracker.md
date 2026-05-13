@@ -1413,3 +1413,27 @@
 - Manual verification: `npm run build -w packages/shared && npm run build -w apps/api` (pass).
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): возможен отказ Bybit по марже, если номинал по equity превышает доступное — осознанный компромисс.
+
+### AUD-117
+
+- Status: `done`
+- Scope: Главная — сводка по всем кабинетам и лента активности за 24 ч.
+- Files: `apps/api/src/modules/orders/orders-dashboard-cabinets.types.ts`, `apps/api/src/modules/orders/orders-dashboard-summary.util.ts`, `apps/api/src/modules/orders/orders-dashboard-activity.types.ts`, `apps/api/src/modules/orders/orders-dashboard-activity.util.ts`, `apps/api/src/modules/orders/orders.service.ts`, `apps/api/src/modules/orders/orders.controller.ts`, `apps/web/app/home-dashboard.types.ts`, `apps/web/app/components/DashboardCrossCabinetSection.tsx`, `apps/web/app/page.tsx`, `apps/web/app/globals.css`, `docs/audit/06-progress-tracker.md`
+- Findings: карточки кабинетов уже есть; не хватало агрегатов и пользовательской ленты без admin AppLog.
+- Changes: `summary` в `GET /orders/dashboard-cabinets`; `GET /orders/dashboard-activity` (ingest routes + сигналы); UI блок KPI + таймлайн.
+- Decomposition notes (`utils/constants/hooks/types`): чистые утилиты `orders-dashboard-summary.util.ts`, `orders-dashboard-activity.util.ts`; DTO активности отдельным файлом.
+- Manual verification: `npm run build -w apps/api` и `npm run build -w apps/web`; главная при ≥1 кабинете показывает блок и ленту.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-116
+
+- Status: `done`
+- Scope: Дашборд / userbot — понятная изоляция balance guard по кабинетам (UI + карточки).
+- Files: `apps/api/src/modules/orders/orders-dashboard-cabinets.types.ts`, `apps/api/src/modules/orders/orders.service.ts`, `apps/web/app/home-dashboard.types.ts`, `apps/web/app/page.tsx`, `apps/web/app/telegram-userbot/page.tsx`, `docs/audit/06-progress-tracker.md`
+- Findings: ingest уже в `runWithCabinet` по маршруту; баннер на главной без имени кабинета; `getDashboardCabinetsOverviewForUser` вызывал `getStatus`, но отбрасывал `balanceGuard`.
+- Changes: DTO карточки + проброс `balanceGuard`; на главной — префикс кабинета и пояснение, предупреждение на карточке; на `/telegram-userbot` — имя кабинета из `/cabinets` и то же пояснение.
+- Decomposition notes (`utils/constants/hooks/types`): тип снимка вынесен рядом с DTO дашборда.
+- Manual verification: два кабинета — пауза только у кабинета с низким available; переключение `cabinetId` меняет баннер; `npm run build -w apps/api` и `npm run build -w apps/web`.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
