@@ -42,7 +42,7 @@ export type LeverageOutlook = {
 
 const DAYS_PER_MONTH = 30;
 
-function monthGrowthFactor(rDaily: number): number {
+export function monthGrowthFactorFromRDaily(rDaily: number): number {
   return Math.pow(1 + rDaily, DAYS_PER_MONTH);
 }
 
@@ -166,7 +166,7 @@ export function computeLeverageOutlook(params: {
     E > 0 &&
     basePnlPerDayUsd != null
   ) {
-    const f = monthGrowthFactor(rDaily);
+    const f = monthGrowthFactorFromRDaily(rDaily);
     let C = C0;
     for (let m = 0; m < termM; m++) {
       C = C * f - M;
@@ -213,4 +213,75 @@ export function formatUsd(n: number | null | undefined, digits = 2): string {
 export function formatMonths(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return '—';
   return `${n} мес.`;
+}
+
+export type TrajectoryPoint = {
+  month: number;
+  capitalUsd: number;
+  cumulativePaidUsd: number;
+  phase: 'loan' | 'after';
+};
+
+/**
+ * Месячная дискретизация: при фазе loan — C←C·(1+r)³⁰−M, после — только рост.
+ */
+export function buildMonthlyCapitalTrajectory(opts: {
+  equityUsd: number;
+  loanPrincipalUsd: number;
+  monthlyPaymentUsd: number;
+  termMonths: number;
+  horizonMonthsAfter: number;
+  rDaily: number;
+}): TrajectoryPoint[] {
+  const { equityUsd: E, loanPrincipalUsd: L, monthlyPaymentUsd: M, termMonths, horizonMonthsAfter, rDaily } =
+    opts;
+  if (!(E > 0 && L >= 0 && Number.isFinite(rDaily) && rDaily > -1)) {
+    return [];
+  }
+  const f = monthGrowthFactorFromRDaily(rDaily);
+  const totalMonths = Math.max(0, termMonths) + Math.max(0, horizonMonthsAfter);
+  let C = E + L;
+  const out: TrajectoryPoint[] = [
+    { month: 0, capitalUsd: C, cumulativePaidUsd: 0, phase: 'loan' },
+  ];
+  let paid = 0;
+  const tm = Math.max(0, Math.floor(termMonths));
+  for (let m = 1; m <= totalMonths; m++) {
+    if (m <= tm) {
+      C = C * f - M;
+      paid += M;
+      out.push({ month: m, capitalUsd: C, cumulativePaidUsd: paid, phase: 'loan' });
+    } else {
+      C = C * f;
+      out.push({ month: m, capitalUsd: C, cumulativePaidUsd: paid, phase: 'after' });
+    }
+  }
+  return out;
+}
+
+/** Дата последнего месяца договора: старт + termMonths (упрощённо). */
+export function computeContractEndDate(loanStart: Date, termMonths: number): Date {
+  const d = new Date(loanStart.getTime());
+  d.setMonth(d.getMonth() + Math.max(0, Math.floor(termMonths)));
+  return d;
+}
+
+export function formatDateRuLong(d: Date): string {
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+export function parseIsoDateOnly(raw: string | undefined): Date | null {
+  const t = String(raw ?? '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return null;
+  const d = new Date(`${t}T12:00:00`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+export function todayIsoDateOnly(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }

@@ -8,6 +8,8 @@ import type {
   DashboardCabinetsSummary,
 } from '../home-dashboard.types';
 
+import { LEVERAGE_CALCULATOR_PRESET_KEY } from './leverage-calculator-page.constants';
+
 import { LeverageCalculatorClient } from './LeverageCalculatorClient';
 
 type AuthMe = {
@@ -74,6 +76,20 @@ export default async function LeverageCalculatorPage({
     cabinetCount: summary?.cabinetCount ?? items.length,
   };
 
+  let initialPresetJson: string | null = null;
+  try {
+    const eff = await fetchJson<{ settings?: { key: string; value: string }[] }>(
+      '/settings/effective',
+      undefined,
+      cabinetId,
+    );
+    const row = eff.settings?.find((s) => s.key === LEVERAGE_CALCULATOR_PRESET_KEY);
+    const raw = row?.value?.trim();
+    initialPresetJson = raw && raw.length > 0 ? raw : null;
+  } catch {
+    initialPresetJson = null;
+  }
+
   return (
     <>
       <SessionInfoBar
@@ -86,7 +102,11 @@ export default async function LeverageCalculatorPage({
           {loadErr}
         </p>
       )}
-      <LeverageCalculatorClient payload={payload} />
+      <LeverageCalculatorClient
+        payload={payload}
+        initialPresetJson={initialPresetJson}
+        cabinetIdForApi={cabinetId}
+      />
     </>
   );
 }

@@ -1460,3 +1460,15 @@
 - Manual verification: `npm run build -w apps/api` и `npm run build -w apps/web`; пункт меню «Кредит / доходность» (по умолчанию скрыт, как прочие advanced).
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): прогнозы ориентировочные; пользователь не должен воспринимать как финансовую рекомендацию.
+
+### AUD-120
+
+- Status: `done`
+- Scope: UI/UX страницы `/leverage-calculator`: дата закрытия кредита, графики, сохранение пресета в БД.
+- Files: `apps/web/app/leverage-calculator/*`, `apps/web/app/globals.css`, `docs/audit/06-progress-tracker.md`
+- Findings: параметры вводились заново; неочевидно, когда заканчивается договор; не хватало визуализации траектории.
+- Changes: пресет v1 в `UserSetting` ключ `LEVERAGE_CALCULATOR_PRESET` (PUT `/settings`, не cabinet-scoped); поле даты начала договора и крупный блок «когда кредит закрыт»; Recharts линии капитала и накопленных выплат; сетка метрик и стили `.leverage*`; автосохранение с debounce (без первого лишнего PUT).
+- Decomposition notes: `leverage-calculator-preset.util.ts`, `LeverageCalculatorCharts.tsx`, константы ключа в `leverage-calculator-page.constants.ts`.
+- Manual verification: `npm run build -w apps/web`; после входа — изменение суммы/срока, перезагрузка страницы, значения подставляются из БД.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): в JSON пресете нет секретов; размер ограничен `PRESET_JSON_MAX_LEN`.
