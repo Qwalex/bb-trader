@@ -1484,3 +1484,15 @@
 - Manual verification: `npm run build -w apps/api`, `npm run build -w apps/web`; блок при ≥1 кабинете, график при наличии снимков.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A (прогноз EV как на главной, не инвестиционная рекомендация).
+
+### AUD-122
+
+- Status: `done`
+- Scope: Главная — визуальное выделение зоны «текущий кабинет» после формы фильтров (метрики, todo, графики, топы, PnL, экспозиция).
+- Files: `apps/web/app/page.tsx`, `apps/web/app/globals.css`, `docs/audit/06-progress-tracker.md`
+- Findings: контент после фильтров визуально сливался с остальной страницей; карточки метрик на глобальном `.card` отличались от блоков «Кабинеты» / «Все кабинеты».
+- Changes: обёртка `section.dashboardActiveCabinetSection` с шапкой (имя кабинета, подсказка, фильтр источника); стили панели, `dashboardMetricsGrid`, переопределения `.card`/`.chartWrap`/`.tableWrap` внутри секции; классы `dashboardActiveSubheading`, `dashboardActiveChartBlock`, `dashboardActiveFootnote`; адаптив padding/высота графиков.
+- Decomposition notes (`utils/constants/hooks/types`): только разметка главной и CSS.
+- Manual verification: `npm run build -w apps/web`; проверка в браузере — секция после «Показать», сетка топов и графики внутри панели.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

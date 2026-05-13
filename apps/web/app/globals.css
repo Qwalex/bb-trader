@@ -496,6 +496,96 @@ a:hover {
   box-sizing: border-box;
 }
 
+/* Зона после фильтров: метрики и графики активного кабинета */
+.dashboardActiveCabinetSection {
+  margin-top: 0.35rem;
+  margin-bottom: 1.75rem;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: linear-gradient(165deg, rgba(24, 32, 46, 0.96), rgba(12, 16, 22, 0.94));
+  padding: 1.15rem 1.25rem 1.35rem;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.22);
+}
+
+.dashboardActiveCabinetHeader {
+  margin-bottom: 1.05rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.dashboardActiveCabinetTitle {
+  margin-bottom: 0.35rem;
+}
+
+.dashboardActiveCabinetHint {
+  margin-bottom: 0.4rem;
+}
+
+.dashboardActiveCabinetSourceHint {
+  margin-bottom: 0;
+}
+
+.dashboardMetricsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 0.65rem;
+  margin-bottom: 1.1rem;
+}
+
+.dashboardActiveCabinetSection .card {
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(145deg, rgba(26, 35, 50, 0.9), rgba(15, 20, 26, 0.85));
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.18);
+  min-height: 4.35rem;
+  padding: 0.7rem 0.8rem;
+}
+
+.dashboardActiveCabinetSection .card h3 {
+  font-size: 0.68rem;
+  margin-bottom: 0.35rem;
+}
+
+.dashboardActiveCabinetSection .card .value {
+  font-size: 1.22rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboardActiveSubheading {
+  font-size: 1.02rem;
+  font-weight: 700;
+  margin: 0 0 0.5rem;
+  letter-spacing: 0.02em;
+}
+
+.dashboardActiveChartBlock {
+  margin-bottom: 1.2rem;
+}
+
+.dashboardActiveCabinetSection .chartWrap {
+  margin-bottom: 0;
+  border-radius: 12px;
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.dashboardActiveCabinetSection .tableWrap {
+  border-radius: 10px;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.dashboardActiveCabinetSection .grid.topSources {
+  margin-bottom: 1rem;
+}
+
+.dashboardActiveFootnote {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin: 0.5rem 0 0;
+  line-height: 1.45;
+}
+
 .dashboardActivityWrap {
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   padding-top: 1rem;
@@ -2130,6 +2220,10 @@ h1.pageTitle {
       max(0.875rem, env(safe-area-inset-left));
   }
 
+  .dashboardActiveCabinetSection {
+    padding: 1rem 0.95rem 1.15rem;
+  }
+
   .nav {
     gap: 0.55rem;
     padding: 0.75rem max(1rem, env(safe-area-inset-right)) 0.75rem
@@ -2175,6 +2269,15 @@ h1.pageTitle {
   .chartWrap {
     height: 260px;
     padding: 0.75rem;
+  }
+
+  .dashboardActiveCabinetSection .chartWrap {
+    height: 260px;
+    padding: 0.75rem;
+  }
+
+  .dashboardMetricsGrid {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 130px), 1fr));
   }
 
   .card .value {
@@ -2446,6 +2549,10 @@ h1.pageTitle {
   }
 
   .chartWrap {
+    height: 220px;
+  }
+
+  .dashboardActiveCabinetSection .chartWrap {
     height: 220px;
   }
 }

@@ -321,6 +321,10 @@ export default async function Home({
     dashboardTodos = [];
   }
 
+  const activeCabinetDisplay =
+    currentCabinet?.name?.trim() ||
+    (cabinetId.trim() ? `ID ${cabinetId.trim()}` : 'не выбран');
+
   return (
     <>
       <SessionInfoBar
@@ -520,7 +524,23 @@ export default async function Home({
           </Link>
         )}
       </form>
-      {stats && (
+      <section className="dashboardSection dashboardActiveCabinetSection">
+        <div className="dashboardActiveCabinetHeader">
+          <h2 className="pageTitle dashboardSectionTitle dashboardActiveCabinetTitle">
+            Текущий кабинет: {activeCabinetDisplay}
+          </h2>
+          <p className="dashboardSectionHint dashboardActiveCabinetHint">
+            Ниже — показатели, графики и экспозиция для активного кабинета (тот же, что в шапке и в
+            выбранной карточке «Кабинеты»).
+          </p>
+          {source ? (
+            <p className="dashboardSectionHint dashboardActiveCabinetSourceHint">
+              Фильтр по источнику: <strong>{source}</strong> — метрики и ряды ниже учитывают только этот
+              источник.
+            </p>
+          ) : null}
+        </div>
+        {stats && (
         <>
           <div className="grid dashboardMetricsGrid">
           <div className="card">
@@ -668,24 +688,15 @@ export default async function Home({
         </>
       )}
       {!stats && <DashboardTodoList initialItems={dashboardTodos} layout="full" />}
-      <div>
-        <h2 className="pageTitle" style={{ fontSize: '1.1rem', marginTop: '1.25rem' }}>
-          Суммарный баланс USDT
-        </h2>
+      <div className="dashboardActiveChartBlock">
+        <h2 className="pageTitle dashboardActiveSubheading">Суммарный баланс USDT</h2>
         <div className="chartWrap">
           <BalanceChart data={balanceHistory} />
         </div>
       </div>
       {top && (
         <>
-          <p
-            style={{
-              fontSize: '0.8rem',
-              color: 'var(--muted)',
-              marginTop: '1rem',
-              marginBottom: 0,
-            }}
-          >
+          <p className="dashboardActiveFootnote">
             APR по источникам: (PnL источника ÷ суммарный equity Bybit) × (365 / T); T — календарных
             дней от первого закрытия источника в окне статистики (включая сброс на странице настроек).
           </p>
@@ -889,13 +900,16 @@ export default async function Home({
           </div>
         </div>
       )}
-      <h2 className="pageTitle" style={{ fontSize: '1.1rem' }}>
-        PnL по дням{source ? ` — ${source}` : ''}
-      </h2>
-      <div className="chartWrap">
-        <PnlChart data={pnl} />
+      <div className="dashboardActiveChartBlock">
+        <h2 className="pageTitle dashboardActiveSubheading">
+          PnL по дням{source ? ` — ${source}` : ''}
+        </h2>
+        <div className="chartWrap">
+          <PnlChart data={pnl} />
+        </div>
       </div>
       <LiveExposurePanel />
+      </section>
     </>
   );
 }
