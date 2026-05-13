@@ -1,8 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 
 import { fetchApiResponse } from '../../lib/api';
+import { readActiveCabinetIdClient } from '../../lib/cabinet-client.util';
 import { formatDateTimeRu } from '../../lib/datetime';
 
 type LiveExposureOrder = {
@@ -52,7 +54,16 @@ type LiveExposureRes = {
   items: LiveExposureItem[];
 };
 
-export function LiveExposurePanel() {
+function resolveCabinetIdForLive(spCabinetId: string): string {
+  const fromUrl = String(spCabinetId ?? '').trim();
+  if (fromUrl) return fromUrl;
+  return readActiveCabinetIdClient().trim();
+}
+
+function LiveExposurePanelBody() {
+  const searchParams = useSearchParams();
+  const cabinetIdKey = searchParams.get('cabinetId')?.trim() ?? '';
+
   const [data, setData] = useState<LiveExposureRes | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,7 +77,8 @@ export function LiveExposurePanel() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetchApiResponse('/bybit/live');
+      const cid = resolveCabinetIdForLive(cabinetIdKey);
+      const res = await fetchApiResponse('/bybit/live', undefined, cid || undefined);
       if (!res.ok) {
         throw new Error(`${res.status} ${res.statusText}`);
       }
@@ -77,7 +89,7 @@ export function LiveExposurePanel() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [cabinetIdKey]);
 
   const closeSignal = useCallback(
     async (signalId: string, pair: string) => {
@@ -87,11 +99,16 @@ export function LiveExposurePanel() {
       setClosingId(signalId);
       setLastMsg(null);
       try {
-        const res = await fetchApiResponse(`/bybit/close/${signalId}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({}),
-        });
+        const cid = resolveCabinetIdForLive(cabinetIdKey);
+        const res = await fetchApiResponse(
+          `/bybit/close/${signalId}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+          },
+          cid || undefined,
+        );
         const body = (await res.json()) as {
           ok: boolean;
           error?: string;
@@ -112,7 +129,7 @@ export function LiveExposurePanel() {
         setClosingId(null);
       }
     },
-    [load],
+    [cabinetIdKey, load],
   );
 
   const loadSignalJson = useCallback(
@@ -120,7 +137,12 @@ export function LiveExposurePanel() {
       setJsonLoadingId(signalId);
       setError(null);
       try {
-        const res = await fetchApiResponse(`/bybit/signal/${signalId}`);
+        const cid = resolveCabinetIdForLive(cabinetIdKey);
+        const res = await fetchApiResponse(
+          `/bybit/signal/${signalId}`,
+          undefined,
+          cid || undefined,
+        );
         if (!res.ok) {
           throw new Error(`${res.status} ${res.statusText}`);
         }
@@ -135,10 +157,13 @@ export function LiveExposurePanel() {
         setJsonLoadingId(null);
       }
     },
-    [],
+    [cabinetIdKey],
   );
 
   useEffect(() => {
+    setExpandedBySignalId({});
+    setJsonBySignalId({});
+    setLastMsg(null);
     void load();
   }, [load]);
 
@@ -369,5 +394,22 @@ export function LiveExposurePanel() {
         </div>
       ))}
     </section>
+  );
+}
+
+export function LiveExposurePanel() {
+  return (
+    <Suspense
+      fallback={
+        <section style={{ marginBottom: '2rem' }}>
+          <h2 className="pageTitle" style={{ fontSize: '1.1rem', marginBottom: '0.75rem' }}>
+            Текущие ордера и позиции
+          </h2>
+          <p style={{ color: 'var(--muted)' }}>Загрузка…</p>
+        </section>
+      }
+    >
+      <LiveExposurePanelBody />
+    </Suspense>
   );
 }

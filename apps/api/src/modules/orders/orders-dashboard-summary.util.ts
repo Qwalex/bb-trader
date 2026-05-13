@@ -19,6 +19,8 @@ export function buildDashboardCabinetsSummary(
   let sumAvailable = 0;
   let equityCount = 0;
   let availableCount = 0;
+  let aggregateExpectedPnlPerDayUsd = 0;
+  let aggregateStatsPeriodDaysMax = 0;
 
   for (const c of items) {
     totalPnl += Number.isFinite(c.totalPnl) ? c.totalPnl : 0;
@@ -41,11 +43,29 @@ export function buildDashboardCabinetsSummary(
       sumAvailable += c.availableBalanceUsd;
       availableCount += 1;
     }
+    const spd = Math.max(0, c.statsPeriodDays ?? 0);
+    if (spd > aggregateStatsPeriodDaysMax) {
+      aggregateStatsPeriodDaysMax = spd;
+    }
+    const wr = Number.isFinite(c.winrate) ? c.winrate : 0;
+    const ap = Number.isFinite(c.avgProfitPnl) ? c.avgProfitPnl : 0;
+    const al = Number.isFinite(c.avgLossPnl) ? c.avgLossPnl : 0;
+    const cpd = Number.isFinite(c.closedPerDayAvg) ? c.closedPerDayAvg : 0;
+    const ev = (wr / 100) * ap + (1 - wr / 100) * al;
+    const expDay = cpd * ev;
+    if (Number.isFinite(expDay)) {
+      aggregateExpectedPnlPerDayUsd += expDay;
+    }
   }
 
   const closed = totalWins + totalLosses;
   const avgWinratePercent =
     closed > 0 && Number.isFinite(totalWins) ? (totalWins / closed) * 100 : null;
+
+  const maxDays =
+    aggregateStatsPeriodDaysMax > 0 ? aggregateStatsPeriodDaysMax : null;
+  const aggregateRealizedPnlPerDayUsd =
+    maxDays != null && maxDays > 0 && Number.isFinite(totalPnl) ? totalPnl / maxDays : null;
 
   return {
     cabinetCount,
@@ -60,5 +80,11 @@ export function buildDashboardCabinetsSummary(
     signalsPlacedToday: totalSignalsPlacedToday,
     cabinetsWithSetupIssues,
     cabinetsBalancePaused,
+    aggregateExpectedPnlPerDayUsd:
+      cabinetCount > 0 && Number.isFinite(aggregateExpectedPnlPerDayUsd)
+        ? aggregateExpectedPnlPerDayUsd
+        : null,
+    aggregateStatsPeriodDaysMax: maxDays,
+    aggregateRealizedPnlPerDayUsd,
   };
 }

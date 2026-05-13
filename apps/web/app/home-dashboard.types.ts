@@ -21,6 +21,11 @@ export type DashboardCabinetCard = {
   losses: number;
   winrate: number;
   totalPnl: number;
+  totalClosed: number;
+  avgProfitPnl: number;
+  avgLossPnl: number;
+  closedPerDayAvg: number;
+  statsPeriodDays: number;
   totalBalanceUsd: number | null;
   availableBalanceUsd: number | null;
   balanceGuard?: DashboardCabinetBalanceGuard;
@@ -46,6 +51,9 @@ export type DashboardCabinetsSummary = {
   signalsPlacedToday: number;
   cabinetsWithSetupIssues: number;
   cabinetsBalancePaused: number;
+  aggregateExpectedPnlPerDayUsd: number | null;
+  aggregateStatsPeriodDaysMax: number | null;
+  aggregateRealizedPnlPerDayUsd: number | null;
 };
 
 export type DashboardActivityTone = 'ok' | 'warn' | 'err' | 'info';

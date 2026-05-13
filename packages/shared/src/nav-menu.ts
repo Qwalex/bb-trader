@@ -9,6 +9,12 @@ export type NavMenuItemConfig = {
 
 export const NAV_MENU_ITEMS: NavMenuItemConfig[] = [
   { id: 'dashboard', label: 'Дашборд', href: '/', cabinetAware: true },
+  {
+    id: 'leverage-calculator',
+    label: 'Кредит / доходность',
+    href: '/leverage-calculator',
+    defaultHidden: true,
+  },
   { id: 'trades', label: 'Сделки', href: '/trades', cabinetAware: true },
   { id: 'ai', label: 'AI', href: '/ai', cabinetAware: true, defaultHidden: true },
   { id: 'diagnostics', label: 'Диагностика', href: '/diagnostics', cabinetAware: true, adminOnly: true, defaultHidden: true },

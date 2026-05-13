@@ -64,7 +64,7 @@ export class OrdersController {
   @ApiOperation({
     summary: 'Сводка по кабинетам для дашборда',
     description:
-      'По каждому кабинету пользователя: W/L, winrate, PnL, баланс Bybit (если ключи заданы). Поле `summary` — агрегаты по всем карточкам. Без привязки к текущему кабинету в query.',
+      'По каждому кабинету пользователя: W/L, winrate, PnL, баланс Bybit (если ключи заданы), поля stats (avgProfit/avgLoss/closedPerDay и т.д.). Поле `summary` — агрегаты по всем карточкам, включая aggregateExpectedPnlPerDayUsd и грубый aggregateRealizedPnlPerDayUsd. Без привязки к текущему кабинету в query.',
   })
   @ApiOkResponse({ description: 'Карточки кабинетов и сводка' })
   @Get('dashboard-cabinets')

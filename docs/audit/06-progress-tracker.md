@@ -1437,3 +1437,26 @@
 - Manual verification: два кабинета — пауза только у кабинета с низким available; переключение `cabinetId` меняет баннер; `npm run build -w apps/api` и `npm run build -w apps/web`.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-118
+
+- Status: `done`
+- Scope: Дашборд — «Текущие ордера и позиции» сразу после смены кабинета по ссылке.
+- Files: `apps/web/app/components/LiveExposurePanel.tsx`, `docs/audit/06-progress-tracker.md`
+- Findings: клиентский `LiveExposurePanel` вызывал `/bybit/live` только на mount; переход по `Link` с новым `?cabinetId=` не обновлял данные.
+- Changes: `useSearchParams`, передача кабинета в `fetchApiResponse` для live/close/signal; сброс раскрытий при смене; `Suspense` вокруг тела панели.
+- Manual verification: `npm run build -w apps/web`; переключение кабинета карточкой на главной обновляет блок.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-119
+
+- Status: `done`
+- Scope: Страница калькулятора доходности при привлечении заёмных средств (агрегат по всем кабинетам).
+- Files: `apps/api/src/modules/orders/orders-dashboard-cabinets.types.ts`, `apps/api/src/modules/orders/orders-dashboard-summary.util.ts`, `apps/api/src/modules/orders/orders.service.ts`, `apps/web/app/home-dashboard.types.ts`, `apps/web/app/leverage-calculator/*`, `packages/shared/src/nav-menu.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: сводка `dashboard-cabinets` не отдавала полей stats для EV по каждому кабинету и кросс-кабинетных агрегатов ожидаемого PnL/день.
+- Changes: в карточку и `summary` добавлены поля stats и `aggregateExpectedPnlPerDayUsd` / `aggregateRealizedPnlPerDayUsd` / `aggregateStatsPeriodDaysMax`; UI `/leverage-calculator` с вводом суммы кредита, срока, платежа; модель r=G/E, масштабирование капитала E+L, точка безубыточности C*, окупаемость переплаты, месячная симуляция и горизонт после кредита.
+- Decomposition notes (`utils/constants/hooks/types`): чистые функции в `leverage-calculator-page.util.ts`.
+- Manual verification: `npm run build -w apps/api` и `npm run build -w apps/web`; пункт меню «Кредит / доходность» (по умолчанию скрыт, как прочие advanced).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): прогнозы ориентировочные; пользователь не должен воспринимать как финансовую рекомендацию.
