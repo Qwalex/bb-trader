@@ -169,19 +169,19 @@ export function DashboardCrossCabinetSection({
             </span>
           </div>
           <div className="dashboardCrossKpi">
-            <span className="dashboardCrossKpiLabel">Прогноз Σ equity, 7 дн.</span>
+            <span className="dashboardCrossKpiLabel">7 дн.</span>
             <span className="dashboardCrossKpiValue">
               {fmtEvProjectedEquityUsd(summary.totalEquityUsd, summary.crossCabinetEvReturn7dPercent)}
             </span>
           </div>
           <div className="dashboardCrossKpi">
-            <span className="dashboardCrossKpiLabel">Прогноз Σ equity, 30 дн.</span>
+            <span className="dashboardCrossKpiLabel">30 дн.</span>
             <span className="dashboardCrossKpiValue">
               {fmtEvProjectedEquityUsd(summary.totalEquityUsd, summary.crossCabinetEvReturn30dPercent)}
             </span>
           </div>
           <div className="dashboardCrossKpi">
-            <span className="dashboardCrossKpiLabel">Прогноз Σ equity, 365 дн.</span>
+            <span className="dashboardCrossKpiLabel">365 дн.</span>
             <span className="dashboardCrossKpiValue">
               {fmtEvProjectedEquityUsd(summary.totalEquityUsd, summary.crossCabinetEvReturn365dPercent)}
             </span>
