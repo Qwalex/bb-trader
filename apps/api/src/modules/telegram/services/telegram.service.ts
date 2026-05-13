@@ -53,6 +53,13 @@ import {
   parseStoredTelegramUserIdAsChatId,
   parseTelegramWhitelistUserIds,
 } from '../utils/telegram-whitelist.util';
+import {
+  makeTelegramBotLaunchCorrelationId,
+  makeTelegramBotSyncCorrelationId,
+  maskTelegramBotToken,
+  TELEGRAM_CABINET_LAUNCH_RETRY_DELAYS_MS,
+  type TelegramLaunchTimedOutPhase,
+} from '../utils/telegram-bot-launch.util';
 import type { ExternalConfirmationResult } from '../types/telegram.types';
 
 @Injectable()
@@ -77,6 +84,12 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
     string,
     { cabinetIds: string[] }
   >();
+  /** Отложенный sync после неудачного launch (один таймер на кабинет). */
+  private readonly cabinetLaunchRetryTimers = new Map<string, NodeJS.Timeout>();
+  /** Число подряд неудачных launch для backoff между retry. */
+  private readonly cabinetLaunchConsecutiveFailures = new Map<string, number>();
+  /** После ошибки в AppLog — при следующем успехе пишем info «recovered». */
+  private readonly cabinetLaunchRecoveryPending = new Set<string>();
 
   constructor(
     private readonly settings: SettingsService,
@@ -142,6 +155,7 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
     }
     this.botSyncInFlight = true;
     try {
+      const syncId = makeTelegramBotSyncCorrelationId();
       const cabinets = await this.prisma.cabinet.findMany({
         select: { id: true, name: true },
         orderBy: { createdAt: 'asc' },
@@ -216,10 +230,11 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
           }
         }
         if (reuseBot) {
+          this.resetCabinetLaunchFailureTracking(cabinetId);
           this.botRegistry.addLaunchedBot(cabinetId, reuseBot);
           this.launchedBotTokensByCabinet.set(cabinetId, cfg.token);
           this.logger.log(
-            `Telegram bot: cabinet=${cabinetId} (${cfg.name}) shares running bot instance with same token`,
+            `Telegram bot: cabinet=${cabinetId} (${cfg.name}) syncId=${syncId} shares running bot instance with same token`,
           );
           void this.sendStartupGreetingForCabinet(cabinetId).catch((e) =>
             this.logger.warn(
@@ -255,11 +270,12 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
         });
         this.registerHandlers(bot, cfg.token);
         try {
-          await this.launchCabinetBotWithTimeout(bot, cabinetId, cfg);
+          await this.launchCabinetBotWithTimeout(bot, cabinetId, cfg, syncId);
         } catch (e) {
-          this.logger.error(
-            `Telegram bot launch failed for cabinet=${cabinetId}: ${formatError(e)}`,
-          );
+          const fc = (this.cabinetLaunchConsecutiveFailures.get(cabinetId) ?? 0) + 1;
+          this.cabinetLaunchConsecutiveFailures.set(cabinetId, fc);
+          this.cabinetLaunchRecoveryPending.add(cabinetId);
+          this.scheduleCabinetLaunchRetryAfterFailure(cabinetId);
         }
       }
 
@@ -271,6 +287,7 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
     }
   }
 
+  /** Таймаут только для `bot.launch()` (getUpdates), мс; `deleteWebhook` — отдельно (`TELEGRAM_BOT_DELETE_WEBHOOK_TIMEOUT_MS`). */
   private telegramLaunchTimeoutMs(): number {
     const raw = process.env.TELEGRAM_BOT_LAUNCH_TIMEOUT_MS?.trim();
     const n = raw ? Number.parseInt(raw, 10) : NaN;
@@ -306,6 +323,92 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
     }
   }
 
+  private telegramDeleteWebhookTimeoutMs(): number {
+    const raw = process.env.TELEGRAM_BOT_DELETE_WEBHOOK_TIMEOUT_MS?.trim();
+    const n = raw ? Number.parseInt(raw, 10) : NaN;
+    if (!Number.isFinite(n)) return 30_000;
+    return Math.min(120_000, Math.max(5_000, n));
+  }
+
+  private async promiseWithTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+    if (!(ms > 0)) {
+      return await p;
+    }
+    return await new Promise<T>((resolve, reject) => {
+      const tid = setTimeout(() => {
+        reject(new Error(`Telegram operation timeout after ${ms}ms`));
+      }, ms);
+      void p.then(
+        (v) => {
+          clearTimeout(tid);
+          resolve(v);
+        },
+        (e) => {
+          clearTimeout(tid);
+          reject(e);
+        },
+      );
+    });
+  }
+
+  /**
+   * Сброс трекинга неудачных launch: таймер retry, счётчик, флаг recovery для AppLog.
+   * @returns true если до сброса ожидалась запись «recovered» в AppLog.
+   */
+  private resetCabinetLaunchFailureTracking(cabinetId: string): boolean {
+    const hadRecovery = this.cabinetLaunchRecoveryPending.has(cabinetId);
+    const t = this.cabinetLaunchRetryTimers.get(cabinetId);
+    if (t) {
+      clearTimeout(t);
+      this.cabinetLaunchRetryTimers.delete(cabinetId);
+    }
+    this.cabinetLaunchConsecutiveFailures.delete(cabinetId);
+    this.cabinetLaunchRecoveryPending.delete(cabinetId);
+    return hadRecovery;
+  }
+
+  private scheduleCabinetLaunchRetryAfterFailure(cabinetId: string): void {
+    if (this.shuttingDown) {
+      return;
+    }
+    const existing = this.cabinetLaunchRetryTimers.get(cabinetId);
+    if (existing) {
+      clearTimeout(existing);
+      this.cabinetLaunchRetryTimers.delete(cabinetId);
+    }
+    const fc = this.cabinetLaunchConsecutiveFailures.get(cabinetId) ?? 1;
+    const delays = TELEGRAM_CABINET_LAUNCH_RETRY_DELAYS_MS;
+    const delayMs = delays[Math.min(Math.max(0, fc - 1), delays.length - 1)];
+    const timer = setTimeout(() => {
+      this.cabinetLaunchRetryTimers.delete(cabinetId);
+      void (async () => {
+        for (let i = 0; i < 24 && this.botSyncInFlight && !this.shuttingDown; i++) {
+          await new Promise((r) => setTimeout(r, 250));
+        }
+        await this.syncBotsWithCabinetTokens().catch((e) =>
+          this.logger.warn(
+            `Telegram cabinet launch retry sync failed cabinet=${cabinetId}: ${formatError(e)}`,
+          ),
+        );
+      })();
+    }, delayMs);
+    this.cabinetLaunchRetryTimers.set(cabinetId, timer);
+    this.logger.log(
+      `Telegram cabinet launch retry scheduled cabinet=${cabinetId} in ${delayMs}ms (consecutiveFailures=${fc})`,
+    );
+  }
+
+  private async appendCabinetLaunchAppLog(
+    cabinetId: string,
+    level: 'info' | 'warn' | 'error',
+    message: string,
+    payload: unknown,
+  ): Promise<void> {
+    await this.cabinetContext.runWithCabinetAsync(cabinetId, () =>
+      this.appLog.append(level, 'telegram', message, payload),
+    );
+  }
+
   private async withTelegramBotLaunchSerialized<T>(fn: () => Promise<T>): Promise<T> {
     const prevGate = this.botLaunchSerialGate;
     let release!: () => void;
@@ -324,52 +427,126 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
     bot: Telegraf,
     cabinetId: string,
     cfg: { token: string; name: string },
+    syncId: string,
   ): Promise<void> {
+    const correlationId = makeTelegramBotLaunchCorrelationId();
+    const tokenMask = maskTelegramBotToken(cfg.token);
+    const launchRequestedAt = performance.now();
+    const deleteWebhookMs = this.telegramDeleteWebhookTimeoutMs();
+    const launchMs = this.telegramLaunchTimeoutMs();
+
     return this.withTelegramBotLaunchSerialized(async () => {
+      const queueWaitMs = Math.round(performance.now() - launchRequestedAt);
+      this.logger.log(
+        `Telegram bot launch phase=launch_gate_ok cabinet=${cabinetId} (${cfg.name}) syncId=${syncId} correlationId=${correlationId} queueWaitMs=${queueWaitMs} tokenMask=${tokenMask}`,
+      );
+
+      const staggerBefore = performance.now();
       await this.sleepCabinetLaunchStaggerIfNeeded();
-      const timeoutMs = this.telegramLaunchTimeoutMs();
-      let timeoutHandle: NodeJS.Timeout | null = null;
-      let timedOut = false;
+      const staggerWaitMs = Math.round(performance.now() - staggerBefore);
+      this.logger.log(
+        `Telegram bot launch phase=launch_stagger cabinet=${cabinetId} syncId=${syncId} correlationId=${correlationId} staggerWaitMs=${staggerWaitMs}`,
+      );
+
+      let activePhase: TelegramLaunchTimedOutPhase = 'unknown';
+      let launchTimeoutHandle: NodeJS.Timeout | null = null;
       try {
-        const timeout = new Promise<never>((_, reject) => {
-          timeoutHandle = setTimeout(() => {
-            timedOut = true;
+        activePhase = 'delete_webhook';
+        const dwStart = performance.now();
+        this.logger.log(
+          `Telegram bot launch phase=delete_webhook_start cabinet=${cabinetId} syncId=${syncId} correlationId=${correlationId} timeoutMs=${deleteWebhookMs}`,
+        );
+        await this.promiseWithTimeout(
+          bot.telegram.deleteWebhook({ drop_pending_updates: false }),
+          deleteWebhookMs,
+        );
+        const dwMs = Math.round(performance.now() - dwStart);
+        this.logger.log(
+          `Telegram bot launch phase=delete_webhook_ok cabinet=${cabinetId} syncId=${syncId} correlationId=${correlationId} durationMs=${dwMs}`,
+        );
+
+        activePhase = 'telegraf_launch';
+        let launchTimedOut = false;
+        const launchTimeout = new Promise<never>((_, reject) => {
+          launchTimeoutHandle = setTimeout(() => {
+            launchTimedOut = true;
             reject(
               new Error(
-                `Telegram launch timeout after ${timeoutMs}ms (cabinet=${cabinetId})`,
+                `Telegram telegraf_launch timeout after ${launchMs}ms (cabinet=${cabinetId})`,
               ),
             );
-          }, timeoutMs);
+          }, launchMs);
         });
 
-        await Promise.race([
-          (async () => {
-            // На части токенов может быть активный webhook; без удаления Telegram блокирует getUpdates (long polling).
-            await bot.telegram.deleteWebhook({ drop_pending_updates: false });
-            await bot.launch();
-            if (timedOut) {
-              try {
-                await bot.stop('SIGTERM');
-              } catch {
-                // ignore
+        try {
+          await Promise.race([
+            (async () => {
+              await bot.launch();
+              if (launchTimedOut) {
+                try {
+                  await bot.stop('SIGTERM');
+                } catch {
+                  // ignore
+                }
+                return;
               }
-              return;
-            }
-            this.botRegistry.addLaunchedBot(cabinetId, bot);
-            this.launchedBotTokensByCabinet.set(cabinetId, cfg.token);
-            const me = await bot.telegram.getMe().catch(() => null);
-            this.logger.log(
-              `Telegram bot started for cabinet=${cabinetId} (${cfg.name}) username=@${me?.username ?? '?'}`,
-            );
-            void this.sendStartupGreetingForCabinet(cabinetId).catch((e) =>
-              this.logger.warn(
-                `sendStartupGreetingForCabinet failed cabinet=${cabinetId}: ${formatError(e)}`,
-              ),
-            );
-          })(),
-          timeout,
-        ]);
+              if (launchTimeoutHandle) {
+                clearTimeout(launchTimeoutHandle);
+                launchTimeoutHandle = null;
+              }
+              this.botRegistry.addLaunchedBot(cabinetId, bot);
+              this.launchedBotTokensByCabinet.set(cabinetId, cfg.token);
+              const hadRecovery = this.resetCabinetLaunchFailureTracking(cabinetId);
+              const me = await bot.telegram.getMe().catch(() => null);
+              const totalMs = Math.round(performance.now() - launchRequestedAt);
+              this.logger.log(
+                `Telegram bot launch phase=launch_complete cabinet=${cabinetId} (${cfg.name}) syncId=${syncId} correlationId=${correlationId} totalMs=${totalMs} username=@${me?.username ?? '?'}`,
+              );
+              if (hadRecovery) {
+                void this.appendCabinetLaunchAppLog(
+                  cabinetId,
+                  'info',
+                  'Telegram bot launch recovered after previous failure',
+                  {
+                    syncId,
+                    correlationId,
+                    cabinetId,
+                    totalMs,
+                    username: me?.username ?? null,
+                  },
+                ).catch(() => {});
+              }
+              void this.sendStartupGreetingForCabinet(cabinetId).catch((e) =>
+                this.logger.warn(
+                  `sendStartupGreetingForCabinet failed cabinet=${cabinetId}: ${formatError(e)}`,
+                ),
+              );
+            })(),
+            launchTimeout,
+          ]);
+        } finally {
+          if (launchTimeoutHandle) {
+            clearTimeout(launchTimeoutHandle);
+          }
+        }
       } catch (e) {
+        const errText = formatError(e);
+        this.logger.error(
+          `Telegram bot launch phase failed activePhase=${activePhase} cabinet=${cabinetId} syncId=${syncId} correlationId=${correlationId}: ${errText}`,
+        );
+        void this.appendCabinetLaunchAppLog(
+          cabinetId,
+          'warn',
+          `Telegram bot launch failed activePhase=${activePhase}: ${errText}`,
+          {
+            syncId,
+            correlationId,
+            cabinetId,
+            activePhase,
+            deleteWebhookTimeoutMs: deleteWebhookMs,
+            launchTimeoutMs: launchMs,
+          },
+        ).catch(() => {});
         try {
           bot.stop('SIGTERM');
         } catch {
@@ -377,9 +554,6 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
         }
         throw e;
       } finally {
-        if (timeoutHandle) {
-          clearTimeout(timeoutHandle);
-        }
         this.lastCabinetBotLaunchFinishedAt = Date.now();
       }
     });
@@ -518,6 +692,12 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
       clearTimeout(this.botLaunchRetryTimer);
       this.botLaunchRetryTimer = null;
     }
+    for (const t of this.cabinetLaunchRetryTimers.values()) {
+      clearTimeout(t);
+    }
+    this.cabinetLaunchRetryTimers.clear();
+    this.cabinetLaunchConsecutiveFailures.clear();
+    this.cabinetLaunchRecoveryPending.clear();
     for (const bot of this.botRegistry.values()) {
       bot.stop('SIGTERM');
     }

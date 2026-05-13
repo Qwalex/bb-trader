@@ -1652,3 +1652,15 @@
 - Manual verification: `npm run build -w apps/api` (pass).
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-137
+
+- Status: `done`
+- Scope: Надёжный запуск assist-бота по кабинетам — фазовые логи, раздельные таймауты deleteWebhook / launch, AppLog, backoff-retry sync, runbook SSH.
+- Files: `apps/api/src/modules/telegram/services/telegram.service.ts`, `apps/api/src/modules/telegram/utils/telegram-bot-launch.util.ts`, `apps/api/src/modules/telegram/utils/index.ts`, `.env.example`, `docs/audit/04-operational-runbooks.md`, `docs/audit/06-progress-tracker.md`
+- Findings: единый таймаут на `deleteWebhook`+`launch` затруднял локализацию; следующая попытка только раз в 30 с при периодическом sync; legacy `launchBotWithRetry` не покрывает per-cabinet путь.
+- Changes: `syncId` / `correlationId`, логи фаз (`launch_gate_ok`, `launch_stagger`, `delete_webhook_*`, `telegraf_launch`, `launch_complete`) и `activePhase` при ошибке; `TELEGRAM_BOT_DELETE_WEBHOOK_TIMEOUT_MS` + `promiseWithTimeout` для webhook, `TELEGRAM_BOT_LAUNCH_TIMEOUT_MS` только для `bot.launch()`; AppLog warn при сбое и info «recovered» после успеха при предшествующей ошибке; retry `syncBotsWithCabinetTokens` с задержками 5/15/30 с и ожиданием снятия `botSyncInFlight`; очистка таймеров при shutdown; runbook с `curl` и `printenv` для Railway SSH.
+- Decomposition notes (`utils/constants/hooks/types`): `telegram-bot-launch.util.ts` — correlation id, маска токена, константы задержек retry.
+- Manual verification: `npm run build -w apps/api` (pass); на стенде — в логах API видны фазы и при сбое `activePhase`; при кратковременной недоступности Bot API — повторный sync по backoff; `/logs` — warn по запуску при сбоях и info при восстановлении.
+- Docs updated: этот трекер, `04-operational-runbooks.md`.
+- Linked risks (`SEC-###`): N/A

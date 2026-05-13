@@ -81,3 +81,32 @@ railway connect <имя-postgres-сервиса>
 ```
 
 Дальше в `psql`: `\dt` и `SELECT * FROM "Cabinet" LIMIT 20;`.
+
+## Telegram assist-бот (long polling): таймауты и диагностика
+
+Окружение ветки **`cabinets`** на Railway → сервис **API** (не Web). Не выводить в чат полный `TELEGRAM_BOT_TOKEN`.
+
+### Исходящий HTTPS к Bot API
+
+```bash
+railway ssh -s api 'curl -sS -o /dev/null -w "code=%{http_code} time_total=%{time_total}\n" "https://api.telegram.org/"'
+```
+
+Ожидается быстрый ответ (обычно менее 2 с). Долгое `time_total` или зависание — проверить egress/DNS и лимиты Railway.
+
+### Переменные только по именам
+
+```bash
+railway ssh -s api 'printenv | grep -E "^TELEGRAM_BOT_" || true'
+```
+
+Проверить наличие при необходимости: `TELEGRAM_BOT_LAUNCH_TIMEOUT_MS`, `TELEGRAM_BOT_LAUNCH_STAGGER_MS`, `TELEGRAM_BOT_DELETE_WEBHOOK_TIMEOUT_MS`.
+
+### Реплики и дубликаты
+
+- Для long polling на один токен держите **одну реплику** сервиса API (или отдельный режим с webhook), иначе возможны конфликты `getUpdates`.
+- Убедитесь, что нет второго процесса (локальный бот, старый деплой) с тем же токеном.
+
+### Логи в приложении
+
+После деплоя с фазовыми логами в Nest ищите строки `Telegram bot launch phase=…` и `activePhase=` при ошибке; в `/logs` (AppLog) — предупреждения по запуску и `Telegram bot launch recovered` после восстановления.
