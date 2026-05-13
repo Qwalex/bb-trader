@@ -508,20 +508,24 @@ a:hover {
 }
 
 .dashboardActiveCabinetHeader {
-  margin-bottom: 1.05rem;
-  padding-bottom: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-bottom: 1.35rem;
+  padding-bottom: 1.25rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
 }
 
 .dashboardActiveCabinetTitle {
-  margin-bottom: 0.35rem;
+  margin-bottom: 0;
 }
 
 .dashboardActiveCabinetHint {
-  margin-bottom: 0.4rem;
+  margin-bottom: 0;
 }
 
 .dashboardActiveCabinetSourceHint {
+  margin-top: 0;
   margin-bottom: 0;
 }
 

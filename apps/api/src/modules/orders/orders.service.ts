@@ -982,11 +982,32 @@ export class OrdersService {
         orderBy: { createdAt: 'asc' },
         select: { cabinetId: true, createdAt: true, totalUsd: true },
       });
-      const merged = [...seeds, ...inRange];
+      const inRangeRows = inRange.filter(
+        (r): r is { cabinetId: string; createdAt: Date; totalUsd: number } =>
+          r.cabinetId != null && Number.isFinite(r.totalUsd),
+      );
+      /** Без снимков в БД кабинет не попадал в сумму (0) — Σ equity в шапке при этом считался live с Bybit. */
+      const merged = [...seeds, ...inRangeRows];
+      const cabinetIdsWithSnapshot = new Set(
+        merged.map((r) => r.cabinetId).filter((id): id is string => Boolean(id)),
+      );
+      const now = new Date();
+      for (const item of items) {
+        const cid = item.cabinetId;
+        const bal = item.totalBalanceUsd;
+        if (!cid || bal == null || !Number.isFinite(bal)) {
+          continue;
+        }
+        if (!cabinetIdsWithSnapshot.has(cid)) {
+          merged.push({ cabinetId: cid, createdAt: since, totalUsd: bal });
+        }
+        merged.push({ cabinetId: cid, createdAt: now, totalUsd: bal });
+      }
       aggregatedBalanceHistory = buildAggregatedBalanceHistoryPoints(
         cabinetIds,
         merged,
         historyDays,
+        now,
       );
     }
 

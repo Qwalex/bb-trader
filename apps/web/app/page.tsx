@@ -479,51 +479,6 @@ export default async function Home({
         </section>
       )}
 
-      <form className="filters" method="get" action="/">
-        {cabinetId ? <input type="hidden" name="cabinetId" value={cabinetId} /> : null}
-        <label>
-          Источник
-          <select
-            name="source"
-            defaultValue={source}
-          >
-            <option value="">все</option>
-            {sourceOptions.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button
-          type="submit"
-          style={{
-            padding: '0.45rem 0.9rem',
-            background: 'var(--accent)',
-            color: '#fff',
-            border: 'none',
-            borderRadius: 6,
-            cursor: 'pointer',
-          }}
-        >
-          Показать
-        </button>
-        {source && (
-          <Link
-            href={cabinetId ? withCabinetPageHref('/', cabinetId) : '/'}
-            style={{
-              alignSelf: 'end',
-              padding: '0.45rem 0.9rem',
-              border: '1px solid var(--border)',
-              borderRadius: 6,
-              color: 'var(--foreground)',
-              textDecoration: 'none',
-            }}
-          >
-            Сброс
-          </Link>
-        )}
-      </form>
       <section className="dashboardSection dashboardActiveCabinetSection">
         <div className="dashboardActiveCabinetHeader">
           <h2 className="pageTitle dashboardSectionTitle dashboardActiveCabinetTitle">
@@ -533,6 +488,51 @@ export default async function Home({
             Ниже — показатели, графики и экспозиция для активного кабинета (тот же, что в шапке и в
             выбранной карточке «Кабинеты»).
           </p>
+          <form className="filters" method="get" action="/">
+            {cabinetId ? <input type="hidden" name="cabinetId" value={cabinetId} /> : null}
+            <label>
+              Источник
+              <select
+                name="source"
+                defaultValue={source}
+              >
+                <option value="">все</option>
+                {sourceOptions.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="submit"
+              style={{
+                padding: '0.45rem 0.9rem',
+                background: 'var(--accent)',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 6,
+                cursor: 'pointer',
+              }}
+            >
+              Показать
+            </button>
+            {source && (
+              <Link
+                href={cabinetId ? withCabinetPageHref('/', cabinetId) : '/'}
+                style={{
+                  alignSelf: 'end',
+                  padding: '0.45rem 0.9rem',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  color: 'var(--foreground)',
+                  textDecoration: 'none',
+                }}
+              >
+                Сброс
+              </Link>
+            )}
+          </form>
           {source ? (
             <p className="dashboardSectionHint dashboardActiveCabinetSourceHint">
               Фильтр по источнику: <strong>{source}</strong> — метрики и ряды ниже учитывают только этот

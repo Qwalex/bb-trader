@@ -40,6 +40,24 @@ function fmtPct(v: number | null | undefined): string {
   return `${v.toFixed(1)}%`;
 }
 
+/** Ожидаемая сумма Σ equity через n дней: equity × (1 + EV%), где EV% = (1+r)^n − 1, r = ожид. PnL/день ÷ equity. */
+function fmtEvProjectedEquityUsd(
+  totalEquityUsd: number | null | undefined,
+  evReturnPercent: number | null | undefined,
+): string {
+  if (totalEquityUsd == null || !Number.isFinite(totalEquityUsd) || totalEquityUsd <= 0) {
+    return '—';
+  }
+  if (evReturnPercent == null || !Number.isFinite(evReturnPercent)) {
+    return '—';
+  }
+  const projected = totalEquityUsd * (1 + evReturnPercent / 100);
+  if (!Number.isFinite(projected)) {
+    return '—';
+  }
+  return `${projected.toFixed(0)} $`;
+}
+
 export function DashboardCrossCabinetSection({
   summary,
   aggregatedBalanceHistory,
@@ -151,28 +169,28 @@ export function DashboardCrossCabinetSection({
             </span>
           </div>
           <div className="dashboardCrossKpi">
-            <span className="dashboardCrossKpiLabel">EV 7 дн.</span>
+            <span className="dashboardCrossKpiLabel">Прогноз Σ equity, 7 дн.</span>
             <span className="dashboardCrossKpiValue">
-              {fmtPct(summary.crossCabinetEvReturn7dPercent)}
+              {fmtEvProjectedEquityUsd(summary.totalEquityUsd, summary.crossCabinetEvReturn7dPercent)}
             </span>
           </div>
           <div className="dashboardCrossKpi">
-            <span className="dashboardCrossKpiLabel">EV 30 дн.</span>
+            <span className="dashboardCrossKpiLabel">Прогноз Σ equity, 30 дн.</span>
             <span className="dashboardCrossKpiValue">
-              {fmtPct(summary.crossCabinetEvReturn30dPercent)}
+              {fmtEvProjectedEquityUsd(summary.totalEquityUsd, summary.crossCabinetEvReturn30dPercent)}
             </span>
           </div>
           <div className="dashboardCrossKpi">
-            <span className="dashboardCrossKpiLabel">EV 365 дн.</span>
+            <span className="dashboardCrossKpiLabel">Прогноз Σ equity, 365 дн.</span>
             <span className="dashboardCrossKpiValue">
-              {fmtPct(summary.crossCabinetEvReturn365dPercent)}
+              {fmtEvProjectedEquityUsd(summary.totalEquityUsd, summary.crossCabinetEvReturn365dPercent)}
             </span>
           </div>
         </div>
         <p className="dashboardCrossYieldHint">
           APR/APY: (ΣPnL ÷ Σ equity) и сложная годовая за T = max(окно статистики по кабинетам) — как на
-          главной. EV: потенциальный прирост (1+r)^n − 1 от суммарного ожидаемого PnL/день ÷ Σ equity;
-          не прогноз рынка.
+          главной. Прогноз Σ equity: текущая сумма балансов × (1 + ожидаемая доходность за период), где
+          доходность считается как (1+r)^n − 1 при r = ожид. PnL/день ÷ Σ equity; не прогноз рынка.
         </p>
       </div>
 

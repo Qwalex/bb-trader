@@ -1485,6 +1485,18 @@
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A (прогноз EV как на главной, не инвестиционная рекомендация).
 
+### AUD-123
+
+- Status: `done`
+- Scope: Дашборд «Все кабинеты» — график Σ equity по дням vs сумма live по кабинетам.
+- Files: `apps/api/src/modules/orders/orders.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: агрегат по `BalanceSnapshot` суммировал только кабинеты со снимками в БД; кабинеты без записей давали 0 в сумме, тогда как KPI Σ equity брал live Bybit по каждому кабинету — расхождение (например один кабинет в графике vs несколько в шапке).
+- Changes: в `getDashboardCabinetsOverviewForUser` после выборки снимков добавляются синтетические точки: live `totalBalanceUsd` на `now` для всех кабинетов с известным балансом; для кабинетов без ни одного снимка в окне — дополнительная точка на `since`, чтобы carry-forward включал их на всём горизонте (приближение: баланс как сейчас на всём окне, если истории нет).
+- Decomposition notes: без выноса (локальная правка в сервисе).
+- Manual verification: `npm run build -w apps/api`; главная при ≥2 кабинетах — последняя точка графика согласована с Σ equity при наличии live балансов.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
 ### AUD-122
 
 - Status: `done`
