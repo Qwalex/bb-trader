@@ -239,6 +239,12 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
             `Telegraf unhandled error (cabinet=${cabinetId}): ${msg} updateType=${ctx?.updateType ?? '?'}`,
             stack,
           );
+          void this.appLog.append('error', 'telegram', 'Telegraf unhandled error', {
+            cabinetId,
+            errorMessage: msg,
+            updateType: ctx?.updateType ?? '?',
+            stack: stack ? stack.slice(0, 800) : undefined,
+          });
           void ctx
             ?.reply(
               'Произошла ошибка при обработке сообщения. Проверьте логи сервера (TelegramService).',
@@ -1307,6 +1313,15 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
     }
   }
 
+  /** Не бросает: истёкший callback, повторный ответ, гонка при нескольких репликах API. */
+  private async safeAnswerCbQuery(ctx: Context, text?: string): Promise<void> {
+    try {
+      await ctx.answerCbQuery(text);
+    } catch (e) {
+      this.logger.debug(`answerCbQuery skipped: ${formatError(e)}`);
+    }
+  }
+
   private registerHandlers(telegraf: Telegraf, botToken: string): void {
     if (!telegraf) return;
     const routing = this.botTokenCabinetRouting.get(botToken);
@@ -1607,17 +1622,43 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
       const uid = ctx.from?.id;
       const signalId = ctx.match?.[1]?.trim();
       if (!uid || !signalId) {
-        await ctx.answerCbQuery();
+        await this.safeAnswerCbQuery(ctx);
         return;
       }
-      await ctx.answerCbQuery('Отменяю ордера…');
-      await this.clearTelegramInlineKeyboard(ctx);
+      // Сразу отвечаем на callback: иначе при медленном DB/whitelist истекает окно Telegram (~10 с)
+      // → 400 «query is too old», необработанное исключение и bot.catch.
+      await this.safeAnswerCbQuery(ctx, 'Отменяю ордера…');
       try {
-        const closed = await this.bybit.closeSignalManually(signalId);
+        const row = await this.prisma.signal.findUnique({
+          where: { id: signalId },
+          select: { id: true, cabinetId: true },
+        });
+        if (!row) {
+          await ctx.reply(`Сигнал не найден: ${signalId}`);
+          return;
+        }
+        const targetCabinetId =
+          row.cabinetId?.trim() || (await this.cabinets.getDefaultCabinetId());
+        const allowed = await this.cabinetContext.runWithCabinetAsync(
+          targetCabinetId,
+          () => this.isAllowed(uid),
+        );
+        if (!allowed) {
+          await ctx.reply(
+            'Нет доступа к кабинету этой сделки (TELEGRAM_WHITELIST или привязка Telegram к аккаунту).',
+          );
+          return;
+        }
+        await this.clearTelegramInlineKeyboard(ctx);
+        const closed = await this.cabinetContext.runWithCabinetAsync(
+          targetCabinetId,
+          () => this.bybit.closeSignalManually(signalId),
+        );
         if (closed.ok) {
           void this.appLog.append('info', 'telegram', 'Result без входа: отмена по кнопке', {
             userId: uid,
             signalId,
+            cabinetId: targetCabinetId,
             cancelledOrders: closed.cancelledOrders,
             closedPositions: closed.closedPositions,
           });
@@ -1630,13 +1671,20 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
           void this.appLog.append('warn', 'telegram', 'Result без входа: отмена по кнопке не удалась', {
             userId: uid,
             signalId,
+            cabinetId: targetCabinetId,
             error: err,
           });
           await ctx.reply(`Не удалось отменить: ${err}`);
         }
       } catch (e) {
-        this.logger.warn(`ub_stale_cancel signalId=${signalId}: ${formatError(e)}`);
-        await ctx.reply(`Ошибка: ${formatError(e)}`);
+        const fe = formatError(e);
+        this.logger.warn(`ub_stale_cancel signalId=${signalId}: ${fe}`);
+        void this.appLog.append('error', 'telegram', 'ub_stale_cancel: необработанная ошибка', {
+          userId: uid,
+          signalId,
+          error: fe,
+        });
+        await ctx.reply(`Ошибка: ${fe}`);
       }
     });
   }

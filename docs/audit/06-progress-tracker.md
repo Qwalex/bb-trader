@@ -1640,3 +1640,15 @@
 - Manual verification: `npm run check-types -w web`.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-136
+
+- Status: `done`
+- Scope: Userbot «result без входа» — автоотмена по флагу и кнопка «Отменить» в Telegram; видимость ошибок Telegraf на `/logs`.
+- Files: `apps/api/src/modules/settings/settings-bool.util.ts`, `apps/api/src/modules/telegram-userbot/ingest/telegram-userbot-ingest-signal-reply.service.ts`, `apps/api/src/modules/telegram-userbot/ingest/telegram-userbot-ingest-pipeline.service.ts`, `apps/api/src/modules/telegram/services/telegram.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: `getBoolSetting` принимал только строку `true` — env `1` не включал автоотмену; `ub_stale_cancel` вызывал Bybit в кабинете из middleware (первый whitelist при общем токене), а `answerCbQuery` вне try ломался на истёкшем callback → `bot.catch` без записи в AppLog.
+- Changes: `parseSettingsBool`; отмена по кнопке — `signal.cabinetId` + `runWithCabinetAsync` + проверка `isAllowed` в целевом кабинете; `safeAnswerCbQuery`; `bot.catch` → `appLog.append` с `cabinetId` и текстом ошибки; follow-up: `ub_stale_cancel` — `answerCbQuery` сразу после валидации (до Prisma/whitelist), иначе истекает callback (~10 с) и снова 400 «query is too old».
+- Decomposition notes (`utils/constants/hooks/types`): `settings-bool.util.ts`.
+- Manual verification: `npm run build -w apps/api` (pass).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

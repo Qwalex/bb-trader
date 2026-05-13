@@ -11,6 +11,7 @@ import { AppLogService } from '../../app-log/app-log.service';
 import { CabinetContextService } from '../../cabinet/cabinet-context.service';
 import { CabinetService } from '../../cabinet/cabinet.service';
 import { SettingsService } from '../../settings/settings.service';
+import { parseSettingsBool } from '../../settings/settings-bool.util';
 import { TranscriptService } from '../../transcript/transcript.service';
 import { BybitService } from '../../bybit/bybit.service';
 import { OrdersService } from '../../orders/orders.service';
@@ -1573,10 +1574,7 @@ export class TelegramUserbotIngestPipelineService {
 
   private async getBoolSetting(key: string, fallback: boolean): Promise<boolean> {
     const raw = await this.settings.get(key);
-    if (raw == null || raw.trim() === '') {
-      return fallback;
-    }
-    return raw.trim().toLowerCase() === 'true';
+    return parseSettingsBool(raw, fallback);
   }
 
   private async getNumberSetting(
