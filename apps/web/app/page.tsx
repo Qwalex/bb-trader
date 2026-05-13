@@ -14,6 +14,7 @@ import { searchParamFirst } from '../lib/search-param.util';
 import type {
   ConnectedGroupItem,
   DashboardActivityItem,
+  DashboardAggregatedBalancePoint,
   DashboardCabinetCard,
   DashboardCabinetsSummary,
 } from './home-dashboard.types';
@@ -102,6 +103,7 @@ export default async function Home({
   let cabinetItems: CabinetItem[] = [];
   let dashboardCabinetCards: DashboardCabinetCard[] = [];
   let dashboardCabinetsSummary: DashboardCabinetsSummary | null = null;
+  let dashboardAggregatedBalanceHistory: DashboardAggregatedBalancePoint[] = [];
   let dashboardActivityItems: DashboardActivityItem[] = [];
   let connectedGroups: ConnectedGroupItem[] = [];
   let err: string | null = null;
@@ -214,12 +216,17 @@ export default async function Home({
     const dc = await fetchJson<{
       items?: DashboardCabinetCard[];
       summary?: DashboardCabinetsSummary;
+      aggregatedBalanceHistory?: DashboardAggregatedBalancePoint[];
     }>('/orders/dashboard-cabinets', undefined, cabinetId);
     dashboardCabinetCards = Array.isArray(dc.items) ? dc.items : [];
     dashboardCabinetsSummary = dc.summary ?? null;
+    dashboardAggregatedBalanceHistory = Array.isArray(dc.aggregatedBalanceHistory)
+      ? dc.aggregatedBalanceHistory
+      : [];
   } catch {
     dashboardCabinetCards = [];
     dashboardCabinetsSummary = null;
+    dashboardAggregatedBalanceHistory = [];
   }
   try {
     const act = await fetchJson<{ items?: DashboardActivityItem[] }>(
@@ -344,6 +351,7 @@ export default async function Home({
 
       <DashboardCrossCabinetSection
         summary={dashboardCabinetsSummary ?? undefined}
+        aggregatedBalanceHistory={dashboardAggregatedBalanceHistory}
         activityItems={dashboardActivityItems}
         cabinetIdForLinks={currentCabinet?.id ?? (cabinetId.trim() ? cabinetId : null)}
       />

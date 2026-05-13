@@ -29,12 +29,24 @@ function formatAt(iso: string): string {
   }
 }
 
-export function BalanceChart({ data }: { data: BalancePoint[] }) {
+export function BalanceChart({
+  data,
+  compact,
+  balanceLabel,
+}: {
+  data: BalancePoint[];
+  /** Компактный режим для вложенных блоков (например «Все кабинеты»). */
+  compact?: boolean;
+  /** Подпись в тултипе (по умолчанию «Суммарный баланс»). */
+  balanceLabel?: string;
+}) {
+  const label = balanceLabel ?? 'Суммарный баланс';
   if (data.length === 0) {
     return (
-      <p style={{ color: 'var(--muted)', padding: '1rem' }}>
-        Записей пока нет. Точки появятся после ежедневного снимка суммарного баланса (cron API, около
-        00:05 UTC).
+      <p style={{ color: 'var(--muted)', padding: compact ? '0.5rem 0.35rem' : '1rem', fontSize: compact ? '0.78rem' : undefined }}>
+        {compact
+          ? 'Нет точек: снимки equity появятся после ежедневного cron (≈00:05 UTC).'
+          : 'Записей пока нет. Точки появятся после ежедневного снимка суммарного баланса (cron API, около 00:05 UTC).'}
       </p>
     );
   }
@@ -42,29 +54,33 @@ export function BalanceChart({ data }: { data: BalancePoint[] }) {
     ...p,
     label: formatAt(p.at),
   }));
+  const margin = compact
+    ? { top: 4, right: 2, left: -6, bottom: 0 }
+    : { top: 8, right: 8, left: 0, bottom: 4 };
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <LineChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
+      <LineChart data={chartData} margin={margin}>
         <CartesianGrid strokeDasharray="3 3" stroke="#30363d" />
         <XAxis
           dataKey="label"
-          tick={{ fill: '#8b949e', fontSize: 10 }}
+          tick={{ fill: '#8b949e', fontSize: compact ? 9 : 10 }}
           interval="preserveStartEnd"
         />
-        <YAxis width={48} tick={{ fill: '#8b949e', fontSize: 10 }} />
+        <YAxis width={compact ? 38 : 48} tick={{ fill: '#8b949e', fontSize: compact ? 9 : 10 }} />
         <Tooltip
-          formatter={(value: number) => [`${value.toFixed(2)} USDT`, 'Суммарный баланс']}
+          formatter={(value: number) => [`${value.toFixed(2)} USDT`, label]}
           contentStyle={{
             background: '#1a2332',
             border: '1px solid #30363d',
+            fontSize: compact ? 12 : undefined,
           }}
         />
         <Line
           type="monotone"
           dataKey="totalUsd"
-          name="Суммарный баланс"
+          name={label}
           stroke="#3b82f6"
-          strokeWidth={2}
+          strokeWidth={compact ? 1.5 : 2}
           dot={false}
         />
       </LineChart>

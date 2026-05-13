@@ -2,6 +2,7 @@ import type {
   DashboardCabinetCardDto,
   DashboardCabinetsSummaryDto,
 } from './orders-dashboard-cabinets.types';
+import { computeCrossCabinetYieldFields } from './orders-dashboard-cross-cabinet-yield.util';
 
 export function buildDashboardCabinetsSummary(
   items: DashboardCabinetCardDto[],
@@ -67,6 +68,19 @@ export function buildDashboardCabinetsSummary(
   const aggregateRealizedPnlPerDayUsd =
     maxDays != null && maxDays > 0 && Number.isFinite(totalPnl) ? totalPnl / maxDays : null;
 
+  const totalEquityUsd = equityCount > 0 ? sumEquity : null;
+  const aggregateExpectedPnlPerDayUsdNorm =
+    cabinetCount > 0 && Number.isFinite(aggregateExpectedPnlPerDayUsd)
+      ? aggregateExpectedPnlPerDayUsd
+      : null;
+
+  const yieldFields = computeCrossCabinetYieldFields({
+    totalPnl,
+    totalEquityUsd,
+    aggregateStatsPeriodDaysMax: maxDays,
+    aggregateExpectedPnlPerDayUsd: aggregateExpectedPnlPerDayUsdNorm,
+  });
+
   return {
     cabinetCount,
     totalPnl,
@@ -74,17 +88,15 @@ export function buildDashboardCabinetsSummary(
     totalWins,
     totalLosses,
     avgWinratePercent,
-    totalEquityUsd: equityCount > 0 ? sumEquity : null,
+    totalEquityUsd,
     totalAvailableUsd: availableCount > 0 ? sumAvailable : null,
     userbotReadsToday: totalUserbotReadsToday,
     signalsPlacedToday: totalSignalsPlacedToday,
     cabinetsWithSetupIssues,
     cabinetsBalancePaused,
-    aggregateExpectedPnlPerDayUsd:
-      cabinetCount > 0 && Number.isFinite(aggregateExpectedPnlPerDayUsd)
-        ? aggregateExpectedPnlPerDayUsd
-        : null,
+    aggregateExpectedPnlPerDayUsd: aggregateExpectedPnlPerDayUsdNorm,
     aggregateStatsPeriodDaysMax: maxDays,
     aggregateRealizedPnlPerDayUsd,
+    ...yieldFields,
   };
 }

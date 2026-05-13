@@ -56,9 +56,24 @@ export type DashboardCabinetsSummaryDto = {
   aggregateStatsPeriodDaysMax: number | null;
   /** totalPnl / aggregateStatsPeriodDaysMax при известном окне. */
   aggregateRealizedPnlPerDayUsd: number | null;
+  /** Простая годовая: (ΣPnL ÷ Σ equity) × (365 / T), T = aggregateStatsPeriodDaysMax. */
+  crossCabinetAprRealizedPercent: number | null;
+  /** Сложная годовая за период T: (1 + ΣPnL/equity)^(365/T) − 1. */
+  crossCabinetApyRealizedPercent: number | null;
+  /** Потенциальный прирост (модель EV) за 7 дней: (1 + r)^7 − 1, r = ожид. PnL/день ÷ equity. */
+  crossCabinetEvReturn7dPercent: number | null;
+  crossCabinetEvReturn30dPercent: number | null;
+  crossCabinetEvReturn365dPercent: number | null;
+};
+
+export type DashboardBalanceHistoryPointDto = {
+  at: string;
+  totalUsd: number;
 };
 
 export type DashboardCabinetsOverviewDto = {
   items: DashboardCabinetCardDto[];
   summary: DashboardCabinetsSummaryDto;
+  /** Σ equity по календарным дням UTC (снимки BalanceSnapshot по всем кабинетам пользователя). */
+  aggregatedBalanceHistory: DashboardBalanceHistoryPointDto[];
 };

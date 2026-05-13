@@ -1,8 +1,10 @@
 import Link from 'next/link';
 
+import { BalanceChart } from './BalanceChart';
 import { withCabinetPageHref } from '../../lib/cabinet-page-href.util';
 import type {
   DashboardActivityItem,
+  DashboardAggregatedBalancePoint,
   DashboardCabinetsSummary,
 } from '../home-dashboard.types';
 
@@ -33,12 +35,19 @@ function kindLabel(kind: DashboardActivityItem['kind']): string {
   }
 }
 
+function fmtPct(v: number | null | undefined): string {
+  if (v == null || !Number.isFinite(v)) return '—';
+  return `${v.toFixed(1)}%`;
+}
+
 export function DashboardCrossCabinetSection({
   summary,
+  aggregatedBalanceHistory,
   activityItems,
   cabinetIdForLinks,
 }: {
   summary: DashboardCabinetsSummary | null | undefined;
+  aggregatedBalanceHistory: DashboardAggregatedBalancePoint[];
   activityItems: DashboardActivityItem[];
   /** Активный кабинет для ссылки «Сделки». */
   cabinetIdForLinks?: string | null;
@@ -124,6 +133,58 @@ export function DashboardCrossCabinetSection({
             </span>
           </div>
         )}
+      </div>
+
+      <div className="dashboardCrossYieldBlock">
+        <h3 className="dashboardCrossSubheading">Доходность (все кабинеты)</h3>
+        <div className="dashboardCrossYieldGrid">
+          <div className="dashboardCrossKpi">
+            <span className="dashboardCrossKpiLabel">APR (реализ.)</span>
+            <span className="dashboardCrossKpiValue">
+              {fmtPct(summary.crossCabinetAprRealizedPercent)}
+            </span>
+          </div>
+          <div className="dashboardCrossKpi">
+            <span className="dashboardCrossKpiLabel">APY (реализ.)</span>
+            <span className="dashboardCrossKpiValue">
+              {fmtPct(summary.crossCabinetApyRealizedPercent)}
+            </span>
+          </div>
+          <div className="dashboardCrossKpi">
+            <span className="dashboardCrossKpiLabel">EV 7 дн.</span>
+            <span className="dashboardCrossKpiValue">
+              {fmtPct(summary.crossCabinetEvReturn7dPercent)}
+            </span>
+          </div>
+          <div className="dashboardCrossKpi">
+            <span className="dashboardCrossKpiLabel">EV 30 дн.</span>
+            <span className="dashboardCrossKpiValue">
+              {fmtPct(summary.crossCabinetEvReturn30dPercent)}
+            </span>
+          </div>
+          <div className="dashboardCrossKpi">
+            <span className="dashboardCrossKpiLabel">EV 365 дн.</span>
+            <span className="dashboardCrossKpiValue">
+              {fmtPct(summary.crossCabinetEvReturn365dPercent)}
+            </span>
+          </div>
+        </div>
+        <p className="dashboardCrossYieldHint">
+          APR/APY: (ΣPnL ÷ Σ equity) и сложная годовая за T = max(окно статистики по кабинетам) — как на
+          главной. EV: потенциальный прирост (1+r)^n − 1 от суммарного ожидаемого PnL/день ÷ Σ equity;
+          не прогноз рынка.
+        </p>
+      </div>
+
+      <div className="dashboardCrossChartBlock">
+        <h3 className="dashboardCrossSubheading">Σ Equity по дням (UTC)</h3>
+        <div className="dashboardCrossChartWrap">
+          <BalanceChart
+            data={aggregatedBalanceHistory}
+            compact
+            balanceLabel="Σ Equity (USDT)"
+          />
+        </div>
       </div>
 
       <div className="dashboardActivityWrap">

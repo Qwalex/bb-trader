@@ -1472,3 +1472,15 @@
 - Manual verification: `npm run build -w apps/web`; после входа — изменение суммы/срока, перезагрузка страницы, значения подставляются из БД.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): в JSON пресете нет секретов; размер ограничен `PRESET_JSON_MAX_LEN`.
+
+### AUD-121
+
+- Status: `done`
+- Scope: Дашборд — блок «Все кабинеты»: APR/APY (реализ.), потенциальная доходность EV (7/30/365 дн.), график Σ equity по дням.
+- Files: `apps/api/src/modules/orders/orders-dashboard-cabinets.types.ts`, `apps/api/src/modules/orders/orders-dashboard-summary.util.ts`, `apps/api/src/modules/orders/orders-dashboard-cross-cabinet-yield.util.ts`, `apps/api/src/modules/orders/orders-dashboard-aggregate-balance-history.util.ts`, `apps/api/src/modules/orders/orders.service.ts`, `apps/web/app/home-dashboard.types.ts`, `apps/web/app/page.tsx`, `apps/web/app/components/DashboardCrossCabinetSection.tsx`, `apps/web/app/components/BalanceChart.tsx`, `apps/web/app/globals.css`, `docs/audit/06-progress-tracker.md`
+- Findings: `GET /orders/dashboard-cabinets` не отдавал агрегированную историю `BalanceSnapshot`; метрики доходности по Σ кабинетов без общей формулы с главной пришлось бы дублировать на web.
+- Changes: в `summary` — поля `crossCabinetAprRealizedPercent`, `crossCabinetApyRealizedPercent`, EV 7/30/365; в ответе — `aggregatedBalanceHistory` (Σ по UTC-дням, сиды до окна); утилиты агрегации и yield; UI секции + компактный `BalanceChart`.
+- Decomposition notes (`utils/constants/hooks/types`): `orders-dashboard-cross-cabinet-yield.util.ts`, `orders-dashboard-aggregate-balance-history.util.ts`.
+- Manual verification: `npm run build -w apps/api`, `npm run build -w apps/web`; блок при ≥1 кабинете, график при наличии снимков.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A (прогноз EV как на главной, не инвестиционная рекомендация).

@@ -31,6 +31,7 @@ import {
   mapSignalCloseToActivity,
   mapSignalOpenToActivity,
 } from './orders-dashboard-activity.util';
+import { buildAggregatedBalanceHistoryPoints } from './orders-dashboard-aggregate-balance-history.util';
 import { buildDashboardCabinetsSummary } from './orders-dashboard-summary.util';
 import type { ActiveSignalTradeSnapshot } from './orders-active-signal-snapshot.types';
 import type { OrdersDailyDigestModel } from './orders-digest.types';
@@ -835,7 +836,11 @@ export class OrdersService {
   ): Promise<DashboardCabinetsOverviewDto> {
     const userId = String(userIdRaw ?? '').trim();
     if (!userId) {
-      return { items: [], summary: buildDashboardCabinetsSummary([]) };
+      return {
+        items: [],
+        summary: buildDashboardCabinetsSummary([]),
+        aggregatedBalanceHistory: [],
+      };
     }
     const cabinets = await this.cabinets.listCabinetsForUser(userId);
     const items: DashboardCabinetCardDto[] = [];
@@ -949,7 +954,43 @@ export class OrdersService {
       });
       items.push(row);
     }
-    return { items, summary: buildDashboardCabinetsSummary(items) };
+    const summary = buildDashboardCabinetsSummary(items);
+    const cabinetIds = cabinets.map((c) => c.id);
+    const historyDays = 30;
+    const since = new Date(Date.now() - historyDays * 24 * 60 * 60 * 1000);
+
+    let aggregatedBalanceHistory: { at: string; totalUsd: number }[] = [];
+    if (cabinetIds.length > 0) {
+      const seedRows = await Promise.all(
+        cabinetIds.map((cabinetId) =>
+          this.prisma.balanceSnapshot.findFirst({
+            where: { cabinetId, createdAt: { lt: since } },
+            orderBy: { createdAt: 'desc' },
+            select: { cabinetId: true, createdAt: true, totalUsd: true },
+          }),
+        ),
+      );
+      const seeds = seedRows.filter(
+        (r): r is { cabinetId: string; createdAt: Date; totalUsd: number } =>
+          r != null && r.cabinetId != null && Number.isFinite(r.totalUsd),
+      );
+      const inRange = await this.prisma.balanceSnapshot.findMany({
+        where: {
+          cabinetId: { in: cabinetIds },
+          createdAt: { gte: since },
+        },
+        orderBy: { createdAt: 'asc' },
+        select: { cabinetId: true, createdAt: true, totalUsd: true },
+      });
+      const merged = [...seeds, ...inRange];
+      aggregatedBalanceHistory = buildAggregatedBalanceHistoryPoints(
+        cabinetIds,
+        merged,
+        historyDays,
+      );
+    }
+
+    return { items, summary, aggregatedBalanceHistory };
   }
 
   /**

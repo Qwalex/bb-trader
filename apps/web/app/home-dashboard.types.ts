@@ -54,6 +54,17 @@ export type DashboardCabinetsSummary = {
   aggregateExpectedPnlPerDayUsd: number | null;
   aggregateStatsPeriodDaysMax: number | null;
   aggregateRealizedPnlPerDayUsd: number | null;
+  crossCabinetAprRealizedPercent: number | null;
+  crossCabinetApyRealizedPercent: number | null;
+  crossCabinetEvReturn7dPercent: number | null;
+  crossCabinetEvReturn30dPercent: number | null;
+  crossCabinetEvReturn365dPercent: number | null;
+};
+
+/** Σ equity по дням UTC (поле `aggregatedBalanceHistory` в GET /orders/dashboard-cabinets). */
+export type DashboardAggregatedBalancePoint = {
+  at: string;
+  totalUsd: number;
 };
 
 export type DashboardActivityTone = 'ok' | 'warn' | 'err' | 'info';
