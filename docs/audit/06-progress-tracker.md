@@ -1739,3 +1739,14 @@
 - Manual verification: `npm run check-types -w web`; визуально проверить `/leverage-calculator` — переключение «Все кабинеты / конкретный кабинет» пересчитывает KPI и заголовок без reload.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-146
+
+- Status: `done`
+- Scope: Web `/leverage-calculator` — в блоке `leverageHighlight` показать годовые проценты по кредиту на основе введённых `L/M/T`.
+- Files: `apps/web/app/leverage-calculator/LeverageCalculatorClient.tsx`, `docs/audit/06-progress-tracker.md`
+- Findings: в верхней карточке не было понятного годового процента для быстрой оценки выгодности кредита.
+- Changes: добавлен расчёт `loanAnnualRate` через `impliedMonthlyRateFromAnnuity(L, M, T)` и вывод в `leverageHighlight` как «Годовые проценты по кредиту (оценка)».
+- Manual verification: `ReadLints` для `LeverageCalculatorClient.tsx` (ошибок нет); визуально проверить `/leverage-calculator` при разных `L/M/T`.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

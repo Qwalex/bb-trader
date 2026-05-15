@@ -47,6 +47,7 @@ import {
   formatMonths,
   formatPercentRate,
   formatUsdSigned,
+  impliedMonthlyRateFromAnnuity,
   parseIsoDateOnly,
   todayIsoDateOnly,
 } from './leverage-calculator-page.util';
@@ -290,6 +291,16 @@ export function LeverageCalculatorClient({
     const h = Number.parseInt(horizonAfter, 10);
     return Number.isFinite(h) ? Math.max(0, h) : 0;
   }, [horizonAfter]);
+
+  const loanAnnualRate = useMemo(() => {
+    const monthlyRate = impliedMonthlyRateFromAnnuity(
+      loan.principalUsd,
+      loan.monthlyPaymentUsd,
+      loan.termMonths,
+    );
+    if (monthlyRate == null || !Number.isFinite(monthlyRate)) return null;
+    return Math.pow(1 + monthlyRate, 12) - 1;
+  }, [loan.principalUsd, loan.monthlyPaymentUsd, loan.termMonths]);
 
   const earlyPayoffForOutlook = useMemo(() => {
     if (!earlyPayoffEnabled) return null;
@@ -1025,6 +1036,10 @@ export function LeverageCalculatorClient({
             <li>
               <strong>Тело кредита:</strong>{' '}
               <DualUsdRub usd={loan.principalUsd} rubPerUsd={rubPerUsdSafe} />
+            </li>
+            <li>
+              <strong>Годовые проценты по кредиту (оценка):</strong>{' '}
+              {formatPercentRate(loanAnnualRate)}
             </li>
             {earlyPayoffEnabled && earlyContractEndLabel && loan.termMonths >= 2 ? (
               <li>
