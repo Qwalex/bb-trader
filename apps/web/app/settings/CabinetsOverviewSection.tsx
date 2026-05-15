@@ -35,16 +35,6 @@ type CabinetsOverviewSectionProps = {
   isAdmin: boolean;
 };
 
-type TableGroupId = 'trading' | 'telegram' | 'extra';
-
-const TABLE_GROUP_LABELS: Record<TableGroupId, string> = {
-  trading: 'Торговые параметры',
-  telegram: 'Telegram / Userbot',
-  extra: 'Дополнительно',
-};
-
-const TABLE_GROUP_ORDER: TableGroupId[] = ['trading', 'telegram', 'extra'];
-
 const truncatedLabelStyle: CSSProperties = {
   maxWidth: '280px',
   whiteSpace: 'nowrap',
@@ -113,7 +103,8 @@ export function CabinetsOverviewSection({ isAdmin }: CabinetsOverviewSectionProp
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cards, setCards] = useState<CabinetOverviewCardData[]>([]);
-  const [enabledGroups, setEnabledGroups] = useState<TableGroupId[]>(TABLE_GROUP_ORDER);
+  const [enabledCabinetIds, setEnabledCabinetIds] = useState<string[]>([]);
+  const [cabinetFilterInitialized, setCabinetFilterInitialized] = useState(false);
 
   useEffect(() => {
     if (!isAdmin) {
@@ -180,6 +171,25 @@ export function CabinetsOverviewSection({ isAdmin }: CabinetsOverviewSectionProp
     };
   }, [isAdmin]);
 
+  useEffect(() => {
+    if (cards.length === 0) {
+      if (!cabinetFilterInitialized) {
+        setEnabledCabinetIds([]);
+      }
+      return;
+    }
+    const allCabinetIds = cards.map((card) => card.cabinet.id);
+    setEnabledCabinetIds((prev) => {
+      if (!cabinetFilterInitialized) {
+        return allCabinetIds;
+      }
+      return prev.filter((id) => allCabinetIds.includes(id));
+    });
+    if (!cabinetFilterInitialized) {
+      setCabinetFilterInitialized(true);
+    }
+  }, [cards, cabinetFilterInitialized]);
+
   const openCabinetSettings = useCallback(
     (cabinetId: string) => {
       try {
@@ -198,11 +208,15 @@ export function CabinetsOverviewSection({ isAdmin }: CabinetsOverviewSectionProp
   );
 
   const hasCards = useMemo(() => cards.length > 0, [cards.length]);
-  const hasEnabledGroups = enabledGroups.length > 0;
+  const visibleCards = useMemo(
+    () => cards.filter((card) => enabledCabinetIds.includes(card.cabinet.id)),
+    [cards, enabledCabinetIds],
+  );
+  const hasEnabledCabinets = visibleCards.length > 0;
 
-  const toggleGroup = useCallback((groupId: TableGroupId) => {
-    setEnabledGroups((prev) =>
-      prev.includes(groupId) ? prev.filter((id) => id !== groupId) : [...prev, groupId],
+  const toggleCabinet = useCallback((cabinetId: string) => {
+    setEnabledCabinetIds((prev) =>
+      prev.includes(cabinetId) ? prev.filter((id) => id !== cabinetId) : [...prev, cabinetId],
     );
   }, []);
 
@@ -214,7 +228,7 @@ export function CabinetsOverviewSection({ isAdmin }: CabinetsOverviewSectionProp
     ) => (
       <section style={{ marginBottom: '1rem' }}>
         <h4 style={{ margin: '0 0 0.45rem 0', fontSize: '0.92rem' }}>{title}</h4>
-        <div style={{ overflowX: 'auto' }}>
+        <div className="settingsCompareScrollbar" style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', minWidth: '860px', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
@@ -228,7 +242,7 @@ export function CabinetsOverviewSection({ isAdmin }: CabinetsOverviewSectionProp
                 >
                   Параметр
                 </th>
-                {cards.map((card) => (
+                {visibleCards.map((card) => (
                   <th
                     key={`${title}-${card.cabinet.id}`}
                     style={{ ...tableCellStyle, textAlign: 'left', minWidth: '220px' }}
@@ -257,7 +271,7 @@ export function CabinetsOverviewSection({ isAdmin }: CabinetsOverviewSectionProp
                         {label}
                       </div>
                     </td>
-                    {cards.map((card) => (
+                    {visibleCards.map((card) => (
                       <td
                         key={`${title}-${key}-${card.cabinet.id}`}
                         style={{ ...tableCellStyle, wordBreak: 'break-word' }}
@@ -273,7 +287,7 @@ export function CabinetsOverviewSection({ isAdmin }: CabinetsOverviewSectionProp
         </div>
       </section>
     ),
-    [cards, openCabinetSettings],
+    [visibleCards, openCabinetSettings],
   );
 
   if (!isAdmin) return null;
@@ -290,18 +304,19 @@ export function CabinetsOverviewSection({ isAdmin }: CabinetsOverviewSectionProp
       </p>
       {!loading ? (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem', marginBottom: '0.85rem' }}>
-          {TABLE_GROUP_ORDER.map((groupId) => {
-            const enabled = enabledGroups.includes(groupId);
+          {cards.map((card) => {
+            const enabled = enabledCabinetIds.includes(card.cabinet.id);
             return (
               <button
-                key={groupId}
+                key={card.cabinet.id}
                 type="button"
-                onClick={() => toggleGroup(groupId)}
+                onClick={() => toggleCabinet(card.cabinet.id)}
                 className={enabled ? 'btn' : 'btn btnSecondary'}
                 style={{ padding: '0.2rem 0.55rem', fontSize: '0.78rem' }}
-                title={enabled ? 'Скрыть группу' : 'Показать группу'}
+                title={enabled ? 'Скрыть кабинет из сравнения' : 'Показать кабинет в сравнении'}
               >
-                {TABLE_GROUP_LABELS[groupId]}
+                {card.cabinet.name}
+                {card.cabinet.isDefault ? ' (по умолчанию)' : ''}
               </button>
             );
           })}
@@ -312,38 +327,34 @@ export function CabinetsOverviewSection({ isAdmin }: CabinetsOverviewSectionProp
       {!loading && !error && !hasCards ? (
         <p style={{ color: 'var(--muted)' }}>Кабинеты не найдены.</p>
       ) : null}
-      {!loading && !error && hasCards && !hasEnabledGroups ? (
-        <p style={{ color: 'var(--muted)' }}>Выключены все группы. Включите хотя бы одну метку.</p>
+      {!loading && !error && hasCards && !hasEnabledCabinets ? (
+        <p style={{ color: 'var(--muted)' }}>
+          Выключены все кабинеты. Включите хотя бы один лейбл кабинета.
+        </p>
       ) : null}
 
-      {!loading && hasCards && hasEnabledGroups ? (
+      {!loading && hasCards && hasEnabledCabinets ? (
         <>
-          {enabledGroups.includes('trading')
-            ? renderSettingsTable(
-                'Торговые параметры',
-                CABINET_TRADING_OVERVIEW_KEYS,
-                (card, key) => formatSettingValue(key, valueOf(card.settings, key)),
-              )
-            : null}
+          {renderSettingsTable(
+            'Торговые параметры',
+            CABINET_TRADING_OVERVIEW_KEYS,
+            (card, key) => formatSettingValue(key, valueOf(card.settings, key)),
+          )}
 
-          {enabledGroups.includes('telegram')
-            ? renderSettingsTable(
-                'Telegram / Userbot',
-                CABINET_TELEGRAM_OVERVIEW_KEYS,
-                (card, key) => formatSettingValue(key, valueOf(card.settings, key)),
-              )
-            : null}
+          {renderSettingsTable(
+            'Telegram / Userbot',
+            CABINET_TELEGRAM_OVERVIEW_KEYS,
+            (card, key) => formatSettingValue(key, valueOf(card.settings, key)),
+          )}
 
-          {enabledGroups.includes('extra')
-            ? renderSettingsTable(
-                'Дополнительно',
-                ['BALANCE_ALERTS', 'SOURCE_EXCLUDE_LIST'],
-                (card, key) => {
-                  if (key === 'BALANCE_ALERTS') return formatBalanceAlertsCell(card);
-                  return formatExcludedSourcesCell(card);
-                },
-              )
-            : null}
+          {renderSettingsTable(
+            'Дополнительно',
+            ['BALANCE_ALERTS', 'SOURCE_EXCLUDE_LIST'],
+            (card, key) => {
+              if (key === 'BALANCE_ALERTS') return formatBalanceAlertsCell(card);
+              return formatExcludedSourcesCell(card);
+            },
+          )}
         </>
       ) : null}
     </section>

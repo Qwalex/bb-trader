@@ -865,6 +865,30 @@ a:hover {
   border-radius: 8px;
 }
 
+.settingsCompareScrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #4b5563 #111827;
+}
+
+.settingsCompareScrollbar::-webkit-scrollbar {
+  height: 10px;
+}
+
+.settingsCompareScrollbar::-webkit-scrollbar-track {
+  background: #111827;
+  border-radius: 999px;
+}
+
+.settingsCompareScrollbar::-webkit-scrollbar-thumb {
+  background: #4b5563;
+  border-radius: 999px;
+  border: 2px solid #111827;
+}
+
+.settingsCompareScrollbar::-webkit-scrollbar-thumb:hover {
+  background: #6b7280;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

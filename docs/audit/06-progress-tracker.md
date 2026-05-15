@@ -1795,3 +1795,14 @@
 - Manual verification: `ReadLints` по изменённому util-файлу (ошибок нет), `npm run build -w apps/api` (pass).
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-152
+
+- Status: `done`
+- Scope: Web `/settings?scope=account` — изменить лейбл-мультиселект: фильтровать отображаемые кабинеты (столбцы), а не группы таблиц; оформить тёмный скроллбар для горизонтального скролла.
+- Files: `apps/web/app/settings/CabinetsOverviewSection.tsx`, `apps/web/app/globals.css`, `docs/audit/06-progress-tracker.md`
+- Findings: текущие лейблы скрывали/показывали группы таблиц, тогда как требовалась фильтрация именно кабинетов; горизонтальный системный скроллбар на тёмной теме визуально выбивался (светлый).
+- Changes: лейблы переключают `enabledCabinetIds` (по умолчанию включены все кабинеты), таблицы всегда по тем же группам, но столбцы показывают только выбранные кабинеты; добавлен notice при выключении всех кабинетов; для контейнера сравнительных таблиц введён класс `settingsCompareScrollbar` с dark-стилями `scrollbar-color` и `::-webkit-scrollbar*`.
+- Manual verification: `ReadLints` по изменённым web-файлам (ошибок нет), `npm run check-types -w apps/web` (pass).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
