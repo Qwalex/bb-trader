@@ -35,9 +35,33 @@ type CabinetsOverviewSectionProps = {
   isAdmin: boolean;
 };
 
-const cardButtonStyle: CSSProperties = {
-  cursor: 'pointer',
-  outline: 'none',
+type TableGroupId = 'trading' | 'telegram' | 'extra';
+
+const TABLE_GROUP_LABELS: Record<TableGroupId, string> = {
+  trading: 'Торговые параметры',
+  telegram: 'Telegram / Userbot',
+  extra: 'Дополнительно',
+};
+
+const TABLE_GROUP_ORDER: TableGroupId[] = ['trading', 'telegram', 'extra'];
+
+const truncatedLabelStyle: CSSProperties = {
+  maxWidth: '280px',
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+};
+
+const tableCellStyle: CSSProperties = {
+  borderBottom: '1px solid var(--border)',
+  padding: '0.45rem 0.55rem',
+  fontSize: '0.82rem',
+  verticalAlign: 'top',
+};
+
+const EXTRA_ROW_LABELS: Record<string, string> = {
+  BALANCE_ALERTS: 'Уведомления о балансе',
+  SOURCE_EXCLUDE_LIST: 'Исключённые источники из аналитики',
 };
 
 function formatSettingValue(key: string, value: string): string {
@@ -65,11 +89,31 @@ function formatSettingValue(key: string, value: string): string {
   return formatCommonValue(value);
 }
 
+function formatBalanceAlertsCell(card: CabinetOverviewCardData): string {
+  if (card.error) return 'Ошибка загрузки';
+  if (card.balanceAlerts.length === 0) return 'Правил нет';
+  return card.balanceAlerts
+    .map((rule) => {
+      const condition = rule.operator === 'gt' ? 'Выше' : 'Ниже';
+      const status = rule.enabled ? 'вкл' : 'выкл';
+      return `${condition} ${rule.thresholdUsd} USDT (${status})`;
+    })
+    .join('; ');
+}
+
+function formatExcludedSourcesCell(card: CabinetOverviewCardData): string {
+  if (card.error) return 'Ошибка загрузки';
+  const excluded = parseStringList(valueOf(card.settings, CABINET_EXCLUDED_SOURCES_KEY));
+  if (excluded.length === 0) return 'Нет исключений';
+  return excluded.join(', ');
+}
+
 export function CabinetsOverviewSection({ isAdmin }: CabinetsOverviewSectionProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cards, setCards] = useState<CabinetOverviewCardData[]>([]);
+  const [enabledGroups, setEnabledGroups] = useState<TableGroupId[]>(TABLE_GROUP_ORDER);
 
   useEffect(() => {
     if (!isAdmin) {
@@ -144,178 +188,163 @@ export function CabinetsOverviewSection({ isAdmin }: CabinetsOverviewSectionProp
         // ignore write errors
       }
       document.cookie = `cabinet_id=${encodeURIComponent(cabinetId)}; path=/; max-age=31536000; SameSite=Lax`;
-      router.push(withAppBasePath(`/settings?scope=cabinet&cabinetId=${encodeURIComponent(cabinetId)}`));
+      router.push(
+        withAppBasePath(
+          `/settings?scope=cabinet&cabinetId=${encodeURIComponent(cabinetId)}`,
+        ),
+      );
     },
     [router],
   );
 
   const hasCards = useMemo(() => cards.length > 0, [cards.length]);
+  const hasEnabledGroups = enabledGroups.length > 0;
+
+  const toggleGroup = useCallback((groupId: TableGroupId) => {
+    setEnabledGroups((prev) =>
+      prev.includes(groupId) ? prev.filter((id) => id !== groupId) : [...prev, groupId],
+    );
+  }, []);
+
+  const renderSettingsTable = useCallback(
+    (
+      title: string,
+      keys: readonly string[],
+      valueFormatter: (card: CabinetOverviewCardData, key: string) => string,
+    ) => (
+      <section style={{ marginBottom: '1rem' }}>
+        <h4 style={{ margin: '0 0 0.45rem 0', fontSize: '0.92rem' }}>{title}</h4>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', minWidth: '860px', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                <th
+                  style={{
+                    ...tableCellStyle,
+                    width: '280px',
+                    textAlign: 'left',
+                    color: 'var(--muted)',
+                  }}
+                >
+                  Параметр
+                </th>
+                {cards.map((card) => (
+                  <th
+                    key={`${title}-${card.cabinet.id}`}
+                    style={{ ...tableCellStyle, textAlign: 'left', minWidth: '220px' }}
+                  >
+                    <button
+                      type="button"
+                      className="btn btnSecondary"
+                      style={{ padding: '0.2rem 0.45rem', fontSize: '0.76rem' }}
+                      onClick={() => openCabinetSettings(card.cabinet.id)}
+                      title={`Перейти в настройки кабинета ${card.cabinet.name}`}
+                    >
+                      {card.cabinet.name}
+                      {card.cabinet.isDefault ? ' (по умолчанию)' : ''}
+                    </button>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {keys.map((key) => {
+                const label = EXTRA_ROW_LABELS[key] ?? LABEL_BY_KEY[key] ?? key;
+                return (
+                  <tr key={`${title}-${key}`}>
+                    <td style={tableCellStyle}>
+                      <div style={truncatedLabelStyle} title={label}>
+                        {label}
+                      </div>
+                    </td>
+                    {cards.map((card) => (
+                      <td
+                        key={`${title}-${key}-${card.cabinet.id}`}
+                        style={{ ...tableCellStyle, wordBreak: 'break-word' }}
+                      >
+                        {card.error ? 'Ошибка загрузки' : valueFormatter(card, key)}
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    ),
+    [cards, openCabinetSettings],
+  );
 
   if (!isAdmin) return null;
 
   return (
     <section className="card" style={{ marginTop: '1rem' }}>
-      <h2 style={{ marginBottom: '0.45rem', fontSize: '1.05rem' }}>Сравнение настроек кабинетов</h2>
+      <h2 style={{ marginBottom: '0.45rem', fontSize: '1.05rem' }}>
+        Сравнение настроек кабинетов
+      </h2>
       <p style={{ color: 'var(--muted)', marginBottom: '0.9rem' }}>
-        Быстрый обзор cabinet-scoped настроек. Нажмите карточку, чтобы перейти в настройки выбранного кабинета.
+        Таблицы сравнения: строки — параметры, столбцы — кабинеты. Если таблица шире
+        экрана, используйте горизонтальный скролл. Название кабинета в заголовке
+        ведёт в его настройки.
       </p>
+      {!loading ? (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem', marginBottom: '0.85rem' }}>
+          {TABLE_GROUP_ORDER.map((groupId) => {
+            const enabled = enabledGroups.includes(groupId);
+            return (
+              <button
+                key={groupId}
+                type="button"
+                onClick={() => toggleGroup(groupId)}
+                className={enabled ? 'btn' : 'btn btnSecondary'}
+                style={{ padding: '0.2rem 0.55rem', fontSize: '0.78rem' }}
+                title={enabled ? 'Скрыть группу' : 'Показать группу'}
+              >
+                {TABLE_GROUP_LABELS[groupId]}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
       {loading ? <p style={{ color: 'var(--muted)' }}>Загрузка кабинетов...</p> : null}
       {error ? <p className="msg err">{error}</p> : null}
       {!loading && !error && !hasCards ? (
         <p style={{ color: 'var(--muted)' }}>Кабинеты не найдены.</p>
       ) : null}
-      {!loading && hasCards ? (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))',
-            gap: '0.8rem',
-          }}
-        >
-          {cards.map((card) => {
-            const excludedSources = parseStringList(
-              valueOf(card.settings, CABINET_EXCLUDED_SOURCES_KEY),
-            );
-            return (
-              <article
-                key={card.cabinet.id}
-                className="card"
-                role="button"
-                tabIndex={0}
-                style={cardButtonStyle}
-                onClick={() => openCabinetSettings(card.cabinet.id)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    openCabinetSettings(card.cabinet.id);
-                  }
-                }}
-              >
-                <div
-                  style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', marginBottom: '0.65rem' }}
-                >
-                  <h3 style={{ margin: 0, fontSize: '1rem' }}>{card.cabinet.name}</h3>
-                  {card.cabinet.isDefault ? (
-                    <span
-                      style={{
-                        border: '1px solid var(--border)',
-                        borderRadius: 999,
-                        padding: '0.05rem 0.45rem',
-                        fontSize: '0.72rem',
-                        color: 'var(--muted)',
-                      }}
-                    >
-                      По умолчанию
-                    </span>
-                  ) : null}
-                </div>
-                <p style={{ color: 'var(--muted)', marginBottom: '0.75rem', fontSize: '0.82rem' }}>
-                  {card.cabinet.slug}
-                </p>
-                {card.error ? (
-                  <p className="msg err" style={{ marginBottom: 0 }}>
-                    {card.error}
-                  </p>
-                ) : (
-                  <>
-                    <section style={{ marginBottom: '0.8rem' }}>
-                      <h4 style={{ margin: '0 0 0.35rem 0', fontSize: '0.9rem' }}>Торговые параметры</h4>
-                      <div style={{ display: 'grid', gap: '0.28rem' }}>
-                        {CABINET_TRADING_OVERVIEW_KEYS.map((key) => (
-                          <div
-                            key={key}
-                            style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '0.5rem' }}
-                          >
-                            <span style={{ color: 'var(--muted)', fontSize: '0.8rem' }}>
-                              {LABEL_BY_KEY[key] ?? key}
-                            </span>
-                            <span style={{ fontSize: '0.82rem', wordBreak: 'break-word' }}>
-                              {formatSettingValue(key, valueOf(card.settings, key))}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </section>
+      {!loading && !error && hasCards && !hasEnabledGroups ? (
+        <p style={{ color: 'var(--muted)' }}>Выключены все группы. Включите хотя бы одну метку.</p>
+      ) : null}
 
-                    <section style={{ marginBottom: '0.8rem' }}>
-                      <h4 style={{ margin: '0 0 0.35rem 0', fontSize: '0.9rem' }}>Telegram / Userbot</h4>
-                      <div style={{ display: 'grid', gap: '0.28rem' }}>
-                        {CABINET_TELEGRAM_OVERVIEW_KEYS.map((key) => (
-                          <div
-                            key={key}
-                            style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '0.5rem' }}
-                          >
-                            <span style={{ color: 'var(--muted)', fontSize: '0.8rem' }}>
-                              {LABEL_BY_KEY[key] ?? key}
-                            </span>
-                            <span style={{ fontSize: '0.82rem', wordBreak: 'break-word' }}>
-                              {formatSettingValue(key, valueOf(card.settings, key))}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </section>
+      {!loading && hasCards && hasEnabledGroups ? (
+        <>
+          {enabledGroups.includes('trading')
+            ? renderSettingsTable(
+                'Торговые параметры',
+                CABINET_TRADING_OVERVIEW_KEYS,
+                (card, key) => formatSettingValue(key, valueOf(card.settings, key)),
+              )
+            : null}
 
-                    <section style={{ marginBottom: '0.8rem' }}>
-                      <h4 style={{ margin: '0 0 0.35rem 0', fontSize: '0.9rem' }}>Уведомления о балансе</h4>
-                      {card.balanceAlerts.length === 0 ? (
-                        <p style={{ color: 'var(--muted)', fontSize: '0.82rem', margin: 0 }}>Правил нет.</p>
-                      ) : (
-                        <div style={{ display: 'grid', gap: '0.28rem' }}>
-                          {card.balanceAlerts.map((rule) => (
-                            <div
-                              key={rule.id}
-                              style={{
-                                display: 'grid',
-                                gridTemplateColumns: '1.1fr 0.9fr auto',
-                                gap: '0.45rem',
-                                fontSize: '0.82rem',
-                              }}
-                            >
-                              <span>{rule.operator === 'gt' ? 'Выше порога' : 'Ниже порога'}</span>
-                              <span>{rule.thresholdUsd} USDT</span>
-                              <span style={{ color: rule.enabled ? 'inherit' : 'var(--muted)' }}>
-                                {rule.enabled ? 'Вкл' : 'Выкл'}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </section>
+          {enabledGroups.includes('telegram')
+            ? renderSettingsTable(
+                'Telegram / Userbot',
+                CABINET_TELEGRAM_OVERVIEW_KEYS,
+                (card, key) => formatSettingValue(key, valueOf(card.settings, key)),
+              )
+            : null}
 
-                    <section>
-                      <h4 style={{ margin: '0 0 0.35rem 0', fontSize: '0.9rem' }}>
-                        Исключённые источники из аналитики
-                      </h4>
-                      {excludedSources.length === 0 ? (
-                        <p style={{ color: 'var(--muted)', fontSize: '0.82rem', margin: 0 }}>
-                          Нет исключений.
-                        </p>
-                      ) : (
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
-                          {excludedSources.map((source) => (
-                            <span
-                              key={`${card.cabinet.id}-${source}`}
-                              style={{
-                                border: '1px solid var(--border)',
-                                borderRadius: 999,
-                                padding: '0.15rem 0.45rem',
-                                fontSize: '0.76rem',
-                                color: 'var(--muted)',
-                              }}
-                            >
-                              {source}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </section>
-                  </>
-                )}
-              </article>
-            );
-          })}
-        </div>
+          {enabledGroups.includes('extra')
+            ? renderSettingsTable(
+                'Дополнительно',
+                ['BALANCE_ALERTS', 'SOURCE_EXCLUDE_LIST'],
+                (card, key) => {
+                  if (key === 'BALANCE_ALERTS') return formatBalanceAlertsCell(card);
+                  return formatExcludedSourcesCell(card);
+                },
+              )
+            : null}
+        </>
       ) : null}
     </section>
   );

@@ -1762,3 +1762,25 @@
 - Manual verification: `ReadLints` по изменённым web-файлам (ошибок нет).
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-149
+
+- Status: `done`
+- Scope: Web `/settings?scope=account` — заменить карточки сравнения кабинетов на табличный вид для быстрого визуального сравнения по столбцам.
+- Files: `apps/web/app/settings/CabinetsOverviewSection.tsx`, `docs/audit/06-progress-tracker.md`
+- Findings: карточки удобны для чтения одного кабинета, но затрудняют сравнение одинакового параметра между несколькими кабинетами.
+- Changes: секция переведена в 3 сравнительные таблицы (торговые параметры, Telegram/Userbot, дополнительно); строки — параметры, столбцы — кабинеты; заголовок каждого столбца (кнопка с именем кабинета) ведёт в настройки соответствующего кабинета; длинные названия параметров в первом столбце с `ellipsis` + `title`; для широких таблиц добавлен горизонтальный скролл (`overflowX: auto`).
+- Manual verification: `ReadLints` для изменённого файла (ошибок нет), `npm run check-types -w apps/web` (pass).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-150
+
+- Status: `done`
+- Scope: Web `/settings?scope=account` — добавить мультиселект групп таблиц сравнения (лейблы-чипы) для показа только нужных секций.
+- Files: `apps/web/app/settings/CabinetsOverviewSection.tsx`, `docs/audit/06-progress-tracker.md`
+- Findings: даже в табличном режиме иногда нужны не все секции сразу; без фильтра группа таблиц занимала лишнюю высоту страницы.
+- Changes: добавлен набор лейблов-групп (`Торговые параметры`, `Telegram / Userbot`, `Дополнительно`) с мультивыбором; по умолчанию включены все группы; при отключении лейбла соответствующая таблица скрывается; если отключены все, показывается подсказка о необходимости включить хотя бы одну группу.
+- Manual verification: `ReadLints` для изменённого файла (ошибок нет), `npm run check-types -w apps/web` (pass).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
