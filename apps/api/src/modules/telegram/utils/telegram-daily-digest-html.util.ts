@@ -23,6 +23,17 @@ function statusRu(status: string): string {
   }
 }
 
+function isEmptyDailyWindow(params: {
+  digest: OrdersDailyDigestModel;
+  tops: { byPnl: TelegramSourceRatingRow[]; byWinrate: TelegramSourceRatingRow[] };
+}): boolean {
+  const { digest, tops } = params;
+  const closedInWindow =
+    digest.rolling24h.wins + digest.rolling24h.losses + digest.rolling24h.mixed;
+  const hasTopData = tops.byPnl.length > 0 || tops.byWinrate.length > 0;
+  return closedInWindow === 0 && !hasTopData;
+}
+
 export function formatTelegramDailyDigestHtml(params: {
   cabinetName: string;
   digest: OrdersDailyDigestModel;
@@ -37,11 +48,23 @@ export function formatTelegramDailyDigestHtml(params: {
     digest;
   const fromStr = formatRuDate(rolling24h.from);
   const toStr = formatRuDate(rolling24h.to);
+  const escapedCabinetName = escapeTelegramHtml(cabinetName);
+  const escapedBalanceLine = escapeTelegramHtml(balanceLine);
+
+  if (isEmptyDailyWindow({ digest, tops })) {
+    return (
+      `<b>📬 Ежедневный дайджест</b>\n` +
+      `<i>${escapedCabinetName} · период: ${escapeTelegramHtml(fromStr)} — ${escapeTelegramHtml(toStr)}</i>\n\n` +
+      `<b>🕐 За последние 24 ч</b>\n` +
+      `<i>Новостей нет: новых закрытий сделок не было.</i>\n\n` +
+      `<b>💵 Сейчас (Bybit USDT)</b>\n<code>${escapedBalanceLine}</code>`
+    );
+  }
 
   let body =
     `<b>📬 Ежедневный дайджест</b>\n` +
-    `<i>${escapeTelegramHtml(cabinetName)} · закрытые за 24 ч: ${escapeTelegramHtml(fromStr)} — ${escapeTelegramHtml(toStr)}</i>\n\n` +
-    `<b>💵 Сейчас (Bybit USDT)</b>\n<code>${escapeTelegramHtml(balanceLine)}</code>\n\n` +
+    `<i>${escapedCabinetName} · закрытые за 24 ч: ${escapeTelegramHtml(fromStr)} — ${escapeTelegramHtml(toStr)}</i>\n\n` +
+    `<b>💵 Сейчас (Bybit USDT)</b>\n<code>${escapedBalanceLine}</code>\n\n` +
     `<b>📊 Итого по кабинету</b>\n` +
     `├ Σ PnL: <code>${overall.totalPnl.toFixed(2)}</code>\n` +
     `├ Winrate: <code>${overall.winrate.toFixed(1)}%</code> <i>(W ${overall.wins} / L ${overall.losses}, закр. ${overall.totalClosed})</i>\n` +

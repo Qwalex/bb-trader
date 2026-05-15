@@ -1784,3 +1784,14 @@
 - Manual verification: `ReadLints` для изменённого файла (ошибок нет), `npm run check-types -w apps/web` (pass).
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-151
+
+- Status: `done`
+- Scope: Telegram daily digest — при пустом окне 24 ч (нет закрытий и нет топов источников) отправлять короткое сообщение вместо длинного «пустого» отчёта.
+- Files: `apps/api/src/modules/telegram/utils/telegram-daily-digest-html.util.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: в дни без активности приходил развёрнутый дайджест с множеством блоков «0/нет данных», что создаёт шум и не несёт полезного сигнала.
+- Changes: в `formatTelegramDailyDigestHtml` добавлен ранний short-path `isEmptyDailyWindow(...)`; при отсутствии событий за 24 ч формируется компактный дайджест с периодом, строкой «Новостей нет: новых закрытий сделок не было» и текущим балансом Bybit.
+- Manual verification: `ReadLints` по изменённому util-файлу (ошибок нет), `npm run build -w apps/api` (pass).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
