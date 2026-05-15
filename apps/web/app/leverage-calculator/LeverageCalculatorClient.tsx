@@ -4,6 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { fetchJson } from '../../lib/api';
 import { withAppBasePath } from '../../lib/base-path';
+import type {
+  DashboardCabinetCard,
+  DashboardCabinetsSummary,
+} from '../home-dashboard.types';
 
 import { LeverageCalculatorCharts } from './LeverageCalculatorCharts';
 import { DualUsdRub, DualUsdRubSigned } from './leverage-calculator-dual-money';
@@ -33,6 +37,7 @@ import {
 } from './leverage-calculator-fx.util';
 import {
   buildMonthlyCapitalTrajectory,
+  buildLeverageStatsPayload,
   buildMonthlyCapitalTrajectoryEarly,
   computeContractEndDate,
   computeLeverageOutlook,
@@ -57,14 +62,21 @@ const LEVERAGE_VERDICT_EPS_USD = 5;
 const LEVERAGE_RUB_PER_USD_ENV = readLeverageRubPerUsdFromEnv();
 
 export function LeverageCalculatorClient({
-  payload,
+  items,
+  summary,
+  initialStatsCabinetId,
+  cabinetOptions,
   initialPresetJson,
   cabinetIdForApi,
 }: {
-  payload: LeverageCalculatorPayload;
+  items: DashboardCabinetCard[];
+  summary: DashboardCabinetsSummary | null;
+  initialStatsCabinetId: string;
+  cabinetOptions: { id: string; name: string }[];
   initialPresetJson: string | null;
   cabinetIdForApi: string;
 }) {
+  const [statsCabinetId, setStatsCabinetId] = useState(() => initialStatsCabinetId.trim());
   const [principal, setPrincipal] = useState(() => {
     const p = parseLeveragePresetJson(initialPresetJson) ?? DEFAULT_LEVERAGE_PRESET;
     return String(p.principalUsd);
@@ -135,6 +147,35 @@ export function LeverageCalculatorClient({
   });
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipPersistOnce = useRef(true);
+
+  useEffect(() => {
+    setStatsCabinetId(initialStatsCabinetId.trim());
+  }, [initialStatsCabinetId]);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (statsCabinetId) {
+      url.searchParams.set('statsCabinetId', statsCabinetId);
+    } else {
+      url.searchParams.delete('statsCabinetId');
+    }
+    window.history.replaceState(window.history.state, '', url.toString());
+  }, [statsCabinetId]);
+
+  const payload: LeverageCalculatorPayload = useMemo(
+    () =>
+      buildLeverageStatsPayload({
+        summary,
+        items,
+        statsCabinetId,
+      }),
+    [summary, items, statsCabinetId],
+  );
+
+  const missingStatsCabinet = useMemo(() => {
+    if (!statsCabinetId) return false;
+    return !items.some((item) => item.cabinetId === statsCabinetId);
+  }, [items, statsCabinetId]);
 
   useEffect(() => {
     let alive = true;
@@ -629,17 +670,31 @@ export function LeverageCalculatorClient({
   );
 
   const moneyUnit = inputCurrency === 'RUB' ? '₽' : 'USDT';
+  const isCabinetScope = payload.statsScope === 'cabinet';
+  const statsTitleSuffix =
+    isCabinetScope && payload.statsCabinetName
+      ? `по кабинету ${payload.statsCabinetName}`
+      : 'по всем кабинетам';
+  const statsLeadPrefix =
+    isCabinetScope && payload.statsCabinetName
+      ? `Сводка кабинета «${payload.statsCabinetName}»: `
+      : 'Сводка по всем кабинетам: ';
+  const kpiCabinetLabel = isCabinetScope ? 'Кабинет в сводке' : 'Кабинетов в сводке';
+  const kpiEquityLabel = isCabinetScope ? 'Equity кабинета' : 'Суммарный equity';
+  const kpiCabinetValue = isCabinetScope
+    ? (payload.statsCabinetName ?? '—')
+    : String(payload.cabinetCount);
 
   return (
     <div className="leveragePage">
       <header className="leverageHero">
         <div>
-          <h1 className="leverageTitle">Кредит и доходность по всем кабинетам</h1>
+          <h1 className="leverageTitle">Кредит и доходность {statsTitleSuffix}</h1>
           <p className="leverageLead">
-            Сводка с дашборда: суммарный equity, ожидаемый и грубо реализованный PnL в день. Займ
-            добавляется к торговому счёту (C₀ = E + L); платёж M каждый месяц списывается с того же
-            остатка, а не «снаружи». Ниже — календарь договора, потоки, сравнение с ростом только на E и
-            график капитала.
+            {statsLeadPrefix}
+            equity, ожидаемый и грубо реализованный PnL в день. Займ добавляется к торговому счёту
+            (C₀ = E + L); платёж M каждый месяц списывается с того же остатка, а не «снаружи». Ниже —
+            календарь договора, потоки, сравнение с ростом только на E и график капитала.
           </p>
         </div>
         <div className="leverageSaveBadge" data-state={saveState}>
@@ -650,14 +705,39 @@ export function LeverageCalculatorClient({
         </div>
       </header>
       {saveMsg && <p className="msg err">{saveMsg}</p>}
+      <label className="cabinetSwitcher compact" style={{ marginBottom: '0.8rem' }}>
+        <span className="cabinetSwitcherLabel">Сводка для расчёта:</span>
+        <select
+          className="cabinetSwitcherSelect"
+          value={statsCabinetId}
+          onChange={(e) => setStatsCabinetId(e.target.value)}
+        >
+          <option value="">Все кабинеты</option>
+          {cabinetOptions.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      {missingStatsCabinet && (
+        <p className="msg err" style={{ marginBottom: '0.8rem' }}>
+          Выбранный кабинет не найден в текущей сводке, поэтому применены данные по всем кабинетам.
+        </p>
+      )}
+      {isCabinetScope && payload.equityUsd == null && (
+        <p className="leverageMuted" style={{ marginBottom: '0.8rem' }}>
+          Для выбранного кабинета equity недоступен. Проверьте подключение Bybit и ключи API.
+        </p>
+      )}
 
       <section className="leverageKpiRow">
         <article className="leverageKpi">
-          <span className="leverageKpiLabel">Кабинетов в сводке</span>
-          <strong className="leverageKpiValue">{payload.cabinetCount}</strong>
+          <span className="leverageKpiLabel">{kpiCabinetLabel}</span>
+          <strong className="leverageKpiValue">{kpiCabinetValue}</strong>
         </article>
         <article className="leverageKpi">
-          <span className="leverageKpiLabel">Суммарный equity</span>
+          <span className="leverageKpiLabel">{kpiEquityLabel}</span>
           <strong className="leverageKpiValue">
             <DualUsdRub usd={payload.equityUsd} rubPerUsd={rubPerUsdSafe} />
           </strong>

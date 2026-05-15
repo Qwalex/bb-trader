@@ -9,6 +9,9 @@ export type LeverageCalculatorPayload = {
   statsPeriodDaysMax: number | null;
   totalPnlUsd: number;
   cabinetCount: number;
+  statsCabinetId: string | null;
+  statsCabinetName: string | null;
+  statsScope: 'all' | 'cabinet';
 };
 
 export type LeverageCalculatorPresetV1 = {

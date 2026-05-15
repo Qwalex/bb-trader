@@ -30,6 +30,8 @@ export default async function LeverageCalculatorPage({
   const sp = await searchParams;
   const cabinetIdFromQuery = searchParamFirst(sp.cabinetId);
   const cabinetId = cabinetIdFromQuery || cabinetIdFromCookie;
+  const statsCabinetIdFromQuery = searchParamFirst(sp.statsCabinetId);
+  const initialStatsCabinetId = statsCabinetIdFromQuery || cabinetId || '';
 
   let authMe: AuthMe | null = null;
   let cabinetItems: CabinetItem[] = [];
@@ -67,14 +69,7 @@ export default async function LeverageCalculatorPage({
     loadErr = 'Не удалось загрузить сводку по кабинетам (проверьте API и авторизацию).';
   }
 
-  const payload = {
-    equityUsd: summary?.totalEquityUsd ?? null,
-    expectedPnlPerDayUsd: summary?.aggregateExpectedPnlPerDayUsd ?? null,
-    realizedPnlPerDayUsd: summary?.aggregateRealizedPnlPerDayUsd ?? null,
-    statsPeriodDaysMax: summary?.aggregateStatsPeriodDaysMax ?? null,
-    totalPnlUsd: summary?.totalPnl ?? 0,
-    cabinetCount: summary?.cabinetCount ?? items.length,
-  };
+  const cabinetOptions = items.map((item) => ({ id: item.cabinetId, name: item.name }));
 
   let initialPresetJson: string | null = null;
   try {
@@ -103,7 +98,10 @@ export default async function LeverageCalculatorPage({
         </p>
       )}
       <LeverageCalculatorClient
-        payload={payload}
+        items={items}
+        summary={summary}
+        initialStatsCabinetId={initialStatsCabinetId}
+        cabinetOptions={cabinetOptions}
         initialPresetJson={initialPresetJson}
         cabinetIdForApi={cabinetId}
       />

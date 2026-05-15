@@ -1,3 +1,10 @@
+import type {
+  DashboardCabinetCard,
+  DashboardCabinetsSummary,
+} from '../home-dashboard.types';
+
+import type { LeverageCalculatorPayload } from './leverage-calculator-page.types';
+
 /**
  * Модель: дневная доходность r = G/E (как блок «перспектива» на главной),
  * G — выбранная база (ожидаемый PnL/день по EV или реализованный / max(period)).
@@ -184,6 +191,71 @@ function pickBasePnlPerDay(
   if (e != null) return e;
   const r = realized != null && Number.isFinite(realized) ? realized : null;
   return r;
+}
+
+export function buildLeverageStatsPayloadAll(
+  summary: DashboardCabinetsSummary | null,
+  items: DashboardCabinetCard[],
+): LeverageCalculatorPayload {
+  return {
+    equityUsd: summary?.totalEquityUsd ?? null,
+    expectedPnlPerDayUsd: summary?.aggregateExpectedPnlPerDayUsd ?? null,
+    realizedPnlPerDayUsd: summary?.aggregateRealizedPnlPerDayUsd ?? null,
+    statsPeriodDaysMax: summary?.aggregateStatsPeriodDaysMax ?? null,
+    totalPnlUsd: summary?.totalPnl ?? 0,
+    cabinetCount: summary?.cabinetCount ?? items.length,
+    statsCabinetId: null,
+    statsCabinetName: null,
+    statsScope: 'all',
+  };
+}
+
+export function buildLeverageStatsPayloadForCabinet(
+  card: DashboardCabinetCard,
+): LeverageCalculatorPayload {
+  const wr = Number.isFinite(card.winrate) ? card.winrate : 0;
+  const ap = Number.isFinite(card.avgProfitPnl) ? card.avgProfitPnl : 0;
+  const al = Number.isFinite(card.avgLossPnl) ? card.avgLossPnl : 0;
+  const cpd = Number.isFinite(card.closedPerDayAvg) ? card.closedPerDayAvg : 0;
+  const ev = (wr / 100) * ap + (1 - wr / 100) * al;
+  const expectedPnlPerDayUsd = Number.isFinite(cpd * ev) ? cpd * ev : null;
+  const statsPeriodDaysRaw = Math.max(0, card.statsPeriodDays ?? 0);
+  const statsPeriodDaysMax = statsPeriodDaysRaw > 0 ? statsPeriodDaysRaw : null;
+  const totalPnlUsd = Number.isFinite(card.totalPnl) ? card.totalPnl : 0;
+
+  return {
+    equityUsd:
+      card.totalBalanceUsd != null && Number.isFinite(card.totalBalanceUsd)
+        ? card.totalBalanceUsd
+        : null,
+    expectedPnlPerDayUsd,
+    realizedPnlPerDayUsd:
+      statsPeriodDaysMax != null && statsPeriodDaysMax > 0
+        ? totalPnlUsd / statsPeriodDaysMax
+        : null,
+    statsPeriodDaysMax,
+    totalPnlUsd,
+    cabinetCount: 1,
+    statsCabinetId: card.cabinetId,
+    statsCabinetName: card.name,
+    statsScope: 'cabinet',
+  };
+}
+
+export function buildLeverageStatsPayload(params: {
+  summary: DashboardCabinetsSummary | null;
+  items: DashboardCabinetCard[];
+  statsCabinetId: string | null | undefined;
+}): LeverageCalculatorPayload {
+  const id = params.statsCabinetId?.trim() ?? '';
+  if (!id) {
+    return buildLeverageStatsPayloadAll(params.summary, params.items);
+  }
+  const card = params.items.find((item) => item.cabinetId === id);
+  if (!card) {
+    return buildLeverageStatsPayloadAll(params.summary, params.items);
+  }
+  return buildLeverageStatsPayloadForCabinet(card);
 }
 
 export type TrajectoryPoint = {

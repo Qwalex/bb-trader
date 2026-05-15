@@ -1728,3 +1728,14 @@
 - Manual verification: `npm run build -w apps/api`; один Telegram-аккаунт пишет двум ботам разных кабинетов — разбор/ответы не блокируют друг друга ожиданием LLM в «чужом» кабинете.
 - Docs updated: этот трекер, `AGENTS.md`.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-145
+
+- Status: `done`
+- Scope: Web `/leverage-calculator` — выбор источника сводки для расчёта (все кабинеты или один кабинет).
+- Files: `apps/web/app/leverage-calculator/page.tsx`, `apps/web/app/leverage-calculator/LeverageCalculatorClient.tsx`, `apps/web/app/leverage-calculator/leverage-calculator-page.util.ts`, `apps/web/app/leverage-calculator/leverage-calculator-page.types.ts`, `apps/web/app/leverage-calculator/leverage-calculator-ai.util.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: калькулятор всегда использовал агрегаты `summary` по всем кабинетам, хотя `dashboard-cabinets` уже возвращает достаточные поля в `items` для расчёта по одному кабинету.
+- Changes: добавлены `buildLeverageStatsPayload*` (all/single + fallback), новый селектор «Сводка для расчёта» в UI, пересчёт KPI/симуляции/AI-снимка от выбранного источника, инициализация `statsCabinetId` из query (`?statsCabinetId=`) с fallback на активный кабинет (`cabinet_id`/`?cabinetId=`), синхронизация query через `history.replaceState`.
+- Manual verification: `npm run check-types -w web`; визуально проверить `/leverage-calculator` — переключение «Все кабинеты / конкретный кабинет» пересчитывает KPI и заголовок без reload.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
