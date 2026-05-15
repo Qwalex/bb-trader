@@ -49,6 +49,15 @@ const tableCellStyle: CSSProperties = {
   verticalAlign: 'top',
 };
 
+const uniformRowCellStyle: CSSProperties = {
+  background: 'rgba(34, 197, 94, 0.12)',
+};
+
+const uniformRowFirstCellStyle: CSSProperties = {
+  ...uniformRowCellStyle,
+  boxShadow: 'inset 3px 0 0 rgba(34, 197, 94, 0.45)',
+};
+
 const EXTRA_ROW_LABELS: Record<string, string> = {
   BALANCE_ALERTS: 'Уведомления о балансе',
   SOURCE_EXCLUDE_LIST: 'Исключённые источники из аналитики',
@@ -264,9 +273,21 @@ export function CabinetsOverviewSection({ isAdmin }: CabinetsOverviewSectionProp
             <tbody>
               {keys.map((key) => {
                 const label = EXTRA_ROW_LABELS[key] ?? LABEL_BY_KEY[key] ?? key;
+                const rowValues = visibleCards.map((card) =>
+                  card.error ? '__error__' : valueFormatter(card, key),
+                );
+                const isUniformAcrossCabinets =
+                  rowValues.length > 1 &&
+                  rowValues.every((value) => value === rowValues[0]);
                 return (
                   <tr key={`${title}-${key}`}>
-                    <td style={tableCellStyle}>
+                    <td
+                      style={
+                        isUniformAcrossCabinets
+                          ? { ...tableCellStyle, ...uniformRowFirstCellStyle }
+                          : tableCellStyle
+                      }
+                    >
                       <div style={truncatedLabelStyle} title={label}>
                         {label}
                       </div>
@@ -274,7 +295,15 @@ export function CabinetsOverviewSection({ isAdmin }: CabinetsOverviewSectionProp
                     {visibleCards.map((card) => (
                       <td
                         key={`${title}-${key}-${card.cabinet.id}`}
-                        style={{ ...tableCellStyle, wordBreak: 'break-word' }}
+                        style={
+                          isUniformAcrossCabinets
+                            ? {
+                                ...tableCellStyle,
+                                ...uniformRowCellStyle,
+                                wordBreak: 'break-word',
+                              }
+                            : { ...tableCellStyle, wordBreak: 'break-word' }
+                        }
                       >
                         {card.error ? 'Ошибка загрузки' : valueFormatter(card, key)}
                       </td>

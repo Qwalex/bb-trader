@@ -1806,3 +1806,14 @@
 - Manual verification: `ReadLints` по изменённым web-файлам (ошибок нет), `npm run check-types -w apps/web` (pass).
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-153
+
+- Status: `done`
+- Scope: Web `/settings?scope=account` — визуально подсветить параметры, у которых значения совпадают во всех выбранных кабинетах.
+- Files: `apps/web/app/settings/CabinetsOverviewSection.tsx`, `docs/audit/06-progress-tracker.md`
+- Findings: при большом числе кабинетов сложно быстро понять, где настройки одинаковые между всеми колонками.
+- Changes: в таблицах сравнения добавлена проверка равенства значений по всем видимым кабинетам для каждой строки; при полном совпадении строка получает мягкую зеленоватую подсветку (`rgba(34,197,94,0.12)`) и акцент слева у ячейки названия параметра.
+- Manual verification: `ReadLints` по изменённому web-файлу (ошибок нет), `npm run check-types -w apps/web` (pass).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
