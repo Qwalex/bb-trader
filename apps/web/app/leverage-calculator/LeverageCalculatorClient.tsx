@@ -42,13 +42,13 @@ import {
   computeContractEndDate,
   computeLeverageOutlook,
   computeLeverageStrategyHints,
-  equityOnlyCapitalAtMonth,
   formatDateRuLong,
   formatMonths,
   formatPercentRate,
   formatUsdSigned,
   impliedMonthlyRateFromAnnuity,
   parseIsoDateOnly,
+  simulateEquityOnlyTrajectory,
   todayIsoDateOnly,
 } from './leverage-calculator-page.util';
 
@@ -292,14 +292,17 @@ export function LeverageCalculatorClient({
     return Number.isFinite(h) ? Math.max(0, h) : 0;
   }, [horizonAfter]);
 
-  const loanAnnualRate = useMemo(() => {
+  const loanRatePreview = useMemo(() => {
     const monthlyRate = impliedMonthlyRateFromAnnuity(
       loan.principalUsd,
       loan.monthlyPaymentUsd,
       loan.termMonths,
     );
     if (monthlyRate == null || !Number.isFinite(monthlyRate)) return null;
-    return Math.pow(1 + monthlyRate, 12) - 1;
+    return {
+      nominalAnnual: monthlyRate * 12,
+      effectiveAnnual: Math.pow(1 + monthlyRate, 12) - 1,
+    };
   }, [loan.principalUsd, loan.monthlyPaymentUsd, loan.termMonths]);
 
   const earlyPayoffForOutlook = useMemo(() => {
@@ -349,6 +352,10 @@ export function LeverageCalculatorClient({
     monthlyContributionUsd,
     targetCapitalUsd,
   ]);
+  const effectiveAnnualRateForCard =
+    outlook?.loanEffectiveAnnualRate ?? loanRatePreview?.effectiveAnnual ?? null;
+  const nominalAnnualRateForCard =
+    outlook?.loanNominalApr ?? loanRatePreview?.nominalAnnual ?? null;
 
   const strategyHints = useMemo(() => (outlook ? computeLeverageStrategyHints(outlook) : []), [outlook]);
 
@@ -359,7 +366,7 @@ export function LeverageCalculatorClient({
     if (dh == null && da == null) {
       return {
         tone: 'neutral' as const,
-        lead: 'Сравнение с «только E» при текущих параметрах не выводится — проверьте срок кредита, платежи и блок предупреждений ниже.',
+        lead: 'Сравнение с «только E при тех же X/K» при текущих параметрах не выводится — проверьте срок кредита, платежи и блок предупреждений ниже.',
         horizonDelta: null as number | null,
         subParts: [] as string[],
       };
@@ -372,12 +379,12 @@ export function LeverageCalculatorClient({
       lead = 'Недостаточно данных, чтобы сравнить займ с ростом только на своих средствах на полном горизонте.';
     } else if (dh > LEVERAGE_VERDICT_EPS_USD) {
       tone = 'win';
-      lead = 'По модели займ увеличивает капитал относительно сценария без заёмных средств (тот же r, только E).';
+      lead = 'По модели займ увеличивает капитал относительно сценария без заёмных средств (тот же r и те же X/K, только E).';
     } else if (dh < -LEVERAGE_VERDICT_EPS_USD) {
       tone = 'lose';
       lead = 'По модели «только свой E» даёт больший капитал на горизонте — займ съедается выплатами относительно этой оценки.';
     } else {
-      lead = 'На полном горизонте симуляции займ и «только E» почти совпадают по капиталу (разница в пределах погрешности модели).';
+      lead = 'На полном горизонте симуляции займ и «только E при тех же X/K» почти совпадают по капиталу (разница в пределах погрешности модели).';
     }
 
     const subParts: string[] = [];
@@ -386,7 +393,7 @@ export function LeverageCalculatorClient({
       rub != null && Number.isFinite(usd) ? ` (~ ${formatRubAmount(usd * rub)})` : '';
     if (da != null && Number.isFinite(da)) {
       subParts.push(
-        `После последнего месяца кредита по графику: ${formatUsdSigned(da)}${rubNote(da)} к «только E» на тот же месяц.`,
+        `После последнего месяца кредита по графику: ${formatUsdSigned(da)}${rubNote(da)} к «только E при тех же X/K» на тот же месяц.`,
       );
     }
     if (outlook.earlyPayoffComparable) {
@@ -487,17 +494,35 @@ export function LeverageCalculatorClient({
     if (trajectory.length === 0 || rDaily == null || !Number.isFinite(rDaily) || rDaily <= -1) {
       return [];
     }
+    const monthsMax = trajectory[trajectory.length - 1]?.month ?? 0;
+    const baseline = simulateEquityOnlyTrajectory({
+      equityUsd: equityNum,
+      totalMonths: monthsMax,
+      rDaily,
+      loanPaymentTiming,
+      otherMonthlyExpensesUsd,
+      monthlyContributionUsd,
+    });
     return trajectory.map((p, i) => {
-      const v = equityOnlyCapitalAtMonth(equityNum, rDaily, p.month);
+      const v = baseline[p.month];
+      const equityOnlyCapitalUsd = typeof v === 'number' && Number.isFinite(v) ? v : Number.NaN;
       const ear = trajectoryEarly?.[i];
       return {
         ...p,
-        equityOnlyCapitalUsd: Number.isFinite(v) ? v : 0,
+        equityOnlyCapitalUsd,
         capitalEarlyUsd: ear?.capitalUsd,
         cumulativePaidEarlyUsd: ear?.cumulativePaidUsd,
       };
     });
-  }, [trajectory, trajectoryEarly, equityNum, rDaily]);
+  }, [
+    trajectory,
+    trajectoryEarly,
+    equityNum,
+    rDaily,
+    loanPaymentTiming,
+    otherMonthlyExpensesUsd,
+    monthlyContributionUsd,
+  ]);
 
   const earlyCloseMonthForChart =
     outlook?.earlyPayoffComparable && earlyPayoffForOutlook
@@ -1038,8 +1063,11 @@ export function LeverageCalculatorClient({
               <DualUsdRub usd={loan.principalUsd} rubPerUsd={rubPerUsdSafe} />
             </li>
             <li>
-              <strong>Годовые проценты по кредиту (оценка):</strong>{' '}
-              {formatPercentRate(loanAnnualRate)}
+              <strong>Эффективная годовая ставка кредита (оценка):</strong>{' '}
+              {formatPercentRate(effectiveAnnualRateForCard)}
+              {nominalAnnualRateForCard != null && Number.isFinite(nominalAnnualRateForCard)
+                ? ` (номинальная: ${formatPercentRate(nominalAnnualRateForCard)})`
+                : ''}
             </li>
             {earlyPayoffEnabled && earlyContractEndLabel && loan.termMonths >= 2 ? (
               <li>
@@ -1058,8 +1086,8 @@ export function LeverageCalculatorClient({
                     <DualUsdRubSigned usd={leverageBorrowVerdict.horizonDelta} rubPerUsd={rubPerUsdSafe} />
                   </p>
                   <p className="leverageVerdictCaption">
-                    Разница капитала на полном горизонте симуляции (со займом по графику минус только E,
-                    тот же r).
+                    Разница капитала на полном горизонте симуляции (со займом по графику минус только E
+                    при тех же взносах/расходах и том же r).
                   </p>
                 </>
               ) : null}
@@ -1077,13 +1105,13 @@ export function LeverageCalculatorClient({
             <div className="leverageVerdict" data-tone="neutral">
               <div className="leverageVerdictTitle">Займ vs только свой капитал</div>
               <p className="leverageVerdictLead">
-                Нет суммарного equity — сравнение с сценарием «только E» недоступно.
+                Нет суммарного equity — сравнение с сценарием «только E при тех же X/K» недоступно.
               </p>
             </div>
           ) : null}
           <p className="leverageFootnote">
             Дата = дата начала + число месяцев срока (календарно). Фактический день последнего
-            платежа у банка может отличаться — уточните в договоре.
+            платежа у банка может отличаться — уточните в договоре. В модели месяц = 30 дней.
           </p>
         </section>
       </div>
@@ -1227,19 +1255,19 @@ export function LeverageCalculatorClient({
                 </span>
               </div>
               <div className="leverageMetric">
-                <span className="leverageMetricLabel">Только E: после срока кредита (без займа)</span>
+                <span className="leverageMetricLabel">Только E: после срока кредита (те же X/K)</span>
                 <span className="leverageMetricVal">
                   <DualUsdRub usd={outlook.equityOnlyAfterLoanUsd} rubPerUsd={rubPerUsdSafe} />
                 </span>
               </div>
               <div className="leverageMetric">
-                <span className="leverageMetricLabel">Только E: на полном горизонте симуляции</span>
+                <span className="leverageMetricLabel">Только E: на полном горизонте (те же X/K)</span>
                 <span className="leverageMetricVal">
                   <DualUsdRub usd={outlook.equityOnlyAfterHorizonUsd} rubPerUsd={rubPerUsdSafe} />
                 </span>
               </div>
               <div className="leverageMetric">
-                <span className="leverageMetricLabel">Разница после кредита (со займом − только E)</span>
+                <span className="leverageMetricLabel">Разница после кредита (со займом − только E при тех же X/K)</span>
                 <span className="leverageMetricVal">
                   <DualUsdRubSigned usd={outlook.deltaAfterLoanVsEquityOnlyUsd} rubPerUsd={rubPerUsdSafe} />
                 </span>
@@ -1315,11 +1343,10 @@ export function LeverageCalculatorClient({
               </div>
             ) : null}
             <p className="leverageFootnote" style={{ marginTop: '0.75rem' }}>
-              «Только E» — тот же коэффициент r, но стартовый капитал равен equity без привлечения L и
-              без ежемесячных платежей M: чистый контрольный сценарий «остаться на своих» при той же
-              оценке доходности. Прочие расходы и «макс. доп. снятие» считаются с того же счёта, что и M;
-              доп. снятие — постоянная сумма сверх M и прочих расходов на весь горизонт симуляции (по
-              дискретным месяцам), при валидном досрочном учитывается и он.
+              «Только E» — тот же r и те же прочие расходы X и взносы K на счёт, но без займа L и без
+              платежей банку M: сравнение «остаться на своих» при одинаковых денежных потоках, кроме
+              кредита. «Макс. доп. снятие» — постоянная сумма сверх M, X и K на весь горизонт (по
+              дискретным месяцам); при валидном досрочном сценарии учитывается и он.
             </p>
             <p className="leverageFootnote" style={{ marginTop: '1.25rem' }}>
               Модель: каждый месяц капитал × (1 + r)³⁰ минус платёж; r не меняется. Реальность:
@@ -1329,7 +1356,7 @@ export function LeverageCalculatorClient({
 
           <section className="card leverageSpaced">
             <h2 className="leverageSectionTitle">
-              График: по графику, досрочно (если задано), только E и выплаты
+              График: по графику, досрочно (если задано), только E при тех же X/K и выплаты
             </h2>
             <LeverageCalculatorCharts
               data={trajectoryWithCompare}

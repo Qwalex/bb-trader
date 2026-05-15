@@ -14,6 +14,7 @@ import { EntrySizingControl } from '../components/EntrySizingControl';
 import { fetchApiResponse } from '../../lib/api';
 import { readActiveCabinetIdClient } from '../../lib/cabinet-client.util';
 import { parseStoredEntry, serializeEntry } from '../../lib/entry-sizing';
+import { CabinetsOverviewSection } from './CabinetsOverviewSection';
 import type { BalanceAlertRuleRow, PendingChange, Row } from './settings.types';
 import {
   ADMIN_GLOBAL_KEYS,
@@ -1374,6 +1375,8 @@ export default function SettingsPage() {
         </details>
         ) : null}
       </div>
+
+      {scope === 'account' ? <CabinetsOverviewSection isAdmin={isAdmin} /> : null}
 
       <div
         className="card"

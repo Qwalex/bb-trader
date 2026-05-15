@@ -17,7 +17,7 @@ import type { TrajectoryPoint } from './leverage-calculator-page.util';
 import { formatRubAmount } from './leverage-calculator-fx.util';
 
 export type LeverageTrajectoryChartPoint = TrajectoryPoint & {
-  /** Тот же r, только стартовый E и без займа/платежей: E·(1+r)³⁰ᵐ. */
+  /** Тот же r, стартовый E, без займа и без платежей банку, но при тех же прочих X/K потоках. */
   equityOnlyCapitalUsd: number;
   /** Капитал при досрочном закрытии (если сценарий задан). */
   capitalEarlyUsd?: number;
@@ -130,7 +130,7 @@ export function LeverageCalculatorCharts({ data, termMonths, earlyCloseMonth, ru
                     : name === 'capitalEarlyUsd'
                       ? 'Капитал (досрочно)'
                       : name === 'equityOnlyCapitalUsd'
-                        ? 'Только свой капитал E'
+                        ? 'Только E (те же X/K)'
                         : name === 'cumulativePaidUsd'
                           ? 'Выплачено Σ (по графику)'
                           : name === 'cumulativePaidEarlyUsd'
@@ -191,7 +191,7 @@ export function LeverageCalculatorCharts({ data, termMonths, earlyCloseMonth, ru
               yAxisId="left"
               type="monotone"
               dataKey="equityOnlyCapitalUsd"
-              name="Только E (без займа)"
+              name="Только E (те же X/K)"
               stroke="#86efac"
               strokeWidth={2}
               strokeDasharray="6 4"
@@ -223,7 +223,8 @@ export function LeverageCalculatorCharts({ data, termMonths, earlyCloseMonth, ru
         </ResponsiveContainer>
       </div>
       <p className="leverageFootnote">
-        Слева — капитал по графику, при досрочном (если задан) и контроль «только E» на тех же r.
+        Слева — капитал по графику, при досрочном (если задан) и контроль «только E» при тех же
+        прочих X/K и том же r.
         Справа — накопленные выплаты банку: полный график и досрочный. Жёлтая вертикаль — месяц
         закрытия долга при досрочном; голубая — конец договорного срока без досрочного.
       </p>

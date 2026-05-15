@@ -16,7 +16,13 @@ export function usdFromRub(rub: number, rubPerUsd: number): number {
 }
 
 export function parseMoneyInput(raw: string): number {
-  return Number.parseFloat(String(raw ?? '').replace(',', '.')) || 0;
+  const normalized = String(raw ?? '')
+    .replace(/[\u00A0\u202F\s]/g, '')
+    .replace(',', '.')
+    .trim();
+  if (normalized.length === 0) return 0;
+  const v = Number.parseFloat(normalized);
+  return Number.isFinite(v) ? v : 0;
 }
 
 /**

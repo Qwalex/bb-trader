@@ -1750,3 +1750,15 @@
 - Manual verification: `ReadLints` для `LeverageCalculatorClient.tsx` (ошибок нет); визуально проверить `/leverage-calculator` при разных `L/M/T`.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-148
+
+- Status: `done`
+- Scope: Web `/settings?scope=account` — добавить карточки сравнения cabinet-scoped настроек по всем кабинетам с переходом в настройки выбранного кабинета.
+- Files: `apps/web/app/settings/page.tsx`, `apps/web/app/settings/CabinetsOverviewSection.tsx`, `apps/web/app/settings/cabinets-overview-page.constants.ts`, `apps/web/app/settings/cabinets-overview-page.util.ts`, `apps/web/app/settings/cabinets-overview-page.types.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: в режиме аккаунта не было быстрого способа сравнить настройки между кабинетами, приходилось открывать каждый кабинет отдельно.
+- Changes: добавлена секция «Сравнение настроек кабинетов» под общими настройками аккаунта; карточки загружают `/cabinets` и параллельно для каждого кабинета `/settings/effective` + `/bybit/balance-alerts`; показываются торговые параметры, Telegram cabinet-scoped поля, правила уведомлений о балансе и `SOURCE_EXCLUDE_LIST`; Bybit API/secret ключи не отображаются; клик по карточке обновляет `localStorage`/cookie активного кабинета и ведёт на `/settings?scope=cabinet&cabinetId=<id>`.
+- Decomposition notes (`utils/constants/hooks/types`): вынесены отдельные `cabinets-overview-page.{constants,util,types}.ts` и компонент `CabinetsOverviewSection.tsx`.
+- Manual verification: `ReadLints` по изменённым web-файлам (ошибок нет).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

@@ -63,8 +63,8 @@ export type LeverageOutlook = {
   /** Горизонт после кредита: capitalAfter × (1+r)^30n без платежа. */
   capitalAfterHorizonUsd: number | null;
   /**
-   * Тот же горизонт месяцев, но без займа: только E, сложный процент E·(1+r)³⁰ᵐ, без платежей.
-   * Сравнение «что было бы на своих» при той же оценке r.
+   * Тот же горизонт месяцев, но без займа: только E, при тех же прочих X/K потоках
+   * и той же оценке r.
    */
   equityOnlyAfterLoanUsd: number | null;
   equityOnlyAfterHorizonUsd: number | null;
@@ -535,6 +535,44 @@ export function simulateLeverageLoan(opts: {
   return { trajectory: out, totalPaidUsd: paid, wentNegativeDuringLoan: wentNegative };
 }
 
+/**
+ * Базовый сценарий «только E»: без займа и платежей банку, но с теми же ежемесячными
+ * расходами X и взносами K, что и в основном сценарии.
+ */
+export function simulateEquityOnlyTrajectory(opts: {
+  equityUsd: number;
+  totalMonths: number;
+  rDaily: number;
+  loanPaymentTiming?: LeverageLoanPaymentTiming;
+  otherMonthlyExpensesUsd?: number;
+  monthlyContributionUsd?: number;
+}): number[] {
+  const E = Number.isFinite(opts.equityUsd) ? Math.max(0, opts.equityUsd) : 0;
+  const totalM = Math.max(0, Math.floor(Number.isFinite(opts.totalMonths) ? opts.totalMonths : 0));
+  const rDaily = opts.rDaily;
+  const timing: LeverageLoanPaymentTiming = opts.loanPaymentTiming ?? 'after_monthly_return';
+  const Xraw = opts.otherMonthlyExpensesUsd;
+  const X = Xraw != null && Number.isFinite(Xraw) ? Math.max(0, Xraw) : 0;
+  const Kraw = opts.monthlyContributionUsd;
+  const K = Kraw != null && Number.isFinite(Kraw) ? Math.max(0, Kraw) : 0;
+  if (!(E > 0 && Number.isFinite(rDaily) && rDaily > -1)) return [];
+
+  const f = monthGrowthFactorFromRDaily(rDaily);
+  const netFlow = -X + K;
+  let C = E;
+  const out: number[] = [C];
+
+  for (let m = 1; m <= totalM; m++) {
+    if (timing === 'before_monthly_return') {
+      C = (C + netFlow) * f;
+    } else {
+      C = C * f + netFlow;
+    }
+    out.push(C);
+  }
+  return out;
+}
+
 export function computeLeverageOutlook(params: {
   equityUsd: number;
   expectedPnlPerDayUsd: number | null | undefined;
@@ -638,8 +676,12 @@ export function computeLeverageOutlook(params: {
   const dailyLoanBurdenUsd = M > 0 ? M / DAYS_PER_MONTH : 0;
 
   let breakEvenCapitalUsd: number | null = null;
-  if (M > 0 && E > 0 && basePnlPerDayUsd != null && Math.abs(basePnlPerDayUsd) > 1e-12) {
+  if (M > 0 && E > 0 && basePnlPerDayUsd != null && basePnlPerDayUsd > 1e-12) {
     breakEvenCapitalUsd = (M * E) / (DAYS_PER_MONTH * basePnlPerDayUsd);
+  } else if (M > 0 && E > 0 && basePnlPerDayUsd != null && basePnlPerDayUsd <= 0) {
+    warnings.push(
+      'При неположительной дневной доходности точка безубыточности C* не определяется: месячный торговый поток не покрывает платёж M.',
+    );
   }
 
   let surplusVsBreakEvenUsd: number | null = null;
@@ -717,10 +759,25 @@ export function computeLeverageOutlook(params: {
 
   let equityOnlyAfterLoanUsd: number | null = null;
   let equityOnlyAfterHorizonUsd: number | null = null;
-  if (rDaily != null && rDaily > -1 && E > 0 && termM > 0) {
-    const fEq = monthGrowthFactorFromRDaily(rDaily);
-    equityOnlyAfterLoanUsd = E * Math.pow(fEq, termM);
-    equityOnlyAfterHorizonUsd = E * Math.pow(fEq, termM + horizonAfter);
+  if (rDaily != null && rDaily > -1 && E > 0 && (termM > 0 || horizonAfter > 0)) {
+    const baseline = simulateEquityOnlyTrajectory({
+      equityUsd: E,
+      totalMonths: termM + horizonAfter,
+      rDaily,
+      loanPaymentTiming: paymentTiming,
+      otherMonthlyExpensesUsd: X,
+      monthlyContributionUsd: K,
+    });
+    const baselineAtLoan = baseline[termM];
+    const baselineAtHorizon = baseline[termM + horizonAfter];
+    equityOnlyAfterLoanUsd =
+      typeof baselineAtLoan === 'number' && Number.isFinite(baselineAtLoan)
+        ? baselineAtLoan
+        : null;
+    equityOnlyAfterHorizonUsd =
+      typeof baselineAtHorizon === 'number' && Number.isFinite(baselineAtHorizon)
+        ? baselineAtHorizon
+        : null;
   }
 
   let deltaAfterLoanVsEquityOnlyUsd: number | null = null;
@@ -898,7 +955,7 @@ export function computeLeverageStrategyHints(o: LeverageOutlook): string[] {
   const hints: string[] = [];
   if (o.deltaHorizonVsEquityOnlyUsd != null && o.deltaHorizonVsEquityOnlyUsd < 0) {
     hints.push(
-      'На выбранном горизонте при текущей оценке r сценарий без займа (только E) даёт больший капитал, чем с кредитом по графику — смысл займа в модели сомнителен, если r не занижен.',
+      'На выбранном горизонте при текущей оценке r сценарий без займа (только E при тех же X/K) даёт больший капитал, чем с кредитом по графику — смысл займа в модели сомнителен, если r не занижен.',
     );
   }
   if (o.netMonthlyStartUsd != null && o.netMonthlyStartUsd <= 0) {
@@ -992,7 +1049,7 @@ export function formatMonths(n: number | null | undefined): string {
 }
 
 /**
- * Капитал только на собственных средствах E при той же r: месяц m → E·(1+r)³⁰ᵐ (без займа и без платежей).
+ * Упрощённая формула E·(1+r)³⁰ᵐ без X/K и без M. Для сравнения в UI используйте `simulateEquityOnlyTrajectory`.
  */
 export function equityOnlyCapitalAtMonth(equityUsd: number, rDaily: number, month: number): number {
   const E = Number.isFinite(equityUsd) ? Math.max(0, equityUsd) : 0;
