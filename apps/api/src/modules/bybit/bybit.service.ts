@@ -32,6 +32,12 @@ import { BybitPlacementValidationService } from './orders/bybit-placement-valida
 import { BybitOrderLifecyclePollService } from './orders/bybit-order-lifecycle-poll.service';
 import { createLinearPollOrdersPorts } from './orders/bybit-order-lifecycle-poll-orders.util';
 import {
+  applyTpSlForSignal,
+  isFastTpSlApplyComplete,
+  syncSignalOrderStatusesFromExchange,
+  type PollSignalRow,
+} from './orders/bybit-order-lifecycle-poll-signal.util';
+import {
   isFilledOrderStatus,
   isInsufficientBalanceError,
   isOpenOrderStatus,
@@ -44,6 +50,7 @@ import { BybitRecalcService } from './pnl/bybit-recalc.service';
 import { BybitSignalOverridesService } from './overrides/bybit-signal-overrides.service';
 import { BybitSignalPlacementService } from './orders/bybit-signal-placement.service';
 import { BybitTpSlService } from './tpsl/bybit-tpsl.service';
+import { BybitTpSlFastApplyService } from './tpsl/bybit-tpsl-fast-apply.service';
 import type {
   BybitOrderLifecyclePollPorts,
   BybitPositionClosePorts,
@@ -96,6 +103,8 @@ export class BybitService implements OnApplicationBootstrap {
     @Inject(forwardRef(() => BybitSpotService))
     private readonly bybitSpot: BybitSpotService,
     private readonly bybitSpotInstrument: BybitSpotInstrumentService,
+    @Inject(forwardRef(() => BybitTpSlFastApplyService))
+    private readonly fastTpSl: BybitTpSlFastApplyService,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -180,9 +189,60 @@ export class BybitService implements OnApplicationBootstrap {
       await this.createSignalPlacementPorts(),
     );
     if (result.ok) {
+      if (result.signalId && pollCabinetId) {
+        this.fastTpSl.scheduleFastTpSlApply(
+          pollCabinetId,
+          result.signalId,
+          'post-placement',
+        );
+      }
       void this.scheduleOpenOrdersPollAsync('post-placement', 200, pollCabinetId);
     }
     return result;
+  }
+
+  /** Одна попытка fast TP/SL для конкретного сигнала (в cabinet context). */
+  async runFastTpSlApplyAttempt(
+    signalId: string,
+    reason: string,
+    attemptNum: number,
+  ): Promise<{ done: boolean }> {
+    const ports = await this.createOrderLifecyclePollPorts();
+    const client = await ports.getClient();
+    if (!client) {
+      return { done: false };
+    }
+
+    void this.appLog.append('debug', 'bybit', 'TP_SL_FAST_APPLY: attempt', {
+      signalId,
+      reason,
+      attempt: attemptNum,
+    });
+
+    const sig = (await ports.orders.getSignalWithOrders(signalId)) as PollSignalRow | null;
+    if (!sig) {
+      return { done: true };
+    }
+
+    await syncSignalOrderStatusesFromExchange(ports, client, sig, (msg) =>
+      this.logger.debug(`fast apply ${msg}`),
+    );
+
+    const fresh = (await ports.orders.getSignalWithOrders(signalId)) as PollSignalRow | null;
+    if (!fresh) {
+      return { done: true };
+    }
+
+    await applyTpSlForSignal(ports, client, fresh, (label, err) =>
+      this.logger.warn(`${label}: ${formatError(err)}`),
+    );
+
+    const after = (await ports.orders.getSignalWithOrders(signalId)) as PollSignalRow | null;
+    if (!after) {
+      return { done: true };
+    }
+
+    return { done: isFastTpSlApplyComplete(after) };
   }
 
   /**
@@ -472,6 +532,12 @@ export class BybitService implements OnApplicationBootstrap {
       stepStopLossIfTpFilled: (client, fresh) => this.stepStopLossIfTpFilled(client, fresh),
       finalizeSignalCloseIfNeeded: (client, fresh) =>
         this.pollFinalize.finalizeSignalCloseIfNeeded(client, fresh),
+      scheduleFastTpSlApply: (signalId, reason) => {
+        const cab = this.currentCabinetId();
+        if (cab) {
+          this.fastTpSl.scheduleFastTpSlApply(cab, signalId, reason);
+        }
+      },
     };
   }
 

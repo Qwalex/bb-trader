@@ -1,10 +1,12 @@
 import { forwardRef, Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 
 import { formatError } from '../../common/format-error';
+import { parseWorkerQueuePollConcurrency } from '../bybit/tpsl/bybit-tpsl-fast-retry.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { BybitService } from '../bybit/bybit.service';
 import { CabinetContextService } from '../cabinet/cabinet-context.service';
 import { CabinetService } from '../cabinet/cabinet.service';
+import { SettingsService } from '../settings/settings.service';
 import {
   WORK_QUEUE_EXECUTION,
   WORK_QUEUE_NOTIFICATIONS,
@@ -19,8 +21,8 @@ export class WorkerQueueService implements OnModuleInit {
   private readonly pollMs = 900;
   private readonly maxAttempts = 8;
   private readonly staleLockMs = 10 * 60 * 1000;
-  /** Параллельные poll-cabinet на разных кабинетах (очередь иначе «залипает» на одном тяжёлом). */
-  private readonly reconcilePollConcurrency = WorkerQueueService.readPollConcurrency();
+  /** Параллельные poll-cabinet на разных кабинетах (значение из settings/env на каждой итерации loop). */
+  private readonly reconcilePollConcurrencyEnv = WorkerQueueService.readPollConcurrencyEnv();
   private running = false;
   private loopIteration = 0;
 
@@ -28,6 +30,7 @@ export class WorkerQueueService implements OnModuleInit {
     private readonly prisma: PrismaService,
     private readonly cabinets: CabinetService,
     private readonly cabinetContext: CabinetContextService,
+    private readonly settings: SettingsService,
     @Inject(
       forwardRef(() => {
         // Lazy resolve: цикл require worker-queue ↔ bybit (иначе Nest: undefined-провайдер / «CircularDependency»).
@@ -42,9 +45,9 @@ export class WorkerQueueService implements OnModuleInit {
       this.logger.warn('worker queue disabled via WORKER_QUEUE_ENABLED=false');
       return;
     }
-    if (this.reconcilePollConcurrency > 1) {
+    if (this.reconcilePollConcurrencyEnv > 1) {
       this.logger.log(
-        `worker queue reconcile poll concurrency=${this.reconcilePollConcurrency}`,
+        `worker queue reconcile poll concurrency env default=${this.reconcilePollConcurrencyEnv}`,
       );
     }
     setTimeout(async () => {
@@ -108,7 +111,7 @@ export class WorkerQueueService implements OnModuleInit {
     );
   }
 
-  private static readPollConcurrency(): number {
+  private static readPollConcurrencyEnv(): number {
     const raw = Number(process.env.WORKER_QUEUE_POLL_CONCURRENCY ?? 3);
     if (!Number.isFinite(raw)) {
       return 3;
@@ -123,7 +126,8 @@ export class WorkerQueueService implements OnModuleInit {
       r.includes('post-placement') ||
       r.startsWith('bybit-ws') ||
       r.includes('post_placement') ||
-      r.includes('-active')
+      r.includes('-active') ||
+      r.includes('fast-apply')
     );
   }
 
@@ -402,9 +406,19 @@ export class WorkerQueueService implements OnModuleInit {
     }
   }
 
+  private async resolvePollConcurrency(): Promise<number> {
+    try {
+      const raw = await this.settings.get('WORKER_QUEUE_POLL_CONCURRENCY');
+      return parseWorkerQueuePollConcurrency(raw, this.reconcilePollConcurrencyEnv);
+    } catch {
+      return this.reconcilePollConcurrencyEnv;
+    }
+  }
+
   private async runReconcileQueues(): Promise<void> {
+    const concurrency = await this.resolvePollConcurrency();
     const tasks: Promise<void>[] = [];
-    for (let i = 0; i < this.reconcilePollConcurrency; i += 1) {
+    for (let i = 0; i < concurrency; i += 1) {
       tasks.push(this.runQueue(WORK_QUEUE_RECONCILE));
     }
     await Promise.all(tasks);

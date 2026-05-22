@@ -1,10 +1,20 @@
 import { Injectable, Logger } from '@nestjs/common';
+import type { RestClientV5 } from 'bybit-api';
 
 import { normalizeTradingPair } from '@repo/shared';
 
 import { formatError } from '../../../common/format-error';
 import { BYBIT_STALE_RECONCILE_REQUIRED_CLEAN_POLLS } from '../bybit.constants';
 import type { BybitOrderLifecyclePollPorts } from '../types/bybit-ports.types';
+import {
+  applyTpSlForSignal,
+  finalizeSignalIfNeeded,
+  shouldApplyTpSlWithoutOrderSync,
+  shouldSkipExchangeOrderSync,
+  syncSignalOrderStatusesFromExchange,
+  type PollSignalRow,
+} from './bybit-order-lifecycle-poll-signal.util';
+import { hasLiveTpOrders, hasOpenEntryOrders } from './bybit-order-status.util';
 
 @Injectable()
 export class BybitOrderLifecyclePollService {
@@ -125,52 +135,59 @@ export class BybitOrderLifecyclePollService {
 
     openSignals = await ports.orders.listOpenSignals();
     for (const sig of openSignals) {
-      for (const ord of sig.orders) {
-        if (!ord.bybitOrderId) continue;
-        try {
-          const st = await ports.fetchOrderStatusFromExchange(
-            client,
-            sig.pair,
-            ord.bybitOrderId,
-            ord.qty != null ? Number(ord.qty) : undefined,
-          );
-          if (st) {
-            await ports.orders.updateOrder(ord.id, {
-              status: st,
-              filledAt: ports.isFilledOrderStatus(st) ? new Date() : undefined,
-            });
-          }
-        } catch (err) {
-          this.logger.debug(`poll order ${ord.bybitOrderId}: ${String(err)}`);
-        }
-      }
+      await this.processOpenSignal(ports, client, sig as PollSignalRow);
+    }
+  }
 
-      const fresh = await ports.orders.getSignalWithOrders(sig.id);
-      if (!fresh) continue;
+  private async processOpenSignal(
+    ports: BybitOrderLifecyclePollPorts,
+    client: RestClientV5,
+    sig: PollSignalRow,
+  ): Promise<void> {
+    const skipSync = shouldSkipExchangeOrderSync(sig);
+    const applyWithoutSync = shouldApplyTpSlWithoutOrderSync(sig);
 
-      try {
-        await ports.ensureStopLossForMultiTpOpenPosition(client, fresh);
-      } catch (e) {
-        this.logger.warn(`ensureStopLossForMultiTpOpenPosition: ${formatError(e)}`);
-      }
+    if (!skipSync && !applyWithoutSync) {
+      await syncSignalOrderStatusesFromExchange(ports, client, sig, (msg) =>
+        this.logger.debug(`poll ${msg}`),
+      );
+    }
 
-      try {
-        await ports.placeTpSplitIfNeeded(client, fresh);
-      } catch (e) {
-        this.logger.warn(`placeTpSplitIfNeeded: ${formatError(e)}`);
-      }
+    const fresh = (await ports.orders.getSignalWithOrders(sig.id)) as PollSignalRow | null;
+    if (!fresh) {
+      return;
+    }
 
+    const hadOpenEntries = hasOpenEntryOrders(sig.orders);
+    const hasOpenEntriesNow = hasOpenEntryOrders(fresh.orders);
+
+    if (
+      ports.scheduleFastTpSlApply &&
+      hadOpenEntries &&
+      !hasOpenEntriesNow &&
+      !hasLiveTpOrders(fresh.orders)
+    ) {
+      ports.scheduleFastTpSlApply(fresh.id, 'poll-fill-detected');
+    }
+
+    if (skipSync) {
       try {
         await ports.stepStopLossIfTpFilled(client, fresh);
       } catch (e) {
         this.logger.warn(`stepStopLossIfTpFilled: ${formatError(e)}`);
       }
-
-      try {
-        await ports.finalizeSignalCloseIfNeeded(client, fresh);
-      } catch (err) {
-        this.logger.debug(`poll position ${fresh.pair}: ${String(err)}`);
-      }
+      await finalizeSignalIfNeeded(ports, client, fresh, (msg) =>
+        this.logger.debug(`poll ${msg}`),
+      );
+      return;
     }
+
+    await applyTpSlForSignal(ports, client, fresh, (label, err) =>
+      this.logger.warn(`${label}: ${formatError(err)}`),
+    );
+
+    await finalizeSignalIfNeeded(ports, client, fresh, (msg) =>
+      this.logger.debug(`poll ${msg}`),
+    );
   }
 }

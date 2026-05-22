@@ -120,6 +120,7 @@ export interface BybitOrderLifecyclePollPorts {
   placeTpSplitIfNeeded: (client: RestClientV5, fresh: any) => Promise<void>;
   stepStopLossIfTpFilled: (client: RestClientV5, fresh: any) => Promise<void>;
   finalizeSignalCloseIfNeeded: (client: RestClientV5, fresh: any) => Promise<void>;
+  scheduleFastTpSlApply?: (signalId: string, reason: string) => void;
 }
 
 export interface BybitPositionClosePorts {

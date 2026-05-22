@@ -1840,6 +1840,17 @@
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
 
+### AUD-164
+
+- Status: `done`
+- Scope: Fast TP/SL при многих кабинетах — in-process apply без очереди poll + runtime settings.
+- Files: `apps/api/src/modules/bybit/orders/bybit-order-lifecycle-poll-signal.util.ts`, `apps/api/src/modules/bybit/tpsl/bybit-tpsl-fast-apply.service.ts`, `apps/api/src/modules/bybit/tpsl/bybit-tpsl-fast-retry.util.ts`, `apps/api/src/modules/bybit/bybit.service.ts`, `apps/api/src/modules/bybit/orders/bybit-order-lifecycle-poll.service.ts`, `apps/api/src/modules/worker-queue/worker-queue.service.ts`, `apps/api/src/modules/settings/settings.constants.ts`, `apps/api/src/modules/settings/settings.service.ts`, `apps/web/app/settings/settings-page.constants.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: TP/SL только через тяжёлый poll кабинета (18–30 с, очередь N кабинетов); post-placement не успевал.
+- Changes: `BybitTpSlFastApplyService` — retry in-process по CSV `TP_SL_FAST_RETRY_DELAYS_MS`; `runFastTpSlApplyAttempt` после placement; slim poll (skip fetch при OPEN+TP live); settings `TP_SL_FAST_APPLY_ENABLED`, `WORKER_QUEUE_POLL_CONCURRENCY` (runtime); UI Bybit section.
+- Manual verification: `npm run build -w apps/api` (pass); после деплoy — `/settings` без рестарта; `/logs` `TP_SL_FAST_APPLY: scheduled/done`; TP/SL < 15 с после fill.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
 ### AUD-163
 
 - Status: `done`

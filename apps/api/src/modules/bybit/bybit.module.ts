@@ -31,6 +31,7 @@ import { BybitPollService } from './poll/bybit-poll.service';
 import { BybitRecalcService } from './pnl/bybit-recalc.service';
 import { BybitSignalOverridesService } from './overrides/bybit-signal-overrides.service';
 import { BybitTpSlService } from './tpsl/bybit-tpsl.service';
+import { BybitTpSlFastApplyService } from './tpsl/bybit-tpsl-fast-apply.service';
 import { BybitSpotModule } from '../bybit-spot/bybit-spot.module';
 
 @Module({
@@ -58,6 +59,7 @@ import { BybitSpotModule } from '../bybit-spot/bybit-spot.module';
     BybitExchangeCleanupService,
     BybitExposureService,
     BybitTpSlService,
+    BybitTpSlFastApplyService,
     BybitPnlService,
     BybitSignalPlacementService,
     BybitOrderLifecyclePollService,

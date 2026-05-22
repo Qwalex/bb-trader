@@ -31,6 +31,9 @@ export const ENV_FALLBACK: Record<string, string> = {
    * `auto` — не поднимать WS, если кабинетов > 1; `force` — как раньше (один ключ).
    */
   BYBIT_WS_MULTI_CABINET: 'auto',
+  TP_SL_FAST_APPLY_ENABLED: 'true',
+  TP_SL_FAST_RETRY_DELAYS_MS: '0,300,700,1500,3000,5000',
+  WORKER_QUEUE_POLL_CONCURRENCY: '3',
 };
 
 /** Ключ глобальной настройки: `AuthUser.id` владельца, под которым сохранена `TELEGRAM_USERBOT_SESSION`. */
@@ -62,6 +65,9 @@ export const GLOBAL_SHARED_SETTING_KEYS = new Set<string>([
   'OPENROUTER_DIAGNOSTIC_MODELS',
   /** Глобально: опрос статусов ордеров/позиций Bybit (см. `BybitPollService`). */
   'POLLING_INTERVAL_MS',
+  'TP_SL_FAST_APPLY_ENABLED',
+  'TP_SL_FAST_RETRY_DELAYS_MS',
+  'WORKER_QUEUE_POLL_CONCURRENCY',
 ]);
 
 export const ADMIN_ONLY_GLOBAL_KEYS = new Set<string>(GLOBAL_SHARED_SETTING_KEYS);

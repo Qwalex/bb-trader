@@ -322,6 +322,46 @@ export class SettingsService {
           }
           normalized = String(n);
         }
+      } else if (key === 'TP_SL_FAST_APPLY_ENABLED') {
+        const t = value.trim().toLowerCase();
+        if (t === '' || t === 'true' || t === '1' || t === 'yes' || t === 'on') {
+          normalized = 'true';
+        } else if (t === 'false' || t === '0' || t === 'off' || t === 'no') {
+          normalized = 'false';
+        } else {
+          throw new BadRequestException(
+            'TP_SL_FAST_APPLY_ENABLED: ожидается true или false',
+          );
+        }
+      } else if (key === 'TP_SL_FAST_RETRY_DELAYS_MS') {
+        const t = value.trim();
+        if (t === '') {
+          normalized = '0,300,700,1500,3000,5000';
+        } else {
+          const parts = t
+            .split(/[,;\s]+/)
+            .map((p) => Math.trunc(Number(p.replace(',', '.'))))
+            .filter((n) => Number.isFinite(n) && n >= 0);
+          if (parts.length === 0 || parts.length > 12) {
+            throw new BadRequestException(
+              'TP_SL_FAST_RETRY_DELAYS_MS: CSV задержек в мс (до 12 значений ≥ 0), например 0,300,700,1500',
+            );
+          }
+          normalized = parts.join(',');
+        }
+      } else if (key === 'WORKER_QUEUE_POLL_CONCURRENCY') {
+        const t = value.trim();
+        if (t === '') {
+          normalized = '3';
+        } else {
+          const n = Math.trunc(Number(t.replace(',', '.')));
+          if (!Number.isFinite(n) || n < 1 || n > 8) {
+            throw new BadRequestException(
+              'WORKER_QUEUE_POLL_CONCURRENCY: целое от 1 до 8',
+            );
+          }
+          normalized = String(n);
+        }
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

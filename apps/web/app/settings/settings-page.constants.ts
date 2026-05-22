@@ -23,6 +23,9 @@ export const ADMIN_GLOBAL_KEYS = new Set<string>([
   'TELEGRAM_USERBOT_MTPROXY_URL',
   DIAGNOSTIC_MODELS_KEY,
   'POLLING_INTERVAL_MS',
+  'TP_SL_FAST_APPLY_ENABLED',
+  'TP_SL_FAST_RETRY_DELAYS_MS',
+  'WORKER_QUEUE_POLL_CONCURRENCY',
 ]);
 
 /** Per-user (userSetting): редактируются в «Настройки кабинета», не cabinetSetting. */
@@ -178,6 +181,21 @@ export const KEYS = [
       'Bybit: интервал фонового опроса ордеров и позиций (мс). По умолчанию 2000; 0 — выключить (TP/SL и статусы не обновятся). Глобально для всего API, только администратор',
   },
   {
+    key: 'TP_SL_FAST_APPLY_ENABLED',
+    label:
+      'Bybit: быстрый TP/SL сразу после входа (in-process, без очереди poll). true — вкл. (по умолчанию). Глобально, только администратор',
+  },
+  {
+    key: 'TP_SL_FAST_RETRY_DELAYS_MS',
+    label:
+      'Bybit: задержки повторов fast TP/SL (мс, CSV). По умолчанию 0,300,700,1500,3000,5000. Глобально, только администратор',
+  },
+  {
+    key: 'WORKER_QUEUE_POLL_CONCURRENCY',
+    label:
+      'Bybit: параллельные poll-cabinet в worker queue (1–8, по умолчанию 3). Глобально, только администратор',
+  },
+  {
     key: 'BYBIT_ACCOUNT_MAX_CONCURRENCY',
     label:
       'Bybit: зарезервировано (оставьте 1). >1 игнорируется: лимитер держит один REST-канал на кабинет между всеми вызовами',
@@ -200,6 +218,7 @@ export const BOOLEAN_KEYS = new Set<string>([
   'BYBIT_TESTNET',
   'BUMP_TO_MIN_EXCHANGE_LOT',
   'DEFAULT_LEVERAGE_ENABLED',
+  'TP_SL_FAST_APPLY_ENABLED',
   'TELEGRAM_USERBOT_ENABLED',
   'TELEGRAM_USERBOT_USE_AI_CLASSIFIER',
   'TELEGRAM_USERBOT_REQUIRE_CONFIRMATION',
@@ -283,6 +302,9 @@ export const SETTINGS_SECTIONS: { id: string; title: string; keys: string[] }[] 
     title: 'Bybit',
     keys: [
       'POLLING_INTERVAL_MS',
+      'TP_SL_FAST_APPLY_ENABLED',
+      'TP_SL_FAST_RETRY_DELAYS_MS',
+      'WORKER_QUEUE_POLL_CONCURRENCY',
       'BYBIT_TESTNET',
       'BYBIT_API_KEY_TESTNET',
       'BYBIT_API_SECRET_TESTNET',
