@@ -1817,3 +1817,14 @@
 - Manual verification: `ReadLints` по изменённому web-файлу (ошибок нет), `npm run check-types -w apps/web` (pass).
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-154
+
+- Status: `done`
+- Scope: Userbot — автоповтор ingest после правки сообщения в канале при `parse_incomplete` / `place_error` (edit-watch, MessageEdited, coalescing очереди, per-cabinet release hash).
+- Files: `apps/api/src/modules/telegram-userbot/ingest/telegram-userbot-ingest-edit-watch.service.ts` (rename с levels-watch), `telegram-userbot-ingest.service.ts`, `telegram-userbot-ingest-pipeline.service.ts`, `telegram-userbot.service.ts`, `client/telegram-userbot-client.service.ts`, `telegram-userbot.constants.ts`, `telegram-userbot.module.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: после incomplete→edit→place_error повтор блокировался (нет edit-handler, hash dedup без release, watch только для `signal_levels_validation`, silent drop enqueue, global hash release в multi-cabinet).
+- Changes: обобщён edit-watch (poll 25 с / TTL 90 мин) на `parse_incomplete` и любой `place_error` с guard по активному `Signal`; `EditedMessage` + bypass `isMessageRecent` для retriable ingest; `prepareIngestForRerun` + `releaseForCabinetAndHash` при edit-requeue; coalescing `pendingRerunByQueueKey`; статус `parse_incomplete` вместо `ignored`; `canReuseExistingHash` из БД.
+- Manual verification: `npm run build -w apps/api` (pass); на стенде — неполный сигнал→правка→placement; place_error→правка без `duplicate_signal`; две быстрые правки при active job; partial ORDERS_PLACED — watch не стартует.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

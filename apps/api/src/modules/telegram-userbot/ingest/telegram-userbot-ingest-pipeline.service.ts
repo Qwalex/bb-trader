@@ -25,7 +25,7 @@ import {
 } from '../telegram-userbot.constants';
 import type { MessageKind, ProcessIngestOptions, UserbotFilterKind } from '../telegram-userbot.types';
 import { TelegramUserbotFiltersService } from '../filters/telegram-userbot-filters.service';
-import { TelegramUserbotIngestLevelsWatchService } from './telegram-userbot-ingest-levels-watch.service';
+import { TelegramUserbotIngestEditWatchService } from './telegram-userbot-ingest-edit-watch.service';
 import { TelegramUserbotIngestPairDirectionService } from './telegram-userbot-ingest-pair-direction.service';
 import { TelegramUserbotIngestSignalLookupService } from './telegram-userbot-ingest-signal-lookup.service';
 import { TelegramUserbotIngestSignalReplyService } from './telegram-userbot-ingest-signal-reply.service';
@@ -75,7 +75,7 @@ export class TelegramUserbotIngestPipelineService {
     private readonly userbotSettings: TelegramUserbotSettingsService,
     private readonly userbotFilters: TelegramUserbotFiltersService,
     private readonly userbotMirror: TelegramUserbotMirrorService,
-    private readonly levelsWatch: TelegramUserbotIngestLevelsWatchService,
+    private readonly editWatch: TelegramUserbotIngestEditWatchService,
     private readonly signalLookup: TelegramUserbotIngestSignalLookupService,
     private readonly pairDirection: TelegramUserbotIngestPairDirectionService,
     private readonly signalReply: TelegramUserbotIngestSignalReplyService,
@@ -466,7 +466,7 @@ export class TelegramUserbotIngestPipelineService {
       });
       await this.ingest.updateIngest(ingest.id, {
         classification: parsed.ok === 'incomplete' ? 'other' : 'signal',
-        status: parsed.ok === 'incomplete' ? 'ignored' : 'parse_error',
+        status: parsed.ok === 'incomplete' ? 'parse_incomplete' : 'parse_error',
         error: parseError,
         aiRequest,
         aiResponse,
@@ -482,6 +482,9 @@ export class TelegramUserbotIngestPipelineService {
             ? this.extractMissingFieldsFromPrompt(parsed.prompt)
             : undefined,
       });
+      if (parsed.ok === 'incomplete') {
+        void this.editWatch.scheduleEditWatch(ingest.id);
+      }
       return;
     }
 
@@ -694,8 +697,14 @@ export class TelegramUserbotIngestPipelineService {
     if (manualReread) {
       await this.userbotSignalHash.releaseForCabinetAndHash(effectiveCabinetId, signalHash);
     }
+    const storedHash = currentIngest?.signalHash ?? ingest.signalHash;
     const canReuseExistingHash =
-      ingest.signalHash === signalHash && ingest.status !== 'placed';
+      storedHash === signalHash &&
+      currentIngest?.status !== 'placed' &&
+      (currentIngest?.status === 'place_error' ||
+        currentIngest?.status === 'duplicate_signal' ||
+        currentIngest?.status === 'parse_incomplete' ||
+        currentIngest?.status === 'parse_error');
     const isNewSignal = canReuseExistingHash
       ? true
       : await this.userbotSignalHash.tryCreate(signalHash);
@@ -781,9 +790,7 @@ export class TelegramUserbotIngestPipelineService {
               result.error ??
               'Подтверждение получено, но ордер не удалось выставить',
           });
-          if (result.placeErrorCode === 'signal_levels_validation') {
-            this.levelsWatch.scheduleSignalLevelsValidationEditWatch(ingest.id);
-          }
+          void this.editWatch.scheduleEditWatch(ingest.id);
           return;
         }
         this.appendIngestStageLog('info', 'Userbot: confirmation accepted and placement succeeded', ingest, {
@@ -868,9 +875,7 @@ export class TelegramUserbotIngestPipelineService {
           error: placeError,
         });
       }
-      if (place.errorCode === 'signal_levels_validation') {
-        this.levelsWatch.scheduleSignalLevelsValidationEditWatch(ingest.id);
-      }
+      void this.editWatch.scheduleEditWatch(ingest.id);
       return;
     }
 
@@ -932,8 +937,8 @@ export class TelegramUserbotIngestPipelineService {
   }
 }
 
-  clearAllSignalLevelsValidationWatches(): void {
-    this.levelsWatch.clearAllSignalLevelsValidationWatches();
+  clearAllEditWatches(): void {
+    this.editWatch.clearAllEditWatches();
   }
 
   async fetchChatMessageMeta(

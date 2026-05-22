@@ -9,10 +9,12 @@ import { CabinetContextService } from '../../cabinet/cabinet-context.service';
 import { SettingsService } from '../../settings/settings.service';
 import {
   USERBOT_INLINE_TEXT_MAX_CHARS,
+  USERBOT_INGEST_RETRIABLE_STATUSES,
   USERBOT_MAX_QUEUE_DEFAULT,
   USERBOT_PROCESSING_CONCURRENCY,
 } from '../telegram-userbot.constants';
 import type { IngestProcessJob, ProcessIngestOptions } from '../telegram-userbot.types';
+import { UserbotSignalHashService } from '../userbot-signal-hash.service';
 import { readString } from '../utils/telegram-userbot-parse.util';
 
 type ProcessIngestRecordFn = (
@@ -28,6 +30,7 @@ export class TelegramUserbotIngestService {
   private readonly processingQueue: IngestProcessJob[] = [];
   private readonly processingQueuedIds = new Set<string>();
   private readonly processingActiveIngestIds = new Set<string>();
+  private readonly pendingRerunByQueueKey = new Map<string, IngestProcessJob>();
   private processingWorkersActive = 0;
 
   private processIngestRecordFn: ProcessIngestRecordFn | null = null;
@@ -38,6 +41,7 @@ export class TelegramUserbotIngestService {
     private readonly appLog: AppLogService,
     private readonly cabinets: CabinetService,
     private readonly cabinetContext: CabinetContextService,
+    private readonly userbotSignalHash: UserbotSignalHashService,
   ) {}
 
   setProcessIngestRecord(fn: ProcessIngestRecordFn): void {
@@ -99,9 +103,12 @@ export class TelegramUserbotIngestService {
         });
         return;
       }
-      await this.prisma.tgUserbotIngest.update({
-        where: { id: existing.id },
-        data: { text: nextText },
+      const updatedIngest = await this.prepareIngestForRerun({
+        ingestId: existing.id,
+        chatId: existing.chatId,
+        nextText,
+        status: existing.status,
+        signalHash: existing.signalHash,
       });
       void this.appLog.append('info', 'telegram', 'Userbot: текст ingest обновлён из Telegram', {
         chatId,
@@ -138,7 +145,7 @@ export class TelegramUserbotIngestService {
             chatId: existing.chatId,
             messageId: existing.messageId,
             signalHash: null,
-            status: existing.status,
+            status: updatedIngest.status,
           },
           text: nextText.length > USERBOT_INLINE_TEXT_MAX_CHARS ? null : nextText,
           textLen: nextText.length,
@@ -197,8 +204,87 @@ export class TelegramUserbotIngestService {
   }
 
   enqueueIngestJob(job: IngestProcessJob): void {
-    const queueKey = `${job.ingest.id}:${job.route?.id ?? 'default'}`;
+    void this.enqueueIngestJobInternal(job, false);
+  }
+
+  private shouldCoalesceEnqueue(job: IngestProcessJob, queueKey: string): boolean {
     if (this.processingQueuedIds.has(queueKey)) {
+      return true;
+    }
+    if (this.processingActiveIngestIds.has(job.ingest.id)) {
+      return true;
+    }
+    return this.processingQueue.some(
+      (item) =>
+        `${item.ingest.id}:${item.route?.id ?? 'default'}` === queueKey,
+    );
+  }
+
+  private async coalesceEnqueue(job: IngestProcessJob, queueKey: string): Promise<void> {
+    const inlineText = job.text?.trim() ?? '';
+    if (inlineText) {
+      const row = await this.prisma.tgUserbotIngest.findUnique({
+        where: { id: job.ingest.id },
+        select: { chatId: true, status: true, signalHash: true },
+      });
+      if (row) {
+        await this.prepareIngestForRerun({
+          ingestId: job.ingest.id,
+          chatId: row.chatId,
+          nextText: inlineText,
+          status: row.status,
+          signalHash: row.signalHash,
+        });
+      } else {
+        await this.prisma.tgUserbotIngest.update({
+          where: { id: job.ingest.id },
+          data: { text: inlineText },
+        });
+      }
+    }
+    this.pendingRerunByQueueKey.set(queueKey, {
+      ...job,
+      ingest: { ...job.ingest, signalHash: null },
+      options: { ...job.options },
+    });
+    for (let i = this.processingQueue.length - 1; i >= 0; i -= 1) {
+      const item = this.processingQueue[i];
+      if (!item) {
+        continue;
+      }
+      if (`${item.ingest.id}:${item.route?.id ?? 'default'}` === queueKey) {
+        this.processingQueue.splice(i, 1);
+      }
+    }
+    void this.appLog.append('debug', 'telegram', 'Userbot: enqueue coalesced, pending rerun', {
+      ingestId: job.ingest.id,
+      queueKey,
+      chatId: job.ingest.chatId,
+      messageId: job.ingest.messageId,
+    });
+  }
+
+  private flushPendingRerun(queueKey: string): void {
+    const pending = this.pendingRerunByQueueKey.get(queueKey);
+    if (!pending) {
+      return;
+    }
+    this.pendingRerunByQueueKey.delete(queueKey);
+    this.enqueueIngestJobInternal(pending, true);
+  }
+
+  private enqueueIngestJobInternal(job: IngestProcessJob, fromPendingFlush: boolean): void {
+    const queueKey = `${job.ingest.id}:${job.route?.id ?? 'default'}`;
+    if (!fromPendingFlush && this.shouldCoalesceEnqueue(job, queueKey)) {
+      void this.coalesceEnqueue(job, queueKey).catch((e) => {
+        this.logger.warn(`coalesceEnqueue failed: ${formatError(e)}`);
+      });
+      return;
+    }
+    if (this.processingQueuedIds.has(queueKey)) {
+      void this.coalesceEnqueue(job, queueKey).catch((e) => {
+        this.logger.warn(`coalesceEnqueue failed: ${formatError(e)}`);
+      });
       return;
     }
     this.processingQueuedIds.add(queueKey);
@@ -266,6 +352,7 @@ export class TelegramUserbotIngestService {
       void this.runIngestJob(job).finally(() => {
         this.processingActiveIngestIds.delete(job.ingest.id);
         this.processingWorkersActive -= 1;
+        this.flushPendingRerun(`${job.ingest.id}:${job.route?.id ?? 'default'}`);
         this.pumpIngestQueue();
       });
     }
@@ -338,6 +425,33 @@ export class TelegramUserbotIngestService {
           .catch(() => undefined);
       }
     }
+  }
+
+  private async prepareIngestForRerun(params: {
+    ingestId: string;
+    chatId: string;
+    nextText: string;
+    status: string;
+    signalHash: string | null;
+  }): Promise<{ status: string }> {
+    const retriable = USERBOT_INGEST_RETRIABLE_STATUSES as readonly string[];
+    const oldHash = params.signalHash?.trim() ?? '';
+    const needsHashRelease = retriable.includes(params.status) || oldHash.length > 0;
+    if (needsHashRelease && oldHash) {
+      const cabinetIds = await this.cabinets.listEnabledCabinetIdsForChat(params.chatId);
+      for (const cabinetId of cabinetIds) {
+        await this.userbotSignalHash.releaseForCabinetAndHash(cabinetId, oldHash);
+      }
+    }
+    const updated = await this.prisma.tgUserbotIngest.update({
+      where: { id: params.ingestId },
+      data: {
+        text: params.nextText,
+        ...(needsHashRelease ? { signalHash: null } : {}),
+      },
+      select: { status: true },
+    });
+    return { status: updated.status };
   }
 
   async updateIngest(id: string, data: Prisma.TgUserbotIngestUpdateInput): Promise<void> {

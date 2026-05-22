@@ -7,22 +7,24 @@ import { CabinetService } from '../../cabinet/cabinet.service';
 import { UserbotSignalHashService } from '../userbot-signal-hash.service';
 import {
   USERBOT_INLINE_TEXT_MAX_CHARS,
-  USERBOT_SIGNAL_LEVELS_EDIT_WATCH_POLL_MS,
-  USERBOT_SIGNAL_LEVELS_EDIT_WATCH_TTL_MS,
+  USERBOT_INGEST_EDIT_WATCH_POLL_MS,
+  USERBOT_INGEST_EDIT_WATCH_TTL_MS,
 } from '../telegram-userbot.constants';
 import { extractSignalExternalId, readString } from '../utils/telegram-userbot-parse.util';
 import { TelegramUserbotIngestService } from './telegram-userbot-ingest.service';
 import { TelegramUserbotIngestSignalLookupService } from './telegram-userbot-ingest-signal-lookup.service';
 
+const ACTIVE_SIGNAL_STATUSES = ['PENDING', 'ORDERS_PLACED', 'OPEN', 'PARSED'] as const;
+
 /**
- * Наблюдение за правкой сообщения в Telegram после ошибки validateSignalLevels (poll + повтор в очередь).
+ * Наблюдение за правкой сообщения в Telegram после parse_incomplete / place_error (poll + повтор в очередь).
  */
 @Injectable()
-export class TelegramUserbotIngestLevelsWatchService {
-  private readonly logger = new Logger(TelegramUserbotIngestLevelsWatchService.name);
-  private readonly signalLevelsValidationWatchTimers = new Map<string, NodeJS.Timeout>();
-  private readonly signalLevelsValidationWatchDeadlineMs = new Map<string, number>();
-  private readonly signalLevelsValidationWatchInflight = new Set<string>();
+export class TelegramUserbotIngestEditWatchService {
+  private readonly logger = new Logger(TelegramUserbotIngestEditWatchService.name);
+  private readonly editWatchTimers = new Map<string, NodeJS.Timeout>();
+  private readonly editWatchDeadlineMs = new Map<string, number>();
+  private readonly editWatchInflight = new Set<string>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -33,38 +35,66 @@ export class TelegramUserbotIngestLevelsWatchService {
     private readonly ingest: TelegramUserbotIngestService,
   ) {}
 
-  clearAllSignalLevelsValidationWatches(): void {
-    for (const id of this.signalLevelsValidationWatchTimers.keys()) {
-      this.clearSignalLevelsValidationWatch(id);
+  clearAllEditWatches(): void {
+    for (const id of this.editWatchTimers.keys()) {
+      this.clearEditWatch(id);
     }
   }
 
   /**
-   * После ошибки validateSignalLevels: опрос Telegram; при смене текста — полный автоповтор
-   * (очередь по каждому кабинету, с обходом подтверждения).
+   * После parse_incomplete / place_error: опрос Telegram; при смене текста — автоповтор ingest.
    */
-  scheduleSignalLevelsValidationEditWatch(ingestId: string): void {
-    this.clearSignalLevelsValidationWatch(ingestId);
-    const deadlineMs = Date.now() + USERBOT_SIGNAL_LEVELS_EDIT_WATCH_TTL_MS;
-    this.signalLevelsValidationWatchDeadlineMs.set(ingestId, deadlineMs);
+  async scheduleEditWatch(ingestId: string): Promise<void> {
+    const row = await this.prisma.tgUserbotIngest.findUnique({
+      where: { id: ingestId },
+      select: { id: true, chatId: true, messageId: true },
+    });
+    if (!row) {
+      return;
+    }
+    if (await this.hasActiveSignalForMessage(row.chatId, row.messageId)) {
+      void this.appLog.append('info', 'telegram', 'Userbot: watch пропущен — активная сделка по сообщению', {
+        ingestId,
+        chatId: row.chatId,
+        messageId: row.messageId,
+      });
+      return;
+    }
+
+    this.clearEditWatch(ingestId);
+    const deadlineMs = Date.now() + USERBOT_INGEST_EDIT_WATCH_TTL_MS;
+    this.editWatchDeadlineMs.set(ingestId, deadlineMs);
     const timer = setInterval(() => {
-      void this.tickSignalLevelsValidationEditWatch(ingestId);
-    }, USERBOT_SIGNAL_LEVELS_EDIT_WATCH_POLL_MS);
-    this.signalLevelsValidationWatchTimers.set(ingestId, timer);
-    void this.appLog.append('info', 'telegram', 'Userbot: наблюдение за правкой сообщения после ошибки уровней', {
+      void this.tickEditWatch(ingestId);
+    }, USERBOT_INGEST_EDIT_WATCH_POLL_MS);
+    this.editWatchTimers.set(ingestId, timer);
+    void this.appLog.append('info', 'telegram', 'Userbot: наблюдение за правкой сообщения', {
       ingestId,
-      pollMs: USERBOT_SIGNAL_LEVELS_EDIT_WATCH_POLL_MS,
-      ttlMs: USERBOT_SIGNAL_LEVELS_EDIT_WATCH_TTL_MS,
+      pollMs: USERBOT_INGEST_EDIT_WATCH_POLL_MS,
+      ttlMs: USERBOT_INGEST_EDIT_WATCH_TTL_MS,
     });
   }
 
-  private clearSignalLevelsValidationWatch(ingestId: string): void {
-    const t = this.signalLevelsValidationWatchTimers.get(ingestId);
+  private clearEditWatch(ingestId: string): void {
+    const t = this.editWatchTimers.get(ingestId);
     if (t) {
       clearInterval(t);
-      this.signalLevelsValidationWatchTimers.delete(ingestId);
+      this.editWatchTimers.delete(ingestId);
     }
-    this.signalLevelsValidationWatchDeadlineMs.delete(ingestId);
+    this.editWatchDeadlineMs.delete(ingestId);
+  }
+
+  private async hasActiveSignalForMessage(chatId: string, messageId: string): Promise<boolean> {
+    const row = await this.prisma.signal.findFirst({
+      where: {
+        deletedAt: null,
+        sourceChatId: chatId,
+        sourceMessageId: messageId,
+        status: { in: [...ACTIVE_SIGNAL_STATUSES] },
+      },
+      select: { id: true },
+    });
+    return row != null;
   }
 
   private appendIngestStageLog(
@@ -81,23 +111,23 @@ export class TelegramUserbotIngestLevelsWatchService {
     });
   }
 
-  private async tickSignalLevelsValidationEditWatch(ingestId: string): Promise<void> {
-    const deadlineMs = this.signalLevelsValidationWatchDeadlineMs.get(ingestId);
+  private async tickEditWatch(ingestId: string): Promise<void> {
+    const deadlineMs = this.editWatchDeadlineMs.get(ingestId);
     if (deadlineMs == null) {
-      this.clearSignalLevelsValidationWatch(ingestId);
+      this.clearEditWatch(ingestId);
       return;
     }
     if (Date.now() > deadlineMs) {
-      this.clearSignalLevelsValidationWatch(ingestId);
-      void this.appLog.append('info', 'telegram', 'Userbot: истекло ожидание правки сообщения (уровни)', {
+      this.clearEditWatch(ingestId);
+      void this.appLog.append('info', 'telegram', 'Userbot: истекло ожидание правки сообщения', {
         ingestId,
       });
       return;
     }
-    if (this.signalLevelsValidationWatchInflight.has(ingestId)) {
+    if (this.editWatchInflight.has(ingestId)) {
       return;
     }
-    this.signalLevelsValidationWatchInflight.add(ingestId);
+    this.editWatchInflight.add(ingestId);
     try {
       const row = await this.prisma.tgUserbotIngest.findUnique({
         where: { id: ingestId },
@@ -112,11 +142,20 @@ export class TelegramUserbotIngestLevelsWatchService {
         },
       });
       if (!row) {
-        this.clearSignalLevelsValidationWatch(ingestId);
+        this.clearEditWatch(ingestId);
         return;
       }
       if (row.status === 'placed' || row.status === 'cancelled_by_confirmation') {
-        this.clearSignalLevelsValidationWatch(ingestId);
+        this.clearEditWatch(ingestId);
+        return;
+      }
+      if (await this.hasActiveSignalForMessage(row.chatId, row.messageId)) {
+        this.clearEditWatch(ingestId);
+        void this.appLog.append('info', 'telegram', 'Userbot: наблюдение остановлено — активная сделка по сообщению', {
+          ingestId,
+          chatId: row.chatId,
+          messageId: row.messageId,
+        });
         return;
       }
       const meta = await this.signalLookup.fetchChatMessageMeta(row.chatId, row.messageId);
@@ -134,14 +173,17 @@ export class TelegramUserbotIngestLevelsWatchService {
 
       this.appendIngestStageLog(
         'info',
-        'Userbot: текст сообщения в канале изменился (наблюдение уровней)',
+        'Userbot: текст сообщения в канале изменился (edit-watch)',
         { id: row.id, chatId: row.chatId, messageId: row.messageId },
         { signalHash: row.signalHash, status: row.status },
       );
 
       const oldHash = row.signalHash?.trim() ?? '';
+      const cabinetIds = await this.cabinets.listEnabledCabinetIdsForChat(row.chatId);
       if (oldHash) {
-        await this.userbotSignalHash.release(oldHash);
+        for (const cabinetId of cabinetIds) {
+          await this.userbotSignalHash.releaseForCabinetAndHash(cabinetId, oldHash);
+        }
       }
       await this.prisma.tgUserbotIngest.update({
         where: { id: ingestId },
@@ -152,7 +194,6 @@ export class TelegramUserbotIngestLevelsWatchService {
         replyToMessageId: meta.replyToMessageId,
         signalExternalId: extractSignalExternalId(fresh),
       };
-      const cabinetIds = await this.cabinets.listEnabledCabinetIdsForChat(row.chatId);
       for (const cabinetId of cabinetIds) {
         const route = await this.prisma.cabinetIngestRoute.upsert({
           where: { cabinetId_ingestId: { cabinetId, ingestId: row.id } },
@@ -179,7 +220,7 @@ export class TelegramUserbotIngestLevelsWatchService {
             chatId: row.chatId,
             messageId: row.messageId,
             signalHash: null,
-            status: 'ignored',
+            status: row.status,
           },
           text: fresh.length > USERBOT_INLINE_TEXT_MAX_CHARS ? null : fresh,
           textLen: fresh.length,
@@ -196,11 +237,9 @@ export class TelegramUserbotIngestLevelsWatchService {
         });
       }
     } catch (e) {
-      this.logger.warn(
-        `tickSignalLevelsValidationEditWatch ingest=${ingestId}: ${formatError(e)}`,
-      );
+      this.logger.warn(`tickEditWatch ingest=${ingestId}: ${formatError(e)}`);
     } finally {
-      this.signalLevelsValidationWatchInflight.delete(ingestId);
+      this.editWatchInflight.delete(ingestId);
     }
   }
 }

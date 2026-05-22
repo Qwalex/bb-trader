@@ -30,10 +30,9 @@ import { UserbotSignalHashService } from './userbot-signal-hash.service';
 import { parseSignalPriceArrayJson } from './userbot-signal-hash.util';
 import {
   CLOSE_REOPEN_COOLDOWN_MS,
+  USERBOT_INGEST_RETRIABLE_STATUSES,
   USERBOT_MIN_BALANCE_USD_DEFAULT,
   USERBOT_POLL_INTERVAL_MS,
-  USERBOT_SIGNAL_LEVELS_EDIT_WATCH_POLL_MS,
-  USERBOT_SIGNAL_LEVELS_EDIT_WATCH_TTL_MS,
 } from './telegram-userbot.constants';
 import type {
   ActiveSignalLookup,
@@ -138,7 +137,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy(): Promise<void> {
-    this.userbotPipeline.clearAllSignalLevelsValidationWatches();
+    this.userbotPipeline.clearAllEditWatches();
     this.stopPollingLoop();
     this.stopRestoreWatchdog();
     await this.userbotClient.disconnectAll();
@@ -746,7 +745,15 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       if (!isToday(createdAt)) {
         return;
       }
-      if (!(await this.userbotScan.isMessageRecent(createdAt))) {
+      const dedupMessageKey = `${chatId}:${messageId}`;
+      const existingIngest = await this.prisma.tgUserbotIngest.findUnique({
+        where: { dedupMessageKey },
+        select: { status: true },
+      });
+      const skipRecencyFilter =
+        existingIngest != null &&
+        (USERBOT_INGEST_RETRIABLE_STATUSES as readonly string[]).includes(existingIngest.status);
+      if (!skipRecencyFilter && !(await this.userbotScan.isMessageRecent(createdAt))) {
         return;
       }
       if (!this.enabledChatIds.has(chatId)) {

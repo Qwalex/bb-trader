@@ -13,9 +13,21 @@ export const CLOSE_REOPEN_COOLDOWN_MS = 30_000;
 export { CRITICAL_NOTIFY_URL } from '../../common/critical-notify.constants';
 export const OPENROUTER_BALANCE_LOW_THRESHOLD_USD = 2;
 export const OPENROUTER_BALANCE_NOTIFY_COOLDOWN_MS = 30 * 60_000;
-/** Опрос Telegram после ошибки уровней (validateSignalLevels). */
-export const USERBOT_SIGNAL_LEVELS_EDIT_WATCH_POLL_MS = 25_000;
-export const USERBOT_SIGNAL_LEVELS_EDIT_WATCH_TTL_MS = 90 * 60_000;
+/** Опрос Telegram после parse_incomplete / place_error (edit-watch). */
+export const USERBOT_INGEST_EDIT_WATCH_POLL_MS = 25_000;
+export const USERBOT_INGEST_EDIT_WATCH_TTL_MS = 90 * 60_000;
+/** @deprecated используйте USERBOT_INGEST_EDIT_WATCH_* */
+export const USERBOT_SIGNAL_LEVELS_EDIT_WATCH_POLL_MS = USERBOT_INGEST_EDIT_WATCH_POLL_MS;
+/** @deprecated используйте USERBOT_INGEST_EDIT_WATCH_* */
+export const USERBOT_SIGNAL_LEVELS_EDIT_WATCH_TTL_MS = USERBOT_INGEST_EDIT_WATCH_TTL_MS;
+
+/** Ingest-статусы, при которых правка сообщения должна перезапускать обработку. */
+export const USERBOT_INGEST_RETRIABLE_STATUSES = [
+  'parse_incomplete',
+  'place_error',
+  'duplicate_signal',
+  'parse_error',
+] as const;
 /**
  * Период записи MTProto StringSession в глобальный Setting (миграция DC и др.).
  * Задаётся env TELEGRAM_USERBOT_SESSION_PERSIST_INTERVAL_MS (мс), минимум 60000.

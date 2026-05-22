@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { NewMessage } from 'telegram/events';
+import { EditedMessage } from 'telegram/events/EditedMessage';
 import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions';
 import * as QRCode from 'qrcode';
@@ -680,6 +681,7 @@ export class TelegramUserbotClientService {
       const handler = this.inboundHandler;
       if (handler) {
         client.addEventHandler(handler, new NewMessage({ incoming: true }));
+        client.addEventHandler(handler, new EditedMessage({ incoming: true }));
         this.messageHandlerRegisteredByUserId.add(owner);
       } else {
         this.logger.warn('TelegramUserbotClientService: inboundHandler не задан до addEventHandler');
