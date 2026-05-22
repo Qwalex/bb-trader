@@ -1846,7 +1846,7 @@
 - Scope: Multi-cabinet poll — TP/SL не доходили до кабинетов из-за заторa worker queue reconcile.
 - Files: `apps/api/src/modules/worker-queue/worker-queue.service.ts`, `docs/audit/06-progress-tracker.md`
 - Findings: interval-sweep каждые ~2 с сбрасывал все `poll-cabinet:*` в pending; ordering по `createdAt` + один worker ≈18 с на тяжёлый кабинет → QSInnerCircleVipFree не получал poll (в логах только `cmobm54…`).
-- Changes: pending poll не перезаписывается interval-sweep; priority bump для `post-placement`/WS (`runAfter` −5 с); ordering `runAfter` + `updatedAt`; `WORKER_QUEUE_POLL_CONCURRENCY` (default 3) — параллельные poll разных кабинетов.
+- Changes: pending poll не перезаписывается interval-sweep; priority bump для `post-placement`/WS/`interval-active` (`runAfter` −5 с); ordering `runAfter` + `updatedAt`; `WORKER_QUEUE_POLL_CONCURRENCY` (default 3); sweep сначала кабинеты с открытыми linear-сигналами.
 - Manual verification: `npm run build -w apps/api`; Railway cabinets — в логах poll по нескольким cabinetId, TP/SL на TON.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A

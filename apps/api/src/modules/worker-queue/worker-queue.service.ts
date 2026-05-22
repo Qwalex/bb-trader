@@ -116,13 +116,14 @@ export class WorkerQueueService implements OnModuleInit {
     return Math.min(Math.max(Math.trunc(raw), 1), 8);
   }
 
-  /** post-placement / WS — poll раньше interval-sweep в общей очереди reconcile. */
+  /** post-placement / WS / кабинеты с открытыми linear-сигналами — раньше в reconcile. */
   private static isPriorityPollReason(reason: string): boolean {
     const r = reason.trim().toLowerCase();
     return (
       r.includes('post-placement') ||
       r.startsWith('bybit-ws') ||
-      r.includes('post_placement')
+      r.includes('post_placement') ||
+      r.includes('-active')
     );
   }
 
@@ -175,8 +176,29 @@ export class WorkerQueueService implements OnModuleInit {
 
   async enqueuePollSweep(reason = 'interval', delayMs = 0): Promise<void> {
     const cabinets = await this.cabinets.listCabinets();
+    const activeCabinetRows = await this.prisma.signal.findMany({
+      where: {
+        deletedAt: null,
+        status: { in: ['PENDING', 'ORDERS_PLACED', 'OPEN', 'PARSED'] },
+        marketType: 'linear',
+      },
+      select: { cabinetId: true },
+      distinct: ['cabinetId'],
+    });
+    const activeCabinetIds = new Set(
+      activeCabinetRows
+        .map((row) => row.cabinetId?.trim())
+        .filter((id): id is string => Boolean(id)),
+    );
     for (const cabinet of cabinets) {
-      await this.enqueueCabinetPoll(cabinet.id, reason, delayMs);
+      if (activeCabinetIds.has(cabinet.id)) {
+        await this.enqueueCabinetPoll(cabinet.id, `${reason}-active`, delayMs);
+      }
+    }
+    for (const cabinet of cabinets) {
+      if (!activeCabinetIds.has(cabinet.id)) {
+        await this.enqueueCabinetPoll(cabinet.id, reason, delayMs);
+      }
     }
   }
 
