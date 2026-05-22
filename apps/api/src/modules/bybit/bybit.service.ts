@@ -15,6 +15,8 @@ import { AppLogService } from '../app-log/app-log.service';
 import { CabinetContextService } from '../cabinet/cabinet-context.service';
 import { CabinetService } from '../cabinet/cabinet.service';
 import { OrdersService } from '../orders/orders.service';
+import { BybitSpotInstrumentService } from '../bybit-spot/instrument/bybit-spot-instrument.service';
+import { BybitSpotService } from '../bybit-spot/bybit-spot.service';
 import { SettingsService } from '../settings/settings.service';
 import { WorkerQueueService } from '../worker-queue/worker-queue.service';
 import { stalePairDirectionKey as stalePairDirectionKeyUtil } from './exposure/bybit-exposure.util';
@@ -90,6 +92,9 @@ export class BybitService implements OnApplicationBootstrap {
     private readonly liveSnapshot: BybitLiveSnapshotService,
     private readonly pollFinalize: BybitPollFinalizeService,
     private readonly exchangeCleanup: BybitExchangeCleanupService,
+    @Inject(forwardRef(() => BybitSpotService))
+    private readonly bybitSpot: BybitSpotService,
+    private readonly bybitSpotInstrument: BybitSpotInstrumentService,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -306,6 +311,7 @@ export class BybitService implements OnApplicationBootstrap {
     await this.bybitOrderLifecyclePoll.pollOpenOrders(
       await this.createOrderLifecyclePollPorts(),
     );
+    await this.bybitSpot.pollSpotSignals();
   }
 
   private createPositionClosePorts(): BybitPositionClosePorts {
@@ -402,14 +408,20 @@ export class BybitService implements OnApplicationBootstrap {
       isInsufficientBalanceError: (msg) => isInsufficientBalanceError(msg),
       notifyHedgeOppositePlacementAudit: (params) =>
         this.bybitNotify.notifyHedgeOppositePlacementAudit(params),
+      preflightLinearPlacement: (pair) =>
+        this.bybitSpotInstrument.preflightLinearPlacement(pair),
     };
   }
 
   private async createOrderLifecyclePollPorts(): Promise<BybitOrderLifecyclePollPorts> {
     const cabinetSegment = await this.resolveCabinetSegmentForKeys();
+    const orders = this.orders;
     return {
       getClient: () => this.balanceInstrument.getClient(),
-      orders: this.orders,
+      orders: {
+        ...orders,
+        listOpenSignals: () => orders.listOpenLinearSignals(),
+      } as typeof orders,
       stalePairDirectionKey: (pair, direction) =>
         stalePairDirectionKeyUtil(cabinetSegment, pair, direction),
       staleFlatPollCounts: this.staleFlatPollCounts,

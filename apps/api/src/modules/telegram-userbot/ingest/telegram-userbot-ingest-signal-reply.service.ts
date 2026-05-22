@@ -6,6 +6,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { AppLogService } from '../../app-log/app-log.service';
 import { CabinetService } from '../../cabinet/cabinet.service';
 import { BybitService } from '../../bybit/bybit.service';
+import { BybitSpotService } from '../../bybit-spot/bybit-spot.service';
 import { OrdersService } from '../../orders/orders.service';
 import { SettingsService } from '../../settings/settings.service';
 import { parseSettingsBool } from '../../settings/settings-bool.util';
@@ -24,6 +25,8 @@ export class TelegramUserbotIngestSignalReplyService {
     private readonly prisma: PrismaService,
     private readonly transcript: TranscriptService,
     private readonly bybit: BybitService,
+    @Inject(forwardRef(() => BybitSpotService))
+    private readonly bybitSpot: BybitSpotService,
     private readonly orders: OrdersService,
     private readonly appLog: AppLogService,
     private readonly settings: SettingsService,
@@ -245,14 +248,26 @@ export class TelegramUserbotIngestSignalReplyService {
         };
       }
 
-      const place = await this.bybit.placeSignalOrders(nextSignal, params.text, {
-        chatId: params.chatId,
-        messageId: rootSource.messageId,
-        signalExternalId: params.signalExternalId?.trim() || undefined,
+      const place = await this.bybitSpot.routeUserbotSignalPlacement({
+        signal: nextSignal,
+        rawMessage: params.text,
+        origin: {
+          chatId: params.chatId,
+          messageId: rootSource.messageId,
+          signalExternalId: params.signalExternalId?.trim() || undefined,
+        },
+        ingestId: `reentry:${params.chatId}:${params.messageId}`,
       });
-      if (!place.ok) {
+      if (place.kind === 'spot_prompt') {
+        return { ok: false, error: place.message ?? 'Ожидает решение по споту в боте' };
+      }
+      if (place.kind === 'blocked') {
         return { ok: false, error: formatError(place.error) };
       }
+      if (!place.placement.ok) {
+        return { ok: false, error: formatError(place.placement.error) };
+      }
+      const placed = place.placement;
 
       await this.prisma.signal.update({
         where: { id: prev.id },
@@ -263,10 +278,10 @@ export class TelegramUserbotIngestSignalReplyService {
         sourceChatId: params.chatId,
         sourceMessageId: rootSource.messageId,
         reentryMessageId: params.messageId,
-        newSignalId: place.signalId,
+        newSignalId: placed.signalId,
       });
-      if (place.signalId) {
-        await this.orders.createSignalEvent(place.signalId, 'REENTRY_REPLACED_NEW', {
+      if (placed.signalId) {
+        await this.orders.createSignalEvent(placed.signalId, 'REENTRY_REPLACED_NEW', {
           reason: 'Перезаход: создан новый сигнал',
           sourceChatId: params.chatId,
           sourceMessageId: rootSource.messageId,
@@ -285,7 +300,7 @@ export class TelegramUserbotIngestSignalReplyService {
 
       void this.appLog.append('info', 'telegram', 'Перезаход обработан', {
         oldSignalId: prev.id,
-        newSignalId: place.signalId,
+        newSignalId: placed.signalId,
         sourceChatId: params.chatId,
         sourceMessageId: rootSource.messageId,
         quotedMessageId: params.replyToMessageId,

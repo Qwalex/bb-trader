@@ -367,6 +367,7 @@ export class OrdersService {
     rawMessage: string | undefined,
     status: string,
     origin?: { chatId?: string; messageId?: string; signalExternalId?: string },
+    options?: { marketType?: 'linear' | 'spot' },
   ) {
     const cabinetId = this.currentCabinetId() ?? (await this.cabinets.getDefaultCabinetId());
     const normalizedPair = normalizeTradingPair(signal.pair);
@@ -422,6 +423,7 @@ export class OrdersService {
           signalExternalId,
           rawMessage: rawMessage ?? null,
           status,
+          marketType: options?.marketType ?? 'linear',
         },
       });
     } catch (e) {
@@ -858,6 +860,32 @@ export class OrdersService {
     });
   }
 
+  /** Open signals для linear poll (legacy rows без marketType = linear). */
+  async listOpenLinearSignals() {
+    return this.prisma.signal.findMany({
+      where: this.withCabinetScope({
+        deletedAt: null,
+        status: { in: OrdersService.ACTIVE_SIGNAL_STATUS_LIST },
+        marketType: 'linear',
+      }),
+      include: { orders: true },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  /** Open spot signals для spot lifecycle poll. */
+  async listOpenSpotSignals() {
+    return this.prisma.signal.findMany({
+      where: this.withCabinetScope({
+        deletedAt: null,
+        status: { in: OrdersService.ACTIVE_SIGNAL_STATUS_LIST },
+        marketType: 'spot',
+      }),
+      include: { orders: true },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
   async listClosedSignalsForPnlRecalc(params?: { limit?: number }) {
     const rawLimit = params?.limit;
     const where = {
@@ -980,6 +1008,7 @@ export class OrdersService {
         deletedAt: null,
         status: { in: OrdersService.ACTIVE_SIGNAL_STATUS_LIST },
         direction,
+        marketType: { not: 'spot' },
       }),
       select: { id: true, pair: true },
     });

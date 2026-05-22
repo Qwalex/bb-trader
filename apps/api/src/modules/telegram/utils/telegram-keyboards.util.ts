@@ -23,6 +23,24 @@ export function externalConfirmKeyboard(requestId: string) {
   ]);
 }
 
+export function spotBuyPromptKeyboard(requestId: string) {
+  return Markup.inlineKeyboard([
+    [
+      Markup.button.callback('✅ Купить на спот', `spot_buy_yes:${requestId}`),
+      Markup.button.callback('❌ Нет', `spot_buy_no:${requestId}`),
+    ],
+  ]);
+}
+
+export function spotSellPromptKeyboard(signalId: string, kind: string, levelIndex: number) {
+  return Markup.inlineKeyboard([
+    [
+      Markup.button.callback('✅ Продать', `spot_sell_yes:${signalId}:${kind}:${levelIndex}`),
+      Markup.button.callback('❌ Нет', `spot_sell_no:${signalId}:${kind}:${levelIndex}`),
+    ],
+  ]);
+}
+
 /** Кнопка отмены ордеров по сделке из уведомления «result без входа». */
 export function staleResultCancelKeyboard(signalId: string) {
   return Markup.inlineKeyboard([

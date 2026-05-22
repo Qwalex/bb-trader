@@ -367,6 +367,16 @@ export class BybitSignalPlacementService {
       } else {
         leveragedNotional = defaultOrderUsd;
       }
+      if (ports.preflightLinearPlacement) {
+        const preflight = await ports.preflightLinearPlacement(symbol);
+        if (!preflight.ok) {
+          void ports.appLog.append('warn', 'bybit', 'placeSignalOrders: preflight linear rejected', {
+            symbol,
+            error: preflight.error,
+          });
+          return { ok: false, error: preflight.error };
+        }
+      }
       const leverageRes = await this.rateLimit.runBybitCall(() =>
         client.setLeverage({
           category: 'linear',

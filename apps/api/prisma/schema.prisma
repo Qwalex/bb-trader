@@ -19,6 +19,12 @@ model Signal {
   stopLoss       Float
   takeProfits    String // JSON number[]
   leverage       Int
+  /// linear | spot
+  marketType     String   @default("linear")
+  /// Исполненный объём base coin после spot buy (для sell % и finalize).
+  spotBaseQty    Float?
+  /// JSON: {"tpHit":[0,1],"slHit":false} — дедуп TP/SL уведомлений spot.
+  spotNotifiedJson String?
   /// Номинал в USDT (fallback в БД 10; фактический дефолт — настройка DEFAULT_ORDER_USD)
   orderUsd       Float    @default(10)
   capitalPercent Float    @default(0)

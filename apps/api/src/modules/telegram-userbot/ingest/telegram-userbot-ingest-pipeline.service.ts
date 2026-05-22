@@ -14,6 +14,7 @@ import { SettingsService } from '../../settings/settings.service';
 import { parseSettingsBool } from '../../settings/settings-bool.util';
 import { TranscriptService } from '../../transcript/transcript.service';
 import { BybitService } from '../../bybit/bybit.service';
+import { BybitSpotService } from '../../bybit-spot/bybit-spot.service';
 import { OrdersService } from '../../orders/orders.service';
 import { TelegramService } from '../../telegram/services/telegram.service';
 import { VkNotifyMirrorService } from '../../vk/vk-notify-mirror.service';
@@ -65,6 +66,8 @@ export class TelegramUserbotIngestPipelineService {
     private readonly cabinetContext: CabinetContextService,
     private readonly transcript: TranscriptService,
     private readonly bybit: BybitService,
+    @Inject(forwardRef(() => BybitSpotService))
+    private readonly bybitSpot: BybitSpotService,
     private readonly orders: OrdersService,
     private readonly appLog: AppLogService,
     private readonly telegramBot: TelegramService,
@@ -732,6 +735,59 @@ export class TelegramUserbotIngestPipelineService {
       return;
     }
 
+    const placementResolve = await this.bybitSpot.resolveUserbotPlacementRoute({
+      signal,
+      ingestId: ingest.id,
+    });
+    if (placementResolve.kind === 'blocked') {
+      this.appendIngestStageLog('error', 'Userbot: placement blocked by market availability', ingest, {
+        error: placementResolve.error,
+      });
+      await this.ingest.updateIngest(ingest.id, {
+        classification: 'signal',
+        status: 'place_error',
+        signalHash,
+        error: placementResolve.error,
+        aiRequest,
+        aiResponse,
+      });
+      await this.notifySignalFailureToBot({
+        ingestId: ingest.id,
+        chatId: ingest.chatId,
+        token: tokenHintForSignalFailure(text, signal.pair),
+        stage: 'bybit',
+        error: placementResolve.error,
+      });
+      if (placementResolve.userbotStatus !== 'cancelled') {
+        void this.editWatch.scheduleEditWatch(ingest.id);
+      }
+      return;
+    }
+    if (placementResolve.kind === 'spot_prompt') {
+      const routed = await this.bybitSpot.routeUserbotSignalPlacement({
+        signal,
+        rawMessage: text,
+        origin: {
+          chatId: ingest.chatId,
+          messageId: ingest.messageId,
+          signalExternalId,
+        },
+        ingestId: ingest.id,
+      });
+      this.editWatch.clearEditWatch(ingest.id);
+      const spotMessage =
+        routed.kind === 'spot_prompt' ? (routed.message ?? 'Ожидает решение по споту') : 'Ожидает решение по споту';
+      await this.ingest.updateIngest(ingest.id, {
+        classification: 'signal',
+        status: 'blocked_by_setting',
+        signalHash,
+        error: spotMessage,
+        aiRequest,
+        aiResponse,
+      });
+      return;
+    }
+
     const requireConfirmationSetting = await this.getBoolSetting(
       'TELEGRAM_USERBOT_REQUIRE_CONFIRMATION',
       false,
@@ -836,11 +892,49 @@ export class TelegramUserbotIngestPipelineService {
       direction: signal.direction,
       signalHash,
     });
-    const place = await this.bybit.placeSignalOrders(signal, text, {
-      chatId: ingest.chatId,
-      messageId: ingest.messageId,
-      signalExternalId,
+    const routed = await this.bybitSpot.routeUserbotSignalPlacement({
+      signal,
+      rawMessage: text,
+      origin: {
+        chatId: ingest.chatId,
+        messageId: ingest.messageId,
+        signalExternalId,
+      },
+      ingestId: ingest.id,
     });
+    if (routed.kind === 'spot_prompt') {
+      this.editWatch.clearEditWatch(ingest.id);
+      await this.ingest.updateIngest(ingest.id, {
+        classification: 'signal',
+        status: 'blocked_by_setting',
+        signalHash,
+        error: routed.message ?? 'Ожидает решение по споту',
+        aiRequest,
+        aiResponse,
+      });
+      return;
+    }
+    if (routed.kind === 'blocked') {
+      const placeError = formatError(routed.error);
+      await this.ingest.updateIngest(ingest.id, {
+        classification: 'signal',
+        status: 'place_error',
+        signalHash,
+        error: placeError,
+        aiRequest,
+        aiResponse,
+      });
+      await this.notifySignalFailureToBot({
+        ingestId: ingest.id,
+        chatId: ingest.chatId,
+        token: signal.pair,
+        stage: 'bybit',
+        error: placeError,
+      });
+      void this.editWatch.scheduleEditWatch(ingest.id);
+      return;
+    }
+    const place = routed.placement;
     if (!place.ok) {
       const placeError = formatError(place.error);
       this.appendIngestStageLog('error', 'Userbot: Bybit placement failed', ingest, {

@@ -83,6 +83,9 @@ export interface BybitSignalPlacementPorts {
     newSignalId: string;
     newSignalDto: SignalDto;
   }) => void | Promise<void>;
+  preflightLinearPlacement?: (
+    pair: string,
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
 }
 
 export interface BybitOrderLifecyclePollPorts {

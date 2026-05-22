@@ -47,6 +47,7 @@ import {
   formatSignalTable,
 } from '../utils/telegram-signal-message-format.util';
 import { TelegramSignalDraftFlowService } from './telegram-signal-draft-flow.service';
+import { TelegramSpotFlowService } from './telegram-spot-flow.service';
 import { tradeSignalEventTitleRu } from '../utils/telegram-trade-event-titles.util';
 import {
   mergeDistinctFiniteNumericIds,
@@ -113,6 +114,8 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
     private readonly botRegistry: TelegramBotRegistryService,
     private readonly chatMenu: TelegramChatMenuService,
     private readonly draftFlow: TelegramSignalDraftFlowService,
+    @Inject(forwardRef(() => TelegramSpotFlowService))
+    private readonly spotFlow: TelegramSpotFlowService,
   ) {}
 
   /** Дефолт номинала с учётом DEFAULT_ORDER_USD и процента от equity. */
@@ -806,6 +809,58 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
     }
     return new Telegraf(token, {
       handlerTimeout: 180_000,
+    });
+  }
+
+  async broadcastCabinetPlainMessage(params: {
+    cabinetId: string;
+    text: string;
+    keyboard?: ReturnType<typeof import('../utils/telegram-keyboards.util').spotBuyPromptKeyboard>;
+  }): Promise<{ ok: boolean; deliveredTo: number; error?: string }> {
+    return this.cabinetContext.runWithCabinetAsync(params.cabinetId, async () => {
+      const bot = await this.getCabinetOutboundTelegraf(params.cabinetId);
+      if (!bot) {
+        return {
+          ok: false,
+          deliveredTo: 0,
+          error: 'Нет TELEGRAM_BOT_TOKEN для кабинета',
+        };
+      }
+      const ids = await this.getTelegramNotifyRecipientIds();
+      if (ids.length === 0) {
+        return {
+          ok: false,
+          deliveredTo: 0,
+          error: 'Нет получателей уведомлений',
+        };
+      }
+      let deliveredTo = 0;
+      for (const uid of ids) {
+        try {
+          await bot.telegram.sendMessage(uid, params.text, params.keyboard ?? undefined);
+          deliveredTo += 1;
+        } catch (e) {
+          this.logTelegramBroadcastRecipientError('broadcastCabinetPlainMessage', uid, e);
+        }
+      }
+      if (deliveredTo === 0) {
+        return { ok: false, deliveredTo: 0, error: 'Не удалось доставить сообщение' };
+      }
+      return { ok: true, deliveredTo };
+    });
+  }
+
+  async sendCabinetUserPlainMessage(
+    cabinetId: string,
+    userId: number,
+    text: string,
+  ): Promise<void> {
+    await this.cabinetContext.runWithCabinetAsync(cabinetId, async () => {
+      const bot = await this.getCabinetOutboundTelegraf(cabinetId);
+      if (!bot) {
+        return;
+      }
+      await bot.telegram.sendMessage(userId, text).catch(() => undefined);
     });
   }
 
@@ -1949,6 +2004,46 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
       await ctx.reply('Сигнал отклонён.');
     });
 
+    telegraf.action(/^spot_buy_yes:(.+)$/i, async (ctx) => {
+      const requestId = ctx.match?.[1];
+      if (!requestId) {
+        await ctx.answerCbQuery();
+        return;
+      }
+      await this.spotFlow.handleSpotBuyYes(ctx, requestId);
+    });
+
+    telegraf.action(/^spot_buy_no:(.+)$/i, async (ctx) => {
+      const requestId = ctx.match?.[1];
+      if (!requestId) {
+        await ctx.answerCbQuery();
+        return;
+      }
+      await this.spotFlow.handleSpotBuyNo(ctx, requestId);
+    });
+
+    telegraf.action(/^spot_sell_yes:([^:]+):(tp|sl):(\d+)$/i, async (ctx) => {
+      const signalId = ctx.match?.[1];
+      const kind = ctx.match?.[2] as 'tp' | 'sl' | undefined;
+      const levelIndex = Number(ctx.match?.[3]);
+      if (!signalId || !kind || !Number.isFinite(levelIndex)) {
+        await ctx.answerCbQuery();
+        return;
+      }
+      await this.spotFlow.handleSpotSellYes(ctx, signalId, kind, levelIndex);
+    });
+
+    telegraf.action(/^spot_sell_no:([^:]+):(tp|sl):(\d+)$/i, async (ctx) => {
+      const signalId = ctx.match?.[1];
+      const kind = ctx.match?.[2] as 'tp' | 'sl' | undefined;
+      const levelIndex = Number(ctx.match?.[3]);
+      if (!signalId || !kind || !Number.isFinite(levelIndex)) {
+        await ctx.answerCbQuery();
+        return;
+      }
+      await this.spotFlow.handleSpotSellNo(ctx, signalId, kind, levelIndex);
+    });
+
     telegraf.action(/^ub_stale_cancel:(.+)$/i, async (ctx) => {
       const uid = ctx.from?.id;
       const signalId = ctx.match?.[1]?.trim();
@@ -2128,6 +2223,17 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
         const scopedCabinetId = this.currentCabinetId();
         if (!scopedCabinetId) {
           await ctx.reply('Внутренняя ошибка: нет контекста кабинета.');
+          return;
+        }
+
+        const spotAmount = await this.spotFlow.tryHandleSpotAmountText(uid, text);
+        if (spotAmount.handled) {
+          await ctx.reply(spotAmount.message);
+          return;
+        }
+        const spotSell = await this.spotFlow.tryHandleSpotSellPercentText(uid, text);
+        if (spotSell.handled) {
+          await ctx.reply(spotSell.message);
           return;
         }
 

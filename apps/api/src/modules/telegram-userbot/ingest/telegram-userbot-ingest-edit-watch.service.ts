@@ -1,9 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 
 import { formatError } from '../../../common/format-error';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AppLogService } from '../../app-log/app-log.service';
 import { CabinetService } from '../../cabinet/cabinet.service';
+import { TelegramSpotFlowService } from '../../telegram/services/telegram-spot-flow.service';
 import { UserbotSignalHashService } from '../userbot-signal-hash.service';
 import {
   USERBOT_INLINE_TEXT_MAX_CHARS,
@@ -33,11 +34,17 @@ export class TelegramUserbotIngestEditWatchService {
     private readonly userbotSignalHash: UserbotSignalHashService,
     private readonly signalLookup: TelegramUserbotIngestSignalLookupService,
     private readonly ingest: TelegramUserbotIngestService,
+    @Inject(forwardRef(() => TelegramSpotFlowService))
+    private readonly spotFlow: TelegramSpotFlowService,
   ) {}
+
+  clearEditWatch(ingestId: string): void {
+    this.clearEditWatchTimer(ingestId);
+  }
 
   clearAllEditWatches(): void {
     for (const id of this.editWatchTimers.keys()) {
-      this.clearEditWatch(id);
+      this.clearEditWatchTimer(id);
     }
   }
 
@@ -45,6 +52,12 @@ export class TelegramUserbotIngestEditWatchService {
    * После parse_incomplete / place_error: опрос Telegram; при смене текста — автоповтор ingest.
    */
   async scheduleEditWatch(ingestId: string): Promise<void> {
+    if (this.spotFlow.hasActiveSpotDialogForIngest(ingestId)) {
+      void this.appLog.append('info', 'telegram', 'Userbot: edit-watch пропущен — активный spot-диалог', {
+        ingestId,
+      });
+      return;
+    }
     const row = await this.prisma.tgUserbotIngest.findUnique({
       where: { id: ingestId },
       select: { id: true, chatId: true, messageId: true },
@@ -61,7 +74,7 @@ export class TelegramUserbotIngestEditWatchService {
       return;
     }
 
-    this.clearEditWatch(ingestId);
+    this.clearEditWatchTimer(ingestId);
     const deadlineMs = Date.now() + USERBOT_INGEST_EDIT_WATCH_TTL_MS;
     this.editWatchDeadlineMs.set(ingestId, deadlineMs);
     const timer = setInterval(() => {
@@ -75,7 +88,7 @@ export class TelegramUserbotIngestEditWatchService {
     });
   }
 
-  private clearEditWatch(ingestId: string): void {
+  private clearEditWatchTimer(ingestId: string): void {
     const t = this.editWatchTimers.get(ingestId);
     if (t) {
       clearInterval(t);
@@ -112,13 +125,16 @@ export class TelegramUserbotIngestEditWatchService {
   }
 
   private async tickEditWatch(ingestId: string): Promise<void> {
+    if (this.spotFlow.hasActiveSpotDialogForIngest(ingestId)) {
+      return;
+    }
     const deadlineMs = this.editWatchDeadlineMs.get(ingestId);
     if (deadlineMs == null) {
-      this.clearEditWatch(ingestId);
+      this.clearEditWatchTimer(ingestId);
       return;
     }
     if (Date.now() > deadlineMs) {
-      this.clearEditWatch(ingestId);
+      this.clearEditWatchTimer(ingestId);
       void this.appLog.append('info', 'telegram', 'Userbot: истекло ожидание правки сообщения', {
         ingestId,
       });

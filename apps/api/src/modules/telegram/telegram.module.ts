@@ -2,6 +2,7 @@ import { forwardRef, Module } from '@nestjs/common';
 
 import { AppLogModule } from '../app-log/app-log.module';
 import { BybitModule } from '../bybit/bybit.module';
+import { BybitSpotModule } from '../bybit-spot/bybit-spot.module';
 import { OrdersModule } from '../orders/orders.module';
 import { SettingsModule } from '../settings/settings.module';
 import { TranscriptModule } from '../transcript/transcript.module';
@@ -12,6 +13,7 @@ import {
   TelegramDigestSchedulerService,
   TelegramService,
   TelegramSignalDraftFlowService,
+  TelegramSpotFlowService,
 } from './services';
 
 @Module({
@@ -19,6 +21,7 @@ import {
     SettingsModule,
     forwardRef(() => TranscriptModule),
     forwardRef(() => BybitModule),
+    forwardRef(() => BybitSpotModule),
     forwardRef(() => OrdersModule),
     AppLogModule,
   ],
@@ -28,8 +31,9 @@ import {
     TelegramSignalDraftFlowService,
     TelegramChatMenuService,
     TelegramDigestSchedulerService,
+    TelegramSpotFlowService,
     TelegramService,
   ],
-  exports: [TelegramService],
+  exports: [TelegramService, TelegramSpotFlowService],
 })
 export class TelegramModule {}

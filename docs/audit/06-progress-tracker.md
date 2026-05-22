@@ -1839,3 +1839,14 @@
 - Manual verification: `npm run build -w apps/api`, `npm run check-types -w web` (pass); на стенде — включить автоотмену в `/settings?scope=cabinet`, сохранить, перезагрузить → ON; result без входа → `result_without_entry_cancelled`.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-156
+
+- Status: `done`
+- Scope: Спот-модуль `bybit-spot` и userbot-флоу: spot-only пары без `setLeverage`, интерактивная покупка/продажа, отдельный lifecycle poll, futures-пайплайн без регрессии.
+- Files: `apps/api/prisma/schema.prisma`, `migrations/20260522120000_signal_spot_fields/`, `apps/api/src/modules/bybit-spot/**`, `apps/api/src/modules/telegram/services/telegram-spot-flow.service.ts`, `telegram.service.ts`, `telegram-keyboards.util.ts`, `bybit.service.ts`, `bybit-signal-placement.service.ts`, `bybit.module.ts`, `telegram-userbot-ingest-pipeline.service.ts`, `telegram-userbot-ingest-signal-reply.service.ts`, `telegram-userbot-ingest-edit-watch.service.ts`, `orders.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: весь placement шёл через linear perpetual; spot-only пары давали `setLeverage failed: 10001` / `110074`; не было `marketType`, spot poll и Telegram-флоу.
+- Changes: Prisma `marketType`/`spotBaseQty`/`spotNotifiedJson`; модуль `bybit-spot` (instrument, placement, order-query, lifecycle poll, price watch, `routeUserbotSignalPlacement`); `TelegramSpotFlowService` (buy prompt, сумма USDT, TP/SL notify + sell); linear poll через `listOpenLinearSignals` без изменений тела; `preflightLinearPlacement` в `placeSignalOrders`; edit-watch guard при активном spot-диалоге.
+- Manual verification: `npm run build -w apps/api` (pass); на стенде — spot-only → prompt → market buy; несуществующая пара → «нет на бирже»; BTCUSDT linear без изменений; fill → TP notify → partial sell; edit-watch не requeue во время spot-диалога.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

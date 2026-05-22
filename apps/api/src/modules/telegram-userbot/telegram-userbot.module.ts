@@ -2,6 +2,7 @@ import { forwardRef, Module } from '@nestjs/common';
 
 import { AppLogModule } from '../app-log/app-log.module';
 import { BybitModule } from '../bybit/bybit.module';
+import { BybitSpotModule } from '../bybit-spot/bybit-spot.module';
 import { OrdersModule } from '../orders/orders.module';
 import { SettingsModule } from '../settings/settings.module';
 import { TelegramModule } from '../telegram';
@@ -29,6 +30,7 @@ import { UserbotSignalHashModule } from './userbot-signal-hash.module';
     SettingsModule,
     TranscriptModule,
     forwardRef(() => BybitModule),
+    forwardRef(() => BybitSpotModule),
     forwardRef(() => OrdersModule),
     AppLogModule,
     forwardRef(() => TelegramModule),
