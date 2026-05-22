@@ -25,6 +25,7 @@ import {
   MODEL_HISTORY_KEY,
   MODEL_KEYS,
   SETTINGS_SECTIONS,
+  USER_LEVEL_RESULT_SETTING_KEYS,
 } from './settings-page.constants';
 import {
   buildPutOperations,
@@ -83,7 +84,12 @@ export default function SettingsPage() {
           return isAdmin && ADMIN_GLOBAL_KEYS.has(key);
         }
         if (scope === 'cabinet') {
-          if (!CABINET_SCOPED_SETTING_KEY_SET.has(key)) return false;
+          if (
+            !CABINET_SCOPED_SETTING_KEY_SET.has(key) &&
+            !USER_LEVEL_RESULT_SETTING_KEYS.has(key)
+          ) {
+            return false;
+          }
           if (!isAdmin && ADMIN_GLOBAL_KEYS.has(key)) return false;
           return true;
         }
@@ -98,8 +104,10 @@ export default function SettingsPage() {
         ...section,
         keys: section.keys.filter((key) =>
           scope === 'cabinet'
-            ? CABINET_SCOPED_SETTING_KEY_SET.has(key)
-            : !CABINET_SCOPED_SETTING_KEY_SET.has(key),
+            ? CABINET_SCOPED_SETTING_KEY_SET.has(key) ||
+              USER_LEVEL_RESULT_SETTING_KEYS.has(key)
+            : !CABINET_SCOPED_SETTING_KEY_SET.has(key) &&
+              !USER_LEVEL_RESULT_SETTING_KEYS.has(key),
         ),
       }))
         .filter((section) => section.keys.length > 0)

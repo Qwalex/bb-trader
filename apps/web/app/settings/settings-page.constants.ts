@@ -24,6 +24,13 @@ export const ADMIN_GLOBAL_KEYS = new Set<string>([
   DIAGNOSTIC_MODELS_KEY,
   'POLLING_INTERVAL_MS',
 ]);
+
+/** Per-user (userSetting): редактируются в «Настройки кабинета», не cabinetSetting. */
+export const USER_LEVEL_RESULT_SETTING_KEYS = new Set<string>([
+  'TELEGRAM_USERBOT_NOTIFY_RESULT_WITHOUT_ENTRY',
+  'TELEGRAM_USERBOT_CANCEL_STALE_ORDERS_ON_RESULT_WITHOUT_ENTRY',
+]);
+
 export const KEYS = [
   { key: NAV_MENU_HIDDEN_SETTING_KEY, label: 'Скрытые пункты меню (бургер)' },
   { key: 'OPENROUTER_API_KEY', label: 'OpenRouter API key' },

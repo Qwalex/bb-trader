@@ -1828,3 +1828,14 @@
 - Manual verification: `npm run build -w apps/api` (pass); на стенде — неполный сигнал→правка→placement; place_error→правка без `duplicate_signal`; две быстрые правки при active job; partial ORDERS_PLACED — watch не стартует.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-155
+
+- Status: `done`
+- Scope: Userbot «result без входа» — автоотмена ордеров не срабатывала: переключатель в UI не сохранялся; runtime не читал legacy global `Setting`.
+- Files: `apps/web/app/settings/settings-page.constants.ts`, `apps/web/app/settings/page.tsx`, `apps/api/src/modules/settings/settings.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: `TELEGRAM_USERBOT_CANCEL_STALE_ORDERS_ON_RESULT_WITHOUT_ENTRY` и парный NOTIFY не входили в `visibleKeySet` cabinet scope → `saveAll` не отправлял PUT; `SettingsService.get()` при активном cabinet context не делал fallback на global `Setting` после пустого `userSetting` (в отличие от `getMany()`).
+- Changes: `USER_LEVEL_RESULT_SETTING_KEYS` — два флага видны и сохраняются в «Настройки кабинета» (→ `userSetting` владельца); `get()` — fallback на global `Setting` при не cabinet-isolated ключе.
+- Manual verification: `npm run build -w apps/api`, `npm run check-types -w web` (pass); на стенде — включить автоотмену в `/settings?scope=cabinet`, сохранить, перезагрузить → ON; result без входа → `result_without_entry_cancelled`.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

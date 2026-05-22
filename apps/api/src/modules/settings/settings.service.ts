@@ -189,9 +189,11 @@ export class SettingsService {
         return userRow.value;
       }
     }
-    if (!ownerUserId || this.isGlobalSharedKey(key)) {
+    const scopedCabinetIsolation =
+      Boolean(cabinetId) && this.isCabinetScopedKey(key) && !this.isGlobalSharedKey(key);
+    if (!scopedCabinetIsolation) {
       const row = await this.prisma.setting.findUnique({ where: { key } });
-      if (row?.value !== undefined && row?.value !== '') {
+      if (row?.value !== undefined && row.value !== '') {
         this.writeCache(cabinetId, key, row.value);
         return row.value;
       }
