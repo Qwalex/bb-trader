@@ -108,16 +108,28 @@ export class WorkerQueueService implements OnModuleInit {
     delayMs = 0,
   ): Promise<void> {
     const runAfter = new Date(Date.now() + Math.max(0, delayMs));
-    await this.prisma.workerQueueJob.upsert({
+    const existing = await this.prisma.workerQueueJob.findUnique({
       where: { jobKey },
-      create: {
-        queue,
-        jobKey,
-        payloadJson: JSON.stringify(payload),
-        status: 'pending',
-        runAfter,
-      },
-      update: {
+      select: { status: true },
+    });
+    if (!existing) {
+      await this.prisma.workerQueueJob.create({
+        data: {
+          queue,
+          jobKey,
+          payloadJson: JSON.stringify(payload),
+          status: 'pending',
+          runAfter,
+        },
+      });
+      return;
+    }
+    if (existing.status === 'running') {
+      return;
+    }
+    await this.prisma.workerQueueJob.update({
+      where: { jobKey },
+      data: {
         payloadJson: JSON.stringify(payload),
         status: 'pending',
         runAfter,
@@ -128,20 +140,46 @@ export class WorkerQueueService implements OnModuleInit {
     });
   }
 
-  async enqueuePollSweep(reason = 'interval'): Promise<void> {
+  async enqueuePollSweep(reason = 'interval', delayMs = 0): Promise<void> {
     const cabinets = await this.cabinets.listCabinets();
     for (const cabinet of cabinets) {
+      await this.enqueueCabinetPoll(cabinet.id, reason, delayMs);
+    }
+  }
+
+  /**
+   * Один кабинет — upsert по `poll-cabinet:{id}` сливает частые триггеры (WS, post-placement).
+   * Если основной poll уже running — планируем followup, не сбрасывая running job.
+   */
+  async enqueueCabinetPoll(
+    cabinetId: string,
+    reason = 'poll-cabinet',
+    delayMs = 0,
+  ): Promise<void> {
+    const id = cabinetId.trim();
+    if (!id) {
+      return;
+    }
+    const jobKey = `poll-cabinet:${id}`;
+    const payload: WorkQueuePayload = {
+      type: 'poll-cabinet',
+      cabinetId: id,
+      reason,
+    };
+    const existing = await this.prisma.workerQueueJob.findUnique({
+      where: { jobKey },
+      select: { status: true },
+    });
+    if (existing?.status === 'running') {
       await this.enqueue(
         WORK_QUEUE_RECONCILE,
-        `poll-cabinet:${cabinet.id}`,
-        {
-          type: 'poll-cabinet',
-          cabinetId: cabinet.id,
-          reason,
-        },
-        0,
+        `${jobKey}:followup`,
+        { ...payload, reason: `${reason}-followup` },
+        Math.max(delayMs, 2_000),
       );
+      return;
     }
+    await this.enqueue(WORK_QUEUE_RECONCILE, jobKey, payload, delayMs);
   }
 
   async enqueueWsReconcile(cabinetId: string, symbol?: string): Promise<void> {

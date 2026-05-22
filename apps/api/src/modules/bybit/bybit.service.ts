@@ -100,7 +100,7 @@ export class BybitService implements OnApplicationBootstrap {
   async onApplicationBootstrap(): Promise<void> {
     const tryStart = async (): Promise<boolean> =>
       this.bybitClient.startPrivateWsSync({
-        onWsUpdate: () => this.workers.enqueuePollSweep('bybit-ws-update'),
+        onWsUpdate: () => this.workers.enqueuePollSweep('bybit-ws-update', 100),
       });
     const ok = await tryStart();
     if (!ok) {
@@ -171,12 +171,41 @@ export class BybitService implements OnApplicationBootstrap {
     rawMessage: string | undefined,
     origin?: SignalOrderOrigin,
   ): Promise<PlaceOrdersResult> {
-    return this.bybitSignalPlacement.placeSignalOrders(
+    const pollCabinetId = this.currentCabinetId();
+    const result = await this.bybitSignalPlacement.placeSignalOrders(
       signal,
       rawMessage,
       origin,
       await this.createSignalPlacementPorts(),
     );
+    if (result.ok) {
+      void this.scheduleOpenOrdersPollAsync('post-placement', 200, pollCabinetId);
+    }
+    return result;
+  }
+
+  /**
+   * Ближайший poll (TP/SL, статусы ордеров) без ожидания POLLING_INTERVAL_MS.
+   * @param cabinetId — активный кабинет контекста; без него — sweep по всем кабинетам (не дефолтный один).
+   */
+  scheduleOpenOrdersPoll(reason: string, delayMs = 200, cabinetId?: string | null): void {
+    void this.scheduleOpenOrdersPollAsync(reason, delayMs, cabinetId ?? this.currentCabinetId());
+  }
+
+  private async scheduleOpenOrdersPollAsync(
+    reason: string,
+    delayMs: number,
+    cabinetId?: string | null,
+  ): Promise<void> {
+    const id = cabinetId?.trim();
+    if (id) {
+      await this.workers.enqueueCabinetPoll(id, reason, delayMs);
+      return;
+    }
+    this.logger.debug(
+      `scheduleOpenOrdersPoll(${reason}): нет cabinet context — poll sweep всех кабинетов`,
+    );
+    await this.workers.enqueuePollSweep(reason, delayMs);
   }
 
   async wouldDuplicateActivePairDirection(

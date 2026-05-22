@@ -175,7 +175,7 @@ export const KEYS = [
   {
     key: 'POLLING_INTERVAL_MS',
     label:
-      'Bybit: интервал опроса ордеров/позиций (мс). По умолчанию 2000; 0 — отключить (поломает сопровождение сделок; только отладка). Только глобально, для администратора',
+      'Bybit: интервал фонового опроса ордеров и позиций (мс). По умолчанию 2000; 0 — выключить (TP/SL и статусы не обновятся). Глобально для всего API, только администратор',
   },
   {
     key: 'BYBIT_ACCOUNT_MAX_CONCURRENCY',
@@ -276,13 +276,13 @@ export const SETTINGS_SECTIONS: { id: string; title: string; keys: string[] }[] 
       'DIAGNOSTIC_MAX_LOG_LINES',
       'APPLOG_ENABLED',
       'APPLOG_LOG_NOISY_EVENTS',
-      'POLLING_INTERVAL_MS',
     ],
   },
   {
     id: 'bybit',
     title: 'Bybit',
     keys: [
+      'POLLING_INTERVAL_MS',
       'BYBIT_TESTNET',
       'BYBIT_API_KEY_TESTNET',
       'BYBIT_API_SECRET_TESTNET',

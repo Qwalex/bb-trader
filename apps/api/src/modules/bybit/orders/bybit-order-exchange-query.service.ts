@@ -69,46 +69,92 @@ export class BybitOrderExchangeQueryService {
     expectedQty?: number,
   ): Promise<string | undefined> {
     const sym = normalizeTradingPair(pair);
+    for (const orderFilter of ['Order', 'StopOrder'] as const) {
+      const status = await this.fetchOrderStatusForFilter(client, sym, orderId, orderFilter, {
+        includeHistScan: false,
+      });
+      if (status) {
+        return status;
+      }
+    }
+    if (expectedQty !== undefined && expectedQty > 0) {
+      const ok = await this.inferFilledFromExecutions(
+        client,
+        sym,
+        orderId,
+        expectedQty,
+      );
+      if (ok) {
+        return 'Filled';
+      }
+    }
+    for (const orderFilter of ['Order', 'StopOrder'] as const) {
+      const status = await this.fetchOrderStatusForFilter(client, sym, orderId, orderFilter, {
+        includeHistScan: true,
+        skipActiveAndDirectHist: true,
+      });
+      if (status) {
+        return status;
+      }
+    }
+    return undefined;
+  }
+
+  /** UTA linear: обычные лимитки (Order) и условные входы (StopOrder) — разные orderFilter. */
+  private async fetchOrderStatusForFilter(
+    client: RestClientV5,
+    sym: string,
+    orderId: string,
+    orderFilter: 'Order' | 'StopOrder',
+    options?: { includeHistScan?: boolean; skipActiveAndDirectHist?: boolean },
+  ): Promise<string | undefined> {
+    const includeHistScan = options?.includeHistScan !== false;
+    const skipActiveAndDirectHist = options?.skipActiveAndDirectHist === true;
     const base = {
       category: 'linear' as const,
       symbol: sym,
       settleCoin: 'USDT' as const,
-      orderFilter: 'Order' as const,
+      orderFilter,
     };
-    try {
-      const active = await this.rateLimit.runBybitCall(() =>
-        client.getActiveOrders({
-          ...base,
-          orderId,
-          openOnly: 0,
-          limit: 1,
-        }),
-      );
-      if (active.retCode === 0 && (active.result?.list?.length ?? 0) > 0) {
-        return active.result!.list![0]!.orderStatus;
+    if (!skipActiveAndDirectHist) {
+      try {
+        const active = await this.rateLimit.runBybitCall(() =>
+          client.getActiveOrders({
+            ...base,
+            orderId,
+            openOnly: 0,
+            limit: 1,
+          }),
+        );
+        if (active.retCode === 0 && (active.result?.list?.length ?? 0) > 0) {
+          return active.result!.list![0]!.orderStatus;
+        }
+      } catch (e) {
+        if (this.rateLimit.isRateLimitError(e)) {
+          throw e;
+        }
+        this.logger.debug(`getActiveOrders ${orderFilter} ${orderId}: ${formatError(e)}`);
       }
-    } catch (e) {
-      if (this.rateLimit.isRateLimitError(e)) {
-        throw e;
+      try {
+        const hist = await this.rateLimit.runBybitCall(() =>
+          client.getHistoricOrders({
+            ...base,
+            orderId,
+            limit: 1,
+          }),
+        );
+        if (hist.retCode === 0 && (hist.result?.list?.length ?? 0) > 0) {
+          return hist.result!.list![0]!.orderStatus;
+        }
+      } catch (e) {
+        if (this.rateLimit.isRateLimitError(e)) {
+          throw e;
+        }
+        this.logger.debug(`getHistoricOrders ${orderFilter} ${orderId}: ${formatError(e)}`);
       }
-      this.logger.debug(`getActiveOrders ${orderId}: ${formatError(e)}`);
     }
-    try {
-      const hist = await this.rateLimit.runBybitCall(() =>
-        client.getHistoricOrders({
-          ...base,
-          orderId,
-          limit: 1,
-        }),
-      );
-      if (hist.retCode === 0 && (hist.result?.list?.length ?? 0) > 0) {
-        return hist.result!.list![0]!.orderStatus;
-      }
-    } catch (e) {
-      if (this.rateLimit.isRateLimitError(e)) {
-        throw e;
-      }
-      this.logger.debug(`getHistoricOrders ${orderId}: ${formatError(e)}`);
+    if (!includeHistScan) {
+      return undefined;
     }
     try {
       const histScan = await this.rateLimit.runBybitCall(() =>
@@ -134,18 +180,7 @@ export class BybitOrderExchangeQueryService {
       if (this.rateLimit.isRateLimitError(e)) {
         throw e;
       }
-      this.logger.debug(`getHistoricOrders scan ${orderId}: ${formatError(e)}`);
-    }
-    if (expectedQty !== undefined && expectedQty > 0) {
-      const ok = await this.inferFilledFromExecutions(
-        client,
-        sym,
-        orderId,
-        expectedQty,
-      );
-      if (ok) {
-        return 'Filled';
-      }
+      this.logger.debug(`getHistoricOrders scan ${orderFilter} ${orderId}: ${formatError(e)}`);
     }
     return undefined;
   }

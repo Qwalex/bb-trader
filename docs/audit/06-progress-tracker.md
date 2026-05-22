@@ -1840,10 +1840,54 @@
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
 
+### AUD-160
+
+- Status: `done`
+- Scope: Multi-cabinet — poll/TP/SL не должен сводиться к дефолтному кабинету.
+- Files: `apps/api/src/modules/bybit/bybit.service.ts`, `apps/api/src/modules/worker-queue/worker-queue.service.ts`, `apps/api/src/modules/bybit-spot/orders/bybit-spot-placement.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: post-placement/WS poll после AUD-158 брал `defaultCabinetId` без контекста; WS триггерил один кабинет вместо sweep; `enqueue` upsert сбрасывал `running` job в `pending`.
+- Changes: post-placement фиксирует `cabinetId` из ALS на входе; без контекста — `enqueuePollSweep` (все кабинеты); WS → sweep с delay 100 ms; `enqueue` не трогает `running`; при running poll — followup job `poll-cabinet:{id}:followup`.
+- Manual verification: `npm run build -w apps/api`; 2+ кабинета — вход в не-дефолтном → TP/SL; WS/interval — poll каждого кабинета.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-159
+
+- Status: `done`
+- Scope: Web settings — `POLLING_INTERVAL_MS` в секции «Bybit», не «Диагностика».
+- Files: `apps/web/app/settings/settings-page.constants.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: после AUD-068 ключ оказался в «Диагностика», хотя напрямую влияет на сопровождение сделок (TP/SL, статусы ордеров).
+- Changes: перенос в секцию `bybit` (на `scope=account` у админа — блок «Bybit» с интервалом poll; в кабинете ключ по-прежнему не показывается).
+- Manual verification: `npm run check-types -w apps/web`; `/settings?scope=account` — «Bybit» → интервал опроса.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-158
+
+- Status: `done`
+- Scope: Bybit — ускорение постановки TP/SL после входа (poll не ждал только интервал).
+- Files: `apps/api/src/modules/worker-queue/worker-queue.service.ts`, `apps/api/src/modules/bybit/bybit.service.ts`, `apps/api/src/modules/bybit/orders/bybit-order-exchange-query.service.ts`, `apps/api/src/modules/bybit-spot/orders/bybit-spot-placement.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: TP/SL ставятся только в poll; после placement не было немедленного poll; WS триггерил poll sweep по всем кабинетам; статус ордера тянул тяжёлый hist-scan до executions и StopOrder.
+- Changes: `enqueueCabinetPoll` + post-placement poll (200 ms); WS → poll одного кабинета (100 ms); fetch status: active/hist по Order+StopOrder → executions → hist-scan fallback.
+- Manual verification: `npm run build -w apps/api` (pass); после входа TP/SL в течение ~1–3 с, не минуты.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-157
+
+- Status: `done`
+- Scope: Bybit poll — статус условных входов (`StopOrder`) не обновлялся → TP/SL не выставлялись после fill.
+- Files: `apps/api/src/modules/bybit/orders/bybit-order-exchange-query.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: `fetchOrderStatusFromExchange` запрашивал только `orderFilter: Order`; входы «stop-limit» (цена входа хуже last) создаются как `StopOrder` — в БД оставались `NEW`, `hasOpenEntryOrders` блокировал `placeTpSplitIfNeeded`.
+- Changes: poll перебирает `Order` и `StopOrder` (как exposure/cancel); fallback по executions без изменений.
+- Manual verification: `npm run build -w apps/api` (pass); на стенде — вход stop-limit → fill → в poll статус `Filled`, событие `BYBIT_TP_LIMITS_PLACED` и SL на позиции.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
 ### AUD-156
 
 - Status: `done`
-- Scope: Спот-модуль `bybit-spot` и userbot-флоу: spot-only пары без `setLeverage`, интерактивная покупка/продажа, отдельный lifecycle poll, futures-пайплайн без регрессии.
+- Scope: Спот-модуль `bybit-spot` и userbot-флоу: spot-only пары без `setLeverage`, интерактивная покупка/продажа, отдельный lifecycle poll, futures-pайплайн без регрессии.
 - Files: `apps/api/prisma/schema.prisma`, `migrations/20260522120000_signal_spot_fields/`, `apps/api/src/modules/bybit-spot/**`, `apps/api/src/modules/telegram/services/telegram-spot-flow.service.ts`, `telegram.service.ts`, `telegram-keyboards.util.ts`, `bybit.service.ts`, `bybit-signal-placement.service.ts`, `bybit.module.ts`, `telegram-userbot-ingest-pipeline.service.ts`, `telegram-userbot-ingest-signal-reply.service.ts`, `telegram-userbot-ingest-edit-watch.service.ts`, `orders.service.ts`, `docs/audit/06-progress-tracker.md`
 - Findings: весь placement шёл через linear perpetual; spot-only пары давали `setLeverage failed: 10001` / `110074`; не было `marketType`, spot poll и Telegram-флоу.
 - Changes: Prisma `marketType`/`spotBaseQty`/`spotNotifiedJson`; модуль `bybit-spot` (instrument, placement, order-query, lifecycle poll, price watch, `routeUserbotSignalPlacement`); `TelegramSpotFlowService` (buy prompt, сумма USDT, TP/SL notify + sell); linear poll через `listOpenLinearSignals` без изменений тела; `preflightLinearPlacement` в `placeSignalOrders`; edit-watch guard при активном spot-диалоге.

@@ -4,6 +4,7 @@ import { normalizeTradingPair } from '@repo/shared';
 
 import { formatError } from '../../../common/format-error';
 import { AppLogService } from '../../app-log/app-log.service';
+import { BybitService } from '../../bybit/bybit.service';
 import { CabinetContextService } from '../../cabinet/cabinet-context.service';
 import { OrdersService } from '../../orders/orders.service';
 import { formatPriceToTick, formatQtyToStep } from '../../bybit/instrument/bybit-qty.util';
@@ -23,6 +24,8 @@ export class BybitSpotPlacementService {
     private readonly cabinetContext: CabinetContextService,
     @Inject(forwardRef(() => OrdersService))
     private readonly orders: OrdersService,
+    @Inject(forwardRef(() => BybitService))
+    private readonly bybit: BybitService,
   ) {}
 
   async placeBuy(params: SpotBuyParams): Promise<PlaceOrdersResult> {
@@ -157,6 +160,11 @@ export class BybitSpotPlacementService {
         bybitOrderIds: bybitIds,
         cabinetId: this.cabinetContext.getCabinetId(),
       });
+      this.bybit.scheduleOpenOrdersPoll(
+        'spot-post-placement',
+        200,
+        this.cabinetContext.getCabinetId(),
+      );
       return { ok: true, signalId: signalRow.id, bybitOrderIds: bybitIds };
     } catch (e) {
       this.logger.warn(`placeBuy ${symbol}: ${formatError(e)}`);
