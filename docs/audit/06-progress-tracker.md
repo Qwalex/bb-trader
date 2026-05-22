@@ -1840,6 +1840,17 @@
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
 
+### AUD-161
+
+- Status: `done`
+- Scope: Railway cabinets — crash API при старте (Nest DI BybitSpotModule).
+- Files: `apps/api/src/modules/bybit/bybit.module.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: `BybitSpotInstrumentService` / spot placement требуют `BybitClientService`, `BybitRateLimitService`; `BybitModule` их не экспортировал → `UnknownDependenciesException` на `start:railway`.
+- Changes: export `BybitClientService`, `BybitRateLimitService` из `BybitModule`.
+- Manual verification: `npm run build -w apps/api`; локальный `node dist/main.js` — `BybitSpotModule dependencies initialized`; Railway cabinets Api deploy SUCCESS.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
 ### AUD-160
 
 - Status: `done`

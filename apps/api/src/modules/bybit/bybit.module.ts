@@ -69,6 +69,11 @@ import { BybitSpotModule } from '../bybit-spot/bybit-spot.module';
     BalanceAlertService,
     BalanceAlertSchedulerService,
   ],
-  exports: [BybitService, BalanceSnapshotService],
+  exports: [
+    BybitService,
+    BalanceSnapshotService,
+    BybitClientService,
+    BybitRateLimitService,
+  ],
 })
 export class BybitModule {}
