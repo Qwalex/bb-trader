@@ -30,6 +30,7 @@ import { BybitNotifyService } from './notify/bybit-notify.service';
 import { BybitOrderExchangeQueryService } from './orders/bybit-order-exchange-query.service';
 import { BybitPlacementValidationService } from './orders/bybit-placement-validation.service';
 import { BybitOrderLifecyclePollService } from './orders/bybit-order-lifecycle-poll.service';
+import { createLinearPollOrdersPorts } from './orders/bybit-order-lifecycle-poll-orders.util';
 import {
   isFilledOrderStatus,
   isInsufficientBalanceError,
@@ -447,10 +448,7 @@ export class BybitService implements OnApplicationBootstrap {
     const orders = this.orders;
     return {
       getClient: () => this.balanceInstrument.getClient(),
-      orders: {
-        ...orders,
-        listOpenSignals: () => orders.listOpenLinearSignals(),
-      } as typeof orders,
+      orders: createLinearPollOrdersPorts(orders),
       stalePairDirectionKey: (pair, direction) =>
         stalePairDirectionKeyUtil(cabinetSegment, pair, direction),
       staleFlatPollCounts: this.staleFlatPollCounts,

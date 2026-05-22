@@ -1840,6 +1840,17 @@
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
 
+### AUD-162
+
+- Status: `done`
+- Scope: Poll linear — TP/SL не выставлялись на всех кабинетах (регрессия spread в poll ports).
+- Files: `apps/api/src/modules/bybit/orders/bybit-order-lifecycle-poll-orders.util.ts`, `apps/api/src/modules/bybit/bybit.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: в `createOrderLifecyclePollPorts` `{ ...orders }` не копирует методы prototype (`getSignalWithOrders`, `updateOrder`, `reconcileStaleOpenSignalsForPairAndDirection`); worker job падал до `ensureStopLoss`/`placeTpSplit` (Railway cabinets, TON/QSInnerCircleVipFree).
+- Changes: `createLinearPollOrdersPorts(orders)` — явная делегация четырёх методов + `listOpenLinearSignals`.
+- Manual verification: `npm run build -w apps/api`; Railway cabinets — нет `is not a function` в логах, poll завершается, TP/SL на открытых позициях.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
 ### AUD-161
 
 - Status: `done`
