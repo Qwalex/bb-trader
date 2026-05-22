@@ -1840,6 +1840,17 @@
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
 
+### AUD-163
+
+- Status: `done`
+- Scope: Multi-cabinet poll — TP/SL не доходили до кабинетов из-за заторa worker queue reconcile.
+- Files: `apps/api/src/modules/worker-queue/worker-queue.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: interval-sweep каждые ~2 с сбрасывал все `poll-cabinet:*` в pending; ordering по `createdAt` + один worker ≈18 с на тяжёлый кабинет → QSInnerCircleVipFree не получал poll (в логах только `cmobm54…`).
+- Changes: pending poll не перезаписывается interval-sweep; priority bump для `post-placement`/WS (`runAfter` −5 с); ordering `runAfter` + `updatedAt`; `WORKER_QUEUE_POLL_CONCURRENCY` (default 3) — параллельные poll разных кабинетов.
+- Manual verification: `npm run build -w apps/api`; Railway cabinets — в логах poll по нескольким cabinetId, TP/SL на TON.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
 ### AUD-162
 
 - Status: `done`
@@ -1847,7 +1858,7 @@
 - Files: `apps/api/src/modules/bybit/orders/bybit-order-lifecycle-poll-orders.util.ts`, `apps/api/src/modules/bybit/bybit.service.ts`, `docs/audit/06-progress-tracker.md`
 - Findings: в `createOrderLifecyclePollPorts` `{ ...orders }` не копирует методы prototype (`getSignalWithOrders`, `updateOrder`, `reconcileStaleOpenSignalsForPairAndDirection`); worker job падал до `ensureStopLoss`/`placeTpSplit` (Railway cabinets, TON/QSInnerCircleVipFree).
 - Changes: `createLinearPollOrdersPorts(orders)` — явная делегация четырёх методов + `listOpenLinearSignals`.
-- Manual verification: `npm run build -w apps/api`; Railway cabinets — нет `is not a function` в логах, poll завершается, TP/SL на открытых позициях.
+- Manual verification: `npm run build -w apps/api`; runtime smoke — все 4 метода в ports; Railway cabinets deploy `d02e3e5` SUCCESS, `/health` 200; в логах Api после деплоя 0× `is not a function`, нет `queue job … failed` для poll-cabinet (только slow reconcile).
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
 

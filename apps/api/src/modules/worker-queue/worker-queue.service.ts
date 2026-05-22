@@ -19,6 +19,8 @@ export class WorkerQueueService implements OnModuleInit {
   private readonly pollMs = 900;
   private readonly maxAttempts = 8;
   private readonly staleLockMs = 10 * 60 * 1000;
+  /** Параллельные poll-cabinet на разных кабинетах (очередь иначе «залипает» на одном тяжёлом). */
+  private readonly reconcilePollConcurrency = WorkerQueueService.readPollConcurrency();
   private running = false;
   private loopIteration = 0;
 
@@ -39,6 +41,11 @@ export class WorkerQueueService implements OnModuleInit {
     if (process.env.WORKER_QUEUE_ENABLED?.trim() === 'false') {
       this.logger.warn('worker queue disabled via WORKER_QUEUE_ENABLED=false');
       return;
+    }
+    if (this.reconcilePollConcurrency > 1) {
+      this.logger.log(
+        `worker queue reconcile poll concurrency=${this.reconcilePollConcurrency}`,
+      );
     }
     setTimeout(async () => {
       await this.recoverStaleRunningJobs();
@@ -101,6 +108,32 @@ export class WorkerQueueService implements OnModuleInit {
     );
   }
 
+  private static readPollConcurrency(): number {
+    const raw = Number(process.env.WORKER_QUEUE_POLL_CONCURRENCY ?? 3);
+    if (!Number.isFinite(raw)) {
+      return 3;
+    }
+    return Math.min(Math.max(Math.trunc(raw), 1), 8);
+  }
+
+  /** post-placement / WS — poll раньше interval-sweep в общей очереди reconcile. */
+  private static isPriorityPollReason(reason: string): boolean {
+    const r = reason.trim().toLowerCase();
+    return (
+      r.includes('post-placement') ||
+      r.startsWith('bybit-ws') ||
+      r.includes('post_placement')
+    );
+  }
+
+  private static resolvePollRunAfter(reason: string, delayMs: number): Date {
+    const base = Date.now() + Math.max(0, delayMs);
+    if (WorkerQueueService.isPriorityPollReason(reason)) {
+      return new Date(base - 5_000);
+    }
+    return new Date(base);
+  }
+
   async enqueue(
     queue: WorkQueueName,
     jobKey: string,
@@ -150,6 +183,7 @@ export class WorkerQueueService implements OnModuleInit {
   /**
    * Один кабинет — upsert по `poll-cabinet:{id}` сливает частые триггеры (WS, post-placement).
    * Если основной poll уже running — планируем followup, не сбрасывая running job.
+   * Interval-sweep не сбрасывает уже pending job (иначе один кабинет с min createdAt монополизирует очередь).
    */
   async enqueueCabinetPoll(
     cabinetId: string,
@@ -166,20 +200,57 @@ export class WorkerQueueService implements OnModuleInit {
       cabinetId: id,
       reason,
     };
+    const runAfter = WorkerQueueService.resolvePollRunAfter(reason, delayMs);
+    const priority = WorkerQueueService.isPriorityPollReason(reason);
     const existing = await this.prisma.workerQueueJob.findUnique({
       where: { jobKey },
-      select: { status: true },
+      select: { status: true, runAfter: true },
     });
     if (existing?.status === 'running') {
       await this.enqueue(
         WORK_QUEUE_RECONCILE,
         `${jobKey}:followup`,
         { ...payload, reason: `${reason}-followup` },
-        Math.max(delayMs, 2_000),
+        priority ? Math.max(delayMs, 500) : Math.max(delayMs, 2_000),
       );
       return;
     }
-    await this.enqueue(WORK_QUEUE_RECONCILE, jobKey, payload, delayMs);
+    if (existing?.status === 'pending') {
+      if (priority) {
+        await this.prisma.workerQueueJob.update({
+          where: { jobKey },
+          data: {
+            payloadJson: JSON.stringify(payload),
+            runAfter,
+            error: null,
+          },
+        });
+      }
+      return;
+    }
+    if (!existing) {
+      await this.prisma.workerQueueJob.create({
+        data: {
+          queue: WORK_QUEUE_RECONCILE,
+          jobKey,
+          payloadJson: JSON.stringify(payload),
+          status: 'pending',
+          runAfter,
+        },
+      });
+      return;
+    }
+    await this.prisma.workerQueueJob.update({
+      where: { jobKey },
+      data: {
+        payloadJson: JSON.stringify(payload),
+        status: 'pending',
+        runAfter,
+        error: null,
+        lockedAt: null,
+        finishedAt: null,
+      },
+    });
   }
 
   async enqueueWsReconcile(cabinetId: string, symbol?: string): Promise<void> {
@@ -270,7 +341,7 @@ export class WorkerQueueService implements OnModuleInit {
         }
         await Promise.all([
           this.runQueue(WORK_QUEUE_EXECUTION),
-          this.runQueue(WORK_QUEUE_RECONCILE),
+          this.runReconcileQueues(),
           this.runQueue(WORK_QUEUE_NOTIFICATIONS),
         ]);
       } catch (e) {
@@ -309,6 +380,14 @@ export class WorkerQueueService implements OnModuleInit {
     }
   }
 
+  private async runReconcileQueues(): Promise<void> {
+    const tasks: Promise<void>[] = [];
+    for (let i = 0; i < this.reconcilePollConcurrency; i += 1) {
+      tasks.push(this.runQueue(WORK_QUEUE_RECONCILE));
+    }
+    await Promise.all(tasks);
+  }
+
   private async runQueue(queue: WorkQueueName): Promise<void> {
     const job = await this.prisma.workerQueueJob.findFirst({
       where: {
@@ -316,7 +395,7 @@ export class WorkerQueueService implements OnModuleInit {
         status: 'pending',
         runAfter: { lte: new Date() },
       },
-      orderBy: [{ runAfter: 'asc' }, { createdAt: 'asc' }],
+      orderBy: [{ runAfter: 'asc' }, { updatedAt: 'asc' }],
       select: {
         id: true,
         payloadJson: true,
