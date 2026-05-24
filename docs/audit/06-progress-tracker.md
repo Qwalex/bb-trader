@@ -1840,6 +1840,17 @@
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
 
+### AUD-165
+
+- Status: `done`
+- Scope: Userbot — повторный parse после `parse_error` (например «Model did not return valid JSON»).
+- Files: `apps/api/src/modules/telegram-userbot/telegram-userbot.constants.ts`, `apps/api/src/modules/telegram-userbot/ingest/telegram-userbot-ingest-parse-retry.service.ts`, `apps/api/src/modules/telegram-userbot/ingest/telegram-userbot-ingest-pipeline.service.ts`, `apps/api/src/modules/telegram-userbot/telegram-userbot.types.ts`, `apps/api/src/modules/telegram-userbot/telegram-userbot.module.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: при transient JSON-ошибке OpenRouter ingest оставался в `parse_error` без повторной попытки.
+- Changes: `TelegramUserbotIngestParseRetryService` — setInterval каждые 5 мин, TTL 1 ч (до 12 попыток); re-enqueue с `source: parse-retry`, без спама в бот; успех/placed → stop; активная сделка по message → skip; повторный fail не сбрасывает окно TTL.
+- Manual verification: `npm run build -w apps/api` (pass); после деплоя — `/logs`: `Userbot: запланирован повтор parse`, `Userbot: повтор parse после parse_error`.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
 ### AUD-164
 
 - Status: `done`
