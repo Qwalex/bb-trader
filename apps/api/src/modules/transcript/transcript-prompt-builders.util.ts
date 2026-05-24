@@ -106,23 +106,23 @@ Return ONLY strict JSON:
 }
 
 Classification rules:
-1. Return "signal" ONLY for a fresh actionable trade setup with pair, side, stop-loss, and at least one take-profit. Entry is optional: if it is omitted, treat it as market entry at the signal placement stage. If BOTH market and limit entry are described, treat as limit entry (the limit price counts as the setup). If any of the required fields above is missing or ambiguous, do NOT return "signal". Leverage and size are optional.
+1. Return "signal" for a fresh trade setup when pair and side (long/short) are clearly named — including incomplete stubs without entry, stop-loss, or take-profit yet (e.g. "INJUSDT SWING LONG"). The parse stage will handle missing levels. Entry is optional when present later. If BOTH market and limit entry are described, treat as limit entry. Leverage and size are optional. Do NOT require SL/TP at classification time.
 1.1. Distinguish labels "SIGNAL" and "SIGNAL ID": a plain "SIGNAL" label is a weak hint of a new setup; "SIGNAL ID" usually references an existing setup and can be close/reentry/result. Do NOT classify as "signal" by "SIGNAL ID" label alone.
 2. Return "close" when the current message explicitly says close/closed/cancel/закрыт/отмена for a trade and it is not a TP/SL result report. Quoted/replied context strongly indicates "close", but even without a quote explicit close wording should still be classified as "close" rather than "result".
 3. Return "reentry" ONLY when the current message is a re-entry / add-entry / update instruction for a previously quoted/replied signal. A quoted/replied context is required.
 4. Return "result" for outcome/performance messages about an existing or past trade: TP hit, SL hit, closed trade report, profit/loss, PNL, percentages, duration, period, recap, statistics, performance summary.
 5. If the text explicitly says close/closed but does NOT mention TP, take profit, SL, stop loss, target reached, тейк, стоп, or similar hit markers, prefer "close" over "result".
 6. If the text contains result markers such as TP/SL outcome markers, target reached markers, profit/loss, PNL, duration/period, or performance summary, return "result".
-7. Return "other" for everything else: commentary, chat, partial follow-ups, incomplete ideas, or anything that is not clearly one of the categories above.
+7. Return "other" for commentary, chat, and unrelated text — but NOT for incomplete setup stubs that already name pair and side (those are "signal").
 
 Priority:
 - explicit manual close wording > close
 - quoted re-entry/update > reentry
-- fresh full setup > signal
+- fresh setup stub or full setup (pair + side) > signal
 - outcome/performance report > result
 - otherwise > other
 
-Be conservative: if unsure, return "other".`;
+Be conservative for close/reentry/result; for pair+side setup stubs prefer "signal" over "other".`;
 }
 
 export function buildFilterPatternGenerationPrompt(kind: string): string {

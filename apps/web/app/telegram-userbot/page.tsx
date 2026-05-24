@@ -425,7 +425,16 @@ export default function TelegramUserbotPage() {
     if (row.classification === 'result') {
       return 'Результат по сигналу';
     }
+    switch (row.status) {
+      case 'parse_incomplete':
+        return 'Прочитано -> частично распознано';
+      case 'parse_error':
+        return 'Прочитано -> ошибка распознавания';
+    }
     if (row.classification !== 'signal') {
+      if (row.status === 'ignored') {
+        return 'Не сигнал (ожидание правки в канале)';
+      }
       return 'Не сигнал';
     }
     switch (row.status) {
@@ -443,10 +452,6 @@ export default function TelegramUserbotPage() {
         return 'Прочитано -> распознано -> отменен (дубликат)';
       case 'place_error':
         return 'Прочитано -> распознано -> ошибка установки';
-      case 'parse_incomplete':
-        return 'Прочитано -> частично распознано';
-      case 'parse_error':
-        return 'Прочитано -> ошибка распознавания';
       default:
         return 'Прочитано';
     }

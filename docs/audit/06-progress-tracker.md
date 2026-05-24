@@ -1949,3 +1949,14 @@
 - Manual verification: `npm run build -w apps/api` (pass); на стенде — spot-only → prompt → market buy; несуществующая пара → «нет на бирже»; BTCUSDT linear без изменений; fill → TP notify → partial sell; edit-watch не requeue во время spot-диалога.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-166
+
+- Status: `done`
+- Scope: Userbot — «INJUSDT SWING LONG» и аналоги: incomplete stub → parse_incomplete + edit-watch; misclassified ignored тоже под наблюдением.
+- Files: `transcript-prompt-builders.util.ts`, `telegram-userbot-ingest-pipeline.service.ts`, `telegram-userbot.constants.ts`, `telegram-userbot-ingest-edit-watch.service.ts`, `apps/web/app/telegram-userbot/page.tsx`, `docs/audit/06-progress-tracker.md`
+- Findings: классификатор требовал SL/TP для kind=signal → «INJUSDT SWING LONG» уходил в other/ignored («Не сигнал»); edit-watch не стартовал; UI маскировал parse_incomplete как «Не сигнал».
+- Changes: промпт классификатора — pair+side достаточно для signal (без regex-эвристики до LLM); `ignored` в `USERBOT_INGEST_RETRIABLE_STATUSES` + edit-watch после ignored; UI — статусы parse_incomplete/parse_error и «ожидание правки» для ignored.
+- Manual verification: `npm run build -w apps/api` (pass); на стенде — stub без уровней → «частично распознано» + edit-watch; правка сообщения → автоповтор без «Перечитать».
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

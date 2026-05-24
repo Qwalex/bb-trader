@@ -13,7 +13,7 @@ export const CLOSE_REOPEN_COOLDOWN_MS = 30_000;
 export { CRITICAL_NOTIFY_URL } from '../../common/critical-notify.constants';
 export const OPENROUTER_BALANCE_LOW_THRESHOLD_USD = 2;
 export const OPENROUTER_BALANCE_NOTIFY_COOLDOWN_MS = 30 * 60_000;
-/** Опрос Telegram после parse_incomplete / place_error (edit-watch). */
+/** Опрос Telegram после retriable ingest / misclassified ignored (edit-watch). */
 export const USERBOT_INGEST_EDIT_WATCH_POLL_MS = 25_000;
 export const USERBOT_INGEST_EDIT_WATCH_TTL_MS = 90 * 60_000;
 /** Повтор transcript.parse после parse_error (JSON/LLM): каждые 5 мин, 1 ч. */
@@ -30,6 +30,8 @@ export const USERBOT_INGEST_RETRIABLE_STATUSES = [
   'place_error',
   'duplicate_signal',
   'parse_error',
+  /** AI/классификатор: «не сигнал» — ждём правку в канале (edit-watch + EditedMessage). */
+  'ignored',
 ] as const;
 /**
  * Период записи MTProto StringSession в глобальный Setting (миграция DC и др.).

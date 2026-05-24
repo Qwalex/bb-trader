@@ -443,6 +443,7 @@ export class TelegramUserbotIngestPipelineService {
         aiRequest,
         aiResponse,
       });
+      void this.editWatch.scheduleEditWatch(ingest.id);
       return;
     }
 
