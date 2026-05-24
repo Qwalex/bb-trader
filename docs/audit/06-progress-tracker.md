@@ -1971,3 +1971,14 @@
 - Manual verification: `npm run build -w apps/api`, `npm run check-types -w apps/web` (pass); на стенде — filter ignore без watch; AI other → awaiting_edit + watch; REQUIRE_CONFIRMATION на пути awaiting_edit→edit.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-168
+
+- Status: `done`
+- Scope: Bybit — дубли Telegram `BYBIT_TP_LIMITS_PLACED` (6 сообщений на одну сделку после fill).
+- Files: `apps/api/src/modules/bybit/tpsl/bybit-tpsl-fast-apply.service.ts`, `apps/api/src/modules/bybit/bybit.service.ts`, `apps/api/src/modules/bybit/tpsl/bybit-tpsl.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: `TP_SL_FAST_RETRY_DELAYS_MS` (6 значений) ставили все `setTimeout` сразу — попытки шли параллельно, guard `hasLiveTp` не успевал; post-placement poll и fast-apply вызывали `placeTpSplitIfNeeded` без общего lock; при 110017 rejected TP не попадали в БД.
+- Changes: fast-apply — последовательная цепочка с cumulative delay + `generation` при reschedule; `tpSplitInFlight` coalesce-lock на `${cabinetId}:${signalId}` в `BybitService`; break цикла TP при `retCode=110017` / truncated to zero.
+- Manual verification: `npm run build -w apps/api` (pass); на стенде — fill → одно `BYBIT_TP_LIMITS_PLACED` в Telegram; `/logs` `TP_SL_FAST_APPLY: scheduled` → `done` на attempt 1; малый лот — без дублей ордеров на бирже.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

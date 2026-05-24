@@ -72,6 +72,7 @@ export class BybitService implements OnApplicationBootstrap {
   private readonly staleFlatPollCounts = new Map<string, number>();
   private readonly staleReconcileSuspensions = new Map<string, { count: number; reason?: string }>();
   private readonly placementLocks = new Set<string>();
+  private readonly tpSplitInFlight = new Map<string, Promise<void>>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -607,19 +608,34 @@ export class BybitService implements OnApplicationBootstrap {
       }[];
     },
   ): Promise<void> {
+    const cabinetSegment = await this.resolveCabinetSegmentForKeys();
+    const lockKey = `${cabinetSegment}:${fresh.id}`;
+    const existing = this.tpSplitInFlight.get(lockKey);
+    if (existing) {
+      await existing;
+      return;
+    }
+
     const pv = this.placementValidation;
-    await this.bybitTpSl.placeTpSplitIfNeeded(client, fresh, {
-      getLinearInstrumentFilters: (c, s) => this.balanceInstrument.getLinearInstrumentFilters(c, s),
-      resolveEntryPositionIdx: (c, s, side) => pv.resolveEntryPositionIdx(c, s, side),
-      formatPriceToTick: (p, t) => pv.formatPriceToTick(p, t),
-      buildTpSplitDiagnostics: (p) => pv.buildTpSplitDiagnostics(p),
-      orders: {
-        createOrderRecord: (data) => this.orders.createOrderRecord(data),
-        createSignalEvent: (signalId, type, payload) =>
-          this.orders.createSignalEvent(signalId, type, payload),
-      },
-      appLog: this.appLog,
-    });
+    const work = this.bybitTpSl
+      .placeTpSplitIfNeeded(client, fresh, {
+        getLinearInstrumentFilters: (c, s) => this.balanceInstrument.getLinearInstrumentFilters(c, s),
+        resolveEntryPositionIdx: (c, s, side) => pv.resolveEntryPositionIdx(c, s, side),
+        formatPriceToTick: (p, t) => pv.formatPriceToTick(p, t),
+        buildTpSplitDiagnostics: (p) => pv.buildTpSplitDiagnostics(p),
+        orders: {
+          createOrderRecord: (data) => this.orders.createOrderRecord(data),
+          createSignalEvent: (signalId, type, payload) =>
+            this.orders.createSignalEvent(signalId, type, payload),
+        },
+        appLog: this.appLog,
+      })
+      .finally(() => {
+        this.tpSplitInFlight.delete(lockKey);
+      });
+
+    this.tpSplitInFlight.set(lockKey, work);
+    await work;
   }
 
   private async clearImmediateStaleDbBlockerIfExchangeFlat(

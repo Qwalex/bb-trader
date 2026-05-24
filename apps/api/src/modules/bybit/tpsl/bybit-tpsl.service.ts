@@ -635,6 +635,10 @@ export class BybitTpSlService {
             retCode: orderRes.retCode,
             retMsg: String(orderRes.retMsg ?? ''),
           });
+          const retMsgLower = String(orderRes.retMsg ?? '').toLowerCase();
+          if (orderRes.retCode === 110017 || retMsgLower.includes('truncated to zero')) {
+            break;
+          }
         }
       } catch (e) {
         const msg = formatError(e);
