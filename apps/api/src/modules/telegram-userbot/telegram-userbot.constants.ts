@@ -16,6 +16,9 @@ export const OPENROUTER_BALANCE_NOTIFY_COOLDOWN_MS = 30 * 60_000;
 /** Опрос Telegram после parse_incomplete / place_error (edit-watch). */
 export const USERBOT_INGEST_EDIT_WATCH_POLL_MS = 25_000;
 export const USERBOT_INGEST_EDIT_WATCH_TTL_MS = 90 * 60_000;
+/** Повтор transcript.parse после parse_error (JSON/LLM): каждые 5 мин, 1 ч. */
+export const USERBOT_PARSE_ERROR_RETRY_POLL_MS = 5 * 60_000;
+export const USERBOT_PARSE_ERROR_RETRY_TTL_MS = 60 * 60_000;
 /** @deprecated используйте USERBOT_INGEST_EDIT_WATCH_* */
 export const USERBOT_SIGNAL_LEVELS_EDIT_WATCH_POLL_MS = USERBOT_INGEST_EDIT_WATCH_POLL_MS;
 /** @deprecated используйте USERBOT_INGEST_EDIT_WATCH_* */

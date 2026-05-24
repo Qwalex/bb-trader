@@ -27,6 +27,7 @@ import {
 import type { MessageKind, ProcessIngestOptions, UserbotFilterKind } from '../telegram-userbot.types';
 import { TelegramUserbotFiltersService } from '../filters/telegram-userbot-filters.service';
 import { TelegramUserbotIngestEditWatchService } from './telegram-userbot-ingest-edit-watch.service';
+import { TelegramUserbotIngestParseRetryService } from './telegram-userbot-ingest-parse-retry.service';
 import { TelegramUserbotIngestPairDirectionService } from './telegram-userbot-ingest-pair-direction.service';
 import { TelegramUserbotIngestSignalLookupService } from './telegram-userbot-ingest-signal-lookup.service';
 import { TelegramUserbotIngestSignalReplyService } from './telegram-userbot-ingest-signal-reply.service';
@@ -79,6 +80,7 @@ export class TelegramUserbotIngestPipelineService {
     private readonly userbotFilters: TelegramUserbotFiltersService,
     private readonly userbotMirror: TelegramUserbotMirrorService,
     private readonly editWatch: TelegramUserbotIngestEditWatchService,
+    private readonly parseRetry: TelegramUserbotIngestParseRetryService,
     private readonly signalLookup: TelegramUserbotIngestSignalLookupService,
     private readonly pairDirection: TelegramUserbotIngestPairDirectionService,
     private readonly signalReply: TelegramUserbotIngestSignalReplyService,
@@ -474,22 +476,30 @@ export class TelegramUserbotIngestPipelineService {
         aiRequest,
         aiResponse,
       });
-      await this.notifySignalFailureToBot({
-        ingestId: ingest.id,
-        chatId: ingest.chatId,
-        token: extractTokenHint(text),
-        stage: 'transcript',
-        error: parseError,
-        missingData:
-          parsed.ok === 'incomplete'
-            ? this.extractMissingFieldsFromPrompt(parsed.prompt)
-            : undefined,
-      });
+      const suppressParseNotify = options?.suppressParseFailureExternalNotify === true;
+      if (!suppressParseNotify) {
+        await this.notifySignalFailureToBot({
+          ingestId: ingest.id,
+          chatId: ingest.chatId,
+          token: extractTokenHint(text),
+          stage: 'transcript',
+          error: parseError,
+          missingData:
+            parsed.ok === 'incomplete'
+              ? this.extractMissingFieldsFromPrompt(parsed.prompt)
+              : undefined,
+        });
+      }
       if (parsed.ok === 'incomplete') {
         void this.editWatch.scheduleEditWatch(ingest.id);
+      } else {
+        void this.parseRetry.scheduleParseRetry(ingest.id);
       }
       return;
     }
+
+    this.parseRetry.clearParseRetry(ingest.id);
+    this.editWatch.clearEditWatch(ingest.id);
 
     const signal = parsed.signal;
     signal.source = chatMeta?.title ?? undefined;
@@ -989,6 +999,8 @@ export class TelegramUserbotIngestPipelineService {
       aiRequest,
       aiResponse,
     });
+    this.parseRetry.clearParseRetry(ingest.id);
+    this.editWatch.clearEditWatch(ingest.id);
     void this.appLog.append('info', 'telegram', 'Сигнал размещен автоматически', {
       pair: signal.pair,
       signalId: place.signalId,
@@ -1008,7 +1020,8 @@ export class TelegramUserbotIngestPipelineService {
       status: 'parse_error',
       error: normalizedErr,
     });
-    if (!isCriticalClassify) {
+    const suppressParseNotify = options?.suppressParseFailureExternalNotify === true;
+    if (!isCriticalClassify && !suppressParseNotify) {
       await this.notifySignalFailureToBot({
         ingestId: ingest.id,
         chatId: ingest.chatId,
@@ -1017,7 +1030,7 @@ export class TelegramUserbotIngestPipelineService {
         error: normalizedErr,
       });
     }
-    if (!isCriticalClassify) {
+    if (!isCriticalClassify && !suppressParseNotify) {
       const lowered = normalizedErr.toLowerCase();
       const criticalApi: 'bybit' | 'openrouter' =
         lowered.includes('bybit') ? 'bybit' : 'openrouter';
@@ -1028,11 +1041,15 @@ export class TelegramUserbotIngestPipelineService {
         error: normalizedErr,
       });
     }
+    if (!isCriticalClassify) {
+      void this.parseRetry.scheduleParseRetry(ingest.id);
+    }
   }
 }
 
   clearAllEditWatches(): void {
     this.editWatch.clearAllEditWatches();
+    this.parseRetry.clearAllParseRetries();
   }
 
   async fetchChatMessageMeta(

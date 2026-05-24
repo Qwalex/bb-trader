@@ -12,6 +12,7 @@ import { TelegramUserbotClientService } from './client/telegram-userbot-client.s
 import { TelegramUserbotFiltersService } from './filters/telegram-userbot-filters.service';
 import { TelegramUserbotIngestService } from './ingest/telegram-userbot-ingest.service';
 import { TelegramUserbotIngestEditWatchService } from './ingest/telegram-userbot-ingest-edit-watch.service';
+import { TelegramUserbotIngestParseRetryService } from './ingest/telegram-userbot-ingest-parse-retry.service';
 import { TelegramUserbotIngestPairDirectionService } from './ingest/telegram-userbot-ingest-pair-direction.service';
 import { TelegramUserbotIngestPipelineService } from './ingest/telegram-userbot-ingest-pipeline.service';
 import { TelegramUserbotIngestSignalLookupService } from './ingest/telegram-userbot-ingest-signal-lookup.service';
@@ -45,6 +46,7 @@ import { UserbotSignalHashModule } from './userbot-signal-hash.module';
     TelegramUserbotIngestPairDirectionService,
     TelegramUserbotIngestSignalLookupService,
     TelegramUserbotIngestEditWatchService,
+    TelegramUserbotIngestParseRetryService,
     TelegramUserbotIngestSignalReplyService,
     TelegramUserbotIngestPipelineService,
     TelegramUserbotPollingService,

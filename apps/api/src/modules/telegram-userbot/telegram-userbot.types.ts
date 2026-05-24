@@ -35,12 +35,14 @@ export type QrState = {
 
 export type ProcessIngestOptions = {
   enforceBalanceGuard?: boolean;
-  source?: 'realtime' | 'poll' | 'manual-reread' | 'manual-reread-all';
+  source?: 'realtime' | 'poll' | 'manual-reread' | 'manual-reread-all' | 'parse-retry';
   telegramReceivedAt?: Date;
   ingestCreatedAt?: Date;
   enqueuedAtMs?: number;
   /** Повтор после правки: не слать whitelist/critical при повторной ошибке уровней. */
   suppressPlacementFailureExternalNotify?: boolean;
+  /** Повтор parse после parse_error: не слать уведомления в бот на каждую попытку. */
+  suppressParseFailureExternalNotify?: boolean;
   /** Автоповтор после правки канала: не запрашивать TELEGRAM_USERBOT_REQUIRE_CONFIRMATION. */
   bypassConfirmationForAutoRetry?: boolean;
 };
