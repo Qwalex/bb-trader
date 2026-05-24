@@ -433,17 +433,22 @@ export class TelegramUserbotIngestPipelineService {
     }
 
     if (kind !== 'signal') {
+      const awaitingEdit =
+        kind === 'other' && !ignoredOtherError && useAiClassifier;
       this.appendIngestStageLog('info', 'Userbot: ignored after classification', ingest, {
         classification: kind,
+        awaitingEdit,
       });
       await this.ingest.updateIngest(ingest.id, {
         classification: kind,
-        status: 'ignored',
+        status: awaitingEdit ? 'awaiting_edit' : 'ignored',
         error: ignoredOtherError,
         aiRequest,
         aiResponse,
       });
-      void this.editWatch.scheduleEditWatch(ingest.id);
+      if (awaitingEdit) {
+        void this.editWatch.scheduleEditWatch(ingest.id);
+      }
       return;
     }
 

@@ -182,7 +182,7 @@ model TgUserbotIngest {
   aiResponse     String?
   classification String // signal | result | other
   signalHash     String?
-  status         String // ignored | duplicate_message | duplicate_signal | placed | parse_incomplete | parse_error | blocked_by_setting | place_error
+  status         String // ignored | awaiting_edit | duplicate_message | duplicate_signal | placed | parse_incomplete | parse_error | blocked_by_setting | place_error
   error          String?
   createdAt      DateTime @default(now())
   routes         CabinetIngestRoute[]

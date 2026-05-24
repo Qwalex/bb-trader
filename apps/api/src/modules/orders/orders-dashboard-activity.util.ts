@@ -29,6 +29,7 @@ function ingestStatusTone(status: string): DashboardActivityTone {
     case 'blocked_by_setting':
     case 'cancelled_by_confirmation':
     case 'parse_incomplete':
+    case 'awaiting_edit':
       return 'warn';
     case 'place_error':
     case 'parse_error':
@@ -53,6 +54,8 @@ function ingestStatusTitle(status: string): string {
       return 'Ошибка распознавания';
     case 'parse_incomplete':
       return 'Неполные данные сигнала';
+    case 'awaiting_edit':
+      return 'Ожидание правки в канале';
     case 'blocked_by_setting':
       return 'Ожидает подтверждение в боте';
     case 'cancelled_by_confirmation':

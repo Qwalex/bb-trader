@@ -9,7 +9,7 @@ import { CabinetContextService } from '../../cabinet/cabinet-context.service';
 import { SettingsService } from '../../settings/settings.service';
 import {
   USERBOT_INLINE_TEXT_MAX_CHARS,
-  USERBOT_INGEST_RETRIABLE_STATUSES,
+  USERBOT_INGEST_EDIT_REQUEUE_STATUSES,
   USERBOT_MAX_QUEUE_DEFAULT,
   USERBOT_PROCESSING_CONCURRENCY,
 } from '../telegram-userbot.constants';
@@ -434,7 +434,7 @@ export class TelegramUserbotIngestService {
     status: string;
     signalHash: string | null;
   }): Promise<{ status: string }> {
-    const retriable = USERBOT_INGEST_RETRIABLE_STATUSES as readonly string[];
+    const retriable = USERBOT_INGEST_EDIT_REQUEUE_STATUSES as readonly string[];
     const oldHash = params.signalHash?.trim() ?? '';
     const needsHashRelease = retriable.includes(params.status) || oldHash.length > 0;
     if (needsHashRelease && oldHash) {

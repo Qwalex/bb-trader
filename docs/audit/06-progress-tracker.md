@@ -1960,3 +1960,14 @@
 - Manual verification: `npm run build -w apps/api` (pass); на стенде — stub без уровней → «частично распознано» + edit-watch; правка сообщения → автоповтор без «Перечитать».
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-167
+
+- Status: `done`
+- Scope: Userbot edit-watch — сужение после code review (статус `awaiting_edit`, recency/confirm).
+- Files: `telegram-userbot.constants.ts`, `telegram-userbot-ingest-pipeline.service.ts`, `telegram-userbot.service.ts`, `telegram-userbot-ingest.service.ts`, `telegram-userbot-ingest-edit-watch.service.ts`, `apps/web/app/telegram-userbot/page.tsx`, `orders-dashboard-activity.util.ts`, `schema.prisma`, `docs/audit/06-progress-tracker.md`
+- Findings: edit-watch на все `ignored`; `ignored` в RETRIABLE → повтор filter-ignore; bypass подтверждения для misclassified; UI «ожидание правки» для всех ignored.
+- Changes: `awaiting_edit` только для AI `other` без close/reentry downgrade; `USERBOT_INGEST_EDIT_REQUEUE_STATUSES` (recency + hash release); edit-watch confirm bypass только для parse/place retry, не для `awaiting_edit`; UI/dashboard по статусу.
+- Manual verification: `npm run build -w apps/api`, `npm run check-types -w apps/web` (pass); на стенде — filter ignore без watch; AI other → awaiting_edit + watch; REQUIRE_CONFIRMATION на пути awaiting_edit→edit.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

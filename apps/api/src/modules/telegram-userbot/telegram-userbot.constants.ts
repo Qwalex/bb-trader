@@ -24,14 +24,18 @@ export const USERBOT_SIGNAL_LEVELS_EDIT_WATCH_POLL_MS = USERBOT_INGEST_EDIT_WATC
 /** @deprecated используйте USERBOT_INGEST_EDIT_WATCH_* */
 export const USERBOT_SIGNAL_LEVELS_EDIT_WATCH_TTL_MS = USERBOT_INGEST_EDIT_WATCH_TTL_MS;
 
-/** Ingest-статусы, при которых правка сообщения должна перезапускать обработку. */
+/** Ingest-статусы для hash-reuse и parse/place retry (без misclassified other). */
 export const USERBOT_INGEST_RETRIABLE_STATUSES = [
   'parse_incomplete',
   'place_error',
   'duplicate_signal',
   'parse_error',
-  /** AI/классификатор: «не сигнал» — ждём правку в канале (edit-watch + EditedMessage). */
-  'ignored',
+] as const;
+
+/** Статусы, при которых правка в канале перезапускает ingest (EditedMessage recency + hash release). */
+export const USERBOT_INGEST_EDIT_REQUEUE_STATUSES = [
+  ...USERBOT_INGEST_RETRIABLE_STATUSES,
+  'awaiting_edit',
 ] as const;
 /**
  * Период записи MTProto StringSession в глобальный Setting (миграция DC и др.).

@@ -18,7 +18,7 @@ import { TelegramUserbotIngestSignalLookupService } from './telegram-userbot-ing
 const ACTIVE_SIGNAL_STATUSES = ['PENDING', 'ORDERS_PLACED', 'OPEN', 'PARSED'] as const;
 
 /**
- * Наблюдение за правкой сообщения в Telegram после retriable ingest и misclassified ignored (poll + повтор в очередь).
+ * Наблюдение за правкой сообщения в Telegram после retriable ingest и awaiting_edit (poll + повтор в очередь).
  */
 @Injectable()
 export class TelegramUserbotIngestEditWatchService {
@@ -49,7 +49,7 @@ export class TelegramUserbotIngestEditWatchService {
   }
 
   /**
-   * После parse_incomplete / place_error / ignored (misclassified): опрос Telegram; при смене текста — автоповтор ingest.
+   * После parse_incomplete / place_error / awaiting_edit: опрос Telegram; при смене текста — автоповтор ingest.
    */
   async scheduleEditWatch(ingestId: string): Promise<void> {
     if (this.spotFlow.hasActiveSpotDialogForIngest(ingestId)) {
@@ -247,7 +247,7 @@ export class TelegramUserbotIngestEditWatchService {
             telegramReceivedAt: new Date(),
             ingestCreatedAt: row.createdAt,
             suppressPlacementFailureExternalNotify: true,
-            bypassConfirmationForAutoRetry: true,
+            bypassConfirmationForAutoRetry: row.status !== 'awaiting_edit',
           },
           route,
         });

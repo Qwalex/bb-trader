@@ -430,11 +430,10 @@ export default function TelegramUserbotPage() {
         return 'Прочитано -> частично распознано';
       case 'parse_error':
         return 'Прочитано -> ошибка распознавания';
+      case 'awaiting_edit':
+        return 'Не сигнал (ожидание правки в канале)';
     }
     if (row.classification !== 'signal') {
-      if (row.status === 'ignored') {
-        return 'Не сигнал (ожидание правки в канале)';
-      }
       return 'Не сигнал';
     }
     switch (row.status) {

@@ -30,7 +30,7 @@ import { UserbotSignalHashService } from './userbot-signal-hash.service';
 import { parseSignalPriceArrayJson } from './userbot-signal-hash.util';
 import {
   CLOSE_REOPEN_COOLDOWN_MS,
-  USERBOT_INGEST_RETRIABLE_STATUSES,
+  USERBOT_INGEST_EDIT_REQUEUE_STATUSES,
   USERBOT_MIN_BALANCE_USD_DEFAULT,
   USERBOT_POLL_INTERVAL_MS,
 } from './telegram-userbot.constants';
@@ -752,7 +752,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       });
       const skipRecencyFilter =
         existingIngest != null &&
-        (USERBOT_INGEST_RETRIABLE_STATUSES as readonly string[]).includes(existingIngest.status);
+        (USERBOT_INGEST_EDIT_REQUEUE_STATUSES as readonly string[]).includes(existingIngest.status);
       if (!skipRecencyFilter && !(await this.userbotScan.isMessageRecent(createdAt))) {
         return;
       }
