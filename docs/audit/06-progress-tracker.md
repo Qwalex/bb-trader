@@ -1982,3 +1982,14 @@
 - Manual verification: `npm run build -w apps/api` (pass); на стенде — fill → одно `BYBIT_TP_LIMITS_PLACED` в Telegram; `/logs` `TP_SL_FAST_APPLY: scheduled` → `done` на attempt 1; малый лот — без дублей ордеров на бирже.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-169
+
+- Status: `done`
+- Scope: Userbot multi-cabinet — второй кабинет «Не сигнал» при успешной установке в первом (coalesce ingest).
+- Files: `apps/api/src/modules/telegram-userbot/ingest/telegram-userbot-ingest.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: `shouldCoalesceEnqueue` срабатывал на `processingActiveIngestIds` (другой кабинет обрабатывает тот же ingest) — job маршрута B уходил в `pendingRerun` без очереди; `coalesceEnqueue` удалял job из `processingQueue`; `flushPendingRerun` только для своего `queueKey` — pending B не запускался после завершения A; route B оставался `other`/`queued`.
+- Changes: coalesce только для того же `queueKey` (очередь / in-flight enqueue / активный job маршрута); не coalesce по чужому кабинету; не удалять job из очереди при coalesce; `flushSiblingPendingReruns` после job — pending других маршрутов ingest, если они не в очереди.
+- Manual verification: `npm run build -w apps/api` (pass); на стенде — один чат в двух кабинетах: оба route доходят до classify/place или duplicate, без «Не сигнал» на втором.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

@@ -29,7 +29,10 @@ export class TelegramUserbotIngestService {
   private readonly logger = new Logger(TelegramUserbotIngestService.name);
   private readonly processingQueue: IngestProcessJob[] = [];
   private readonly processingQueuedIds = new Set<string>();
+  /** Один ingest за раз (разные кабинеты — очередь, не coalesce). */
   private readonly processingActiveIngestIds = new Set<string>();
+  /** Активный job по маршруту кабинета (ingestId:routeId). */
+  private readonly processingActiveQueueKeys = new Set<string>();
   private readonly pendingRerunByQueueKey = new Map<string, IngestProcessJob>();
   private processingWorkersActive = 0;
 
@@ -207,17 +210,18 @@ export class TelegramUserbotIngestService {
     void this.enqueueIngestJobInternal(job, false);
   }
 
+  private buildQueueKey(job: IngestProcessJob): string {
+    return `${job.ingest.id}:${job.route?.id ?? 'default'}`;
+  }
+
   private shouldCoalesceEnqueue(job: IngestProcessJob, queueKey: string): boolean {
     if (this.processingQueuedIds.has(queueKey)) {
       return true;
     }
-    if (this.processingActiveIngestIds.has(job.ingest.id)) {
+    if (this.processingActiveQueueKeys.has(queueKey)) {
       return true;
     }
-    return this.processingQueue.some(
-      (item) =>
-        `${item.ingest.id}:${item.route?.id ?? 'default'}` === queueKey,
-    );
+    return this.processingQueue.some((item) => this.buildQueueKey(item) === queueKey);
   }
 
   private async coalesceEnqueue(job: IngestProcessJob, queueKey: string): Promise<void> {
@@ -247,15 +251,6 @@ export class TelegramUserbotIngestService {
       ingest: { ...job.ingest, signalHash: null },
       options: { ...job.options },
     });
-    for (let i = this.processingQueue.length - 1; i >= 0; i -= 1) {
-      const item = this.processingQueue[i];
-      if (!item) {
-        continue;
-      }
-      if (`${item.ingest.id}:${item.route?.id ?? 'default'}` === queueKey) {
-        this.processingQueue.splice(i, 1);
-      }
-    }
     void this.appLog.append('debug', 'telegram', 'Userbot: enqueue coalesced, pending rerun', {
       ingestId: job.ingest.id,
       queueKey,
@@ -273,8 +268,25 @@ export class TelegramUserbotIngestService {
     this.enqueueIngestJobInternal(pending, true);
   }
 
+  /** После job по ingest — pending других маршрутов (multi-cabinet), если job не в очереди. */
+  private flushSiblingPendingReruns(ingestId: string, completedQueueKey: string): void {
+    const prefix = `${ingestId}:`;
+    for (const queueKey of Array.from(this.pendingRerunByQueueKey.keys())) {
+      if (!queueKey.startsWith(prefix) || queueKey === completedQueueKey) {
+        continue;
+      }
+      const queued = this.processingQueue.some((item) => this.buildQueueKey(item) === queueKey);
+      const enqueueInFlight = this.processingQueuedIds.has(queueKey);
+      const active = this.processingActiveQueueKeys.has(queueKey);
+      if (queued || enqueueInFlight || active) {
+        continue;
+      }
+      this.flushPendingRerun(queueKey);
+    }
+  }
+
   private enqueueIngestJobInternal(job: IngestProcessJob, fromPendingFlush: boolean): void {
-    const queueKey = `${job.ingest.id}:${job.route?.id ?? 'default'}`;
+    const queueKey = this.buildQueueKey(job);
     if (!fromPendingFlush && this.shouldCoalesceEnqueue(job, queueKey)) {
       void this.coalesceEnqueue(job, queueKey).catch((e) => {
         this.logger.warn(`coalesceEnqueue failed: ${formatError(e)}`);
@@ -346,13 +358,17 @@ export class TelegramUserbotIngestService {
       if (!job) {
         return;
       }
-      this.processingQueuedIds.delete(`${job.ingest.id}:${job.route?.id ?? 'default'}`);
+      const queueKey = this.buildQueueKey(job);
+      this.processingQueuedIds.delete(queueKey);
       this.processingActiveIngestIds.add(job.ingest.id);
+      this.processingActiveQueueKeys.add(queueKey);
       this.processingWorkersActive += 1;
       void this.runIngestJob(job).finally(() => {
         this.processingActiveIngestIds.delete(job.ingest.id);
+        this.processingActiveQueueKeys.delete(queueKey);
         this.processingWorkersActive -= 1;
-        this.flushPendingRerun(`${job.ingest.id}:${job.route?.id ?? 'default'}`);
+        this.flushPendingRerun(queueKey);
+        this.flushSiblingPendingReruns(job.ingest.id, queueKey);
         this.pumpIngestQueue();
       });
     }
