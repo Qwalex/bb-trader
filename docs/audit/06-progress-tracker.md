@@ -1993,3 +1993,14 @@
 - Manual verification: `npm run build -w apps/api` (pass); на стенде — один чат в двух кабинетах: оба route доходят до classify/place или duplicate, без «Не сигнал» на втором.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-170
+
+- Status: `done`
+- Scope: Bybit poll — SL лестница не подтягивалась после TP2+ при OPEN + live TP (XLMUSDT / QSBinanceKillers).
+- Files: `apps/api/src/modules/bybit/orders/bybit-order-lifecycle-poll.service.ts`, `apps/api/src/modules/bybit/orders/bybit-order-lifecycle-poll-signal.util.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: `shouldSkipExchangeOrderSync` пропускал `syncSignalOrderStatusesFromExchange`; `stepStopLossIfTpFilled` опирается на `order.status=Filled` в БД — после первого TP статусы следующих не обновлялись, `filledCount` застревал на 1.
+- Changes: в skipSync-ветке poll перед `stepStopLossIfTpFilled` синхронизировать статусы открытых ордеров с биржи и перечитывать сигнал.
+- Manual verification: `npm run build -w apps/api` (pass); на стенде — сделка с 4 TP: после каждого исполнения TP в логах/боте события `TP_SL_STEPPED` по лестнице, `tpSlStep` догоняет число исполненных TP.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

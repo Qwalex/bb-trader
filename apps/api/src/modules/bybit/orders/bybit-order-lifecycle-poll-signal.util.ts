@@ -23,7 +23,7 @@ export type PollSignalRow = {
   }>;
 };
 
-/** OPEN + entries закрыты + TP уже live — не тянем статусы и не ставим TP/SL заново. */
+/** OPEN + entries закрыты + TP уже live — не ставим TP/SL заново; статусы ордеров всё равно синхронизируем в poll (см. skipSync-ветку). */
 export function shouldSkipExchangeOrderSync(sig: PollSignalRow): boolean {
   if (String(sig.status ?? '') !== 'OPEN') {
     return false;

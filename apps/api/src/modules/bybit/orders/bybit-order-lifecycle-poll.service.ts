@@ -171,12 +171,19 @@ export class BybitOrderLifecyclePollService {
     }
 
     if (skipSync) {
+      // Статусы TP на бирже меняются (Filled), но applyTpSlForSignal пропускаем — иначе stepStopLoss
+      // не видит исполненные TP2+ и SL подтягивается только один раз.
+      await syncSignalOrderStatusesFromExchange(ports, client, sig, (msg) =>
+        this.logger.debug(`poll skip-sync ${msg}`),
+      );
+      const freshForStep =
+        ((await ports.orders.getSignalWithOrders(sig.id)) as PollSignalRow | null) ?? fresh;
       try {
-        await ports.stepStopLossIfTpFilled(client, fresh);
+        await ports.stepStopLossIfTpFilled(client, freshForStep);
       } catch (e) {
         this.logger.warn(`stepStopLossIfTpFilled: ${formatError(e)}`);
       }
-      await finalizeSignalIfNeeded(ports, client, fresh, (msg) =>
+      await finalizeSignalIfNeeded(ports, client, freshForStep, (msg) =>
         this.logger.debug(`poll ${msg}`),
       );
       return;
