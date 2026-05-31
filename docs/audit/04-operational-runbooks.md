@@ -110,3 +110,23 @@ railway ssh -s api 'printenv | grep -E "^TELEGRAM_BOT_" || true'
 ### Логи в приложении
 
 После деплоя с фазовыми логами в Nest ищите строки `Telegram bot launch phase=…` и `activePhase=` при ошибке; в `/logs` (AppLog) — предупреждения по запуску и `Telegram bot launch recovered` после восстановления.
+
+## QPulse sync (signalsBot ↔ QPulse)
+
+Кабинетные ключи в БД (`Setting`): `QPULSE_SYNC_ENABLED`, `QPULSE_API_URL`, `QPULSE_API_KEY`. UI: `/my-group`.
+
+На QPulse API (Railway, ветка `master` / production): `INTEGRATIONS_API_KEY` — тот же секрет, что `QPULSE_API_KEY` в кабинете.
+
+```bash
+# QPulse — задать ключ интеграции (после railway link на qpulse-api)
+openssl rand -hex 32   # сохранить локально
+railway variables set INTEGRATIONS_API_KEY="<key>" -s qpulse-api
+
+# signalsBot — redeploy cabinets после migrate
+cd /path/to/signalsBotProd
+railway link   # environment cabinets
+railway service api
+railway redeploy
+```
+
+Проверка: ingest сигналов в группу с `linkedToApp=true` → `POST /integrations/signals` в логах QPulse; группа без галочки — только Telegram mirror.

@@ -1,9 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { forwardRef, Inject, Injectable } from '@nestjs/common';
 import type { SignalDto } from '@repo/shared';
 
 import { formatError } from '../../../common/format-error';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CabinetContextService } from '../../cabinet/cabinet-context.service';
+import { QpulseSyncService } from '../../qpulse-sync/qpulse-sync.service';
 import { TelegramUserbotClientService } from '../client/telegram-userbot-client.service';
 import {
   formatMirrorCancelText,
@@ -17,6 +18,8 @@ export class TelegramUserbotMirrorService {
     private readonly prisma: PrismaService,
     private readonly cabinetContext: CabinetContextService,
     private readonly userbotClient: TelegramUserbotClientService,
+    @Inject(forwardRef(() => QpulseSyncService))
+    private readonly qpulseSync: QpulseSyncService,
   ) {}
 
   async sendMirrorMessage(params: {
@@ -117,6 +120,138 @@ export class TelegramUserbotMirrorService {
           status: out.ok ? 'posted' : 'failed',
           targetChatId: g.chatId,
           targetMessageId: out.ok ? out.messageId : null,
+          error: out.ok ? null : out.error,
+        },
+      });
+    }
+  }
+
+  async tryCreateQpulseForSignal(signalId: string): Promise<void> {
+    const cabinetId = this.cabinetContext.getCabinetId();
+    const prismaAny = this.prisma as any;
+    const signal = await this.prisma.signal.findFirst({
+      where: { id: signalId, cabinetId, deletedAt: null },
+      include: { orders: true },
+    });
+    if (!signal?.sourceChatId || !signal.sourceMessageId) return;
+
+    const mirrorPosts = await prismaAny.tgUserbotMirrorMessage.findMany({
+      where: {
+        cabinetId,
+        kind: 'signal',
+        status: 'posted',
+        sourceChatId: signal.sourceChatId,
+        sourceMessageId: signal.sourceMessageId,
+      },
+      select: { publishGroupId: true },
+    });
+    if (mirrorPosts.length === 0) return;
+
+    const linkedGroup = await prismaAny.tgUserbotPublishGroup.findFirst({
+      where: {
+        id: { in: mirrorPosts.map((m: { publishGroupId: string }) => m.publishGroupId) },
+        linkedToApp: true,
+        enabled: true,
+        cabinetId,
+      },
+      select: { id: true },
+    });
+    if (!linkedGroup) return;
+
+    void this.qpulseSync.createSignalIfLinked({
+      signalId,
+      signalRow: signal as any,
+    });
+  }
+
+  async publishTradeEventToMirrorGroups(params: {
+    signalId: string;
+    sourceChatId: string;
+    sourceMessageId: string;
+    kind: 'tp' | 'sl' | 'close' | 'liquidation' | 'cancel';
+    text: string;
+  }): Promise<void> {
+    const cabinetId = this.cabinetContext.getCabinetId();
+    const prismaAny = this.prisma as any;
+    const groups = await prismaAny.tgUserbotPublishGroup.findMany({
+      where: { enabled: true, cabinetId },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (groups.length === 0) return;
+
+    const eventKind =
+      params.kind === 'cancel' ? 'cancel' : ('result' as const);
+    const dedupeKind = `trade_${params.kind}`;
+
+    for (const g of groups) {
+      const existing = await prismaAny.tgUserbotMirrorMessage.findFirst({
+        where: {
+          cabinetId,
+          publishGroupId: g.id,
+          sourceChatId: params.sourceChatId,
+          sourceMessageId: params.sourceMessageId,
+          kind: dedupeKind,
+        },
+        select: { id: true },
+      });
+      if (existing) continue;
+
+      const rootPosted = await prismaAny.tgUserbotMirrorMessage.findFirst({
+        where: {
+          publishGroupId: g.id,
+          cabinetId,
+          kind: 'signal',
+          sourceChatId: params.sourceChatId,
+          sourceMessageId: params.sourceMessageId,
+          status: 'posted',
+          targetMessageId: { not: null },
+        },
+        select: { targetMessageId: true, ingestId: true },
+      });
+      if (!rootPosted?.targetMessageId) {
+        await prismaAny.tgUserbotMirrorMessage.create({
+          data: {
+            publishGroupId: g.id,
+            cabinetId,
+            ingestId: rootPosted?.ingestId ?? params.signalId,
+            sourceChatId: params.sourceChatId,
+            sourceMessageId: params.sourceMessageId,
+            rootSourceChatId: params.sourceChatId,
+            rootSourceMessageId: params.sourceMessageId,
+            kind: dedupeKind,
+            status: 'skipped_no_root',
+            targetChatId: g.chatId,
+            error: 'Связанный сигнал не был опубликован в группу',
+          },
+        });
+        continue;
+      }
+
+      const formatted =
+        eventKind === 'cancel'
+          ? formatMirrorCancelText(params.text)
+          : formatMirrorResultText(params.text);
+
+      const out = await this.sendMirrorMessage({
+        targetChatId: g.chatId,
+        text: formatted,
+        replyToMessageId: rootPosted.targetMessageId,
+      });
+
+      await prismaAny.tgUserbotMirrorMessage.create({
+        data: {
+          publishGroupId: g.id,
+          cabinetId,
+          ingestId: rootPosted.ingestId ?? params.signalId,
+          sourceChatId: params.sourceChatId,
+          sourceMessageId: `${params.sourceMessageId}:${params.kind}`,
+          rootSourceChatId: params.sourceChatId,
+          rootSourceMessageId: params.sourceMessageId,
+          kind: dedupeKind,
+          status: out.ok ? 'posted' : 'failed',
+          targetChatId: g.chatId,
+          targetMessageId: out.ok ? out.messageId : null,
+          replyToTargetMessageId: rootPosted.targetMessageId,
           error: out.ok ? null : out.error,
         },
       });
@@ -237,11 +372,13 @@ export class TelegramUserbotMirrorService {
     chatId?: string;
     enabled?: boolean;
     publishEveryN?: number;
+    linkedToApp?: boolean;
   }) {
     const cabinetId = this.cabinetContext.getCabinetId();
     const title = body.title?.trim() ?? '';
     const chatId = body.chatId?.trim() ?? '';
     const enabled = body.enabled !== false;
+    const linkedToApp = body.linkedToApp === true;
     const publishEveryN = Math.max(1, Math.trunc(Number(body.publishEveryN ?? 1) || 1));
     if (!title) return { ok: false, error: 'title обязателен' };
     if (!chatId) return { ok: false, error: 'chatId обязателен' };
@@ -251,14 +388,14 @@ export class TelegramUserbotMirrorService {
       const prismaAny = this.prisma as any;
       const updated = await prismaAny.tgUserbotPublishGroup.update({
         where: { id },
-        data: { title, chatId, enabled, publishEveryN, cabinetId },
+        data: { title, chatId, enabled, publishEveryN, linkedToApp, cabinetId },
       });
       return { ok: true, item: updated };
     }
 
     const prismaAny = this.prisma as any;
     const created = await prismaAny.tgUserbotPublishGroup.create({
-      data: { title, chatId, enabled, publishEveryN, cabinetId },
+      data: { title, chatId, enabled, publishEveryN, linkedToApp, cabinetId },
     });
     return { ok: true, item: created };
   }

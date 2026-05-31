@@ -14,26 +14,49 @@ type PublishGroup = {
   enabled: boolean;
   publishEveryN: number;
   signalCounter: number;
+  linkedToApp?: boolean;
+};
+
+type QpulseSettings = {
+  enabled: boolean;
+  apiUrl: string;
+  apiKeyConfigured: boolean;
 };
 
 export default function MyGroupPage() {
   const router = useRouter();
   const [adminChecked, setAdminChecked] = useState(false);
   const [items, setItems] = useState<PublishGroup[]>([]);
+  const [qpulse, setQpulse] = useState<QpulseSettings>({
+    enabled: false,
+    apiUrl: '',
+    apiKeyConfigured: false,
+  });
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [title, setTitle] = useState('');
   const [chatId, setChatId] = useState('');
   const [publishEveryN, setPublishEveryN] = useState('1');
+  const [linkedToApp, setLinkedToApp] = useState(false);
+  const [qpulseEnabled, setQpulseEnabled] = useState(false);
+  const [qpulseApiUrl, setQpulseApiUrl] = useState('');
+  const [qpulseApiKey, setQpulseApiKey] = useState('');
 
   const apiFetch = (path: string, init?: RequestInit) => {
     return fetchApiResponse(path, init, readActiveCabinetIdClient());
   };
 
   async function loadAll() {
-    const res = await apiFetch('/telegram-userbot/publish-groups');
-    const j = (await res.json()) as { items?: PublishGroup[] };
+    const [groupsRes, qpulseRes] = await Promise.all([
+      apiFetch('/telegram-userbot/publish-groups'),
+      apiFetch('/telegram-userbot/qpulse-settings'),
+    ]);
+    const j = (await groupsRes.json()) as { items?: PublishGroup[] };
     setItems(Array.isArray(j.items) ? j.items : []);
+    const q = (await qpulseRes.json()) as QpulseSettings;
+    setQpulse(q);
+    setQpulseEnabled(Boolean(q.enabled));
+    setQpulseApiUrl(q.apiUrl ?? '');
   }
 
   useEffect(() => {
@@ -86,6 +109,80 @@ export default function MyGroupPage() {
       {msg && <div className={`msg ${msg.type === 'ok' ? 'ok' : 'err'}`}>{msg.text}</div>}
 
       <div className="card" style={{ marginBottom: '1rem' }}>
+        <h3 style={{ marginBottom: '0.5rem' }}>Подключение QPulse</h3>
+        <p style={{ color: 'var(--muted)', fontSize: '0.85rem', marginBottom: '0.75rem' }}>
+          Группы с «Подключить к приложению» отправляют сигналы (с учётом N) в QPulse. Группы без
+          галочки — только Telegram.
+        </p>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))',
+            gap: '0.75rem',
+          }}
+        >
+          <label className="inlineCheckboxLabel">
+            <input
+              type="checkbox"
+              checked={qpulseEnabled}
+              onChange={(e) => setQpulseEnabled(e.target.checked)}
+            />
+            Синхронизация с QPulse включена
+          </label>
+          <div>
+            <label className="inlineCheckboxLabel" style={{ marginBottom: '0.35rem' }}>
+              API URL
+            </label>
+            <input
+              value={qpulseApiUrl}
+              onChange={(e) => setQpulseApiUrl(e.target.value)}
+              placeholder="https://example.up.railway.app/api/v1"
+              className="userbotDefaultsInput"
+            />
+          </div>
+          <div>
+            <label className="inlineCheckboxLabel" style={{ marginBottom: '0.35rem' }}>
+              API Key {qpulse.apiKeyConfigured ? '(задан)' : ''}
+            </label>
+            <input
+              value={qpulseApiKey}
+              onChange={(e) => setQpulseApiKey(e.target.value)}
+              placeholder="Новый ключ (оставьте пустым, чтобы не менять)"
+              className="userbotDefaultsInput"
+              type="password"
+              autoComplete="off"
+            />
+          </div>
+        </div>
+        <div style={{ marginTop: '0.75rem' }}>
+          <button
+            className="btn btnSecondary"
+            disabled={busy !== null}
+            onClick={() =>
+              void runBusy('qpulse', async () => {
+                const res = await apiFetch('/telegram-userbot/qpulse-settings', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    enabled: qpulseEnabled,
+                    apiUrl: qpulseApiUrl,
+                    ...(qpulseApiKey.trim() ? { apiKey: qpulseApiKey.trim() } : {}),
+                  }),
+                });
+                const j = (await res.json()) as { ok?: boolean; error?: string };
+                if (!j.ok) throw new Error(j.error ?? 'Не удалось сохранить QPulse');
+                setQpulseApiKey('');
+                setMsg({ type: 'ok', text: 'Настройки QPulse сохранены' });
+                await loadAll();
+              })
+            }
+          >
+            {busy === 'qpulse' ? 'Сохранение…' : 'Сохранить QPulse'}
+          </button>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: '1rem' }}>
         <h3 style={{ marginBottom: '0.5rem' }}>Добавить группу для публикации</h3>
         <div
           style={{
@@ -101,7 +198,7 @@ export default function MyGroupPage() {
             <input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="Например: Моя VIP группа"
+              placeholder="Например: Публичная группа"
               className="userbotDefaultsInput"
             />
           </div>
@@ -128,6 +225,14 @@ export default function MyGroupPage() {
               placeholder="1"
             />
           </div>
+          <label className="inlineCheckboxLabel" style={{ alignSelf: 'end' }}>
+            <input
+              type="checkbox"
+              checked={linkedToApp}
+              onChange={(e) => setLinkedToApp(e.target.checked)}
+            />
+            Подключить к приложению (QPulse)
+          </label>
         </div>
         <div style={{ marginTop: '0.75rem' }}>
           <button
@@ -143,6 +248,7 @@ export default function MyGroupPage() {
                     chatId,
                     enabled: true,
                     publishEveryN: Number(publishEveryN || '1'),
+                    linkedToApp,
                   }),
                 });
                 const j = (await res.json()) as { ok?: boolean; error?: string };
@@ -150,6 +256,7 @@ export default function MyGroupPage() {
                 setTitle('');
                 setChatId('');
                 setPublishEveryN('1');
+                setLinkedToApp(false);
                 setMsg({ type: 'ok', text: 'Группа добавлена' });
                 await loadAll();
               })
@@ -178,13 +285,45 @@ export default function MyGroupPage() {
                   }}
                 >
                   <div>
-                    <div style={{ fontWeight: 700 }}>{g.title}</div>
+                    <div style={{ fontWeight: 700 }}>
+                      {g.title}
+                      {g.linkedToApp ? (
+                        <span style={{ color: 'var(--accent)', fontSize: '0.8rem', marginLeft: '0.5rem' }}>
+                          · QPulse
+                        </span>
+                      ) : null}
+                    </div>
                     <div style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>{g.chatId}</div>
                     <div style={{ color: 'var(--muted)', fontSize: '0.82rem', marginTop: '0.25rem' }}>
                       Публиковать каждый <b>{g.publishEveryN}</b> сигнал · счетчик: {g.signalCounter}
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
+                    <button
+                      className="btn btnSecondary btnSm"
+                      disabled={busy !== null}
+                      onClick={() =>
+                        void runBusy(`link-${g.id}`, async () => {
+                          const res = await apiFetch('/telegram-userbot/publish-groups', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              id: g.id,
+                              title: g.title,
+                              chatId: g.chatId,
+                              enabled: g.enabled,
+                              publishEveryN: g.publishEveryN,
+                              linkedToApp: !g.linkedToApp,
+                            }),
+                          });
+                          const j = (await res.json()) as { ok?: boolean; error?: string };
+                          if (!j.ok) throw new Error(j.error ?? 'Не удалось обновить группу');
+                          await loadAll();
+                        })
+                      }
+                    >
+                      {g.linkedToApp ? 'Отключить QPulse' : 'Подключить QPulse'}
+                    </button>
                     <button
                       className="btn btnSecondary btnSm"
                       disabled={busy !== null}
@@ -199,6 +338,7 @@ export default function MyGroupPage() {
                               chatId: g.chatId,
                               enabled: !g.enabled,
                               publishEveryN: g.publishEveryN,
+                              linkedToApp: g.linkedToApp === true,
                             }),
                           });
                           const j = (await res.json()) as { ok?: boolean; error?: string };
@@ -236,4 +376,3 @@ export default function MyGroupPage() {
     </>
   );
 }
-

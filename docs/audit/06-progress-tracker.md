@@ -2004,3 +2004,14 @@
 - Manual verification: `npm run build -w apps/api` (pass); на стенде — сделка с 4 TP: после каждого исполнения TP в логах/боте события `TP_SL_STEPPED` по лестнице, `tpSlStep` догоняет число исполненных TP.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-171
+
+- Status: `done`
+- Scope: Интеграция signalsBot ↔ QPulse — publish groups `linkedToApp`, ExternalSignalsAdapter, lifecycle sync.
+- Files: QPulse `apps/api/src/integrations/*`, `prisma/schema.prisma`; signalsBot `apps/api/src/modules/qpulse-sync/*`, `telegram-userbot/mirror/*`, `orders.service.ts`, `prisma/schema.prisma`, `packages/shared/src/cabinet-settings.ts`, `apps/web/app/my-group/page.tsx`, `docs/contracts/rest-api.md` (QPulse), `docs/audit/04-operational-runbooks.md`, `AGENTS.md`
+- Findings: QPulse принимал сигналы только через admin JWT; «Моя группа» публиковала в TG без lifecycle в QPulse; не было связи кабинет → app.
+- Changes: QPulse `POST/PATCH /integrations/signals` + `externalId`/`source`; signalsBot `SignalExternalSync`, `QpulseSyncService`, `SignalDistributionService`, `linkedToApp` на `TgUserbotPublishGroup`, UI QPulse + checkbox; mirror trade events (TP/close/cancel); Railway runbook для `INTEGRATIONS_API_KEY`.
+- Manual verification: `npm run build -w api` + `npm run build -w web` (pass); QPulse `nest build` (pass); на стенде — linked group N=3 → QPulse admin/mobile только каждый 3-й; non-linked group → только TG; lifecycle PATCH при `SignalExternalSync`.
+- Docs updated: этот трекер, runbook, AGENTS.md.
+- Linked risks (`SEC-###`): N/A

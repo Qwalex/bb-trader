@@ -274,6 +274,7 @@ export class TelegramUserbotController {
         chatId: { type: 'string' },
         enabled: { type: 'boolean' },
         publishEveryN: { type: 'number' },
+        linkedToApp: { type: 'boolean' },
       },
     },
   })
@@ -287,9 +288,29 @@ export class TelegramUserbotController {
       chatId?: string;
       enabled?: boolean;
       publishEveryN?: number;
+      linkedToApp?: boolean;
     },
   ) {
     return this.userbot.createOrUpdatePublishGroup(body);
+  }
+
+  @ApiOperation({ summary: 'Настройки синхронизации QPulse (кабинет)' })
+  @Get('qpulse-settings')
+  async getQpulseSettings() {
+    return this.userbot.getQpulseSettings();
+  }
+
+  @ApiOperation({ summary: 'Сохранить настройки синхронизации QPulse' })
+  @Post('qpulse-settings')
+  async saveQpulseSettings(
+    @Body()
+    body: {
+      enabled?: boolean;
+      apiUrl?: string;
+      apiKey?: string;
+    },
+  ) {
+    return this.userbot.saveQpulseSettings(body);
   }
 
   @ApiOperation({ summary: 'Удалить publish-группу' })

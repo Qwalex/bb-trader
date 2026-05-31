@@ -18,6 +18,7 @@ import { SettingsService } from '../settings/settings.service';
 import { TelegramService } from '../telegram';
 import { UserbotSignalHashService } from '../telegram-userbot/userbot-signal-hash.service';
 import type { TelegramUserbotService } from '../telegram-userbot/telegram-userbot.service';
+import type { SignalDistributionService } from '../qpulse-sync/signal-distribution.service';
 
 import { formatError } from '../../common/format-error';
 import type {
@@ -90,6 +91,12 @@ export class OrdersService {
     @Inject(forwardRef(() => TelegramService))
     private readonly telegram: TelegramService,
     private readonly userbotSignalHash: UserbotSignalHashService,
+    @Inject(
+      forwardRef(() =>
+        require('../qpulse-sync/signal-distribution.service').SignalDistributionService,
+      ),
+    )
+    private readonly signalDistribution: SignalDistributionService,
   ) {}
 
   private static readonly ACTIVE_SIGNAL_STATUSES = new Set([
@@ -405,7 +412,7 @@ export class OrdersService {
     }
 
     try {
-      return await this.prisma.signal.create({
+      const created = await this.prisma.signal.create({
         data: {
           cabinetId,
           pair: normalizedPair,
@@ -426,6 +433,8 @@ export class OrdersService {
           marketType: options?.marketType ?? 'linear',
         },
       });
+      void this.signalDistribution.onSignalCreated(created.id);
+      return created;
     } catch (e) {
       const msg = formatError(e);
       if (msg.includes('Signal_active_pair_direction_unique')) {
@@ -450,14 +459,20 @@ export class OrdersService {
     }
     const row = await this.prisma.signal.findFirst({
       where: this.withCabinetScope({ id }),
-      select: { status: true },
+      select: { status: true, liquidation: true, realizedPnl: true },
     });
     if (
       row?.status &&
       OrdersService.CLOSED_SIGNAL_STATUSES.has(row.status)
     ) {
       void this.userbotSignalHash.releaseForSignalId(id);
+      void this.signalDistribution.onTradeClosed({
+        signalId: id,
+        liquidation: row.liquidation === true,
+        realizedPnl: row.realizedPnl,
+      });
     }
+    void this.signalDistribution.onLifecycleUpdate(id);
     return res;
   }
 
@@ -714,6 +729,7 @@ export class OrdersService {
     await this.telegram.notifyTradeSignalEvent({ signalId, type, payload }).catch((e) =>
       this.logger.warn(`notifyTradeSignalEvent: ${formatError(e)}`),
     );
+    void this.signalDistribution.onSignalEvent(signalId, type, payload);
     return row;
   }
 

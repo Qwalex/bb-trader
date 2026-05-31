@@ -47,6 +47,7 @@ model Signal {
   deletedAt      DateTime?
   orders         Order[]
   events         SignalEvent[]
+  externalSyncs  SignalExternalSync[]
 
   @@index([sourceChatId, sourceMessageId])
   @@index([sourceChatId, signalExternalId])
@@ -241,6 +242,8 @@ model TgUserbotPublishGroup {
   enabled       Boolean  @default(true)
   publishEveryN Int      @default(1)
   signalCounter Int      @default(0)
+  /// Сигналы группы (с учётом N) также синхронизируются в QPulse.
+  linkedToApp   Boolean  @default(false)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -272,6 +275,22 @@ model TgUserbotMirrorMessage {
   @@index([publishGroupId, sourceChatId, sourceMessageId, kind])
   @@index([publishGroupId, rootSourceChatId, rootSourceMessageId, kind])
   @@index([createdAt])
+}
+
+model SignalExternalSync {
+  id         String    @id @default(cuid())
+  cabinetId  String
+  cabinet    Cabinet   @relation(fields: [cabinetId], references: [id], onDelete: Cascade)
+  signalId   String
+  signal     Signal    @relation(fields: [signalId], references: [id], onDelete: Cascade)
+  qpulseId   String?
+  syncedAt   DateTime?
+  lastError  String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@unique([cabinetId, signalId])
+  @@index([signalId])
 }
 
 model DiagnosticRun {
@@ -430,6 +449,7 @@ model Cabinet {
   mirrorMessages   TgUserbotMirrorMessage[]
   userbotSignalHashes TgUserbotSignalHash[]
   balanceAlertRules   CabinetBalanceAlertRule[]
+  signalExternalSyncs SignalExternalSync[]
 
   @@index([isDefault])
   @@index([ownerUserId, createdAt])

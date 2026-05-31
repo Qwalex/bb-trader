@@ -42,8 +42,9 @@ export class SettingsService {
     'TELEGRAM_BOT_TOKEN',
     'TELEGRAM_USERBOT_API_HASH',
     'TELEGRAM_USERBOT_SESSION',
-    'TELEGRAM_USERBOT_MTPROXY_URL',
-  ] as const;
+  'TELEGRAM_USERBOT_MTPROXY_URL',
+  'QPULSE_API_KEY',
+] as const;
 
   constructor(
     private readonly prisma: PrismaService,

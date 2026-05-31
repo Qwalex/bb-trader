@@ -25,6 +25,7 @@ import { TelegramUserbotOpenrouterService } from './openrouter/telegram-userbot-
 import { TelegramUserbotController } from './telegram-userbot.controller';
 import { TelegramUserbotService } from './telegram-userbot.service';
 import { UserbotSignalHashModule } from './userbot-signal-hash.module';
+import { QpulseSyncModule } from '../qpulse-sync/qpulse-sync.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { UserbotSignalHashModule } from './userbot-signal-hash.module';
     forwardRef(() => TelegramModule),
     forwardRef(() => VkModule),
     UserbotSignalHashModule,
+    forwardRef(() => QpulseSyncModule),
   ],
   controllers: [TelegramUserbotController],
   providers: [
@@ -56,6 +58,6 @@ import { UserbotSignalHashModule } from './userbot-signal-hash.module';
     TelegramUserbotMirrorService,
     TelegramUserbotService,
   ],
-  exports: [TelegramUserbotService],
+  exports: [TelegramUserbotService, TelegramUserbotMirrorService],
 })
 export class TelegramUserbotModule {}

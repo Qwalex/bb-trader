@@ -47,6 +47,7 @@ import { TelegramUserbotClientService } from './client/telegram-userbot-client.s
 import { TelegramUserbotIngestService } from './ingest/telegram-userbot-ingest.service';
 import { TelegramUserbotIngestPipelineService } from './ingest/telegram-userbot-ingest-pipeline.service';
 import { TelegramUserbotMirrorService } from './mirror/telegram-userbot-mirror.service';
+import { QpulseSyncService } from '../qpulse-sync/qpulse-sync.service';
 import { TelegramUserbotPollingService } from './polling/telegram-userbot-polling.service';
 import { TelegramUserbotScanService } from './scan/telegram-userbot-scan.service';
 import { TelegramUserbotSettingsService } from './settings/telegram-userbot-settings.service';
@@ -119,6 +120,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     private readonly userbotSettings: TelegramUserbotSettingsService,
     private readonly userbotFilters: TelegramUserbotFiltersService,
     private readonly userbotMirror: TelegramUserbotMirrorService,
+    private readonly qpulseSync: QpulseSyncService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -423,8 +425,21 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     chatId?: string;
     enabled?: boolean;
     publishEveryN?: number;
+    linkedToApp?: boolean;
   }) {
     return this.userbotMirror.createOrUpdatePublishGroup(body);
+  }
+
+  async getQpulseSettings() {
+    return this.qpulseSync.getPublicConfig();
+  }
+
+  async saveQpulseSettings(body: {
+    enabled?: boolean;
+    apiUrl?: string;
+    apiKey?: string;
+  }) {
+    return this.qpulseSync.saveConfig(body);
   }
 
   async deletePublishGroup(id: string) {
