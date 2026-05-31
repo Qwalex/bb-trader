@@ -29,9 +29,19 @@ export class SignalDistributionService {
     type: string,
     payload?: unknown,
   ): Promise<void> {
+    const cabinetId = this.cabinetContext.getCabinetId();
+    if (
+      cabinetId &&
+      (type === 'CANCELLED_BY_CHAT' || type === 'SIGNAL_CANCELLED_BY_SOURCE_PRIORITY')
+    ) {
+      await this.prisma.signal.updateMany({
+        where: { id: signalId, cabinetId, deletedAt: null },
+        data: { status: 'CANCELLED_BY_CHAT' },
+      });
+    }
+
     void this.qpulseSync.patchSignalIfSynced(signalId);
 
-    const cabinetId = this.cabinetContext.getCabinetId();
     const signal = await this.prisma.signal.findFirst({
       where: { id: signalId, cabinetId, deletedAt: null },
       select: {

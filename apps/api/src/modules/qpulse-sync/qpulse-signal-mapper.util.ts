@@ -3,7 +3,6 @@ import type { SignalDto } from '@repo/shared';
 import {
   calculateMovePercent,
   normalizeDirection,
-  toFixedPrice,
 } from '../telegram-userbot/mirror/telegram-userbot-mirror-format.util';
 
 type SignalRow = {
@@ -16,6 +15,7 @@ type SignalRow = {
   leverage: number;
   marketType: string;
   capitalPercent: number;
+  orderUsd?: number;
   source?: string | null;
   status: string;
   realizedPnl?: number | null;
@@ -59,6 +59,17 @@ function entryMid(entries: number[]): number {
   return (low + high) / 2;
 }
 
+function isFilledOrderStatus(status: string | null | undefined): boolean {
+  return String(status ?? '').toLowerCase().includes('filled');
+}
+
+function hasFilledEntryOrder(orders: SignalRow['orders']): boolean {
+  return (orders ?? []).some(
+    (o) =>
+      (o.orderKind === 'ENTRY' || o.orderKind === 'DCA') && isFilledOrderStatus(o.status),
+  );
+}
+
 function countFilledTpOrders(
   orders: SignalRow['orders'],
   takeProfits: number[],
@@ -69,7 +80,7 @@ function countFilledTpOrders(
       .filter(
         (o) =>
           o.orderKind === 'TP' &&
-          String(o.status ?? '').toLowerCase().includes('filled') &&
+          isFilledOrderStatus(o.status) &&
           o.price != null,
       )
       .map((o) => Number(o.price)),
@@ -83,24 +94,35 @@ function countFilledTpOrders(
   return hits;
 }
 
-function mapStatus(status: string, liquidation?: boolean): string {
+function mapStatus(
+  status: string,
+  params: { liquidation?: boolean; isSpot: boolean; hasFilledEntry: boolean },
+): string {
   const s = String(status ?? '').toUpperCase();
   if (s === 'FAILED' || s.includes('CANCEL')) return 'CANCELLED';
-  if (s.startsWith('CLOSED') || s === 'CLOSED_WIN' || s === 'CLOSED_LOSS' || s === 'CLOSED_MIXED') {
+  if (
+    s.startsWith('CLOSED') ||
+    s === 'CLOSED_WIN' ||
+    s === 'CLOSED_LOSS' ||
+    s === 'CLOSED_MIXED'
+  ) {
     return 'CLOSED';
   }
-  if (s === 'OPEN' || s === 'ORDERS_PLACED') return 'OPEN';
-  if (s === 'PARSED' || s === 'PENDING') return 'OPEN';
-  if (liquidation) return 'CLOSED';
+  if (params.liquidation) return 'CLOSED';
+  if (s === 'OPEN' && params.isSpot) return 'ACTIVE';
+  if (s === 'ORDERS_PLACED' && params.hasFilledEntry) return 'ACTIVE';
+  if (s === 'OPEN' || s === 'ORDERS_PLACED' || s === 'PARSED' || s === 'PENDING') {
+    return 'OPEN';
+  }
   return 'ACTIVE';
 }
 
 function computeProfitPercentage(params: {
-  entry: number;
   realizedPnl?: number | null;
   leverage: number;
   orderUsd?: number;
   capitalPercent: number;
+  isSpot: boolean;
 }): number | null {
   const pnl = params.realizedPnl;
   if (pnl == null || !Number.isFinite(pnl)) return null;
@@ -109,7 +131,8 @@ function computeProfitPercentage(params: {
       ? params.orderUsd
       : Math.max(1, params.capitalPercent);
   if (notional <= 0) return null;
-  return (pnl / notional) * 100 * Math.max(1, params.leverage);
+  const leverage = params.isSpot ? 1 : Math.max(1, params.leverage);
+  return (pnl / notional) * 100 * leverage;
 }
 
 export function mapSignalRowToQpulsePayload(row: SignalRow): Record<string, unknown> {
@@ -119,9 +142,17 @@ export function mapSignalRowToQpulsePayload(row: SignalRow): Record<string, unkn
   const direction = normalizeDirection(row.direction as SignalDto['direction']);
   const marketTypeRaw = String(row.marketType ?? 'linear').toLowerCase();
   const isSpot = marketTypeRaw === 'spot';
+  const hasFilledEntry = hasFilledEntryOrder(row.orders);
   const tpHits = countFilledTpOrders(row.orders, takeProfits);
-  const mappedStatus = mapStatus(row.status, row.liquidation === true);
+  const mappedStatus = mapStatus(row.status, {
+    liquidation: row.liquidation === true,
+    isSpot,
+    hasFilledEntry,
+  });
   const closed = mappedStatus === 'CLOSED';
+  const positionSizeUsdt = row.orderUsd && row.orderUsd > 0 ? row.orderUsd : null;
+  const realizedPnlUsdt =
+    row.realizedPnl != null && Number.isFinite(row.realizedPnl) ? row.realizedPnl : null;
 
   const targets = takeProfits.map((price, index) => ({
     label: `Target ${String(index + 1).padStart(2, '0')}`,
@@ -139,10 +170,11 @@ export function mapSignalRowToQpulsePayload(row: SignalRow): Record<string, unkn
     tpHits === 0;
 
   const profitPercentage = computeProfitPercentage({
-    entry: mid,
     realizedPnl: row.realizedPnl,
     leverage: row.leverage,
+    orderUsd: row.orderUsd,
     capitalPercent: row.capitalPercent,
+    isSpot,
   });
 
   return {
@@ -157,9 +189,11 @@ export function mapSignalRowToQpulsePayload(row: SignalRow): Record<string, unkn
     leverage: isSpot ? undefined : row.leverage,
     openDate: row.createdAt.toISOString(),
     closeDate: closed ? (row.closedAt ?? new Date()).toISOString() : null,
-    status: mappedStatus === 'CLOSED' && row.liquidation ? 'CLOSED' : mappedStatus,
+    status: mappedStatus,
     slHit,
     liquidated: row.liquidation === true,
+    positionSizeUsdt,
+    realizedPnlUsdt,
     profitPercentage,
     details: {
       targets,

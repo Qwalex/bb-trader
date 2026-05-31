@@ -2026,3 +2026,14 @@
 - Manual verification: после деплоя Trace для ingest с classify/parse на маршруте кабинета показывает JSON; `/logs` → openrouter по `ingestId` без изменений.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-173
+
+- Status: `done`
+- Scope: QPulse ↔ bb-trader sync — PnL fields, computed Results, admin delete/batch delete.
+- Files: QPulse `packages/shared/src/signal-profit.util.ts`, `results-summary.util.ts`, `apps/api/prisma/migrations/20260531140000_*`, `signals.service.ts`, `results.service.ts`, admin `signals/page.tsx`, `results-summary/page.tsx`, `docs/contracts/rest-api.md`; signalsBot `qpulse-signal-mapper.util.ts`, `signal-distribution.service.ts`
+- Findings: `orderUsd` не участвовал в profit%; `ResultsSummary` расходился с CLOSED-сигналами; admin delete на `/results-summary` ломался на enum `THREE_M`; нет batch delete.
+- Changes: shared `computeProfitPercentage` / `computeResultsSummary`; Signal `positionSizeUsdt`/`realizedPnlUsdt`; drop `ResultsSummary`; `GET /results` summary из CLOSED; bb-trader status map + cancel→`CANCELLED_BY_CHAT`; admin batch-delete + Results UI.
+- Manual verification: `pnpm build` QPulse API/admin; `npm run build -w apps/api` signalsBot; Railway: deploy QPulse API → Admin → cabinets API (migration first).
+- Docs updated: QPulse rest-api, architecture, admin; этот трекер.
+- Linked risks (`SEC-###`): N/A
