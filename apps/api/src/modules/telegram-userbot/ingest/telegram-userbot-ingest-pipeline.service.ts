@@ -509,9 +509,10 @@ export class TelegramUserbotIngestPipelineService {
 
     const signal = parsed.signal;
     signal.source = chatMeta?.title ?? undefined;
+    const mirrorSignal = await this.bybit.resolveMarketEntryIfMissing(signal, 'linear');
     await this.userbotMirror.publishSignalToMirrorGroups({
       ingest: { id: ingest.id, chatId: ingest.chatId, messageId: ingest.messageId },
-      signal,
+      signal: mirrorSignal,
       sourceChatTitle: chatMeta?.title ?? undefined,
     });
     this.appendIngestStageLog('info', 'Userbot: parse produced signal', ingest, {

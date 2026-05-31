@@ -10,6 +10,10 @@ import { RestClientV5 } from 'bybit-api';
 import { normalizeTradingPair, type SignalDto } from '@repo/shared';
 
 import { formatError } from '../../common/format-error';
+import {
+  applyMarketEntryPrice,
+  hasExplicitEntryPrices,
+} from '../../common/signal-market-entry.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppLogService } from '../app-log/app-log.service';
 import { CabinetContextService } from '../cabinet/cabinet-context.service';
@@ -139,6 +143,37 @@ export class BybitService implements OnApplicationBootstrap {
 
   async getLastPriceForPair(pair: string): Promise<number | undefined> {
     return this.balanceInstrument.getLastPriceForPair(pair);
+  }
+
+  async getSpotLastPriceForPair(pair: string): Promise<number | undefined> {
+    const client = await this.bybitSpotInstrument.getClient();
+    if (!client) {
+      return undefined;
+    }
+    return this.bybitSpotInstrument.getSpotLastPrice(client, normalizeTradingPair(pair));
+  }
+
+  /**
+   * Рыночный вход без явной цены в сигнале — подставляем last price на момент вызова.
+   */
+  async resolveMarketEntryIfMissing(
+    signal: SignalDto,
+    marketType: 'linear' | 'spot' = 'linear',
+  ): Promise<SignalDto> {
+    if (hasExplicitEntryPrices(signal.entries)) {
+      return signal;
+    }
+    const lastPrice =
+      marketType === 'spot'
+        ? await this.getSpotLastPriceForPair(signal.pair)
+        : await this.getLastPriceForPair(signal.pair);
+    if (!lastPrice) {
+      this.logger.warn(
+        `resolveMarketEntryIfMissing: last price unavailable for ${signal.pair} (${marketType})`,
+      );
+      return signal;
+    }
+    return applyMarketEntryPrice(signal, lastPrice);
   }
 
   async getLiveExposureSnapshot(): ReturnType<

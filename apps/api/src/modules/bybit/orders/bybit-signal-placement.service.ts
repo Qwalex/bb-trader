@@ -499,7 +499,9 @@ export class BybitSignalPlacementService {
         }
       }
 
-      const signalToStore: SignalDto = { ...signal, entries: effectiveEntries };
+      const entriesForStore =
+        effectiveEntries.length === 0 && lastPrice ? [lastPrice] : effectiveEntries;
+      const signalToStore: SignalDto = { ...signal, entries: entriesForStore };
       const signalRow = await ports.orders.createSignalRecord(
         signalToStore,
         rawMessage,

@@ -52,11 +52,25 @@ function formatPairForQpulse(pair: string): string {
 }
 
 function entryMid(entries: number[]): number {
-  if (entries.length === 0) return 0;
-  const sorted = [...entries].sort((a, b) => a - b);
+  const valid = entries.filter((e) => Number.isFinite(e) && e > 0);
+  if (valid.length === 0) return 0;
+  const sorted = [...valid].sort((a, b) => a - b);
   const low = sorted[0] ?? 0;
   const high = sorted[sorted.length - 1] ?? low;
   return (low + high) / 2;
+}
+
+function resolveEntryPrice(row: SignalRow, entries: number[]): number {
+  const mid = entryMid(entries);
+  if (mid > 0) return mid;
+  const filledEntry = (row.orders ?? []).find(
+    (o) =>
+      (o.orderKind === 'ENTRY' || o.orderKind === 'DCA') &&
+      isFilledOrderStatus(o.status) &&
+      o.price != null &&
+      Number(o.price) > 0,
+  );
+  return filledEntry?.price != null ? Number(filledEntry.price) : 0;
 }
 
 function isFilledOrderStatus(status: string | null | undefined): boolean {
@@ -138,7 +152,7 @@ function computeProfitPercentage(params: {
 export function mapSignalRowToQpulsePayload(row: SignalRow): Record<string, unknown> {
   const entries = parseNumberArray(row.entries);
   const takeProfits = parseNumberArray(row.takeProfits);
-  const mid = entryMid(entries);
+  const mid = resolveEntryPrice(row, entries);
   const direction = normalizeDirection(row.direction as SignalDto['direction']);
   const marketTypeRaw = String(row.marketType ?? 'linear').toLowerCase();
   const isSpot = marketTypeRaw === 'spot';

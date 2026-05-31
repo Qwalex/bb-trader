@@ -45,11 +45,18 @@ export function formatMirrorSignalText(
   void _sourceChatTitle;
   const direction = normalizeDirection(signal.direction);
   const pair = signal.pair.toUpperCase();
-  const entries = [...signal.entries].filter(Number.isFinite).sort((a, b) => a - b);
+  const entries = [...signal.entries].filter((e) => Number.isFinite(e) && e > 0);
   const tps = [...signal.takeProfits].filter(Number.isFinite);
-  const entryLow = entries[0] ?? signal.entries[0] ?? 0;
-  const entryHigh = entries[entries.length - 1] ?? signal.entries[0] ?? 0;
+  const entryLow = entries[0] ?? 0;
+  const entryHigh = entries[entries.length - 1] ?? entryLow;
   const entryMid = (entryLow + entryHigh) / 2;
+  const entryLine =
+    entries.length === 0
+      ? '— (цена не получена)'
+      : entries.length === 1 || entryLow === entryHigh
+        ? toFixedPrice(entryLow)
+        : `${toFixedPrice(entryLow)} - ${toFixedPrice(entryHigh)}`;
+  const entryLabel = entries.length <= 1 ? '💰 Entry:' : '💰 Entry Range:';
   const slPercent = calculateMovePercent({
     from: entryMid,
     to: signal.stopLoss,
@@ -66,8 +73,8 @@ export function formatMirrorSignalText(
     '📊 Market: futures',
     `⚡ Leverage: ${signal.leverage}x`,
     '',
-    '💰 Entry Range:',
-    `${toFixedPrice(entryLow)} - ${toFixedPrice(entryHigh)}`,
+    entryLabel,
+    entryLine,
     '',
     '🛑 Stop Loss:',
     `${toFixedPrice(signal.stopLoss)} (${slPercent})`,

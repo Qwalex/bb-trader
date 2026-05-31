@@ -412,19 +412,21 @@ export class OrdersService {
     }
 
     try {
+      const marketType = options?.marketType ?? 'linear';
+      const signalToStore = await this.bybit.resolveMarketEntryIfMissing(signal, marketType);
       const created = await this.prisma.signal.create({
         data: {
           cabinetId,
           pair: normalizedPair,
-          direction: signal.direction,
-          entries: JSON.stringify(signal.entries),
-          entryIsRange: signal.entryIsRange === true,
-          stopLoss: signal.stopLoss,
-          takeProfits: JSON.stringify(signal.takeProfits),
-          leverage: signal.leverage,
-          orderUsd: signal.orderUsd,
-          capitalPercent: signal.capitalPercent,
-          source: signal.source ?? null,
+          direction: signalToStore.direction,
+          entries: JSON.stringify(signalToStore.entries),
+          entryIsRange: signalToStore.entryIsRange === true,
+          stopLoss: signalToStore.stopLoss,
+          takeProfits: JSON.stringify(signalToStore.takeProfits),
+          leverage: signalToStore.leverage,
+          orderUsd: signalToStore.orderUsd,
+          capitalPercent: signalToStore.capitalPercent,
+          source: signalToStore.source ?? null,
           sourceChatId,
           sourceMessageId,
           signalExternalId,

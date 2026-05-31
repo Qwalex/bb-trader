@@ -2037,3 +2037,14 @@
 - Manual verification: `pnpm build` QPulse API/admin; `npm run build -w apps/api` signalsBot; Railway: deploy QPulse API → Admin → cabinets API (migration first).
 - Docs updated: QPulse rest-api, architecture, admin; этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-174
+
+- Status: `done`
+- Scope: Рыночный вход без явного entry — подстановка last price вместо 0 в группе и QPulse.
+- Files: `common/signal-market-entry.util.ts`, `bybit.service.ts` (`resolveMarketEntryIfMissing`), `orders.service.ts`, `telegram-userbot-ingest-pipeline.service.ts`, `bybit-signal-placement.service.ts`, `telegram-userbot-mirror-format.util.ts`, `qpulse-signal-mapper.util.ts`
+- Findings: при `entries=null/[]` mirror и QPulse mapper давали entry 0; placement на бирже брал lastPrice, но не сохранял в сигнал.
+- Changes: last price Bybit (linear/spot) на момент parse/persist; mirror до публикации; `createSignalRecord` перед записью; fallback в QPulse mapper из filled ENTRY order.
+- Manual verification: `npm run build -w apps/api` (pass); сигнал без entry → в группе и приложении цена ≈ рынок, не 0.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
