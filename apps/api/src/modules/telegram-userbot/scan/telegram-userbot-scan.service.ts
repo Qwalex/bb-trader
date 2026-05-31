@@ -122,6 +122,8 @@ export class TelegramUserbotScanService {
       select: {
         ingestId: true,
         chatId: true,
+        aiRequest: true,
+        aiResponse: true,
         ingest: {
           select: {
             messageId: true,
@@ -149,8 +151,8 @@ export class TelegramUserbotScanService {
         chatId: row.chatId,
         messageId: row.ingest.messageId,
         text: row.ingest.text,
-        aiRequest: row.ingest.aiRequest,
-        aiResponse: row.ingest.aiResponse,
+        aiRequest: row.aiRequest ?? row.ingest.aiRequest,
+        aiResponse: row.aiResponse ?? row.ingest.aiResponse,
         classification: row.classification,
         status: row.status,
         error: row.error,

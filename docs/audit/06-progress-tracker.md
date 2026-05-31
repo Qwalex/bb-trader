@@ -2015,3 +2015,14 @@
 - Manual verification: `npm run build -w api` + `npm run build -w web` (pass); QPulse `nest build` (pass); на стенде — linked group N=3 → QPulse admin/mobile только каждый 3-й; non-linked group → только TG; lifecycle PATCH при `SignalExternalSync`.
 - Docs updated: этот трекер, runbook, AGENTS.md.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-172
+
+- Status: `done`
+- Scope: Userbot UI — пустой OpenRouter trace при успешной классификации/parse.
+- Files: `apps/api/src/modules/telegram-userbot/scan/telegram-userbot-scan.service.ts`, `docs/audit/06-progress-tracker.md`
+- Findings: `metrics/today.recent` отдавал `aiRequest`/`aiResponse` только из `TgUserbotIngest`; при multi-cabinet и `pipeline exception` trace остаётся на `CabinetIngestRoute`, ingest обнуляется.
+- Changes: в `recent` приоритет полей маршрута кабинета (`route.aiRequest ?? ingest.aiRequest`).
+- Manual verification: после деплоя Trace для ingest с classify/parse на маршруте кабинета показывает JSON; `/logs` → openrouter по `ingestId` без изменений.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
