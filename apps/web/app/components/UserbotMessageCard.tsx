@@ -1,6 +1,7 @@
 'use client';
 
 import { formatTimeRu } from '../../lib/datetime';
+import { ingestClassificationLabel } from '../telegram-userbot/telegram-userbot-page.constants';
 
 export type UserbotRecentRow = {
   id: string;
@@ -45,7 +46,7 @@ export function UserbotMessageCard({
           <time className="userbotMessageCardTime" dateTime={row.createdAt}>
             {formatTimeRu(row.createdAt)}
           </time>
-          <span className="userbotMessageCardClass">{row.classification}</span>
+          <span className="userbotMessageCardClass">{ingestClassificationLabel(row.classification)}</span>
         </div>
         <span className="userbotMessageCardMsgId" title="Message ID">
           #{row.messageId}

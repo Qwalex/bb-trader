@@ -321,13 +321,109 @@ export class TelegramUserbotController {
     return this.userbot.deletePublishGroup(id);
   }
 
+  @ApiOperation({ summary: 'Список постов редактора контента (analysis/content)' })
+  @ApiQuery({ name: 'status', required: false })
+  @ApiQuery({ name: 'classification', required: false, enum: ['analysis', 'content'] })
+  @ApiQuery({ name: 'limit', required: false })
+  @Get('content/posts')
+  async listContentPosts(
+    @Req() req: AuthReq,
+    @Query('cabinetId') cabinetId: string | undefined,
+    @Query('status') status?: string,
+    @Query('classification') classification?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.runWithCabinet(req, cabinetId, () =>
+      this.userbot.listContentPosts({
+        status,
+        classification,
+        limit: this.parseLimit(limit, 100),
+      }),
+    );
+  }
+
+  @ApiOperation({ summary: 'Получить пост редактора контента' })
+  @Get('content/posts/:id')
+  async getContentPost(
+    @Req() req: AuthReq,
+    @Query('cabinetId') cabinetId: string | undefined,
+    @Param('id') id: string,
+  ) {
+    return this.runWithCabinet(req, cabinetId, () => this.userbot.getContentPost(id));
+  }
+
+  @ApiOperation({ summary: 'Сохранить черновик поста' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { editedText: { type: 'string', nullable: true } },
+    },
+  })
+  @Put('content/posts/:id')
+  async updateContentPost(
+    @Req() req: AuthReq,
+    @Query('cabinetId') cabinetId: string | undefined,
+    @Param('id') id: string,
+    @Body() body: { editedText?: string | null },
+  ) {
+    return this.runWithCabinet(req, cabinetId, () => this.userbot.updateContentPost(id, body));
+  }
+
+  @ApiOperation({ summary: 'Переписать пост через OpenRouter' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { instruction: { type: 'string' } },
+    },
+  })
+  @Post('content/posts/:id/ai-rewrite')
+  async aiRewriteContentPost(
+    @Req() req: AuthReq,
+    @Query('cabinetId') cabinetId: string | undefined,
+    @Param('id') id: string,
+    @Body() body: { instruction?: string },
+  ) {
+    return this.runWithCabinet(req, cabinetId, () => this.userbot.aiRewriteContentPost(id, body));
+  }
+
+  @ApiOperation({ summary: 'Опубликовать пост в группы с contentPublishEnabled' })
+  @Post('content/posts/:id/publish')
+  async publishContentPost(
+    @Req() req: AuthReq,
+    @Query('cabinetId') cabinetId: string | undefined,
+    @Param('id') id: string,
+  ) {
+    return this.runWithCabinet(req, cabinetId, () => this.userbot.publishContentPost(id));
+  }
+
+  @ApiOperation({ summary: 'Сохранить выбор групп для публикации контента' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        enabledGroupIds: { type: 'array', items: { type: 'string' } },
+      },
+    },
+  })
+  @Put('content/publish-groups')
+  async saveContentPublishGroups(
+    @Req() req: AuthReq,
+    @Query('cabinetId') cabinetId: string | undefined,
+    @Body() body: { enabledGroupIds?: string[] },
+  ) {
+    return this.runWithCabinet(req, cabinetId, () => this.userbot.saveContentPublishGroups(body));
+  }
+
   @ApiOperation({ summary: 'Создать фильтр-пример' })
   @ApiBody({
     schema: {
       type: 'object',
       properties: {
         groupName: { type: 'string' },
-        kind: { type: 'string', enum: ['signal', 'close', 'result', 'reentry', 'ignore'] },
+        kind: {
+          type: 'string',
+          enum: ['signal', 'close', 'result', 'reentry', 'ad', 'analysis', 'promo', 'content', 'ignore'],
+        },
         example: { type: 'string' },
         requiresQuote: { type: 'boolean' },
       },
@@ -361,7 +457,10 @@ export class TelegramUserbotController {
       type: 'object',
       properties: {
         groupName: { type: 'string' },
-        kind: { type: 'string', enum: ['signal', 'close', 'result', 'reentry', 'ignore'] },
+        kind: {
+          type: 'string',
+          enum: ['signal', 'close', 'result', 'reentry', 'ad', 'analysis', 'promo', 'content', 'ignore'],
+        },
         pattern: { type: 'string' },
         requiresQuote: { type: 'boolean' },
       },
@@ -394,7 +493,10 @@ export class TelegramUserbotController {
     schema: {
       type: 'object',
       properties: {
-        kind: { type: 'string', enum: ['signal', 'close', 'result', 'reentry', 'ignore'] },
+        kind: {
+          type: 'string',
+          enum: ['signal', 'close', 'result', 'reentry', 'ad', 'analysis', 'promo', 'content', 'ignore'],
+        },
         example: { type: 'string' },
       },
     },

@@ -69,7 +69,10 @@ export const TRANSCRIPT_RESPONSE_JSON_SCHEMA = {
 export const CLASSIFIER_RESPONSE_JSON_SCHEMA = {
   type: 'object',
   properties: {
-    kind: { type: 'string', enum: ['signal', 'close', 'reentry', 'result', 'other'] },
+    kind: {
+      type: 'string',
+      enum: ['signal', 'close', 'reentry', 'result', 'ad', 'analysis', 'promo', 'content', 'other'],
+    },
     reason: { type: 'string' },
   },
   required: ['kind', 'reason'],
@@ -87,5 +90,15 @@ export const FILTER_PATTERN_GENERATION_JSON_SCHEMA = {
     },
   },
   required: ['patterns'],
+  additionalProperties: false,
+} as const;
+
+/** JSON Schema для переписывания поста «Редактор контента». */
+export const CONTENT_REWRITE_JSON_SCHEMA = {
+  type: 'object',
+  properties: {
+    text: { type: 'string', minLength: 1 },
+  },
+  required: ['text'],
   additionalProperties: false,
 } as const;

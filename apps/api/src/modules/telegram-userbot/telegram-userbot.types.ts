@@ -1,5 +1,23 @@
-export type MessageKind = 'signal' | 'close' | 'reentry' | 'result' | 'other';
-export type UserbotFilterKind = 'signal' | 'close' | 'result' | 'reentry' | 'ignore';
+export type MessageKind =
+  | 'signal'
+  | 'close'
+  | 'reentry'
+  | 'result'
+  | 'ad'
+  | 'analysis'
+  | 'promo'
+  | 'content'
+  | 'other';
+export type UserbotFilterKind =
+  | 'signal'
+  | 'close'
+  | 'result'
+  | 'reentry'
+  | 'ad'
+  | 'analysis'
+  | 'promo'
+  | 'content'
+  | 'ignore';
 
 export type UserbotFilterExampleMatch = {
   kind: UserbotFilterKind;

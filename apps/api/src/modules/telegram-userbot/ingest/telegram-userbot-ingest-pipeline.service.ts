@@ -33,6 +33,7 @@ import { TelegramUserbotIngestSignalLookupService } from './telegram-userbot-ing
 import { TelegramUserbotIngestSignalReplyService } from './telegram-userbot-ingest-signal-reply.service';
 import { TelegramUserbotIngestService } from './telegram-userbot-ingest.service';
 import { TelegramUserbotMirrorService } from '../mirror/telegram-userbot-mirror.service';
+import { TelegramUserbotContentEditorService } from '../content-editor/telegram-userbot-content-editor.service';
 import { TelegramUserbotSettingsService } from '../settings/telegram-userbot-settings.service';
 import {
   countLockEmojiInText,
@@ -79,6 +80,7 @@ export class TelegramUserbotIngestPipelineService {
     private readonly userbotSettings: TelegramUserbotSettingsService,
     private readonly userbotFilters: TelegramUserbotFiltersService,
     private readonly userbotMirror: TelegramUserbotMirrorService,
+    private readonly contentEditor: TelegramUserbotContentEditorService,
     private readonly editWatch: TelegramUserbotIngestEditWatchService,
     private readonly parseRetry: TelegramUserbotIngestParseRetryService,
     private readonly signalLookup: TelegramUserbotIngestSignalLookupService,
@@ -446,6 +448,22 @@ export class TelegramUserbotIngestPipelineService {
         aiRequest,
         aiResponse,
       });
+      if (kind === 'analysis' || kind === 'content') {
+        try {
+          await this.contentEditor.upsertFromIngest({
+            ingestId: ingest.id,
+            sourceChatId: ingest.chatId,
+            sourceMessageId: ingest.messageId,
+            sourceTitle: groupName || null,
+            classification: kind,
+            originalText: text,
+          });
+        } catch (e) {
+          this.appendIngestStageLog('warn', 'Userbot: content post upsert failed', ingest, {
+            error: formatError(e),
+          });
+        }
+      }
       if (awaitingEdit) {
         void this.editWatch.scheduleEditWatch(ingest.id);
       }

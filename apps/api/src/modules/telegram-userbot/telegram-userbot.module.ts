@@ -21,6 +21,7 @@ import { TelegramUserbotPollingService } from './polling/telegram-userbot-pollin
 import { TelegramUserbotScanService } from './scan/telegram-userbot-scan.service';
 import { TelegramUserbotSettingsService } from './settings/telegram-userbot-settings.service';
 import { TelegramUserbotMirrorService } from './mirror/telegram-userbot-mirror.service';
+import { TelegramUserbotContentEditorService } from './content-editor/telegram-userbot-content-editor.service';
 import { TelegramUserbotOpenrouterService } from './openrouter/telegram-userbot-openrouter.service';
 import { TelegramUserbotController } from './telegram-userbot.controller';
 import { TelegramUserbotService } from './telegram-userbot.service';
@@ -56,6 +57,7 @@ import { QpulseSyncModule } from '../qpulse-sync/qpulse-sync.module';
     TelegramUserbotSettingsService,
     TelegramUserbotFiltersService,
     TelegramUserbotMirrorService,
+    TelegramUserbotContentEditorService,
     TelegramUserbotService,
   ],
   exports: [TelegramUserbotService, TelegramUserbotMirrorService],

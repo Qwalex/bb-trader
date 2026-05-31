@@ -29,6 +29,7 @@ export const NAV_MENU_ITEMS: NavMenuItemConfig[] = [
   { id: 'telegram-userbot', label: 'Userbot', href: '/telegram-userbot', cabinetAware: true, defaultHidden: true },
   { id: 'openrouter-spend', label: 'Расходы OpenRouter', href: '/openrouter-spend', cabinetAware: true, adminOnly: true, defaultHidden: true },
   { id: 'my-group', label: 'Моя группа', href: '/my-group', cabinetAware: true, adminOnly: true, defaultHidden: true },
+  { id: 'content-editor', label: 'Редактор контента', href: '/content-editor', cabinetAware: true, adminOnly: true, defaultHidden: true },
   { id: 'filters', label: 'Фильтры', href: '/filters', cabinetAware: true, defaultHidden: true },
   { id: 'settings-cabinet', label: 'Настройки кабинета', href: '/settings?scope=cabinet', cabinetAware: true },
   { id: 'settings-account', label: 'Настройки аккаунта', href: '/settings?scope=account', defaultHidden: true },

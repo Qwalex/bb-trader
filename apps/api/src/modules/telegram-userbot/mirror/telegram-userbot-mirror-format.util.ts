@@ -1,7 +1,7 @@
 import type { SignalDto } from '@repo/shared';
 
 export function toFixedPrice(value: number): string {
-  return Number.isFinite(value) ? value.toFixed(4) : '0.0000';
+  return Number.isFinite(value) ? value.toFixed(2) : '0.00';
 }
 
 export function normalizeDirection(direction: SignalDto['direction']): 'LONG' | 'SHORT' {
@@ -63,8 +63,8 @@ export function formatMirrorSignalText(
     direction,
   });
   const targetLines = tps.map(
-    (tp, idx) =>
-      `${idx + 1}. ${toFixedPrice(tp)} (${calculateMovePercent({ from: entryMid, to: tp, direction })})`,
+    (tp) =>
+      `${toFixedPrice(tp)} (${calculateMovePercent({ from: entryMid, to: tp, direction })})`,
   );
 
   return [
@@ -80,9 +80,7 @@ export function formatMirrorSignalText(
     `${toFixedPrice(signal.stopLoss)} (${slPercent})`,
     '',
     '🎯 Targets:',
-    ...(targetLines.length > 0 ? targetLines : ['1. —']),
-    '',
-    '🤖 Auto-generated signal',
+    ...(targetLines.length > 0 ? targetLines : ['—']),
   ].join('\n');
 }
 

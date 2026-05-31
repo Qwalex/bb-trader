@@ -373,12 +373,14 @@ export class TelegramUserbotMirrorService {
     enabled?: boolean;
     publishEveryN?: number;
     linkedToApp?: boolean;
+    contentPublishEnabled?: boolean;
   }) {
     const cabinetId = this.cabinetContext.getCabinetId();
     const title = body.title?.trim() ?? '';
     const chatId = body.chatId?.trim() ?? '';
     const enabled = body.enabled !== false;
     const linkedToApp = body.linkedToApp === true;
+    const contentPublishEnabled = body.contentPublishEnabled === true;
     const publishEveryN = Math.max(1, Math.trunc(Number(body.publishEveryN ?? 1) || 1));
     if (!title) return { ok: false, error: 'title обязателен' };
     if (!chatId) return { ok: false, error: 'chatId обязателен' };
@@ -388,14 +390,14 @@ export class TelegramUserbotMirrorService {
       const prismaAny = this.prisma as any;
       const updated = await prismaAny.tgUserbotPublishGroup.update({
         where: { id },
-        data: { title, chatId, enabled, publishEveryN, linkedToApp, cabinetId },
+        data: { title, chatId, enabled, publishEveryN, linkedToApp, contentPublishEnabled, cabinetId },
       });
       return { ok: true, item: updated };
     }
 
     const prismaAny = this.prisma as any;
     const created = await prismaAny.tgUserbotPublishGroup.create({
-      data: { title, chatId, enabled, publishEveryN, linkedToApp, cabinetId },
+      data: { title, chatId, enabled, publishEveryN, linkedToApp, contentPublishEnabled, cabinetId },
     });
     return { ok: true, item: created };
   }

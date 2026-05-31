@@ -425,6 +425,18 @@ export default function TelegramUserbotPage() {
     if (row.classification === 'result') {
       return 'Результат по сигналу';
     }
+    if (row.classification === 'ad') {
+      return 'Реклама';
+    }
+    if (row.classification === 'analysis') {
+      return 'Анализ рынка';
+    }
+    if (row.classification === 'promo') {
+      return 'Акция / розыгрыш';
+    }
+    if (row.classification === 'content') {
+      return 'Контент';
+    }
     switch (row.status) {
       case 'parse_incomplete':
         return 'Прочитано -> частично распознано';

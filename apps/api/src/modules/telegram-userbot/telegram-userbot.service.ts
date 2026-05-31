@@ -47,6 +47,7 @@ import { TelegramUserbotClientService } from './client/telegram-userbot-client.s
 import { TelegramUserbotIngestService } from './ingest/telegram-userbot-ingest.service';
 import { TelegramUserbotIngestPipelineService } from './ingest/telegram-userbot-ingest-pipeline.service';
 import { TelegramUserbotMirrorService } from './mirror/telegram-userbot-mirror.service';
+import { TelegramUserbotContentEditorService } from './content-editor/telegram-userbot-content-editor.service';
 import { QpulseSyncService } from '../qpulse-sync/qpulse-sync.service';
 import { TelegramUserbotPollingService } from './polling/telegram-userbot-polling.service';
 import { TelegramUserbotScanService } from './scan/telegram-userbot-scan.service';
@@ -120,6 +121,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     private readonly userbotSettings: TelegramUserbotSettingsService,
     private readonly userbotFilters: TelegramUserbotFiltersService,
     private readonly userbotMirror: TelegramUserbotMirrorService,
+    private readonly contentEditor: TelegramUserbotContentEditorService,
     private readonly qpulseSync: QpulseSyncService,
   ) {}
 
@@ -446,6 +448,30 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     return this.userbotMirror.deletePublishGroup(id);
   }
 
+  async listContentPosts(options?: { status?: string; classification?: string; limit?: number }) {
+    return this.contentEditor.listPosts(options);
+  }
+
+  async getContentPost(id: string) {
+    return this.contentEditor.getPost(id);
+  }
+
+  async updateContentPost(id: string, body: { editedText?: string | null }) {
+    return this.contentEditor.updatePost(id, body);
+  }
+
+  async aiRewriteContentPost(id: string, body: { instruction?: string }) {
+    return this.contentEditor.aiRewritePost(id, body);
+  }
+
+  async publishContentPost(id: string) {
+    return this.contentEditor.publishPost(id);
+  }
+
+  async saveContentPublishGroups(body: { enabledGroupIds?: string[] }) {
+    return this.contentEditor.saveContentPublishGroups(body);
+  }
+
   /**
    * Недавние записи userbot-ingest для ручной привязки сделки (chat id + message id).
    * Все сообщения из ingest, без отбора по classification/status; опционально только chatId.
@@ -482,7 +508,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
   async createFilterExample(body: {
     groupName?: string;
-    kind?: 'signal' | 'close' | 'result' | 'reentry' | 'ignore';
+    kind?: 'signal' | 'close' | 'result' | 'reentry' | 'ad' | 'analysis' | 'promo' | 'content' | 'ignore';
     example?: string;
     requiresQuote?: boolean;
   }) {
@@ -495,7 +521,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
   async createFilterPattern(body: {
     groupName?: string;
-    kind?: 'signal' | 'close' | 'result' | 'reentry' | 'ignore';
+    kind?: 'signal' | 'close' | 'result' | 'reentry' | 'ad' | 'analysis' | 'promo' | 'content' | 'ignore';
     pattern?: string;
     requiresQuote?: boolean;
   }) {
@@ -507,7 +533,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   }
 
   async generateFilterPatterns(body: {
-    kind?: 'signal' | 'close' | 'result' | 'reentry' | 'ignore';
+    kind?: 'signal' | 'close' | 'result' | 'reentry' | 'ad' | 'analysis' | 'promo' | 'content' | 'ignore';
     example?: string;
   }) {
     return this.userbotFilters.generateFilterPatterns(body);

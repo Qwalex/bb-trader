@@ -101,7 +101,7 @@ Use all provided parts together.
 
 Return ONLY strict JSON:
 {
-  "kind": "signal" | "close" | "reentry" | "result" | "other",
+  "kind": "signal" | "close" | "reentry" | "result" | "ad" | "analysis" | "promo" | "content" | "other",
   "reason": "short reason in Russian"
 }
 
@@ -113,16 +113,24 @@ Classification rules:
 4. Return "result" for outcome/performance messages about an existing or past trade: TP hit, SL hit, closed trade report, profit/loss, PNL, percentages, duration, period, recap, statistics, performance summary.
 5. If the text explicitly says close/closed but does NOT mention TP, take profit, SL, stop loss, target reached, тейк, стоп, or similar hit markers, prefer "close" over "result".
 6. If the text contains result markers such as TP/SL outcome markers, target reached markers, profit/loss, PNL, duration/period, or performance summary, return "result".
-7. Return "other" for commentary, chat, and unrelated text — but NOT for incomplete setup stubs that already name pair and side (those are "signal").
+7. Return "ad" for advertisements and promos of external channels, VIP subscriptions, paid signal groups, Cornix/bot bundles, referral links, "message to buy", combo prices for channel access, TeleFeed promos, and similar commercial offers. No actionable trade setup for our bot.
+8. Return "analysis" for market commentary and technical outlook without a fresh actionable trade setup: price updates, trend/channel/support-resistance narrative, "possible scenarios", "keep an eye", "stay tuned", educational outlook. Usually mentions a pair or market but lacks explicit new entry+SL+TP setup intent.
+9. Return "promo" for contests, giveaways, trader shows, challenge promotions, prize pools, "who will win", promo codes for prop firms/challenges, entertainment/event posts tied to trading community — not a trade signal and not a pure channel subscription ad.
+10. Return "content" for useful non-commercial posts that are NOT "analysis" and NOT "ad": trading tips, education, how-to, risk/money management advice, news digests, tool/platform updates, community announcements with practical value, motivational or informational posts for traders. The message should feel like substantive value for the reader, not a sales pitch and not primarily a pair/market outlook.
+11. Return "other" for generic chat, empty fluff, off-topic noise, or unclear text — but NOT for incomplete setup stubs that already name pair and side (those are "signal"). Do NOT use "other" when "ad", "analysis", "promo", or "content" fits better.
 
 Priority:
 - explicit manual close wording > close
 - quoted re-entry/update > reentry
 - fresh setup stub or full setup (pair + side) > signal
 - outcome/performance report > result
+- channel/VIP/subscription ads > ad
+- market outlook without setup > analysis
+- contests/giveaways/show promos > promo
+- useful educational/informational (not ad, not analysis) > content
 - otherwise > other
 
-Be conservative for close/reentry/result; for pair+side setup stubs prefer "signal" over "other".`;
+Be conservative for close/reentry/result; for pair+side setup stubs prefer "signal" over "other". Prefer "ad"/"analysis"/"promo"/"content" over "other" when the message clearly matches those categories.`;
 }
 
 export function buildFilterPatternGenerationPrompt(kind: string): string {
@@ -144,4 +152,26 @@ Task:
 - Keep patterns short, usually 2-40 characters.
 - Order patterns from best to weaker alternatives.
 - Ensure all patterns are unique.`;
+}
+
+export function buildContentRewritePrompt(classification: 'analysis' | 'content'): string {
+  const kindHint =
+    classification === 'analysis'
+      ? 'аналитический пост о рынке (outlook, уровни, сценарии)'
+      : 'полезный образовательный или информационный пост для трейдеров';
+  return `You rewrite Telegram posts for publication in trading groups.
+
+Return ONLY strict JSON:
+{
+  "text": "rewritten message in Russian"
+}
+
+Rules:
+- Post kind: ${kindHint}
+- Preserve factual meaning; improve clarity, structure, and readability.
+- Keep tickers, numbers, levels, and links accurate — do not invent prices or setups.
+- Do NOT add trade signals (entry/SL/TP) unless they were in the original.
+- Do NOT add ads, referral links, or channel promos.
+- Use concise Russian; Telegram-friendly formatting (short paragraphs, optional emoji sparingly).
+- Output only the rewritten message body in the "text" field.`;
 }

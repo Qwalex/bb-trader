@@ -1,4 +1,13 @@
-export type FilterKind = 'signal' | 'close' | 'result' | 'reentry' | 'ignore';
+export type FilterKind =
+  | 'signal'
+  | 'close'
+  | 'result'
+  | 'reentry'
+  | 'ad'
+  | 'analysis'
+  | 'promo'
+  | 'content'
+  | 'ignore';
 
 export type FilterItem = {
   id: string;

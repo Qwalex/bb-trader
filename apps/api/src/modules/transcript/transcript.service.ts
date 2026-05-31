@@ -41,12 +41,18 @@ import {
   sanitizeSignalSource,
 } from './partial-signal.util';
 import {
+  buildContentRewritePrompt,
   buildFilterPatternGenerationPrompt,
   buildJsonSchemaRules,
   buildSystemPrompt,
   buildTradingMessageClassifierPrompt,
   normalizeOpenRouterAudioFormat,
 } from './transcript-prompt-builders.util';
+import {
+  isUserbotClassifierKind,
+  type UserbotClassifierKind,
+  type UserbotFilterKindValue,
+} from '../telegram-userbot/utils/userbot-message-kind.util';
 
 @Injectable()
 export class TranscriptService {
@@ -98,7 +104,7 @@ export class TranscriptService {
       logContext?: OpenRouterLogContext;
     },
   ): Promise<{
-    kind: 'signal' | 'close' | 'reentry' | 'result' | 'other';
+    kind: UserbotClassifierKind;
     reason?: string;
     debug?: {
       model?: string;
@@ -163,13 +169,7 @@ export class TranscriptService {
         throw new Error(`Classifier вернул невалидный JSON: ${reason}`);
       }
       const root = parsed.value as { kind?: string; reason?: string };
-      if (
-        root.kind === 'signal' ||
-        root.kind === 'close' ||
-        root.kind === 'reentry' ||
-        root.kind === 'result' ||
-        root.kind === 'other'
-      ) {
+      if (isUserbotClassifierKind(root.kind)) {
         return {
           kind: root.kind,
           reason: root.reason,
@@ -188,7 +188,7 @@ export class TranscriptService {
   }
 
   async generateFilterPatterns(params: {
-    kind: 'signal' | 'close' | 'result' | 'reentry' | 'ignore';
+    kind: UserbotFilterKindValue;
     example: string;
   }): Promise<{
     ok: boolean;
@@ -266,6 +266,100 @@ export class TranscriptService {
       return {
         ok: true,
         patterns,
+        debug: {
+          model,
+          request: JSON.stringify({ model, messages }),
+          response: responseRaw,
+        },
+      };
+    } catch (e) {
+      return {
+        ok: false,
+        error: formatOpenRouterError(e),
+        debug: {
+          model,
+          request: JSON.stringify({ model, messages }),
+          response: formatOpenRouterError(e),
+        },
+      };
+    }
+  }
+
+  async rewriteContentPost(params: {
+    classification: 'analysis' | 'content';
+    text: string;
+    instruction?: string;
+    openrouterLogContext?: OpenRouterLogContext;
+  }): Promise<{
+    ok: boolean;
+    text?: string;
+    error?: string;
+    debug?: { model?: string; request?: string; response?: string };
+  }> {
+    const sourceText = params.text.trim();
+    if (sourceText.length < 6) {
+      return { ok: false, error: 'Текст слишком короткий для переписывания' };
+    }
+
+    const apiKey = await this.settings.get('OPENROUTER_API_KEY');
+    if (!apiKey) {
+      return { ok: false, error: 'OPENROUTER_API_KEY is not configured' };
+    }
+
+    const model =
+      (await this.openRouterModelChain.resolveModelKeyWithDefault('OPENROUTER_MODEL_TEXT')) ??
+      (await this.settings.get('OPENROUTER_MODEL_DEFAULT'));
+    if (!model) {
+      return { ok: false, error: 'OPENROUTER model is not configured' };
+    }
+
+    const prompt = buildContentRewritePrompt(params.classification);
+    const extra = params.instruction?.trim();
+    const userInput = [
+      `CLASSIFICATION: ${params.classification}`,
+      extra ? `EDITOR_INSTRUCTION:\n${extra}` : null,
+      `ORIGINAL_TEXT:\n${sourceText}`,
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+    const messages = [
+      { role: 'system', content: prompt },
+      { role: 'user', content: userInput },
+    ];
+    try {
+      const content = await this.openRouterClient.callOpenRouter(apiKey, model, messages, {
+        operation: 'rewriteContentPost',
+        logContext: params.openrouterLogContext,
+      });
+      const responseRaw =
+        typeof content === 'string' ? content : JSON.stringify(content);
+      const parsed = tryParseModelContent(content);
+      if (!parsed.ok) {
+        return {
+          ok: false,
+          error: parsed.result.ok === false ? parsed.result.error : 'Не удалось разобрать ответ AI',
+          debug: {
+            model,
+            request: JSON.stringify({ model, messages }),
+            response: responseRaw,
+          },
+        };
+      }
+      const rewritten = String((parsed.value as { text?: unknown }).text ?? '').trim();
+      if (rewritten.length < 2) {
+        return {
+          ok: false,
+          error: 'AI вернул пустой текст',
+          debug: {
+            model,
+            request: JSON.stringify({ model, messages }),
+            response: responseRaw,
+          },
+        };
+      }
+      return {
+        ok: true,
+        text: rewritten,
         debug: {
           model,
           request: JSON.stringify({ model, messages }),

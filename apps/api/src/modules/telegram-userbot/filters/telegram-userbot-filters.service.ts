@@ -9,6 +9,7 @@ import type {
   UserbotFilterKind,
   UserbotFilterPatternMatch,
 } from '../telegram-userbot.types';
+import { isUserbotFilterKind } from '../utils/userbot-message-kind.util';
 import { computeTextSimilarity } from '../utils/telegram-userbot-text-similarity.util';
 import { makeTextPreview } from '../utils/telegram-userbot-text.util';
 
@@ -46,13 +47,7 @@ export class TelegramUserbotFiltersService {
       const kind = row.kind as UserbotFilterKind;
       const exampleText = typeof row.example === 'string' ? row.example : '';
       const requiresQuote = row.requiresQuote === true;
-      if (
-        kind !== 'signal' &&
-        kind !== 'close' &&
-        kind !== 'result' &&
-        kind !== 'reentry' &&
-        kind !== 'ignore'
-      ) {
+      if (!isUserbotFilterKind(kind)) {
         continue;
       }
       if ((kind === 'close' || kind === 'reentry') && !hasQuotedSource) {
@@ -108,13 +103,7 @@ export class TelegramUserbotFiltersService {
       if (name !== target || !pattern) {
         continue;
       }
-      if (
-        kind !== 'signal' &&
-        kind !== 'close' &&
-        kind !== 'result' &&
-        kind !== 'reentry' &&
-        kind !== 'ignore'
-      ) {
+      if (!isUserbotFilterKind(kind)) {
         continue;
       }
       if ((kind === 'close' || kind === 'reentry') && !hasQuotedSource) {
@@ -191,7 +180,7 @@ export class TelegramUserbotFiltersService {
 
   async createFilterExample(body: {
     groupName?: string;
-    kind?: 'signal' | 'close' | 'result' | 'reentry' | 'ignore';
+    kind?: UserbotFilterKind;
     example?: string;
     requiresQuote?: boolean;
   }) {
@@ -202,14 +191,8 @@ export class TelegramUserbotFiltersService {
     if (!groupName) {
       return { ok: false, error: 'groupName обязателен' };
     }
-    if (
-      kind !== 'signal' &&
-      kind !== 'close' &&
-      kind !== 'result' &&
-      kind !== 'reentry' &&
-      kind !== 'ignore'
-    ) {
-      return { ok: false, error: 'kind должен быть signal | close | result | reentry | ignore' };
+    if (!isUserbotFilterKind(kind)) {
+      return { ok: false, error: 'kind должен быть signal | close | result | reentry | ad | analysis | promo | content | ignore' };
     }
     if (example.length < 6) {
       return { ok: false, error: 'example слишком короткий (минимум 6 символов)' };
@@ -238,7 +221,7 @@ export class TelegramUserbotFiltersService {
 
   async createFilterPattern(body: {
     groupName?: string;
-    kind?: 'signal' | 'close' | 'result' | 'reentry' | 'ignore';
+    kind?: UserbotFilterKind;
     pattern?: string;
     requiresQuote?: boolean;
   }) {
@@ -249,14 +232,8 @@ export class TelegramUserbotFiltersService {
     if (!groupName) {
       return { ok: false, error: 'groupName обязателен' };
     }
-    if (
-      kind !== 'signal' &&
-      kind !== 'close' &&
-      kind !== 'result' &&
-      kind !== 'reentry' &&
-      kind !== 'ignore'
-    ) {
-      return { ok: false, error: 'kind должен быть signal | close | result | reentry | ignore' };
+    if (!isUserbotFilterKind(kind)) {
+      return { ok: false, error: 'kind должен быть signal | close | result | reentry | ad | analysis | promo | content | ignore' };
     }
     if (pattern.length < 2) {
       return { ok: false, error: 'pattern слишком короткий (минимум 2 символа)' };
@@ -284,19 +261,13 @@ export class TelegramUserbotFiltersService {
   }
 
   async generateFilterPatterns(body: {
-    kind?: 'signal' | 'close' | 'result' | 'reentry' | 'ignore';
+    kind?: UserbotFilterKind;
     example?: string;
   }) {
     const kind = body.kind;
     const example = body.example?.trim() ?? '';
-    if (
-      kind !== 'signal' &&
-      kind !== 'close' &&
-      kind !== 'result' &&
-      kind !== 'reentry' &&
-      kind !== 'ignore'
-    ) {
-      return { ok: false, error: 'kind должен быть signal | close | result | reentry | ignore' };
+    if (!isUserbotFilterKind(kind)) {
+      return { ok: false, error: 'kind должен быть signal | close | result | reentry | ad | analysis | promo | content | ignore' };
     }
     if (example.length < 6) {
       return { ok: false, error: 'example слишком короткий (минимум 6 символов)' };

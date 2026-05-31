@@ -14,6 +14,7 @@ import {
 import type { OpenRouterLogContext } from './transcript.types';
 import {
   CLASSIFIER_RESPONSE_JSON_SCHEMA,
+  CONTENT_REWRITE_JSON_SCHEMA,
   FILTER_PATTERN_GENERATION_JSON_SCHEMA,
   TRANSCRIPT_RESPONSE_JSON_SCHEMA,
 } from './transcript-model-json-schemas';
@@ -52,13 +53,17 @@ export class TranscriptOpenRouterClientService {
         ? 'transcript_classifier_result'
         : ctx.operation === 'generateFilterPatterns'
           ? 'transcript_filter_pattern_generation_result'
-          : 'transcript_signal_result';
+          : ctx.operation === 'rewriteContentPost'
+            ? 'transcript_content_rewrite_result'
+            : 'transcript_signal_result';
     const schema =
       ctx.operation === 'classifyTradingMessage'
         ? CLASSIFIER_RESPONSE_JSON_SCHEMA
         : ctx.operation === 'generateFilterPatterns'
           ? FILTER_PATTERN_GENERATION_JSON_SCHEMA
-          : TRANSCRIPT_RESPONSE_JSON_SCHEMA;
+          : ctx.operation === 'rewriteContentPost'
+            ? CONTENT_REWRITE_JSON_SCHEMA
+            : TRANSCRIPT_RESPONSE_JSON_SCHEMA;
     const responseFormat = {
       type: 'json_schema' as const,
       jsonSchema: {

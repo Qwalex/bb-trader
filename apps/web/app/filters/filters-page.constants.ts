@@ -1,10 +1,26 @@
 import type { FilterKind } from './filters-page.types';
 
+export const FILTER_KINDS: FilterKind[] = [
+  'signal',
+  'close',
+  'result',
+  'reentry',
+  'ad',
+  'analysis',
+  'promo',
+  'content',
+  'ignore',
+];
+
 export const KIND_LABEL: Record<FilterKind, string> = {
   signal: 'Сигналы',
   close: 'Закрытие сделки (closed/cancel)',
   result: 'Результаты (TP/SL/отчеты)',
   reentry: 'Перезаход в позицию',
+  ad: 'Реклама (VIP/каналы/подписки)',
+  analysis: 'Анализ рынка',
+  promo: 'Акции (розыгрыши/шоу/челенджи)',
+  content: 'Контент (полезное/обучение/новости)',
   ignore: 'Игнорировать (не отправлять в AI)',
 };
 
@@ -68,12 +84,58 @@ Trade closed with 15.6938% profit.`,
 SL тот же`,
     ],
   },
+  ad: {
+    patterns: ['vip cornix', 'combo price', 'message to buy', 'lifetime validity'],
+    examples: [
+      `Binance Killers VIP Cornix
+Combo Price $60 $50
+Message to buy @seller`,
+    ],
+  },
+  analysis: {
+    patterns: ['update:', 'trading around', 'possible scenarios', 'stay tuned'],
+    examples: [
+      `#BTCUSDT UPDATE:
+Bitcoin is trading around $75600 inside an uptrend channel.
+Possible scenarios if price pumps from support...`,
+    ],
+  },
+  promo: {
+    patterns: ['розыгрыш', 'главный приз', 'челендж', 'промокод', 'giveaway'],
+    examples: [
+      `Трейдерское шоу
+Осталось 2 дня — узнаем победителя главного приза.
+Промокод на челендж — пишите в личку.`,
+    ],
+  },
+  content: {
+    patterns: ['совет', 'как торговать', 'money management', 'полезно знать'],
+    examples: [
+      `5 правил риск-менеджмента для фьючерсов:
+1. Не рискуйте больше 1–2% на сделку
+2. Всегда ставьте SL до входа
+3. Не усредняйтесь против тренда`,
+    ],
+  },
   ignore: {
-    patterns: ['free trial', 'vip доступ', 'реклама', 'subscribe'],
+    patterns: ['free trial', 'subscribe', 'реклама'],
     examples: [
       `Открыт набор в VIP-группу.
-Переходите по ссылке и оформляйте подписку.
-Промокод действует 24 часа.`,
+Переходите по ссылке и оформляйте подписку.`,
     ],
   },
 };
+
+export function emptyFilterKindMap(): Record<FilterKind, never[]> {
+  return {
+    signal: [],
+    close: [],
+    result: [],
+    reentry: [],
+    ad: [],
+    analysis: [],
+    promo: [],
+    content: [],
+    ignore: [],
+  };
+}

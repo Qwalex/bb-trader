@@ -181,7 +181,7 @@ model TgUserbotIngest {
   text           String?
   aiRequest      String?
   aiResponse     String?
-  classification String // signal | result | other
+  classification String // signal | result | ad | analysis | promo | content | other
   signalHash     String?
   status         String // ignored | awaiting_edit | duplicate_message | duplicate_signal | placed | parse_incomplete | parse_error | blocked_by_setting | place_error
   error          String?
@@ -244,11 +244,50 @@ model TgUserbotPublishGroup {
   signalCounter Int      @default(0)
   /// Сигналы группы (с учётом N) также синхронизируются в QPulse.
   linkedToApp   Boolean  @default(false)
+  /// Публиковать посты «Редактор контента» (analysis/content) в эту группу.
+  contentPublishEnabled Boolean  @default(false)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
   @@unique([cabinetId, chatId])
   @@index([cabinetId, enabled])
+}
+
+model TgUserbotContentPost {
+  id              String   @id @default(cuid())
+  cabinetId       String
+  cabinet         Cabinet  @relation(fields: [cabinetId], references: [id], onDelete: Cascade)
+  ingestId        String   @unique
+  sourceChatId    String
+  sourceMessageId String
+  sourceTitle     String?
+  classification  String // analysis | content
+  originalText    String
+  editedText      String?
+  status          String   @default("draft") // draft | published
+  publishedAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  publications    TgUserbotContentPublication[]
+
+  @@index([cabinetId, createdAt])
+  @@index([cabinetId, status])
+  @@index([classification, createdAt])
+}
+
+model TgUserbotContentPublication {
+  id             String   @id @default(cuid())
+  contentPostId  String
+  contentPost    TgUserbotContentPost @relation(fields: [contentPostId], references: [id], onDelete: Cascade)
+  publishGroupId String
+  targetChatId   String
+  targetMessageId String?
+  status         String // posted | failed
+  error          String?
+  createdAt      DateTime @default(now())
+
+  @@index([contentPostId, createdAt])
+  @@index([publishGroupId, createdAt])
 }
 
 model TgUserbotMirrorMessage {
@@ -446,6 +485,7 @@ model Cabinet {
   balanceSnapshots BalanceSnapshot[]
   openrouterCosts  OpenrouterGenerationCost[]
   publishGroups    TgUserbotPublishGroup[]
+  contentPosts     TgUserbotContentPost[]
   mirrorMessages   TgUserbotMirrorMessage[]
   userbotSignalHashes TgUserbotSignalHash[]
   balanceAlertRules   CabinetBalanceAlertRule[]

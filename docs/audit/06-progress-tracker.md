@@ -2038,6 +2038,17 @@
 - Docs updated: QPulse rest-api, architecture, admin; этот трекер.
 - Linked risks (`SEC-###`): N/A
 
+### AUD-175
+
+- Status: `done`
+- Scope: Userbot — типы классификации реклама / анализ / акция.
+- Files: `transcript-prompt-builders.util.ts`, `transcript.service.ts`, `transcript-model-json-schemas.ts`, `telegram-userbot.types.ts`, `utils/userbot-message-kind.util.ts`, `filters/*`, web `filters/*`, `telegram-userbot/page.tsx`, `UserbotMessageCard.tsx`
+- Findings: VIP/анализ/розыгрыши попадали в `other` («Не сигнал») без отдельной категории.
+- Changes: classifier kinds `ad`, `analysis`, `promo`; сохранение в `TgUserbotIngest.classification`, status `ignored`; UI labels; фильтры-примеры для новых типов.
+- Manual verification: `npm run build -w apps/api`, `npm run check-types -w apps/web` (pass).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
 ### AUD-174
 
 - Status: `done`
@@ -2046,5 +2057,25 @@
 - Findings: при `entries=null/[]` mirror и QPulse mapper давали entry 0; placement на бирже брал lastPrice, но не сохранял в сигнал.
 - Changes: last price Bybit (linear/spot) на момент parse/persist; mirror до публикации; `createSignalRecord` перед записью; fallback в QPulse mapper из filled ENTRY order.
 - Manual verification: `npm run build -w apps/api` (pass); сигнал без entry → в группе и приложении цена ≈ рынок, не 0.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-176
+
+- Status: `done`
+- Scope: Userbot — тип классификации `content` (полезный контент, не реклама и не анализ).
+- Files: `transcript-prompt-builders.util.ts`, `userbot-message-kind.util.ts`, `telegram-userbot.types.ts`, web filters/userbot UI
+- Changes: kind `content`; промпт LLM; labels «Контент»; фильтры-примеры.
+- Manual verification: `npm run build -w apps/api`, `npm run check-types -w apps/web` (pass).
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-177
+
+- Status: `done`
+- Scope: Редактор контента — сохранение analysis/content в БД, страница редактирования, AI rewrite (OpenRouter), публикация в группы с чекбоксами.
+- Files: Prisma `TgUserbotContentPost`, `TgUserbotContentPublication`, `contentPublishEnabled`; `telegram-userbot-content-editor.service.ts`; ingest hook; transcript `rewriteContentPost`; `apps/web/app/content-editor/*`; `nav-menu.ts`
+- Changes: upsert поста при классификации analysis/content; CRUD + publish API; выбор групп `contentPublishEnabled` в БД; UI admin `/content-editor`.
+- Manual verification: `npm run build -w apps/api`, `npm run check-types -w apps/web`; миграция на стенде; ingest analysis → пост в редакторе → publish в группу с галочкой.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
