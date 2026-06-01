@@ -50,13 +50,17 @@ export function formatMirrorSignalText(
   const entryLow = entries[0] ?? 0;
   const entryHigh = entries[entries.length - 1] ?? entryLow;
   const entryMid = (entryLow + entryHigh) / 2;
+  const entryLowFmt = toFixedPrice(entryLow);
+  const entryHighFmt = toFixedPrice(entryHigh);
+  const entryIsSingle = entries.length === 0 || entries.length === 1 || entryLowFmt === entryHighFmt;
   const entryLine =
     entries.length === 0
       ? '— (цена не получена)'
-      : entries.length === 1 || entryLow === entryHigh
-        ? toFixedPrice(entryLow)
-        : `${toFixedPrice(entryLow)} - ${toFixedPrice(entryHigh)}`;
-  const entryLabel = entries.length <= 1 ? '💰 Entry:' : '💰 Entry Range:';
+      : entryIsSingle
+        ? entryLowFmt
+        : `${entryLowFmt} - ${entryHighFmt}`;
+  const entryLabel =
+    entries.length > 1 && !entryIsSingle ? '💰 Entry Range:' : '💰 Entry:';
   const slPercent = calculateMovePercent({
     from: entryMid,
     to: signal.stopLoss,
@@ -66,11 +70,12 @@ export function formatMirrorSignalText(
     (tp) =>
       `${toFixedPrice(tp)} (${calculateMovePercent({ from: entryMid, to: tp, direction })})`,
   );
+  const targetsLine =
+    targetLines.length > 0 ? targetLines.join(', ') : '—';
 
   return [
     `${direction === 'LONG' ? '🟢' : '🔴'} ${direction} ${pair}`,
     '',
-    '📊 Market: futures',
     `⚡ Leverage: ${signal.leverage}x`,
     '',
     entryLabel,
@@ -79,8 +84,7 @@ export function formatMirrorSignalText(
     '🛑 Stop Loss:',
     `${toFixedPrice(signal.stopLoss)} (${slPercent})`,
     '',
-    '🎯 Targets:',
-    ...(targetLines.length > 0 ? targetLines : ['—']),
+    `🎯 Targets: ${targetsLine}`,
   ].join('\n');
 }
 
