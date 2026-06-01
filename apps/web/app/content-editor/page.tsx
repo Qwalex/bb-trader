@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
+import { formatDateTimeRu } from '../../lib/datetime';
 import { withAppBasePath } from '../../lib/base-path';
 import type { ContentPostItem, PublishGroupItem } from './content-editor-page.types';
 import {
@@ -75,6 +76,12 @@ export default function ContentEditorPage() {
     if (!adminChecked) return;
     void loadAll().catch(() => setMsg({ type: 'err', text: 'Не удалось загрузить данные' }));
   }, [adminChecked, filterClassification]);
+
+  useEffect(() => {
+    if (selectedId && !posts.some((p) => p.id === selectedId)) {
+      setSelectedId(null);
+    }
+  }, [posts, selectedId]);
 
   useEffect(() => {
     if (!selectedPost) {
@@ -162,6 +169,29 @@ export default function ContentEditorPage() {
     });
   }
 
+  async function deletePost(post: ContentPostItem) {
+    const label = post.displayText.slice(0, 80).trim() || post.id;
+    const ok = window.confirm(
+      `Удалить сообщение из редактора?\n\n«${label}${post.displayText.length > 80 ? '…' : ''}»\n\nПубликации в Telegram не отзываются.`,
+    );
+    if (!ok) return;
+    await runBusy(`delete:${post.id}`, async () => {
+      const res = await contentEditorApiFetch(`/telegram-userbot/content/posts/${post.id}`, {
+        method: 'DELETE',
+      });
+      const j = (await res.json()) as { ok?: boolean; error?: string };
+      if (j.ok !== true) {
+        throw new Error(j.error ?? 'Не удалось удалить');
+      }
+      setPosts((prev) => prev.filter((p) => p.id !== post.id));
+      if (selectedId === post.id) {
+        setSelectedId(null);
+        setDraftText('');
+      }
+      setMsg({ type: 'ok', text: 'Сообщение удалено' });
+    });
+  }
+
   async function toggleGroup(groupId: string, checked: boolean) {
     const nextIds = groups
       .filter((g) => (g.id === groupId ? checked : Boolean(g.contentPublishEnabled)))
@@ -238,14 +268,7 @@ export default function ContentEditorPage() {
         )}
       </div>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'minmax(240px, 320px) 1fr',
-          gap: '1rem',
-          alignItems: 'start',
-        }}
-      >
+      <div className="contentEditorWorkspace">
         <div className="card">
           <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
             {(['all', 'analysis', 'content'] as const).map((key) => (
@@ -259,43 +282,39 @@ export default function ContentEditorPage() {
               </button>
             ))}
           </div>
-          <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
+          <div className="contentEditorList">
             {posts.length === 0 ? (
               <p style={{ color: 'var(--muted)' }}>Пока нет постов analysis/content</p>
             ) : (
               posts.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => setSelectedId(p.id)}
-                  style={{
-                    display: 'block',
-                    width: '100%',
-                    textAlign: 'left',
-                    padding: '0.6rem 0.5rem',
-                    marginBottom: '0.35rem',
-                    border:
-                      selectedId === p.id ? '1px solid var(--accent)' : '1px solid var(--border)',
-                    borderRadius: 6,
-                    background: selectedId === p.id ? 'var(--card-hover, rgba(0,0,0,0.03))' : 'transparent',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <div style={{ fontSize: '0.75rem', color: 'var(--muted)', marginBottom: '0.2rem' }}>
-                    {CLASSIFICATION_LABEL[p.classification]} · {STATUS_LABEL[p.status]}
-                    {p.sourceTitle ? ` · ${p.sourceTitle}` : ''}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: '0.85rem',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
+                <div key={p.id} className="contentEditorListItem">
+                  <button
+                    type="button"
+                    className={`contentEditorListSelect${
+                      selectedId === p.id ? ' contentEditorListSelectSelected' : ''
+                    }`}
+                    onClick={() => setSelectedId(p.id)}
+                  >
+                    <div className="contentEditorListMeta">
+                      {CLASSIFICATION_LABEL[p.classification]} · {STATUS_LABEL[p.status]}
+                      {p.sourceTitle ? ` · ${p.sourceTitle}` : ''}
+                      {p.createdAt ? ` · ${formatDateTimeRu(p.createdAt)}` : ''}
+                    </div>
+                    <div className="contentEditorListPreview">{p.displayText}</div>
+                  </button>
+                  <button
+                    type="button"
+                    className="contentEditorListDelete"
+                    title="Удалить"
+                    disabled={busy !== null}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void deletePost(p);
                     }}
                   >
-                    {p.displayText}
-                  </div>
-                </button>
+                    ×
+                  </button>
+                </div>
               ))
             )}
           </div>
@@ -306,32 +325,57 @@ export default function ContentEditorPage() {
             <p style={{ color: 'var(--muted)' }}>Выберите сообщение слева</p>
           ) : (
             <>
-              <div style={{ marginBottom: '0.75rem', fontSize: '0.85rem', color: 'var(--muted)' }}>
-                {CLASSIFICATION_LABEL[selectedPost.classification]} · {STATUS_LABEL[selectedPost.status]}
+              <div className="contentEditorPanelMeta">
+                {CLASSIFICATION_LABEL[selectedPost.classification]} ·{' '}
+                {STATUS_LABEL[selectedPost.status]}
                 {selectedPost.publishedAt
-                  ? ` · опубликован ${new Date(selectedPost.publishedAt).toLocaleString('ru-RU')}`
+                  ? ` · опубликован ${formatDateTimeRu(selectedPost.publishedAt)}`
                   : ''}
                 {selectedPost.publicationCount > 0
                   ? ` · публикаций: ${selectedPost.publicationCount}`
                   : ''}
               </div>
-              <textarea
-                value={draftText}
-                onChange={(e) => setDraftText(e.target.value)}
-                rows={16}
-                style={{ width: '100%', marginBottom: '0.75rem', fontFamily: 'inherit' }}
-              />
-              <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+
+              <div className="contentEditorEditGrid">
+                <div>
+                  <span className="contentEditorFieldLabel">Предпросмотр</span>
+                  <div className="contentEditorPreview" aria-label="Предпросмотр сообщения">
+                    <div className="contentEditorPreviewBubble">
+                      {draftText.trim() ? (
+                        draftText
+                      ) : (
+                        <span className="contentEditorPreviewEmpty">Пустой текст</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <label className="contentEditorFieldLabel" htmlFor="content-editor-textarea">
+                    Редактор
+                  </label>
+                  <textarea
+                    id="content-editor-textarea"
+                    className="contentEditorTextarea"
+                    value={draftText}
+                    onChange={(e) => setDraftText(e.target.value)}
+                    spellCheck
+                  />
+                </div>
+              </div>
+
+              <label className="contentEditorFieldLabel" htmlFor="content-editor-ai">
                 Инструкция для AI (необязательно)
               </label>
               <input
+                id="content-editor-ai"
                 type="text"
+                className="contentEditorAiInput"
                 value={aiInstruction}
                 onChange={(e) => setAiInstruction(e.target.value)}
                 placeholder="Например: сократи до 3 абзацев, добавь эмодзи умеренно"
-                style={{ width: '100%', marginBottom: '0.75rem' }}
               />
-              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+
+              <div className="contentEditorActions">
                 <button
                   type="button"
                   className="btn"
@@ -356,21 +400,22 @@ export default function ContentEditorPage() {
                 >
                   {busy === 'publish' ? '…' : 'Опубликовать'}
                 </button>
+                <span className="contentEditorActionsSpacer" />
+                <button
+                  type="button"
+                  className="btn btnDanger"
+                  disabled={busy !== null}
+                  onClick={() => void deletePost(selectedPost)}
+                >
+                  {busy === `delete:${selectedPost.id}` ? '…' : 'Удалить'}
+                </button>
               </div>
+
               <details style={{ marginTop: '1rem' }}>
                 <summary style={{ cursor: 'pointer', color: 'var(--muted)' }}>
                   Оригинал из источника
                 </summary>
-                <pre
-                  style={{
-                    whiteSpace: 'pre-wrap',
-                    fontSize: '0.85rem',
-                    marginTop: '0.5rem',
-                    color: 'var(--muted)',
-                  }}
-                >
-                  {selectedPost.originalText}
-                </pre>
+                <pre className="contentEditorOriginal">{selectedPost.originalText}</pre>
               </details>
             </>
           )}

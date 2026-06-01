@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, Query, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, Query, Req } from '@nestjs/common';
 import {
   ApiBody,
   ApiOkResponse,
@@ -394,6 +394,16 @@ export class TelegramUserbotController {
     @Param('id') id: string,
   ) {
     return this.runWithCabinet(req, cabinetId, () => this.userbot.publishContentPost(id));
+  }
+
+  @ApiOperation({ summary: 'Удалить пост редактора контента' })
+  @Delete('content/posts/:id')
+  async deleteContentPost(
+    @Req() req: AuthReq,
+    @Query('cabinetId') cabinetId: string | undefined,
+    @Param('id') id: string,
+  ) {
+    return this.runWithCabinet(req, cabinetId, () => this.userbot.deleteContentPost(id));
   }
 
   @ApiOperation({ summary: 'Сохранить выбор групп для публикации контента' })

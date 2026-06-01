@@ -2173,3 +2173,13 @@
 - Manual verification: `npm run build -w @repo/shared`, `npm run build -w apps/api`, `npm run check-types -w apps/web`.
 - Docs updated: `.env.example`, этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-184
+
+- Status: `done`
+- Scope: Редактор контента — стили preview/textarea и удаление постов.
+- Files: `apps/web/app/content-editor/page.tsx`, `apps/web/app/globals.css`; API `DELETE /telegram-userbot/content/posts/:id` (AUD-177 follow-up).
+- Changes: Telegram-like bubble предпросмотр; стилизованный textarea и двухколоночная сетка; список постов с кнопкой «×»; confirm + «Удалить» в панели; даты через `formatDateTimeRu`.
+- Manual verification: `npm run check-types -w apps/web` (pass); открыть `/content-editor` — preview, редактирование, удаление поста из списка.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

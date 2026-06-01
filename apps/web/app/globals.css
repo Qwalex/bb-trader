@@ -3031,3 +3031,207 @@ h1.pageTitle {
 .leverageCharts {
   margin-top: 0.5rem;
 }
+
+/* —— Content editor (/content-editor) —— */
+.contentEditorWorkspace {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (max-width: 860px) {
+  .contentEditorWorkspace {
+    grid-template-columns: 1fr;
+  }
+}
+
+.contentEditorList {
+  max-height: 60vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.contentEditorListItem {
+  display: flex;
+  align-items: stretch;
+  gap: 0.35rem;
+  width: 100%;
+}
+
+.contentEditorListSelect {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: transparent;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.contentEditorListSelect:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.contentEditorListSelectSelected {
+  border-color: var(--accent);
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.contentEditorListMeta {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-bottom: 0.25rem;
+  line-height: 1.35;
+}
+
+.contentEditorListPreview {
+  font-size: 0.85rem;
+  line-height: 1.4;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.contentEditorListDelete {
+  flex-shrink: 0;
+  align-self: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.contentEditorListDelete:hover:not(:disabled) {
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.45);
+  background: rgba(248, 113, 113, 0.08);
+}
+
+.contentEditorPanelMeta {
+  margin-bottom: 0.85rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.contentEditorEditGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+@media (max-width: 960px) {
+  .contentEditorEditGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.contentEditorFieldLabel {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin-bottom: 0.45rem;
+}
+
+.contentEditorPreview {
+  min-height: 320px;
+  padding: 0.85rem 1rem;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: linear-gradient(
+    165deg,
+    rgba(255, 255, 255, 0.04) 0%,
+    rgba(0, 0, 0, 0.12) 100%
+  );
+}
+
+.contentEditorPreviewBubble {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  padding: 0.75rem 0.9rem;
+  border-radius: 0 12px 12px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--card));
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
+}
+
+.contentEditorPreviewEmpty {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.contentEditorTextarea {
+  width: 100%;
+  min-height: 320px;
+  padding: 0.85rem 1rem;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--foreground);
+  font-family: inherit;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.contentEditorTextarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.contentEditorAiInput {
+  width: 100%;
+  margin-bottom: 0.85rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--foreground);
+  font-family: inherit;
+  font-size: 0.9rem;
+}
+
+.contentEditorActions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.contentEditorActionsSpacer {
+  flex: 1;
+  min-width: 0.5rem;
+}
+
+.contentEditorOriginal {
+  white-space: pre-wrap;
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 8px;
+  border: 1px dashed var(--border);
+  color: var(--muted);
+  line-height: 1.5;
+  max-height: 240px;
+  overflow-y: auto;
+}

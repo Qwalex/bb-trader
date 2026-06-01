@@ -264,6 +264,20 @@ export class TelegramUserbotContentEditorService {
     return { ok: true, item: updated.item, results };
   }
 
+  async deletePost(id: string): Promise<{ ok: true } | { ok: false; error: string }> {
+    const cabinetId = this.cabinetContext.getCabinetId();
+    const v = id.trim();
+    if (!v) return { ok: false, error: 'id обязателен' };
+    const prismaAny = this.prisma as any;
+    const row = await prismaAny.tgUserbotContentPost.findFirst({
+      where: { id: v, cabinetId },
+      select: { id: true },
+    });
+    if (!row) return { ok: false, error: 'Пост не найден' };
+    await prismaAny.tgUserbotContentPost.delete({ where: { id: row.id } });
+    return { ok: true };
+  }
+
   async saveContentPublishGroups(body: {
     enabledGroupIds?: string[];
   }): Promise<{ ok: true; items: Array<{ id: string; contentPublishEnabled: boolean }> }> {

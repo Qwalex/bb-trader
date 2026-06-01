@@ -468,6 +468,10 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     return this.contentEditor.publishPost(id);
   }
 
+  async deleteContentPost(id: string) {
+    return this.contentEditor.deletePost(id);
+  }
+
   async saveContentPublishGroups(body: { enabledGroupIds?: string[] }) {
     return this.contentEditor.saveContentPublishGroups(body);
   }
