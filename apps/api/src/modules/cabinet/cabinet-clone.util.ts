@@ -18,6 +18,35 @@ export function stripCloneSuffix(name: string): string {
     .trim();
 }
 
+/** Ключ «key\0value» для проверки занятых уникальных настроек при клоне. */
+export function cloneSettingDuplicatePairKey(key: string, value: string): string {
+  return `${key}\0${value}`;
+}
+
+export function buildCloneSettingsInsertRows(
+  sourceSettings: readonly { key: string; value: string }[],
+  duplicatedKeyValuePairs: ReadonlySet<string>,
+  statsResetAt: string,
+): { rows: { key: string; value: string }[]; skippedSettingKeys: string[] } {
+  const skippedSettingKeys: string[] = [];
+  const rows: { key: string; value: string }[] = [];
+  for (const row of sourceSettings) {
+    if (CABINET_CLONE_SKIP_SETTING_KEYS.has(row.key)) {
+      continue;
+    }
+    const value = String(row.value ?? '').trim();
+    if (CABINET_CLONE_UNIQUE_SETTING_KEYS.has(row.key) && value) {
+      if (duplicatedKeyValuePairs.has(cloneSettingDuplicatePairKey(row.key, row.value))) {
+        skippedSettingKeys.push(row.key);
+        continue;
+      }
+    }
+    rows.push({ key: row.key, value: row.value });
+  }
+  rows.push({ key: 'STATS_RESET_AT', value: statsResetAt });
+  return { rows, skippedSettingKeys };
+}
+
 /** «Имя copy (1)», «Имя copy (2)», … без коллизий с existingNames. */
 export function buildCloneCabinetName(sourceName: string, existingNames: readonly string[]): string {
   const base = stripCloneSuffix(sourceName) || String(sourceName ?? '').trim() || 'Cabinet';

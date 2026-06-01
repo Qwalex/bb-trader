@@ -2119,3 +2119,14 @@
 - Manual verification: `npm run build -w apps/api`, `npm run check-types -w apps/web`; клон → пустая статистика; сброс stats в кабинете A не меняет метрики B.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-180 (fix)
+
+- Status: `done`
+- Scope: Клонирование кабинета — таймаут Prisma interactive transaction.
+- Files: `cabinet.service.ts`, `cabinet-clone.util.ts`
+- Findings: при большом числе настроек/источников цикл `create()` в `$transaction` превышал дефолтный timeout (~5 с) → «Transaction not found» на `cabinetTelegramSource.create`.
+- Changes: проверка дубликатов unique settings одним запросом до транзакции; `createMany` вместо N×`create`; `{ maxWait: 10_000, timeout: 30_000 }`.
+- Manual verification: `npm run build -w apps/api`; клон кабинета с множеством telegram sources.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
