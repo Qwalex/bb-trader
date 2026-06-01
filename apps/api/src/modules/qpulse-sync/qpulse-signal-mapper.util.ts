@@ -77,6 +77,56 @@ function isFilledOrderStatus(status: string | null | undefined): boolean {
   return String(status ?? '').toLowerCase().includes('filled');
 }
 
+function pricesMatch(a: number, b: number): boolean {
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+  const tol = Math.max(1e-6, Math.abs(b) * 1e-4);
+  return Math.abs(a - b) <= tol;
+}
+
+function countFilledTpLevels(
+  orders: SignalRow['orders'],
+  takeProfits: number[],
+  direction: string,
+): number {
+  if (!orders?.length || takeProfits.length === 0) return 0;
+  const sorted = [...takeProfits].sort((a, b) =>
+    direction === 'short' ? b - a : a - b,
+  );
+  let hits = 0;
+  for (const tp of sorted) {
+    const filled = (orders ?? []).some(
+      (o) =>
+        o.orderKind === 'TP' &&
+        isFilledOrderStatus(o.status) &&
+        o.price != null &&
+        pricesMatch(Number(o.price), tp),
+    );
+    if (!filled) break;
+    hits += 1;
+  }
+  return hits;
+}
+
+function isTpLevelHit(
+  orders: SignalRow['orders'],
+  takeProfits: number[],
+  direction: string,
+  index: number,
+): boolean {
+  const sorted = [...takeProfits].sort((a, b) =>
+    direction === 'short' ? b - a : a - b,
+  );
+  const tp = sorted[index];
+  if (tp == null) return false;
+  return (orders ?? []).some(
+    (o) =>
+      o.orderKind === 'TP' &&
+      isFilledOrderStatus(o.status) &&
+      o.price != null &&
+      pricesMatch(Number(o.price), tp),
+  );
+}
+
 function hasFilledEntryOrder(orders: SignalRow['orders']): boolean {
   return (orders ?? []).some(
     (o) =>
@@ -87,25 +137,9 @@ function hasFilledEntryOrder(orders: SignalRow['orders']): boolean {
 function countFilledTpOrders(
   orders: SignalRow['orders'],
   takeProfits: number[],
+  direction = 'long',
 ): number {
-  if (!orders?.length || takeProfits.length === 0) return 0;
-  const filledTpPrices = new Set(
-    orders
-      .filter(
-        (o) =>
-          o.orderKind === 'TP' &&
-          isFilledOrderStatus(o.status) &&
-          o.price != null,
-      )
-      .map((o) => Number(o.price)),
-  );
-  let hits = 0;
-  for (const tp of takeProfits) {
-    if ([...filledTpPrices].some((p) => Math.abs(p - tp) < 1e-8)) {
-      hits += 1;
-    }
-  }
-  return hits;
+  return countFilledTpLevels(orders, takeProfits, direction);
 }
 
 function mapStatus(
@@ -153,11 +187,12 @@ export function mapSignalRowToQpulsePayload(row: SignalRow): Record<string, unkn
   const entries = parseNumberArray(row.entries);
   const takeProfits = parseNumberArray(row.takeProfits);
   const mid = resolveEntryPrice(row, entries);
-  const direction = normalizeDirection(row.direction as SignalDto['direction']);
+  const tradeDirection = normalizeDirection(row.direction as SignalDto['direction']);
+  const directionRaw = String(row.direction ?? 'long').toLowerCase();
   const marketTypeRaw = String(row.marketType ?? 'linear').toLowerCase();
   const isSpot = marketTypeRaw === 'spot';
   const hasFilledEntry = hasFilledEntryOrder(row.orders);
-  const tpHits = countFilledTpOrders(row.orders, takeProfits);
+  const tpHits = countFilledTpOrders(row.orders, takeProfits, directionRaw);
   const mappedStatus = mapStatus(row.status, {
     liquidation: row.liquidation === true,
     isSpot,
@@ -172,9 +207,9 @@ export function mapSignalRowToQpulsePayload(row: SignalRow): Record<string, unkn
     label: `Target ${String(index + 1).padStart(2, '0')}`,
     price,
     profitPercent: Number.parseFloat(
-      calculateMovePercent({ from: mid, to: price, direction }).replace('%', ''),
+      calculateMovePercent({ from: mid, to: price, direction: tradeDirection }).replace('%', ''),
     ) || 0,
-    hit: index < tpHits,
+    hit: isTpLevelHit(row.orders, takeProfits, directionRaw, index),
   }));
 
   const slHit =
@@ -196,7 +231,7 @@ export function mapSignalRowToQpulsePayload(row: SignalRow): Record<string, unkn
     source: row.source ?? undefined,
     pair: formatPairForQpulse(row.pair),
     marketType: isSpot ? 'SPOT' : 'FUTURES',
-    direction: isSpot ? undefined : direction,
+    direction: isSpot ? undefined : tradeDirection,
     action: isSpot ? 'BUY' : undefined,
     entryPrice: mid,
     capitalPercentage: row.capitalPercent > 0 ? row.capitalPercent : 1,
@@ -217,15 +252,17 @@ export function mapSignalRowToQpulsePayload(row: SignalRow): Record<string, unkn
 }
 
 export function buildMirrorTradeEventText(params: {
-  kind: 'tp' | 'sl' | 'close' | 'liquidation' | 'cancel';
+  kind: 'tp' | 'sl' | 'close' | 'liquidation' | 'cancel' | 'entry';
   pair: string;
   detail?: string;
   pnl?: number | null;
 }): string {
   const pair = params.pair.toUpperCase();
   switch (params.kind) {
+    case 'entry':
+      return `📥 ${pair}: вход в позицию${params.detail ? ` — ${params.detail}` : ''}`;
     case 'tp':
-      return `🎯 ${pair}: ${params.detail ?? 'Take profit hit'}`;
+      return `🎯 ${pair}: ${params.detail ?? 'Take profit достигнут'}`;
     case 'sl':
       return `🛑 ${pair}: Stop loss hit`;
     case 'liquidation':

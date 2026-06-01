@@ -2070,6 +2070,17 @@
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
 
+### AUD-183
+
+- Status: `done`
+- Scope: Mirror/QPulse — сообщения TP/вход, отметка TP в приложении, дедуп trade_tp.
+- Files: `bybit-order-fill-events.util.ts`, `signal-distribution.service.ts`, `qpulse-signal-mapper.util.ts`, `telegram-userbot-mirror.service.ts`, `bybit-order-lifecycle-poll.service.ts`
+- Findings: в группу уходило «TP step 0» (событие подтягивания SL, не TP); все TP дедуплицировались как `trade_tp` — только первое событие; PATCH в QPulse не отмечал TP из‑за неточного match цены; sync терял cabinet context.
+- Changes: события `BYBIT_TP_FILLED` / `BYBIT_ENTRY_FILLED`; тексты «TP N price — достигнут», «вход в позицию»; `TP_SL_STEPPED` без spam в группу; dedupe `tp1/tp2/entry`; улучшен mapper targets.hit + await PATCH.
+- Manual verification: `npm run build -w apps/api`; TP1/TP2 → два сообщения в группе; QPulse targets hit; entry message после fill.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
 ### AUD-182
 
 - Status: `done`

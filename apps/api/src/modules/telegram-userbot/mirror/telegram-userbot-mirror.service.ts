@@ -184,8 +184,10 @@ export class TelegramUserbotMirrorService {
     signalId: string;
     sourceChatId: string;
     sourceMessageId: string;
-    kind: 'tp' | 'sl' | 'close' | 'liquidation' | 'cancel';
+    kind: 'tp' | 'sl' | 'close' | 'liquidation' | 'cancel' | 'entry';
     text: string;
+    /** Уникальный ключ события (tp1, tp2, entry) — иначе второй TP не публикуется. */
+    dedupeSuffix?: string;
   }): Promise<void> {
     const cabinetId = this.cabinetContext.getCabinetId();
     const prismaAny = this.prisma as any;
@@ -197,7 +199,8 @@ export class TelegramUserbotMirrorService {
 
     const eventKind =
       params.kind === 'cancel' ? 'cancel' : ('result' as const);
-    const dedupeKind = `trade_${params.kind}`;
+    const dedupeKey = params.dedupeSuffix ?? params.kind;
+    const dedupeKind = `trade_${dedupeKey}`;
 
     for (const g of groups) {
       const existing = await prismaAny.tgUserbotMirrorMessage.findFirst({
@@ -260,7 +263,7 @@ export class TelegramUserbotMirrorService {
           cabinetId,
           ingestId: rootPosted.ingestId ?? params.signalId,
           sourceChatId: params.sourceChatId,
-          sourceMessageId: `${params.sourceMessageId}:${params.kind}`,
+          sourceMessageId: `${params.sourceMessageId}:${dedupeKey}`,
           rootSourceChatId: params.sourceChatId,
           rootSourceMessageId: params.sourceMessageId,
           kind: dedupeKind,

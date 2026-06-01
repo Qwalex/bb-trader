@@ -9,6 +9,8 @@ export function createLinearPollOrdersPorts(
     listOpenSignals: () => orders.listOpenLinearSignals(),
     getSignalWithOrders: (id) => orders.getSignalWithOrders(id),
     updateOrder: (id, data) => orders.updateOrder(id, data),
+    createSignalEvent: (signalId, type, payload) =>
+      orders.createSignalEvent(signalId, type, payload),
     reconcileStaleOpenSignalsForPairAndDirection: (pair, direction) =>
       orders.reconcileStaleOpenSignalsForPairAndDirection(pair, direction),
   };

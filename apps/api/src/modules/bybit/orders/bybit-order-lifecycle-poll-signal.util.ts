@@ -11,6 +11,7 @@ import {
 export type PollSignalRow = {
   id: string;
   pair: string;
+  direction?: string;
   status?: string;
   stopLoss?: number;
   takeProfits?: string;
@@ -20,6 +21,7 @@ export type PollSignalRow = {
     orderKind: string;
     status: string | null;
     qty: number | null;
+    price: number | null;
   }>;
 };
 

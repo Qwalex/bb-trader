@@ -14,6 +14,7 @@ import {
   syncSignalOrderStatusesFromExchange,
   type PollSignalRow,
 } from './bybit-order-lifecycle-poll-signal.util';
+import { emitOrderFillEventsIfNew } from './bybit-order-fill-events.util';
 import { hasLiveTpOrders, hasOpenEntryOrders } from './bybit-order-status.util';
 
 @Injectable()
@@ -158,6 +159,8 @@ export class BybitOrderLifecyclePollService {
       return;
     }
 
+    await emitOrderFillEventsIfNew(ports, sig, fresh);
+
     const hadOpenEntries = hasOpenEntryOrders(sig.orders);
     const hasOpenEntriesNow = hasOpenEntryOrders(fresh.orders);
 
@@ -178,6 +181,7 @@ export class BybitOrderLifecyclePollService {
       );
       const freshForStep =
         ((await ports.orders.getSignalWithOrders(sig.id)) as PollSignalRow | null) ?? fresh;
+      await emitOrderFillEventsIfNew(ports, fresh, freshForStep);
       try {
         await ports.stepStopLossIfTpFilled(client, freshForStep);
       } catch (e) {

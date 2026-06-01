@@ -98,6 +98,7 @@ export interface BybitOrderLifecyclePollPorts {
     ) => Promise<string[]>;
     updateOrder: (orderId: string, data: any) => Promise<any>;
     getSignalWithOrders: (signalId: string) => Promise<any | null>;
+    createSignalEvent?: (signalId: string, type: string, payload?: unknown) => Promise<unknown>;
   };
   stalePairDirectionKey: (pair: string, direction: 'long' | 'short') => string;
   staleFlatPollCounts: Map<string, number>;

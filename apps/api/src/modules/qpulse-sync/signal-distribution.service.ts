@@ -2,9 +2,12 @@ import { forwardRef, Inject, Injectable } from '@nestjs/common';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { CabinetContextService } from '../cabinet/cabinet-context.service';
+import { toFixedPrice } from '../telegram-userbot/mirror/telegram-userbot-mirror-format.util';
 import { TelegramUserbotMirrorService } from '../telegram-userbot/mirror/telegram-userbot-mirror.service';
 import { buildMirrorTradeEventText } from './qpulse-signal-mapper.util';
 import { QpulseSyncService } from './qpulse-sync.service';
+
+type MirrorTradeKind = 'tp' | 'sl' | 'close' | 'liquidation' | 'cancel' | 'entry';
 
 @Injectable()
 export class SignalDistributionService {
@@ -17,7 +20,7 @@ export class SignalDistributionService {
   ) {}
 
   async onLifecycleUpdate(signalId: string): Promise<void> {
-    void this.qpulseSync.patchSignalIfSynced(signalId);
+    await this.qpulseSync.patchSignalIfSynced(signalId);
   }
 
   async onSignalCreated(signalId: string): Promise<void> {
@@ -29,63 +32,88 @@ export class SignalDistributionService {
     type: string,
     payload?: unknown,
   ): Promise<void> {
-    const cabinetId = this.cabinetContext.getCabinetId();
-    if (
-      cabinetId &&
-      (type === 'CANCELLED_BY_CHAT' || type === 'SIGNAL_CANCELLED_BY_SOURCE_PRIORITY')
-    ) {
-      await this.prisma.signal.updateMany({
-        where: { id: signalId, cabinetId, deletedAt: null },
-        data: { status: 'CANCELLED_BY_CHAT' },
-      });
-    }
-
-    void this.qpulseSync.patchSignalIfSynced(signalId);
-
     const signal = await this.prisma.signal.findFirst({
-      where: { id: signalId, cabinetId, deletedAt: null },
+      where: { id: signalId, deletedAt: null },
       select: {
         id: true,
         pair: true,
+        cabinetId: true,
         sourceChatId: true,
         sourceMessageId: true,
         realizedPnl: true,
         liquidation: true,
       },
     });
-    if (!signal?.sourceChatId || !signal.sourceMessageId) return;
+    if (!signal?.cabinetId) return;
 
-    const p = (payload ?? {}) as Record<string, unknown>;
-    let kind: 'tp' | 'sl' | 'close' | 'liquidation' | 'cancel' | null = null;
-    let detail: string | undefined;
+    await this.cabinetContext.runWithCabinetAsync(signal.cabinetId, async () => {
+      if (
+        type === 'CANCELLED_BY_CHAT' ||
+        type === 'SIGNAL_CANCELLED_BY_SOURCE_PRIORITY'
+      ) {
+        await this.prisma.signal.updateMany({
+          where: { id: signalId, cabinetId: signal.cabinetId, deletedAt: null },
+          data: { status: 'CANCELLED_BY_CHAT' },
+        });
+      }
 
-    if (type === 'BYBIT_CLOSE_SUCCESS') {
-      kind = 'close';
-    } else if (type === 'CANCELLED_BY_CHAT' || type === 'SIGNAL_CANCELLED_BY_SOURCE_PRIORITY') {
-      kind = 'cancel';
-    } else if (type === 'TP_SL_STEPPED') {
-      kind = 'tp';
-      detail =
-        p.step != null
-          ? `TP step ${String(p.step)}`
-          : 'Take profit / SL step';
-    }
+      const p = (payload ?? {}) as Record<string, unknown>;
+      let mirrorKind: MirrorTradeKind | null = null;
+      let detail: string | undefined;
+      let dedupeSuffix: string | undefined;
 
-    if (!kind) return;
+      if (type === 'BYBIT_CLOSE_SUCCESS') {
+        mirrorKind = 'close';
+      } else if (
+        type === 'CANCELLED_BY_CHAT' ||
+        type === 'SIGNAL_CANCELLED_BY_SOURCE_PRIORITY'
+      ) {
+        mirrorKind = 'cancel';
+        dedupeSuffix = 'cancel';
+      } else if (type === 'BYBIT_TP_FILLED') {
+        const tpNumber = Math.max(1, Math.trunc(Number(p.tpNumber) || 1));
+        const price = Number(p.price);
+        mirrorKind = 'tp';
+        dedupeSuffix = `tp${tpNumber}`;
+        detail =
+          Number.isFinite(price) && price > 0
+            ? `TP ${tpNumber} ${toFixedPrice(price)} — достигнут`
+            : `TP ${tpNumber} — достигнут`;
+      } else if (type === 'BYBIT_ENTRY_FILLED') {
+        const price = Number(p.price);
+        mirrorKind = 'entry';
+        dedupeSuffix = 'entry';
+        detail =
+          Number.isFinite(price) && price > 0 ? toFixedPrice(price) : undefined;
+      } else if (type === 'TP_SL_STEPPED') {
+        await this.qpulseSync.patchSignalIfSynced(signalId);
+        return;
+      }
 
-    const text = buildMirrorTradeEventText({
-      kind,
-      pair: signal.pair,
-      detail,
-      pnl: signal.realizedPnl,
-    });
+      if (mirrorKind) {
+        await this.qpulseSync.patchSignalIfSynced(signalId);
+      } else {
+        await this.qpulseSync.patchSignalIfSynced(signalId);
+        return;
+      }
 
-    void this.mirror.publishTradeEventToMirrorGroups({
-      signalId: signal.id,
-      sourceChatId: signal.sourceChatId,
-      sourceMessageId: signal.sourceMessageId,
-      kind,
-      text,
+      if (!signal.sourceChatId || !signal.sourceMessageId) return;
+
+      const text = buildMirrorTradeEventText({
+        kind: mirrorKind,
+        pair: signal.pair,
+        detail,
+        pnl: signal.realizedPnl,
+      });
+
+      await this.mirror.publishTradeEventToMirrorGroups({
+        signalId: signal.id,
+        sourceChatId: signal.sourceChatId,
+        sourceMessageId: signal.sourceMessageId,
+        kind: mirrorKind,
+        dedupeSuffix,
+        text,
+      });
     });
   }
 
@@ -94,34 +122,40 @@ export class SignalDistributionService {
     liquidation?: boolean;
     realizedPnl?: number | null;
   }): Promise<void> {
-    void this.qpulseSync.patchSignalIfSynced(params.signalId);
+    await this.qpulseSync.patchSignalIfSynced(params.signalId);
 
-    const cabinetId = this.cabinetContext.getCabinetId();
     const signal = await this.prisma.signal.findFirst({
-      where: { id: params.signalId, cabinetId, deletedAt: null },
+      where: { id: params.signalId, deletedAt: null },
       select: {
         id: true,
         pair: true,
+        cabinetId: true,
         sourceChatId: true,
         sourceMessageId: true,
         realizedPnl: true,
       },
     });
-    if (!signal?.sourceChatId || !signal.sourceMessageId) return;
+    if (!signal?.cabinetId || !signal.sourceChatId || !signal.sourceMessageId) return;
 
-    const kind = params.liquidation ? 'liquidation' : 'close';
-    const text = buildMirrorTradeEventText({
-      kind,
-      pair: signal.pair,
-      pnl: params.realizedPnl ?? signal.realizedPnl,
-    });
+    const sourceChatId = signal.sourceChatId;
+    const sourceMessageId = signal.sourceMessageId;
 
-    void this.mirror.publishTradeEventToMirrorGroups({
-      signalId: signal.id,
-      sourceChatId: signal.sourceChatId,
-      sourceMessageId: signal.sourceMessageId,
-      kind,
-      text,
+    await this.cabinetContext.runWithCabinetAsync(signal.cabinetId, async () => {
+      const kind = params.liquidation ? 'liquidation' : 'close';
+      const text = buildMirrorTradeEventText({
+        kind,
+        pair: signal.pair,
+        pnl: params.realizedPnl ?? signal.realizedPnl,
+      });
+
+      await this.mirror.publishTradeEventToMirrorGroups({
+        signalId: signal.id,
+        sourceChatId,
+        sourceMessageId,
+        kind,
+        dedupeSuffix: kind,
+        text,
+      });
     });
   }
 
@@ -129,8 +163,9 @@ export class SignalDistributionService {
     signalId: string;
     sourceChatId?: string | null;
     sourceMessageId?: string | null;
-    kind: 'tp' | 'sl' | 'close' | 'liquidation' | 'cancel';
+    kind: MirrorTradeKind;
     text: string;
+    dedupeSuffix?: string;
   }): Promise<void> {
     if (!params.sourceChatId || !params.sourceMessageId) return;
     await this.mirror.publishTradeEventToMirrorGroups({
@@ -138,8 +173,9 @@ export class SignalDistributionService {
       sourceChatId: params.sourceChatId,
       sourceMessageId: params.sourceMessageId,
       kind: params.kind,
+      dedupeSuffix: params.dedupeSuffix,
       text: params.text,
     });
-    void this.qpulseSync.patchSignalIfSynced(params.signalId);
+    await this.qpulseSync.patchSignalIfSynced(params.signalId);
   }
 }
