@@ -52,6 +52,23 @@ export class CabinetController {
     }
   }
 
+  @ApiOperation({ summary: 'Клонировать кабинет' })
+  @ApiOkResponse({ description: 'Кабинет склонирован' })
+  @Post(':id/clone')
+  async clone(
+    @Req() req: { auth?: { userId?: string } },
+    @Param('id') id: string,
+  ) {
+    try {
+      return await this.cabinets.cloneCabinet({
+        ownerUserId: this.userIdFromReq(req),
+        sourceCabinetId: id,
+      });
+    } catch (e) {
+      throw new BadRequestException(e instanceof Error ? e.message : String(e));
+    }
+  }
+
   @ApiOperation({ summary: 'Обновить кабинет' })
   @ApiOkResponse({ description: 'Кабинет обновлен' })
   @Patch(':id')

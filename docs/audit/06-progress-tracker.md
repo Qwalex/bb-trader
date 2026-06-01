@@ -2108,3 +2108,14 @@
 - Files: `orders-dashboard-cabinets.types.ts`, `orders.service.ts`, `DashboardCabinetInactiveBanner.tsx`, `page.tsx`, `home-dashboard.types.ts`, `globals.css`
 - Changes: `isActive` в карточках dashboard-cabinets; баннер на карточке и в блоке «Текущий кабинет»; бейдж «неактивен»; для inactive не показываются setupWarnings/balanceGuard.
 - Manual verification: `npm run check-types -w apps/web`, `npm run build -w apps/api`.
+
+### AUD-180
+
+- Status: `done`
+- Scope: Клонирование кабинета; `STATS_RESET_AT` per-cabinet (изоляция сброса статистики).
+- Files: `cabinet-clone.util.ts`, `cabinet-clone.types.ts`, `cabinet.service.ts`, `cabinet.controller.ts`, `packages/shared/src/cabinet-settings.ts`, migration `20260601140000_stats_reset_at_per_cabinet`, web `cabinets/page.tsx`, `settings/page.tsx`, `orders.service.ts`
+- Findings: `STATS_RESET_AT` писался в глобальную `Setting` — сброс статистики одного кабинета влиял на все.
+- Changes: `POST /cabinets/:id/clone` — копия настроек, `CabinetTelegramSource`, publish-групп, balance alert rules, members; без сделок/ingest/snapshots; имя `copy (n)`; уникальные Bybit/TG token пропускаются; clone получает свой `STATS_RESET_AT`; ключ в `CABINET_SCOPED_SETTING_KEYS` + миграция legacy global → CabinetSetting.
+- Manual verification: `npm run build -w apps/api`, `npm run check-types -w apps/web`; клон → пустая статистика; сброс stats в кабинете A не меняет метрики B.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

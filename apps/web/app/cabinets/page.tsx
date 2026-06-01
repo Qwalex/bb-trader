@@ -123,6 +123,38 @@ export default function CabinetsPage() {
     }
   }
 
+  async function cloneCabinet(item: CabinetItem) {
+    const ok = window.confirm(
+      `Клонировать кабинет «${item.name}»?\n\nБудут скопированы настройки и userbot; сделки и статистика — с нуля.`,
+    );
+    if (!ok) return;
+    setBusy(`clone:${item.id}`);
+    setMsg(null);
+    try {
+      const res = await fetchApiResponse(`/cabinets/${encodeURIComponent(item.id)}/clone`, {
+        method: 'POST',
+      });
+      const json = (await res.json().catch(() => null)) as {
+        message?: string;
+        item?: CabinetItem;
+        skippedSettingKeys?: string[];
+      } | null;
+      if (!res.ok) throw new Error(json?.message ?? `${res.status}`);
+      const skipped = Array.isArray(json?.skippedSettingKeys) ? json.skippedSettingKeys : [];
+      const createdName = json?.item?.name ?? 'копия';
+      let text = `Создан кабинет «${createdName}»`;
+      if (skipped.length > 0) {
+        text += `. Не скопированы уникальные ключи: ${skipped.join(', ')} — задайте их в настройках клона.`;
+      }
+      setMsg({ type: 'ok', text });
+      await loadAll();
+    } catch (e) {
+      setMsg({ type: 'err', text: e instanceof Error ? e.message : 'Ошибка клонирования' });
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function removeCabinet(item: CabinetItem) {
     if (item.isDefault) return;
     const ok = window.confirm(`Удалить кабинет "${item.name}"?`);
@@ -149,8 +181,9 @@ export default function CabinetsPage() {
       <h1 className="pageTitle">Управление кабинетами</h1>
       <p style={{ color: 'var(--muted)', marginBottom: '1rem' }}>
         Общие настройки действуют по умолчанию для всех кабинетов. Кабинетные override-настройки
-        задаются на странице `Настройки` в режиме `Кабинет`. Неактивный кабинет не участвует в
-        отслеживании userbot и опросах Bybit; просмотр истории и настроек остаётся доступен.
+        задаются на странице `Настройки` в режиме `Кабинет`. Клонирование копирует настройки и группы
+        userbot без сделок и истории. Неактивный кабинет не участвует в отслеживании userbot и
+        опросах Bybit; просмотр истории и настроек остаётся доступен.
       </p>
       {msg && <p className={`msg ${msg.type === 'ok' ? 'ok' : 'err'}`}>{msg.text}</p>}
 
@@ -249,6 +282,14 @@ export default function CabinetsPage() {
                     </label>
                   </div>
                   <div className="cabinetActions">
+                    <button
+                      className="btn btnSecondary"
+                      type="button"
+                      disabled={busy !== null}
+                      onClick={() => void cloneCabinet(item)}
+                    >
+                      {busy === `clone:${item.id}` ? 'Клонирование…' : 'Клонировать'}
+                    </button>
                     <button
                       className="btn btnSecondary"
                       type="button"

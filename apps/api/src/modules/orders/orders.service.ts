@@ -1900,6 +1900,7 @@ export class OrdersService {
 
   async resetAnalyticsStats() {
     const resetAt = new Date();
+    /** Per-cabinet: `STATS_RESET_AT` в `CabinetSetting` (см. CABINET_SCOPED_SETTING_KEYS). */
     await this.settings.set('STATS_RESET_AT', resetAt.toISOString());
     return { ok: true, resetAt: resetAt.toISOString() };
   }

@@ -1354,8 +1354,9 @@ export default function SettingsPage() {
           <summary className="settingsSectionSummary">Опасная зона</summary>
           <div style={{ marginTop: '0.9rem' }}>
             <p style={{ color: 'var(--muted)', marginBottom: '0.75rem', fontSize: '0.9rem' }}>
-              Сброс статистики не удаляет сделки, а только начинает расчет метрик заново. Полный сброс
-              БД удаляет сигналы, ордера, логи и настройки в PostgreSQL.
+              Сброс статистики не удаляет сделки, а только начинает расчёт метрик заново для текущего
+              кабинета (не затрагивает другие кабинеты). Полный сброс БД удаляет сигналы, ордера,
+              логи и настройки в PostgreSQL.
             </p>
             <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
               {scope === 'cabinet' ? (

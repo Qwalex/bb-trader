@@ -2,6 +2,12 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { CABINET_LIST_SELECT, mapCabinetListRow } from './cabinet-select.util';
+import {
+  buildCloneCabinetName,
+  CABINET_CLONE_SKIP_SETTING_KEYS,
+  CABINET_CLONE_UNIQUE_SETTING_KEYS,
+} from './cabinet-clone.util';
+import type { CloneCabinetResult } from './cabinet-clone.types';
 import type { CabinetListItem } from './cabinet.types';
 
 const DEFAULT_CABINET_ID = 'cab_main';
@@ -269,19 +275,7 @@ export class CabinetService implements OnModuleInit {
       .slice(0, 60);
   }
 
-  async createCabinet(params: {
-    ownerUserId?: string | null;
-    name: string;
-    slug?: string;
-  }): Promise<CabinetListItem> {
-    const name = String(params.name ?? '').trim();
-    if (!name) {
-      throw new Error('Cabinet name is required');
-    }
-    const baseSlug = this.normalizeSlug(params.slug ?? name);
-    if (!baseSlug) {
-      throw new Error('Cabinet slug is invalid');
-    }
+  private async allocateUniqueSlug(baseSlug: string): Promise<string> {
     let slug = baseSlug;
     let idx = 2;
     for (;;) {
@@ -296,6 +290,23 @@ export class CabinetService implements OnModuleInit {
         throw new Error('Unable to generate unique cabinet slug');
       }
     }
+    return slug;
+  }
+
+  async createCabinet(params: {
+    ownerUserId?: string | null;
+    name: string;
+    slug?: string;
+  }): Promise<CabinetListItem> {
+    const name = String(params.name ?? '').trim();
+    if (!name) {
+      throw new Error('Cabinet name is required');
+    }
+    const baseSlug = this.normalizeSlug(params.slug ?? name);
+    if (!baseSlug) {
+      throw new Error('Cabinet slug is invalid');
+    }
+    const slug = await this.allocateUniqueSlug(baseSlug);
     const row = await this.prisma.cabinet.create({
       data: {
         name,
@@ -307,6 +318,165 @@ export class CabinetService implements OnModuleInit {
       select: CABINET_LIST_SELECT,
     });
     return mapCabinetListRow(row);
+  }
+
+  async cloneCabinet(params: {
+    ownerUserId?: string | null;
+    sourceCabinetId: string;
+  }): Promise<CloneCabinetResult> {
+    const ownerUserId = String(params.ownerUserId ?? '').trim() || null;
+    const sourceCabinetId = String(params.sourceCabinetId ?? '').trim();
+    if (!sourceCabinetId) {
+      throw new Error('Cabinet id is required');
+    }
+
+    const source = await this.prisma.cabinet.findFirst({
+      where: { id: sourceCabinetId, ownerUserId },
+      include: {
+        settings: true,
+        telegramSources: true,
+        publishGroups: { where: { cabinetId: sourceCabinetId } },
+        balanceAlertRules: true,
+        members: true,
+      },
+    });
+    if (!source) {
+      throw new Error('Cabinet not found');
+    }
+
+    const siblings = await this.prisma.cabinet.findMany({
+      where: { ownerUserId },
+      select: { name: true },
+    });
+    const cloneName = buildCloneCabinetName(
+      source.name,
+      siblings.map((row) => row.name),
+    );
+    const baseSlug = this.normalizeSlug(cloneName);
+    if (!baseSlug) {
+      throw new Error('Cabinet slug is invalid');
+    }
+    const slug = await this.allocateUniqueSlug(baseSlug);
+    const skippedSettingKeys: string[] = [];
+    const statsResetAt = new Date().toISOString();
+
+    const created = await this.prisma.$transaction(async (tx) => {
+      const cabinet = await tx.cabinet.create({
+        data: {
+          name: cloneName,
+          slug,
+          isDefault: false,
+          isActive: true,
+          ownerUserId: ownerUserId ?? undefined,
+        },
+        select: CABINET_LIST_SELECT,
+      });
+
+      for (const row of source.settings) {
+        if (CABINET_CLONE_SKIP_SETTING_KEYS.has(row.key)) {
+          continue;
+        }
+        const value = String(row.value ?? '').trim();
+        if (CABINET_CLONE_UNIQUE_SETTING_KEYS.has(row.key) && value) {
+          const duplicated = await tx.cabinetSetting.findFirst({
+            where: {
+              key: row.key,
+              value,
+              cabinetId: { not: cabinet.id },
+            },
+            select: { id: true },
+          });
+          if (duplicated) {
+            skippedSettingKeys.push(row.key);
+            continue;
+          }
+        }
+        await tx.cabinetSetting.create({
+          data: { cabinetId: cabinet.id, key: row.key, value: row.value },
+        });
+      }
+
+      await tx.cabinetSetting.create({
+        data: {
+          cabinetId: cabinet.id,
+          key: 'STATS_RESET_AT',
+          value: statsResetAt,
+        },
+      });
+
+      for (const src of source.telegramSources) {
+        await tx.cabinetTelegramSource.create({
+          data: {
+            cabinetId: cabinet.id,
+            chatId: src.chatId,
+            enabled: src.enabled,
+            sourcePriority: src.sourcePriority,
+            defaultLeverage: src.defaultLeverage,
+            forcedLeverage: src.forcedLeverage,
+            leverageRangeMode: src.leverageRangeMode,
+            minLeverage: src.minLeverage,
+            maxLeverage: src.maxLeverage,
+            defaultEntryUsd: src.defaultEntryUsd,
+            minLotBump: src.minLotBump,
+            martingaleMultiplier: src.martingaleMultiplier,
+            tpSlStepStart: src.tpSlStepStart,
+            tpSlStepRange: src.tpSlStepRange,
+          },
+        });
+      }
+
+      for (const group of source.publishGroups) {
+        await tx.tgUserbotPublishGroup.create({
+          data: {
+            cabinetId: cabinet.id,
+            title: group.title,
+            chatId: group.chatId,
+            enabled: group.enabled,
+            publishEveryN: group.publishEveryN,
+            signalCounter: 0,
+            linkedToApp: group.linkedToApp,
+            contentPublishEnabled: group.contentPublishEnabled,
+          },
+        });
+      }
+
+      for (const rule of source.balanceAlertRules) {
+        await tx.cabinetBalanceAlertRule.create({
+          data: {
+            cabinetId: cabinet.id,
+            operator: rule.operator,
+            thresholdUsd: rule.thresholdUsd,
+            enabled: rule.enabled,
+            lastSatisfied: null,
+          },
+        });
+      }
+
+      for (const member of source.members) {
+        await tx.cabinetMember.create({
+          data: {
+            cabinetId: cabinet.id,
+            telegramUserId: member.telegramUserId,
+            role: member.role,
+            isActive: member.isActive,
+          },
+        });
+      }
+
+      return cabinet;
+    });
+
+    this.logger.log(
+      `Cloned cabinet source=${sourceCabinetId} -> id=${created.id} slug=${created.slug}` +
+        (skippedSettingKeys.length > 0
+          ? ` skippedSettings=${skippedSettingKeys.join(',')}`
+          : ''),
+    );
+
+    return {
+      item: mapCabinetListRow(created),
+      skippedSettingKeys,
+    };
   }
 
   async updateCabinet(params: {
