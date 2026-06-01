@@ -2142,6 +2142,17 @@
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
 
+### AUD-180 (fix keys copy)
+
+- Status: `done`
+- Scope: Клонирование — копировать Bybit/Telegram ключи вместе с остальными настройками.
+- Files: `cabinet-clone.util.ts`, `cabinet.service.ts`, `cabinet-clone.types.ts`, `cabinets/page.tsx`
+- Findings: проверка «уникальности» находила ключи в исходном кабинете и пропускала их при копировании.
+- Changes: убран skip `BYBIT_*` / `TELEGRAM_BOT_TOKEN`; клон получает полную копию настроек (кроме нового `STATS_RESET_AT`).
+- Manual verification: клон кабинета → в `/settings` клона те же API-ключи, что у источника.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
 ### AUD-181
 
 - Status: `done`

@@ -5,8 +5,6 @@ import { CABINET_LIST_SELECT, mapCabinetListRow } from './cabinet-select.util';
 import {
   buildCloneCabinetName,
   buildCloneSettingsInsertRows,
-  CABINET_CLONE_UNIQUE_SETTING_KEYS,
-  cloneSettingDuplicatePairKey,
 } from './cabinet-clone.util';
 import type { CloneCabinetResult } from './cabinet-clone.types';
 import type { CabinetListItem } from './cabinet.types';
@@ -359,34 +357,7 @@ export class CabinetService implements OnModuleInit {
     }
     const slug = await this.allocateUniqueSlug(baseSlug);
     const statsResetAt = new Date().toISOString();
-
-    const uniqueSourceSettings = source.settings.filter(
-      (row) =>
-        CABINET_CLONE_UNIQUE_SETTING_KEYS.has(row.key) &&
-        String(row.value ?? '').trim(),
-    );
-    const existingDuplicateSettings =
-      uniqueSourceSettings.length > 0
-        ? await this.prisma.cabinetSetting.findMany({
-            where: {
-              OR: uniqueSourceSettings.map((row) => ({
-                key: row.key,
-                value: row.value,
-              })),
-            },
-            select: { key: true, value: true },
-          })
-        : [];
-    const duplicatedKeyValuePairs = new Set(
-      existingDuplicateSettings.map((row) =>
-        cloneSettingDuplicatePairKey(row.key, row.value),
-      ),
-    );
-    const { rows: settingRows, skippedSettingKeys } = buildCloneSettingsInsertRows(
-      source.settings,
-      duplicatedKeyValuePairs,
-      statsResetAt,
-    );
+    const settingRows = buildCloneSettingsInsertRows(source.settings, statsResetAt);
 
     const created = await this.prisma.$transaction(
       async (tx) => {
@@ -476,15 +447,11 @@ export class CabinetService implements OnModuleInit {
     );
 
     this.logger.log(
-      `Cloned cabinet source=${sourceCabinetId} -> id=${created.id} slug=${created.slug}` +
-        (skippedSettingKeys.length > 0
-          ? ` skippedSettings=${skippedSettingKeys.join(',')}`
-          : ''),
+      `Cloned cabinet source=${sourceCabinetId} -> id=${created.id} slug=${created.slug}`,
     );
 
     return {
       item: mapCabinetListRow(created),
-      skippedSettingKeys,
     };
   }
 

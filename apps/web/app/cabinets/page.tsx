@@ -137,16 +137,10 @@ export default function CabinetsPage() {
       const json = (await res.json().catch(() => null)) as {
         message?: string;
         item?: CabinetItem;
-        skippedSettingKeys?: string[];
       } | null;
       if (!res.ok) throw new Error(json?.message ?? `${res.status}`);
-      const skipped = Array.isArray(json?.skippedSettingKeys) ? json.skippedSettingKeys : [];
       const createdName = json?.item?.name ?? 'копия';
-      let text = `Создан кабинет «${createdName}»`;
-      if (skipped.length > 0) {
-        text += `. Не скопированы уникальные ключи: ${skipped.join(', ')} — задайте их в настройках клона.`;
-      }
-      setMsg({ type: 'ok', text });
+      setMsg({ type: 'ok', text: `Создан кабинет «${createdName}»` });
       await loadAll();
     } catch (e) {
       setMsg({ type: 'err', text: e instanceof Error ? e.message : 'Ошибка клонирования' });
