@@ -19,7 +19,7 @@ import type {
   DashboardCabinetCard,
   DashboardCabinetsSummary,
 } from './home-dashboard.types';
-import { formatDashboardDurationMs, formatDashboardRatioPercent } from './home-dashboard.util';
+import { formatDashboardDurationMs, formatDashboardRatioPercent, sortDashboardCabinetCardsForDisplay } from './home-dashboard.util';
 
 type Stats = {
   source?: string | null;
@@ -335,6 +335,7 @@ export default async function Home({
     selectedDashboardCabinet?.isActive === false ||
     (currentCabinet != null && currentCabinet.isActive === false);
   const inactiveCabinetCount = dashboardCabinetCards.filter((c) => c.isActive === false).length;
+  const displayCabinetCards = sortDashboardCabinetCardsForDisplay(dashboardCabinetCards);
 
   return (
     <>
@@ -386,7 +387,7 @@ export default async function Home({
             ) : null}
           </p>
           <div className="dashboardCabinetCards">
-            {dashboardCabinetCards.map((c) => {
+            {displayCabinetCards.map((c) => {
               const isSelected =
                 (cabinetId && c.cabinetId === cabinetId) ||
                 (!cabinetId && currentCabinet?.id === c.cabinetId);

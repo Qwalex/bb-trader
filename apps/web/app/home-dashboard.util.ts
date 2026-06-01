@@ -20,3 +20,18 @@ export function formatDashboardRatioPercent(ratio: number | null | undefined): s
   if (ratio == null || !Number.isFinite(ratio)) return '—';
   return `${(Math.min(1, Math.max(0, ratio)) * 100).toFixed(1)}%`;
 }
+
+/** Активные кабинеты первыми, деактивированные — в конце (порядок внутри группы сохраняется). */
+export function sortDashboardCabinetCardsForDisplay<T extends { isActive?: boolean }>(
+  items: T[],
+): T[] {
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => {
+      const aInactive = a.item.isActive === false ? 1 : 0;
+      const bInactive = b.item.isActive === false ? 1 : 0;
+      if (aInactive !== bInactive) return aInactive - bInactive;
+      return a.index - b.index;
+    })
+    .map(({ item }) => item);
+}
