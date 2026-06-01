@@ -2079,3 +2079,14 @@
 - Manual verification: `npm run build -w apps/api`, `npm run check-types -w apps/web`; миграция на стенде; ingest analysis → пост в редакторе → publish в группу с галочкой.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-178
+
+- Status: `done`
+- Scope: Дашборд — метрики утилизации капитала по кабинетам (время исполнения сигнала, простой, доля не задействованного баланса).
+- Files: `orders-dashboard-utilization.util.ts`, `orders-dashboard-utilization.types.ts`, `orders.service.ts`, `orders-dashboard-cabinets.types.ts`, `balance-snapshot.service.ts`, Prisma `BalanceSnapshot.availableUsd`, migration `20260601120000_balance_snapshot_available_usd`, web `home-dashboard.types.ts`, `home-dashboard.util.ts`, `page.tsx`, `globals.css`
+- Findings: не было метрик простоя и задействования баланса; снимки баланса хранили только equity без available.
+- Changes: среднее время исполнения (createdAt→closedAt); средняя длительность периодов с 0 открытых сигналов; текущая и 30-дневная средняя доля available/equity; поля в GET `/orders/dashboard-cabinets`; UI в карточках кабинетов; daily snapshot пишет `availableUsd`.
+- Manual verification: `npm run build -w apps/api`, `npm run check-types -w apps/web` (pass); после деплоя — миграция БД, открыть дашборд, проверить карточки кабинетов.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

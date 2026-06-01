@@ -29,6 +29,11 @@ export type DashboardCabinetCard = {
   totalBalanceUsd: number | null;
   availableBalanceUsd: number | null;
   balanceGuard?: DashboardCabinetBalanceGuard;
+  avgSignalExecutionMs: number | null;
+  avgIdlePeriodMs: number | null;
+  unusedBalanceRatio: number | null;
+  avgUnusedBalanceRatioMonth: number | null;
+  utilizationPeriodDays: number;
 };
 
 export type ConnectedGroupItem = {

@@ -18,6 +18,7 @@ import type {
   DashboardCabinetCard,
   DashboardCabinetsSummary,
 } from './home-dashboard.types';
+import { formatDashboardDurationMs, formatDashboardRatioPercent } from './home-dashboard.util';
 
 type Stats = {
   source?: string | null;
@@ -365,7 +366,8 @@ export default async function Home({
           <h2 className="pageTitle dashboardSectionTitle">Кабинеты</h2>
           <p className="dashboardSectionHint">
             Краткая сводка по каждому кабинету. Нажмите карточку, чтобы переключить активный кабинет на
-            главной.
+            главной. «Исполнение» и «Простой» — средние за период статистики; «Не в работе» — доля
+            доступного баланса (не в позициях).
           </p>
           <div className="dashboardCabinetCards">
             {dashboardCabinetCards.map((c) => {
@@ -447,6 +449,30 @@ export default async function Home({
                         {c.availableBalanceUsd != null && Number.isFinite(c.availableBalanceUsd)
                           ? `${c.availableBalanceUsd.toFixed(2)} $`
                           : '—'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="dashboardCabinetMetricLabel">Исполнение (сред.)</span>
+                      <span className="dashboardCabinetMetricValue">
+                        {formatDashboardDurationMs(c.avgSignalExecutionMs)}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="dashboardCabinetMetricLabel">Простой (сред.)</span>
+                      <span className="dashboardCabinetMetricValue">
+                        {formatDashboardDurationMs(c.avgIdlePeriodMs)}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="dashboardCabinetMetricLabel">Не в работе</span>
+                      <span className="dashboardCabinetMetricValue">
+                        {formatDashboardRatioPercent(c.unusedBalanceRatio)}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="dashboardCabinetMetricLabel">Не в работе (30д)</span>
+                      <span className="dashboardCabinetMetricValue">
+                        {formatDashboardRatioPercent(c.avgUnusedBalanceRatioMonth)}
                       </span>
                     </div>
                   </div>

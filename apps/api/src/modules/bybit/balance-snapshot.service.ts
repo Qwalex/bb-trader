@@ -40,7 +40,7 @@ export class BalanceSnapshotService {
           if (!details || !Number.isFinite(details.totalUsd)) {
             return;
           }
-          await this.upsertToday(details.totalUsd);
+          await this.upsertToday(details.totalUsd, details.availableUsd);
         });
       }
     } catch (e) {
@@ -52,10 +52,12 @@ export class BalanceSnapshotService {
    * Одна запись на календарный день (UTC): создаёт или обновляет суммарный баланс за сегодня.
    * Вызывается из cron и при открытии дашборда (userbot status), если нужно зафиксировать день.
    */
-  async upsertToday(totalUsd: number): Promise<void> {
+  async upsertToday(totalUsd: number, availableUsd?: number | null): Promise<void> {
     if (!Number.isFinite(totalUsd)) {
       return;
     }
+    const available =
+      availableUsd != null && Number.isFinite(availableUsd) ? availableUsd : undefined;
     const cabinetId = this.cabinetContext.getCabinetId();
     const { start, end } = utcTodayRange();
     const existing = await this.prisma.balanceSnapshot.findFirst({
@@ -66,14 +68,19 @@ export class BalanceSnapshotService {
       orderBy: { createdAt: 'desc' },
       select: { id: true },
     });
+    const data = {
+      totalUsd,
+      createdAt: new Date(),
+      ...(available !== undefined ? { availableUsd: available } : {}),
+    };
     if (existing) {
       await this.prisma.balanceSnapshot.update({
         where: { id: existing.id },
-        data: { totalUsd, createdAt: new Date() },
+        data,
       });
     } else {
       await this.prisma.balanceSnapshot.create({
-        data: { cabinetId, totalUsd },
+        data: { cabinetId, ...data },
       });
     }
   }

@@ -31,6 +31,16 @@ export type DashboardCabinetCardDto = {
   totalBalanceUsd: number | null;
   availableBalanceUsd: number | null;
   balanceGuard?: DashboardCabinetBalanceGuardDto;
+  /** Среднее время исполнения закрытых сигналов (createdAt → closedAt), мс. */
+  avgSignalExecutionMs: number | null;
+  /** Средняя длительность периода простоя (0 открытых сигналов), мс. */
+  avgIdlePeriodMs: number | null;
+  /** Текущая доля не задействованного баланса (available / equity), 0…1. */
+  unusedBalanceRatio: number | null;
+  /** Средняя доля не задействованного баланса за 30 дней, 0…1. */
+  avgUnusedBalanceRatioMonth: number | null;
+  /** Окно расчёта исполнения и простоя (дней). */
+  utilizationPeriodDays: number;
 };
 
 export type DashboardCabinetsSummaryDto = {

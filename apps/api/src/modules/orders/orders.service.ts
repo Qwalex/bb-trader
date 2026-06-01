@@ -14,6 +14,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CabinetService } from '../cabinet/cabinet.service';
 import { CabinetContextService } from '../cabinet/cabinet-context.service';
 import type { BybitService } from '../bybit/bybit.service';
+import type { BalanceSnapshotService } from '../bybit/balance-snapshot.service';
 import { SettingsService } from '../settings/settings.service';
 import { TelegramService } from '../telegram';
 import { UserbotSignalHashService } from '../telegram-userbot/userbot-signal-hash.service';
@@ -34,6 +35,16 @@ import {
 } from './orders-dashboard-activity.util';
 import { buildAggregatedBalanceHistoryPoints } from './orders-dashboard-aggregate-balance-history.util';
 import { buildDashboardCabinetsSummary } from './orders-dashboard-summary.util';
+import {
+  computeAvgIdlePeriodMs,
+  computeAvgSignalExecutionMs,
+  computeAvgUnusedBalanceRatioMonth,
+  computeUnusedBalanceRatio,
+  DASHBOARD_ACTIVE_SIGNAL_STATUSES,
+  DASHBOARD_CLOSED_SIGNAL_STATUSES,
+  filterSignalsByExcludedSources,
+} from './orders-dashboard-utilization.util';
+import type { DashboardCabinetUtilizationMetrics } from './orders-dashboard-utilization.types';
 import type { ActiveSignalTradeSnapshot } from './orders-active-signal-snapshot.types';
 import type { OrdersDailyDigestModel } from './orders-digest.types';
 import { parseStringList } from './orders-source.util';
@@ -88,6 +99,12 @@ export class OrdersService {
       }),
     )
     private readonly bybit: BybitService,
+    @Inject(
+      forwardRef(() => {
+        return require('../bybit/balance-snapshot.service').BalanceSnapshotService;
+      }),
+    )
+    private readonly balanceSnapshots: BalanceSnapshotService,
     @Inject(forwardRef(() => TelegramService))
     private readonly telegram: TelegramService,
     private readonly userbotSignalHash: UserbotSignalHashService,
@@ -1139,6 +1156,15 @@ export class OrdersService {
           if (bal && Number.isFinite(bal.availableUsd)) {
             availableBalanceUsd = bal.availableUsd;
           }
+          if (totalBalanceUsd != null) {
+            await this.balanceSnapshots
+              .upsertToday(totalBalanceUsd, availableBalanceUsd)
+              .catch((e) => {
+                this.logger.debug(
+                  `getDashboardCabinetsOverviewForUser: snapshot upsert cabinet=${c.id}: ${formatError(e)}`,
+                );
+              });
+          }
         } catch (e) {
           this.logger.debug(
             `getDashboardCabinetsOverviewForUser: баланс недоступен cabinet=${c.id}: ${formatError(e)}`,
@@ -1161,6 +1187,11 @@ export class OrdersService {
                   : {}),
               }
             : undefined;
+
+        const utilization = await this.getCabinetUtilizationMetrics({
+          availableBalanceUsd,
+          totalBalanceUsd,
+        });
 
         return {
           cabinetId: c.id,
@@ -1185,6 +1216,11 @@ export class OrdersService {
           totalBalanceUsd,
           availableBalanceUsd,
           balanceGuard,
+          avgSignalExecutionMs: utilization.avgSignalExecutionMs,
+          avgIdlePeriodMs: utilization.avgIdlePeriodMs,
+          unusedBalanceRatio: utilization.unusedBalanceRatio,
+          avgUnusedBalanceRatioMonth: utilization.avgUnusedBalanceRatioMonth,
+          utilizationPeriodDays: utilization.utilizationPeriodDays,
         };
       });
       items.push(row);
@@ -1766,6 +1802,96 @@ export class OrdersService {
     }
     const d = new Date(raw);
     return Number.isNaN(d.getTime()) ? undefined : d;
+  }
+
+  private async getCabinetUtilizationMetrics(params?: {
+    availableBalanceUsd?: number | null;
+    totalBalanceUsd?: number | null;
+  }): Promise<DashboardCabinetUtilizationMetrics> {
+    const excluded = await this.getExcludedSourcesSet();
+    const statsResetAt = await this.getStatsResetAt();
+    const nowMs = Date.now();
+    const dayMs = 86_400_000;
+    const cabinetId = this.currentCabinetId() ?? (await this.cabinets.getDefaultCabinetId());
+
+    const closedRows = await this.prisma.signal.findMany({
+      where: this.withCabinetScope({
+        deletedAt: null,
+        status: { in: [...DASHBOARD_CLOSED_SIGNAL_STATUSES] },
+        closedAt: {
+          not: null,
+          ...(statsResetAt ? { gte: statsResetAt } : {}),
+        },
+      }),
+      select: { createdAt: true, closedAt: true, source: true },
+    });
+    const closedFiltered = filterSignalsByExcludedSources(closedRows, excluded);
+
+    const timelineRows = await this.prisma.signal.findMany({
+      where: this.withCabinetScope({
+        deletedAt: null,
+        status: { not: 'FAILED' },
+      }),
+      select: { createdAt: true, closedAt: true, source: true, status: true },
+    });
+    const timelineFiltered = filterSignalsByExcludedSources(timelineRows, excluded);
+
+    let windowStartMs = statsResetAt?.getTime() ?? null;
+    if (windowStartMs == null) {
+      const closedStarts = closedFiltered
+        .map((row) => row.createdAt.getTime())
+        .filter((ms) => Number.isFinite(ms));
+      const timelineStarts = timelineFiltered
+        .map((row) => row.createdAt.getTime())
+        .filter((ms) => Number.isFinite(ms));
+      const candidates = [...closedStarts, ...timelineStarts];
+      windowStartMs = candidates.length > 0 ? Math.min(...candidates) : nowMs;
+    }
+
+    const occupancySignals = timelineFiltered
+      .filter((row) => {
+        const startMs = row.createdAt.getTime();
+        const isActive = DASHBOARD_ACTIVE_SIGNAL_STATUSES.includes(
+          row.status as (typeof DASHBOARD_ACTIVE_SIGNAL_STATUSES)[number],
+        );
+        const endMs =
+          row.closedAt instanceof Date && !Number.isNaN(row.closedAt.getTime())
+            ? row.closedAt.getTime()
+            : isActive
+              ? nowMs
+              : null;
+        if (endMs == null || !Number.isFinite(startMs)) return false;
+        return startMs < nowMs && endMs > windowStartMs;
+      })
+      .map((row) => ({
+        createdAt: row.createdAt,
+        closedAt:
+          row.closedAt instanceof Date && !Number.isNaN(row.closedAt.getTime())
+            ? row.closedAt
+            : null,
+      }));
+
+    const utilizationPeriodDays = Math.max(1, Math.ceil((nowMs - windowStartMs) / dayMs));
+    const avgSignalExecutionMs = computeAvgSignalExecutionMs(closedFiltered);
+    const avgIdlePeriodMs = computeAvgIdlePeriodMs(occupancySignals, windowStartMs, nowMs);
+
+    const snapshotSince = new Date(nowMs - 30 * dayMs);
+    const snapshots = await this.prisma.balanceSnapshot.findMany({
+      where: { cabinetId, createdAt: { gte: snapshotSince } },
+      select: { totalUsd: true, availableUsd: true, createdAt: true },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    return {
+      avgSignalExecutionMs,
+      avgIdlePeriodMs,
+      unusedBalanceRatio: computeUnusedBalanceRatio(
+        params?.availableBalanceUsd,
+        params?.totalBalanceUsd,
+      ),
+      avgUnusedBalanceRatioMonth: computeAvgUnusedBalanceRatioMonth(snapshots, 30),
+      utilizationPeriodDays,
+    };
   }
 
   async resetAnalyticsStats() {

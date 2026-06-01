@@ -119,13 +119,15 @@ model UserSetting {
   @@index([userId, updatedAt])
 }
 
-/// Один снимок суммарного USDT-баланса (equity) в сутки — для графика на дашборде.
+/// Один снимок USDT-баланса (equity + доступно) в сутки — для графика и метрик утилизации.
 model BalanceSnapshot {
-  id        String   @id @default(cuid())
-  cabinetId String?
-  cabinet   Cabinet? @relation(fields: [cabinetId], references: [id], onDelete: SetNull)
-  createdAt DateTime @default(now())
-  totalUsd  Float
+  id           String   @id @default(cuid())
+  cabinetId    String?
+  cabinet      Cabinet? @relation(fields: [cabinetId], references: [id], onDelete: SetNull)
+  createdAt    DateTime @default(now())
+  totalUsd     Float
+  /// Доступно для торговли (unified wallet). null — старые снимки до миграции.
+  availableUsd Float?
 
   @@index([cabinetId, createdAt])
   @@index([createdAt])
