@@ -35,6 +35,16 @@ import {
 } from './orders-dashboard-activity.util';
 import { buildAggregatedBalanceHistoryPoints } from './orders-dashboard-aggregate-balance-history.util';
 import { buildDashboardCabinetsSummary } from './orders-dashboard-summary.util';
+import { mapWithConcurrency } from './orders-async-pool.util';
+import {
+  buildDashboardCabinetBalanceGuard,
+  parseMinBalanceUsdSetting,
+} from './orders-dashboard-balance-guard.util';
+import {
+  getCachedDashboardCabinetsOverview,
+  invalidateDashboardCabinetsOverviewCache,
+  setCachedDashboardCabinetsOverview,
+} from './orders-dashboard-overview-cache.util';
 import {
   computeAvgIdlePeriodMs,
   computeAvgSignalExecutionMs,
@@ -45,6 +55,7 @@ import {
   filterSignalsByExcludedSources,
 } from './orders-dashboard-utilization.util';
 import type { DashboardCabinetUtilizationMetrics } from './orders-dashboard-utilization.types';
+import { USERBOT_MIN_BALANCE_USD_DEFAULT } from '../telegram-userbot/telegram-userbot.constants';
 import type { ActiveSignalTradeSnapshot } from './orders-active-signal-snapshot.types';
 import type { OrdersDailyDigestModel } from './orders-digest.types';
 import { parseStringList } from './orders-source.util';
@@ -1081,7 +1092,7 @@ export class OrdersService {
 
   /**
    * Сводка по всем кабинетам пользователя для дашборда (win/lose/winrate/pnl/balance).
-   * Последовательные вызовы — чтобы не дублировать параллельные запросы к Bybit по rate limit.
+   * Bybit — до 3 кабинетов параллельно (очередь rate limit на кабинет); краткий кэш 20 с.
    */
   async getDashboardCabinetsOverviewForUser(
     userIdRaw: string | null | undefined,
@@ -1094,10 +1105,31 @@ export class OrdersService {
         aggregatedBalanceHistory: [],
       };
     }
+    const cached = getCachedDashboardCabinetsOverview(userId);
+    if (cached) {
+      return cached;
+    }
+
     const cabinets = await this.cabinets.listCabinetsForUser(userId);
-    const items: DashboardCabinetCardDto[] = [];
-    for (const c of cabinets) {
-      const row = await this.cabinetContext.runWithCabinet(c.id, async () => {
+    const probeCabinetId =
+      cabinets.find((c) => c.isActive)?.id ?? cabinets[0]?.id ?? null;
+    let userbotConnectedGlobal = false;
+    if (probeCabinetId) {
+      userbotConnectedGlobal = await this.cabinetContext.runWithCabinet(
+        probeCabinetId,
+        async () => {
+          try {
+            const status = await this.userbot.getStatus();
+            return Boolean(status?.connected);
+          } catch {
+            return false;
+          }
+        },
+      );
+    }
+
+    const items = await mapWithConcurrency(cabinets, 3, async (c) =>
+      this.cabinetContext.runWithCabinet(c.id, async () => {
         const stats = await this.getDashboardStats();
         const startOfToday = new Date();
         startOfToday.setHours(0, 0, 0, 0);
@@ -1107,8 +1139,8 @@ export class OrdersService {
           userbotReadMessagesToday,
           userbotSignalsPlacedToday,
           enabledGroupsCount,
-          userbotStatus,
           required,
+          minBalanceRaw,
         ] = await Promise.all([
           this.prisma.cabinetIngestRoute.count({
             where: { cabinetId: c.id, createdAt: { gte: startOfToday } },
@@ -1119,16 +1151,16 @@ export class OrdersService {
           this.prisma.cabinetTelegramSource.count({
             where: { cabinetId: c.id, enabled: true },
           }),
-          this.userbot.getStatus().catch(() => ({ connected: false } as { connected: boolean })),
           this.settings.getMany([
             'BYBIT_API_KEY_MAINNET',
             'BYBIT_API_SECRET_MAINNET',
             'TELEGRAM_BOT_TOKEN',
             'TELEGRAM_WHITELIST',
           ]),
+          this.settings.get('TELEGRAM_USERBOT_MIN_BALANCE_USD'),
         ]);
         const isFilled = (v: string | undefined) => String(v ?? '').trim().length > 0;
-        const userbotConnected = Boolean(userbotStatus?.connected);
+        const userbotConnected = userbotConnectedGlobal;
         const setupWarnings: string[] = [];
         if (!userbotConnected) {
           setupWarnings.push('Подключите Userbot (статус должен быть «подключен»).');
@@ -1148,45 +1180,58 @@ export class OrdersService {
         if (!isFilled(required.TELEGRAM_WHITELIST)) {
           setupWarnings.push('Заполните: Telegram user IDs.');
         }
-        try {
-          const bal = await this.bybit.getUnifiedUsdtBalanceDetails();
-          if (bal && Number.isFinite(bal.totalUsd)) {
-            totalBalanceUsd = bal.totalUsd;
-          }
-          if (bal && Number.isFinite(bal.availableUsd)) {
-            availableBalanceUsd = bal.availableUsd;
-          }
-          if (totalBalanceUsd != null) {
-            await this.balanceSnapshots
-              .upsertToday(totalBalanceUsd, availableBalanceUsd)
-              .catch((e) => {
-                this.logger.debug(
-                  `getDashboardCabinetsOverviewForUser: snapshot upsert cabinet=${c.id}: ${formatError(e)}`,
-                );
+
+        if (c.isActive) {
+          try {
+            const bal = await this.bybit.getUnifiedUsdtBalanceDetails();
+            if (bal && Number.isFinite(bal.totalUsd)) {
+              totalBalanceUsd = bal.totalUsd;
+            }
+            if (bal && Number.isFinite(bal.availableUsd)) {
+              availableBalanceUsd = bal.availableUsd;
+            }
+            if (totalBalanceUsd != null) {
+              const dayStart = new Date();
+              dayStart.setHours(0, 0, 0, 0);
+              const dayEnd = new Date(dayStart);
+              dayEnd.setDate(dayEnd.getDate() + 1);
+              const recentSnapshot = await this.prisma.balanceSnapshot.findFirst({
+                where: {
+                  cabinetId: c.id,
+                  createdAt: { gte: dayStart, lt: dayEnd },
+                },
+                orderBy: { createdAt: 'desc' },
+                select: { createdAt: true },
               });
-          }
-        } catch (e) {
-          this.logger.debug(
-            `getDashboardCabinetsOverviewForUser: баланс недоступен cabinet=${c.id}: ${formatError(e)}`,
-          );
-        }
-        const balanceGuard =
-          userbotStatus &&
-          typeof userbotStatus === 'object' &&
-          'balanceGuard' in userbotStatus &&
-          userbotStatus.balanceGuard &&
-          typeof userbotStatus.balanceGuard === 'object'
-            ? {
-                minBalanceUsd: Number(userbotStatus.balanceGuard.minBalanceUsd),
-                balanceUsd: userbotStatus.balanceGuard.balanceUsd ?? null,
-                totalBalanceUsd: userbotStatus.balanceGuard.totalBalanceUsd ?? null,
-                paused: Boolean(userbotStatus.balanceGuard.paused),
-                ...(typeof userbotStatus.balanceGuard.reason === 'string' &&
-                userbotStatus.balanceGuard.reason.trim().length > 0
-                  ? { reason: userbotStatus.balanceGuard.reason }
-                  : {}),
+              const snapshotFresh =
+                recentSnapshot != null &&
+                Date.now() - recentSnapshot.createdAt.getTime() < 10 * 60_000;
+              if (!snapshotFresh) {
+                await this.balanceSnapshots
+                  .upsertToday(totalBalanceUsd, availableBalanceUsd)
+                  .catch((e) => {
+                    this.logger.debug(
+                      `getDashboardCabinetsOverviewForUser: snapshot upsert cabinet=${c.id}: ${formatError(e)}`,
+                    );
+                  });
               }
-            : undefined;
+            }
+          } catch (e) {
+            this.logger.debug(
+              `getDashboardCabinetsOverviewForUser: баланс недоступен cabinet=${c.id}: ${formatError(e)}`,
+            );
+          }
+        }
+
+        const minBalanceUsd = parseMinBalanceUsdSetting(
+          minBalanceRaw,
+          USERBOT_MIN_BALANCE_USD_DEFAULT,
+        );
+        const balanceGuard = buildDashboardCabinetBalanceGuard({
+          minBalanceUsd,
+          balanceUsd: availableBalanceUsd,
+          totalBalanceUsd,
+        });
 
         const effectiveSetupWarnings = c.isActive ? setupWarnings : [];
         const effectiveBalanceGuard = c.isActive ? balanceGuard : undefined;
@@ -1225,10 +1270,16 @@ export class OrdersService {
           unusedBalanceRatio: utilization.unusedBalanceRatio,
           avgUnusedBalanceRatioMonth: utilization.avgUnusedBalanceRatioMonth,
           utilizationPeriodDays: utilization.utilizationPeriodDays,
-        };
-      });
-      items.push(row);
-    }
+        } satisfies DashboardCabinetCardDto;
+      }),
+    );
+
+    items.sort((a, b) => {
+      const aOff = a.isActive === false ? 1 : 0;
+      const bOff = b.isActive === false ? 1 : 0;
+      return aOff - bOff;
+    });
+
     const summary = buildDashboardCabinetsSummary(items);
     const cabinetIds = cabinets.map((c) => c.id);
     const historyDays = 30;
@@ -1286,7 +1337,9 @@ export class OrdersService {
       );
     }
 
-    return { items, summary, aggregatedBalanceHistory };
+    const result = { items, summary, aggregatedBalanceHistory };
+    setCachedDashboardCabinetsOverview(userId, result);
+    return result;
   }
 
   /**
@@ -1902,6 +1955,7 @@ export class OrdersService {
     const resetAt = new Date();
     /** Per-cabinet: `STATS_RESET_AT` в `CabinetSetting` (см. CABINET_SCOPED_SETTING_KEYS). */
     await this.settings.set('STATS_RESET_AT', resetAt.toISOString());
+    invalidateDashboardCabinetsOverviewCache();
     return { ok: true, resetAt: resetAt.toISOString() };
   }
 

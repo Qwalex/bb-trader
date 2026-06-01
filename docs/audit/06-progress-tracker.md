@@ -2120,6 +2120,7 @@
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
 
+<<<<<<< Updated upstream
 ### AUD-180 (fix)
 
 - Status: `done`
@@ -2128,5 +2129,15 @@
 - Findings: при большом числе настроек/источников цикл `create()` в `$transaction` превышал дефолтный timeout (~5 с) → «Transaction not found» на `cabinetTelegramSource.create`.
 - Changes: проверка дубликатов unique settings одним запросом до транзакции; `createMany` вместо N×`create`; `{ maxWait: 10_000, timeout: 30_000 }`.
 - Manual verification: `npm run build -w apps/api`; клон кабинета с множеством telegram sources.
+=======
+### AUD-181
+
+- Status: `done`
+- Scope: Оптимизация отклика UI при навигации и переключении настроек — API dashboard/settings и параллельные fetch на web.
+- Files: `orders-dashboard-overview-cache.util.ts`, `orders-async-pool.util.ts`, `orders-dashboard-balance-guard.util.ts`, `orders.service.ts`, `settings-list-resolve.util.ts`, `settings.service.ts`, `apps/web/app/page.tsx`, `apps/web/app/settings/page.tsx`
+- Findings: `GET /orders/dashboard-cabinets` последовательно опрашивал Bybit и userbot на каждый кабинет; главная и `/settings` делали цепочку последовательных HTTP; `settings.list()` вызывал тяжёлый `getMany()` по всем ключам.
+- Changes: in-memory кэш overview 20 с по userId; параллельная обработка до 3 кабинетов; один `userbot.getStatus()` на overview; skip Bybit для inactive; throttle `upsertToday`; sync fallback в `list()` без N×`get()`; параллельный `Promise.allSettled` на главной (auth, cabinets, userbot, dashboard, activity, groups, balance-history); параллельная загрузка settings+cabinets+balance-alerts; invalidate кэша при сбросе статистики.
+- Manual verification: `npm run build -w apps/api`, `npm run check-types -w apps/web`; открыть `/`, `/settings` с несколькими кабинетами — заметно быстрее повторная загрузка (кэш 20 с).
+>>>>>>> Stashed changes
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A

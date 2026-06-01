@@ -189,78 +189,75 @@ export default async function Home({
   if (loadErrors.length > 0) {
     err = `Часть данных не загружена: ${loadErrors.join(', ')}`;
   }
-  try {
-    authMe = await fetchJson<AuthMe>('/auth/me', undefined, cabinetId);
-  } catch {
-    authMe = null;
+  let balanceHistory: BalancePoint[] = [];
+  const [
+    authMeRes,
+    cabinetsRes,
+    userbotRes,
+    dashboardCabinetsRes,
+    activityRes,
+    connectedGroupsRes,
+    balanceHistoryRes,
+  ] = await Promise.allSettled([
+    fetchJson<AuthMe>('/auth/me', undefined, cabinetId),
+    fetchJson<{ items?: CabinetItem[] }>('/cabinets', undefined, cabinetId),
+    fetchJson<UserbotStatus>('/telegram-userbot/status', undefined, cabinetId),
+    fetchJson<{
+      items?: DashboardCabinetCard[];
+      summary?: DashboardCabinetsSummary;
+      aggregatedBalanceHistory?: DashboardAggregatedBalancePoint[];
+    }>('/orders/dashboard-cabinets', undefined, cabinetId),
+    fetchJson<{ items?: DashboardActivityItem[] }>(
+      '/orders/dashboard-activity?hours=24&limit=80',
+      undefined,
+      cabinetId,
+    ),
+    fetchJson<{ items?: ConnectedGroupItem[] }>(
+      '/telegram-userbot/dashboard-connected-groups',
+      undefined,
+      cabinetId,
+    ),
+    fetchJson<{ points: BalancePoint[] }>(
+      '/bybit/balance-history?days=30',
+      undefined,
+      cabinetId,
+    ),
+  ]);
+  if (authMeRes.status === 'fulfilled') {
+    authMe = authMeRes.value;
   }
-  try {
-    const cabinets = await fetchJson<{ items?: CabinetItem[] }>('/cabinets', undefined, cabinetId);
-    cabinetItems = Array.isArray(cabinets.items) ? cabinets.items : [];
-  } catch {
-    cabinetItems = [];
+  if (cabinetsRes.status === 'fulfilled') {
+    cabinetItems = Array.isArray(cabinetsRes.value.items) ? cabinetsRes.value.items : [];
+  }
+  if (userbotRes.status === 'fulfilled') {
+    userbotStatus = userbotRes.value;
+  }
+  if (dashboardCabinetsRes.status === 'fulfilled') {
+    const dc = dashboardCabinetsRes.value;
+    dashboardCabinetCards = Array.isArray(dc.items) ? dc.items : [];
+    dashboardCabinetsSummary = dc.summary ?? null;
+    dashboardAggregatedBalanceHistory = Array.isArray(dc.aggregatedBalanceHistory)
+      ? dc.aggregatedBalanceHistory
+      : [];
+  }
+  if (activityRes.status === 'fulfilled') {
+    dashboardActivityItems = Array.isArray(activityRes.value.items)
+      ? activityRes.value.items
+      : [];
+  }
+  if (connectedGroupsRes.status === 'fulfilled') {
+    connectedGroups = Array.isArray(connectedGroupsRes.value.items)
+      ? connectedGroupsRes.value.items
+      : [];
+  }
+  if (balanceHistoryRes.status === 'fulfilled') {
+    balanceHistory = balanceHistoryRes.value.points ?? [];
   }
   const currentCabinet =
     (cabinetId ? cabinetItems.find((c) => c.id === cabinetId) : null) ??
     cabinetItems.find((c) => c.isDefault) ??
     cabinetItems[0] ??
     null;
-  let balanceHistory: BalancePoint[] = [];
-  try {
-    userbotStatus = await fetchJson<UserbotStatus>(
-      '/telegram-userbot/status',
-      undefined,
-      cabinetId,
-    );
-  } catch {
-    // Userbot status is optional for dashboard render.
-  }
-  try {
-    const dc = await fetchJson<{
-      items?: DashboardCabinetCard[];
-      summary?: DashboardCabinetsSummary;
-      aggregatedBalanceHistory?: DashboardAggregatedBalancePoint[];
-    }>('/orders/dashboard-cabinets', undefined, cabinetId);
-    dashboardCabinetCards = Array.isArray(dc.items) ? dc.items : [];
-    dashboardCabinetsSummary = dc.summary ?? null;
-    dashboardAggregatedBalanceHistory = Array.isArray(dc.aggregatedBalanceHistory)
-      ? dc.aggregatedBalanceHistory
-      : [];
-  } catch {
-    dashboardCabinetCards = [];
-    dashboardCabinetsSummary = null;
-    dashboardAggregatedBalanceHistory = [];
-  }
-  try {
-    const act = await fetchJson<{ items?: DashboardActivityItem[] }>(
-      '/orders/dashboard-activity?hours=24&limit=80',
-      undefined,
-      cabinetId,
-    );
-    dashboardActivityItems = Array.isArray(act.items) ? act.items : [];
-  } catch {
-    dashboardActivityItems = [];
-  }
-  try {
-    const cg = await fetchJson<{ items?: ConnectedGroupItem[] }>(
-      '/telegram-userbot/dashboard-connected-groups',
-      undefined,
-      cabinetId,
-    );
-    connectedGroups = Array.isArray(cg.items) ? cg.items : [];
-  } catch {
-    connectedGroups = [];
-  }
-  try {
-    const bh = await fetchJson<{ points: BalancePoint[] }>(
-      '/bybit/balance-history?days=30',
-      undefined,
-      cabinetId,
-    );
-    balanceHistory = bh.points ?? [];
-  } catch {
-    // История баланса опциональна.
-  }
   const guard = userbotStatus?.balanceGuard;
   const equity = guard?.totalBalanceUsd ?? null;
   const wr = stats?.winrate ?? 0;

@@ -134,36 +134,46 @@ export default function SettingsPage() {
 
   const loadSettings = useCallback(async () => {
     try {
-      const res = await apiFetchScoped('/settings/effective');
-      if (!res.ok) throw new Error(String(res.status));
-      const j = (await res.json()) as {
+      const [settingsRes, cabinetsRes, balanceAlertsRes] = await Promise.all([
+        apiFetchScoped('/settings/effective'),
+        scope === 'cabinet'
+          ? apiFetchScoped('/cabinets')
+          : Promise.resolve(null as Response | null),
+        scope === 'cabinet'
+          ? apiFetchScoped('/bybit/balance-alerts')
+          : Promise.resolve(null as Response | null),
+      ]);
+      if (!settingsRes.ok) throw new Error(String(settingsRes.status));
+      const j = (await settingsRes.json()) as {
         settings: Row[];
       };
       const list = j.settings ?? [];
       setSavedRows(list);
       setDraftRows(list);
-      if (scope === 'cabinet') {
+      if (scope === 'cabinet' && cabinetsRes?.ok) {
         try {
-          const cabinetsRes = await apiFetchScoped('/cabinets');
-          if (cabinetsRes.ok) {
-            const cabinetsJson = (await cabinetsRes.json()) as { items?: CabinetItem[] };
-            const items = Array.isArray(cabinetsJson.items) ? cabinetsJson.items : [];
-            const activeId = activeCabinetId;
-            const active =
-              (activeId ? items.find((c) => c.id === activeId) : null) ??
-              items.find((c) => c.isDefault) ??
-              items[0] ??
-              null;
-            setActiveCabinet(active);
-          }
+          const cabinetsJson = (await cabinetsRes.json()) as { items?: CabinetItem[] };
+          const items = Array.isArray(cabinetsJson.items) ? cabinetsJson.items : [];
+          const activeId = activeCabinetId;
+          const active =
+            (activeId ? items.find((c) => c.id === activeId) : null) ??
+            items.find((c) => c.isDefault) ??
+            items[0] ??
+            null;
+          setActiveCabinet(active);
         } catch {
           setActiveCabinet(null);
         }
       } else {
         setActiveCabinet(null);
       }
-      if (scope === 'cabinet') {
-        await refreshBalanceAlerts();
+      if (scope === 'cabinet' && balanceAlertsRes?.ok) {
+        try {
+          const alertsJson = (await balanceAlertsRes.json()) as { items?: BalanceAlertRuleRow[] };
+          setBalanceAlerts(Array.isArray(alertsJson.items) ? alertsJson.items : []);
+        } catch {
+          setBalanceAlerts([]);
+        }
       } else {
         setBalanceAlerts([]);
       }
@@ -172,7 +182,7 @@ export default function SettingsPage() {
     } finally {
       setLoading(false);
     }
-  }, [apiFetchScoped, scope, activeCabinetId, refreshBalanceAlerts]);
+  }, [apiFetchScoped, scope, activeCabinetId]);
 
   useEffect(() => {
     void (async () => {

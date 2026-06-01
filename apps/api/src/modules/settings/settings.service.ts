@@ -23,6 +23,7 @@ import {
   GLOBAL_SHARED_SETTING_KEYS,
   TELEGRAM_USERBOT_SESSION_OWNER_USER_ID_KEY,
 } from './settings.constants';
+import { resolveSettingFallbackSync } from './settings-list-resolve.util';
 
 /** JSON-массив заметок на дашборде: `{ id, text }[]` */
 export const DASHBOARD_TODOS_SETTING_KEY = 'DASHBOARD_TODOS';
@@ -588,16 +589,21 @@ export class SettingsService {
       map.set(row.key, row.value);
     }
     const keysToResolve = Array.from(
-      new Set<string>([
-        ...map.keys(),
-        ...Object.keys(ENV_FALLBACK),
-      ]),
+      new Set<string>([...map.keys(), ...Object.keys(ENV_FALLBACK)]),
     );
-    const effective = await this.getMany(keysToResolve);
-    return keysToResolve
-      .map((key) => ({ key, value: effective[key] }))
-      .filter((row): row is { key: string; value: string } => row.value !== undefined)
-      .sort((a, b) => a.key.localeCompare(b.key, 'ru'));
+    const out: { key: string; value: string }[] = [];
+    for (const key of keysToResolve) {
+      const fromMap = map.get(key);
+      if (fromMap !== undefined && fromMap !== '') {
+        out.push({ key, value: fromMap });
+        continue;
+      }
+      const fallback = resolveSettingFallbackSync(key, (k) => this.config.get<string>(k));
+      if (fallback !== undefined) {
+        out.push({ key, value: fallback });
+      }
+    }
+    return out.sort((a, b) => a.key.localeCompare(b.key, 'ru'));
   }
 
   /** Чтение только из БД (без подмешивания .env). */
