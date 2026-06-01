@@ -2081,6 +2081,16 @@
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
 
+### AUD-185
+
+- Status: `done`
+- Scope: Mirror — PnL в сообщениях о закрытии/SL/ликвидации в процентах, не USDT.
+- Files: `qpulse-signal-mapper.util.ts`, `signal-distribution.service.ts`
+- Changes: `formatMirrorPnlPercent`; close/sl/liquidation → «PnL +12.50%» (формула как QPulse `profitPercentage`: `(pnl/notional)*100*leverage`).
+- Manual verification: `npm run build -w apps/api`.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
 ### AUD-182
 
 - Status: `done`

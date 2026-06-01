@@ -42,6 +42,10 @@ export class SignalDistributionService {
         sourceMessageId: true,
         realizedPnl: true,
         liquidation: true,
+        leverage: true,
+        orderUsd: true,
+        capitalPercent: true,
+        marketType: true,
       },
     });
     if (!signal?.cabinetId) return;
@@ -104,6 +108,10 @@ export class SignalDistributionService {
         pair: signal.pair,
         detail,
         pnl: signal.realizedPnl,
+        leverage: signal.leverage,
+        orderUsd: signal.orderUsd,
+        capitalPercent: signal.capitalPercent,
+        isSpot: String(signal.marketType ?? 'linear').toLowerCase() === 'spot',
       });
 
       await this.mirror.publishTradeEventToMirrorGroups({
@@ -133,6 +141,10 @@ export class SignalDistributionService {
         sourceChatId: true,
         sourceMessageId: true,
         realizedPnl: true,
+        leverage: true,
+        orderUsd: true,
+        capitalPercent: true,
+        marketType: true,
       },
     });
     if (!signal?.cabinetId || !signal.sourceChatId || !signal.sourceMessageId) return;
@@ -146,6 +158,10 @@ export class SignalDistributionService {
         kind,
         pair: signal.pair,
         pnl: params.realizedPnl ?? signal.realizedPnl,
+        leverage: signal.leverage,
+        orderUsd: signal.orderUsd,
+        capitalPercent: signal.capitalPercent,
+        isSpot: String(signal.marketType ?? 'linear').toLowerCase() === 'spot',
       });
 
       await this.mirror.publishTradeEventToMirrorGroups({

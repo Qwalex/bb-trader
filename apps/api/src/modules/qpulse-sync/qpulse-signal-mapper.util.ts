@@ -183,6 +183,25 @@ function computeProfitPercentage(params: {
   return (pnl / notional) * 100 * leverage;
 }
 
+export function formatMirrorPnlPercent(params: {
+  realizedPnl?: number | null;
+  leverage?: number;
+  orderUsd?: number;
+  capitalPercent?: number;
+  isSpot?: boolean;
+}): string | null {
+  const pct = computeProfitPercentage({
+    realizedPnl: params.realizedPnl,
+    leverage: params.leverage ?? 1,
+    orderUsd: params.orderUsd,
+    capitalPercent: params.capitalPercent ?? 0,
+    isSpot: params.isSpot === true,
+  });
+  if (pct == null || !Number.isFinite(pct)) return null;
+  const sign = pct >= 0 ? '+' : '';
+  return `${sign}${pct.toFixed(2)}%`;
+}
+
 export function mapSignalRowToQpulsePayload(row: SignalRow): Record<string, unknown> {
   const entries = parseNumberArray(row.entries);
   const takeProfits = parseNumberArray(row.takeProfits);
@@ -256,26 +275,34 @@ export function buildMirrorTradeEventText(params: {
   pair: string;
   detail?: string;
   pnl?: number | null;
+  leverage?: number;
+  orderUsd?: number;
+  capitalPercent?: number;
+  isSpot?: boolean;
 }): string {
   const pair = params.pair.toUpperCase();
+  const pnlPercent = formatMirrorPnlPercent({
+    realizedPnl: params.pnl,
+    leverage: params.leverage,
+    orderUsd: params.orderUsd,
+    capitalPercent: params.capitalPercent,
+    isSpot: params.isSpot,
+  });
   switch (params.kind) {
     case 'entry':
       return `📥 ${pair}: вход в позицию${params.detail ? ` — ${params.detail}` : ''}`;
     case 'tp':
       return `🎯 ${pair}: ${params.detail ?? 'Take profit достигнут'}`;
     case 'sl':
-      return `🛑 ${pair}: Stop loss hit`;
+      return `🛑 ${pair}: Stop loss сработал${pnlPercent ? ` · PnL ${pnlPercent}` : ''}`;
     case 'liquidation':
-      return `💥 ${pair}: Liquidation`;
+      return `💥 ${pair}: ликвидация${pnlPercent ? ` · PnL ${pnlPercent}` : ''}`;
     case 'cancel':
-      return `❌ ${pair}: Signal cancelled`;
+      return `❌ ${pair}: сигнал отменён`;
     case 'close':
     default: {
-      const pnl =
-        params.pnl != null && Number.isFinite(params.pnl)
-          ? ` PnL: ${params.pnl >= 0 ? '+' : ''}${params.pnl.toFixed(2)} USDT`
-          : '';
-      return `✅ ${pair}: Trade closed${pnl}`;
+      const pnlSuffix = pnlPercent ? ` · PnL ${pnlPercent}` : '';
+      return `✅ ${pair}: сделка закрыта${pnlSuffix}`;
     }
   }
 }
