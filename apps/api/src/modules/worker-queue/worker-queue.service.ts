@@ -179,7 +179,7 @@ export class WorkerQueueService implements OnModuleInit {
   }
 
   async enqueuePollSweep(reason = 'interval', delayMs = 0): Promise<void> {
-    const cabinets = await this.cabinets.listCabinets();
+    const cabinets = await this.cabinets.listActiveCabinets();
     const activeCabinetRows = await this.prisma.signal.findMany({
       where: {
         deletedAt: null,
@@ -218,6 +218,9 @@ export class WorkerQueueService implements OnModuleInit {
   ): Promise<void> {
     const id = cabinetId.trim();
     if (!id) {
+      return;
+    }
+    if (!(await this.cabinets.isCabinetActive(id))) {
       return;
     }
     const jobKey = `poll-cabinet:${id}`;
@@ -503,12 +506,18 @@ export class WorkerQueueService implements OnModuleInit {
 
   private async handlePayload(payload: WorkQueuePayload): Promise<void> {
     if (payload.type === 'poll-cabinet') {
+      if (!(await this.cabinets.isCabinetActive(payload.cabinetId))) {
+        return;
+      }
       await this.cabinetContext.runWithCabinet(payload.cabinetId, async () => {
         await this.bybit.pollOpenOrders();
       });
       return;
     }
     if (payload.type === 'bybit-ws-reconcile') {
+      if (!(await this.cabinets.isCabinetActive(payload.cabinetId))) {
+        return;
+      }
       await this.cabinetContext.runWithCabinet(payload.cabinetId, async () => {
         await this.bybit.pollOpenOrders();
       });

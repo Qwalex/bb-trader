@@ -1188,6 +1188,9 @@ export class OrdersService {
               }
             : undefined;
 
+        const effectiveSetupWarnings = c.isActive ? setupWarnings : [];
+        const effectiveBalanceGuard = c.isActive ? balanceGuard : undefined;
+
         const utilization = await this.getCabinetUtilizationMetrics({
           availableBalanceUsd,
           totalBalanceUsd,
@@ -1198,12 +1201,13 @@ export class OrdersService {
           slug: c.slug,
           name: c.name,
           isDefault: c.isDefault,
+          isActive: c.isActive,
           openSignals: stats.openSignals,
           userbotReadMessagesToday,
           userbotSignalsPlacedToday,
           userbotConnected,
           enabledGroupsCount,
-          setupWarnings,
+          setupWarnings: effectiveSetupWarnings,
           wins: stats.wins,
           losses: stats.losses,
           winrate: stats.winrate,
@@ -1215,7 +1219,7 @@ export class OrdersService {
           statsPeriodDays: stats.statsPeriodDays,
           totalBalanceUsd,
           availableBalanceUsd,
-          balanceGuard,
+          balanceGuard: effectiveBalanceGuard,
           avgSignalExecutionMs: utilization.avgSignalExecutionMs,
           avgIdlePeriodMs: utilization.avgIdlePeriodMs,
           unusedBalanceRatio: utilization.unusedBalanceRatio,

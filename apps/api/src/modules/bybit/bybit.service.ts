@@ -296,6 +296,9 @@ export class BybitService implements OnApplicationBootstrap {
   ): Promise<void> {
     const id = cabinetId?.trim();
     if (id) {
+      if (!(await this.cabinets.isCabinetActive(id))) {
+        return;
+      }
       await this.workers.enqueueCabinetPoll(id, reason, delayMs);
       return;
     }
@@ -434,6 +437,10 @@ export class BybitService implements OnApplicationBootstrap {
   // --- Poll open orders & TP/SL hooks ---
 
   async pollOpenOrders(): Promise<void> {
+    const cabinetId = this.currentCabinetId();
+    if (cabinetId && !(await this.cabinets.isCabinetActive(cabinetId))) {
+      return;
+    }
     await this.bybitOrderLifecyclePoll.pollOpenOrders(
       await this.createOrderLifecyclePollPorts(),
     );

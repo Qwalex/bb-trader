@@ -474,6 +474,8 @@ model Cabinet {
   slug             String                 @unique
   name             String
   isDefault        Boolean                @default(false)
+  /// false — фоновая работа кабинета остановлена (userbot, poll Bybit).
+  isActive         Boolean                @default(true)
   ownerUserId      String?
   ownerUser        AuthUser?              @relation(fields: [ownerUserId], references: [id], onDelete: SetNull)
   createdAt        DateTime               @default(now())

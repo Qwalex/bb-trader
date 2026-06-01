@@ -1,6 +1,8 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import { CABINET_LIST_SELECT, mapCabinetListRow } from './cabinet-select.util';
+import type { CabinetListItem } from './cabinet.types';
 
 const DEFAULT_CABINET_ID = 'cab_main';
 const DEFAULT_CABINET_SLUG = 'main';
@@ -190,39 +192,49 @@ export class CabinetService implements OnModuleInit {
     return this.getDefaultCabinetId();
   }
 
-  async listCabinets(): Promise<
-    Array<{ id: string; slug: string; name: string; isDefault: boolean }>
-  > {
+  async listCabinets(): Promise<CabinetListItem[]> {
     await this.ensureDefaultCabinet();
-    return this.prisma.cabinet.findMany({
+    const rows = await this.prisma.cabinet.findMany({
       orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
-      select: {
-        id: true,
-        slug: true,
-        name: true,
-        isDefault: true,
-      },
+      select: CABINET_LIST_SELECT,
     });
+    return rows.map(mapCabinetListRow);
   }
 
-  async listCabinetsForUser(
-    userIdRaw: string | null | undefined,
-  ): Promise<Array<{ id: string; slug: string; name: string; isDefault: boolean }>> {
+  async listCabinetsForUser(userIdRaw: string | null | undefined): Promise<CabinetListItem[]> {
     const userId = String(userIdRaw ?? '').trim();
     if (!userId) {
       return [];
     }
     await this.ensureUserDefaultCabinet(userId);
-    return this.prisma.cabinet.findMany({
+    const rows = await this.prisma.cabinet.findMany({
       where: { ownerUserId: userId },
       orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
-      select: {
-        id: true,
-        slug: true,
-        name: true,
-        isDefault: true,
-      },
+      select: CABINET_LIST_SELECT,
     });
+    return rows.map(mapCabinetListRow);
+  }
+
+  /** Активные кабинеты — для фоновых задач (poll, cron). */
+  async listActiveCabinets(): Promise<CabinetListItem[]> {
+    const rows = await this.prisma.cabinet.findMany({
+      where: { isActive: true },
+      orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+      select: CABINET_LIST_SELECT,
+    });
+    return rows.map(mapCabinetListRow);
+  }
+
+  async isCabinetActive(cabinetIdRaw: string | null | undefined): Promise<boolean> {
+    const id = String(cabinetIdRaw ?? '').trim();
+    if (!id) {
+      return false;
+    }
+    const row = await this.prisma.cabinet.findUnique({
+      where: { id },
+      select: { isActive: true },
+    });
+    return row?.isActive === true;
   }
 
   async listEnabledCabinetIdsForChat(chatId: string): Promise<string[]> {
@@ -231,13 +243,21 @@ export class CabinetService implements OnModuleInit {
       return [];
     }
     const rows = await this.prisma.cabinetTelegramSource.findMany({
-      where: { chatId: chat, enabled: true },
+      where: {
+        chatId: chat,
+        enabled: true,
+        cabinet: { isActive: true },
+      },
       select: { cabinetId: true },
     });
     if (rows.length > 0) {
       return Array.from(new Set(rows.map((r) => r.cabinetId)));
     }
-    return [await this.getDefaultCabinetId()];
+    const defaultId = await this.getDefaultCabinetId();
+    if (await this.isCabinetActive(defaultId)) {
+      return [defaultId];
+    }
+    return [];
   }
 
   private normalizeSlug(value: string): string {
@@ -253,7 +273,7 @@ export class CabinetService implements OnModuleInit {
     ownerUserId?: string | null;
     name: string;
     slug?: string;
-  }): Promise<{ id: string; slug: string; name: string; isDefault: boolean }> {
+  }): Promise<CabinetListItem> {
     const name = String(params.name ?? '').trim();
     if (!name) {
       throw new Error('Cabinet name is required');
@@ -276,20 +296,17 @@ export class CabinetService implements OnModuleInit {
         throw new Error('Unable to generate unique cabinet slug');
       }
     }
-    return this.prisma.cabinet.create({
+    const row = await this.prisma.cabinet.create({
       data: {
         name,
         slug,
         isDefault: false,
+        isActive: true,
         ownerUserId: String(params.ownerUserId ?? '').trim() || undefined,
       },
-      select: {
-        id: true,
-        slug: true,
-        name: true,
-        isDefault: true,
-      },
+      select: CABINET_LIST_SELECT,
     });
+    return mapCabinetListRow(row);
   }
 
   async updateCabinet(params: {
@@ -297,10 +314,11 @@ export class CabinetService implements OnModuleInit {
     id: string;
     name?: string;
     slug?: string;
-  }): Promise<{ id: string; slug: string; name: string; isDefault: boolean }> {
+    isActive?: boolean;
+  }): Promise<CabinetListItem> {
     const id = String(params.id ?? '').trim();
     if (!id) throw new Error('Cabinet id is required');
-    const data: { name?: string; slug?: string } = {};
+    const data: { name?: string; slug?: string; isActive?: boolean } = {};
     if (params.name != null) {
       const name = String(params.name).trim();
       if (!name) throw new Error('Cabinet name is invalid');
@@ -311,24 +329,26 @@ export class CabinetService implements OnModuleInit {
       if (!slug) throw new Error('Cabinet slug is invalid');
       data.slug = slug;
     }
+    if (params.isActive != null) {
+      data.isActive = Boolean(params.isActive);
+    }
     const ownerUserId = String(params.ownerUserId ?? '').trim() || null;
     const existing = await this.prisma.cabinet.findFirst({
       where: { id, ownerUserId },
-      select: { id: true },
+      select: { id: true, isDefault: true },
     });
     if (!existing?.id) {
       throw new Error('Cabinet not found');
     }
-    return this.prisma.cabinet.update({
+    if (existing.isDefault && params.isActive === false) {
+      throw new Error('Default cabinet cannot be deactivated');
+    }
+    const row = await this.prisma.cabinet.update({
       where: { id: existing.id },
       data,
-      select: {
-        id: true,
-        slug: true,
-        name: true,
-        isDefault: true,
-      },
+      select: CABINET_LIST_SELECT,
     });
+    return mapCabinetListRow(row);
   }
 
   async deleteCabinet(

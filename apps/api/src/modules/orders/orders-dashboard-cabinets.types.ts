@@ -12,6 +12,8 @@ export type DashboardCabinetCardDto = {
   slug: string;
   name: string;
   isDefault: boolean;
+  /** false — фоновая работа кабинета остановлена. */
+  isActive: boolean;
   openSignals: number;
   userbotReadMessagesToday: number;
   userbotSignalsPlacedToday: number;

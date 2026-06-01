@@ -252,6 +252,104 @@ a:hover {
     0 8px 28px rgba(59, 130, 246, 0.12);
 }
 
+.dashboardCabinetCardInactive {
+  border-color: rgba(148, 163, 184, 0.28);
+  background: linear-gradient(145deg, rgba(22, 28, 38, 0.92), rgba(12, 16, 22, 0.9));
+  opacity: 0.92;
+}
+
+.dashboardCabinetCardInactive:hover,
+.dashboardCabinetCardInactive:focus,
+.dashboardCabinetCardInactive:focus-visible {
+  border-color: rgba(148, 163, 184, 0.45);
+  transform: translateY(-1px);
+}
+
+.dashboardCabinetCardInactive.dashboardCabinetCardActive {
+  border-color: rgba(248, 113, 113, 0.45);
+  box-shadow:
+    0 0 0 1px rgba(248, 113, 113, 0.22),
+    0 6px 22px rgba(0, 0, 0, 0.2);
+}
+
+.dashboardCabinetCardBadges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+}
+
+.dashboardCabinetBadgeInactive {
+  color: #fca5a5;
+  border-color: rgba(248, 113, 113, 0.45);
+}
+
+.dashboardCabinetInactiveBanner {
+  border-radius: 10px;
+  border: 1px solid rgba(248, 113, 113, 0.28);
+  background: rgba(248, 113, 113, 0.07);
+  padding: 0.75rem 0.85rem;
+}
+
+.dashboardCabinetInactiveBannerCompact {
+  padding: 0.55rem 0.65rem;
+}
+
+.dashboardCabinetInactiveBannerTitle {
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #fca5a5;
+  margin-bottom: 0.25rem;
+}
+
+.dashboardCabinetInactiveBannerCompact .dashboardCabinetInactiveBannerTitle {
+  font-size: 0.76rem;
+  margin-bottom: 0.15rem;
+}
+
+.dashboardCabinetInactiveBannerText {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.dashboardCabinetInactiveBannerCompact .dashboardCabinetInactiveBannerText {
+  display: none;
+}
+
+.dashboardCabinetInactiveBannerLink {
+  display: inline-block;
+  margin-top: 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #93c5fd;
+  text-decoration: none;
+}
+
+.dashboardCabinetInactiveBannerLink:hover,
+.dashboardCabinetInactiveBannerLink:focus-visible {
+  text-decoration: underline;
+}
+
+.dashboardCabinetInactiveBannerCompact .dashboardCabinetInactiveBannerLink {
+  margin-top: 0.2rem;
+  font-size: 0.72rem;
+}
+
+.dashboardCabinetInactiveBannerHint {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.dashboardActiveCabinetSection .dashboardCabinetInactiveBanner {
+  margin-bottom: 1rem;
+}
+
 .dashboardCabinetCardHeader {
   display: flex;
   align-items: center;

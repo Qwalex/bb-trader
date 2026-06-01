@@ -2090,3 +2090,21 @@
 - Manual verification: `npm run build -w apps/api`, `npm run check-types -w apps/web` (pass); после деплоя — миграция БД, открыть дашборд, проверить карточки кабинетов.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-179
+
+- Status: `done`
+- Scope: Деактивация кабинета — флаг `isActive`, UI «Активность», остановка userbot и poll Bybit.
+- Files: Prisma `Cabinet.isActive`, migration `20260601130000_cabinet_is_active`, `cabinet.service.ts`, `cabinet.controller.ts`, `cabinet.types.ts`, `cabinet-select.util.ts`, `worker-queue.service.ts`, `telegram-userbot-scan.service.ts`, `telegram-userbot-ingest-pipeline.service.ts`, `bybit.service.ts`, web `cabinets/page.tsx`
+- Findings: не было способа полностью остановить фоновую работу кабинета без удаления.
+- Changes: `isActive` (default true); PATCH `/cabinets/:id` `{ isActive }`; default нельзя деактивировать; inactive skip в poll sweep, enqueueCabinetPoll, ingest pipeline, userbot pollTick; UI toggle на `/cabinets`.
+- Manual verification: `npm run build -w apps/api`, `npm run check-types -w apps/web`; деактивировать кабинет → нет новых ingest/poll; активировать обратно.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-179 (продолжение)
+
+- Scope: Дашборд — отображение деактивированного кабинета.
+- Files: `orders-dashboard-cabinets.types.ts`, `orders.service.ts`, `DashboardCabinetInactiveBanner.tsx`, `page.tsx`, `home-dashboard.types.ts`, `globals.css`
+- Changes: `isActive` в карточках dashboard-cabinets; баннер на карточке и в блоке «Текущий кабинет»; бейдж «неактивен»; для inactive не показываются setupWarnings/balanceGuard.
+- Manual verification: `npm run check-types -w apps/web`, `npm run build -w apps/api`.

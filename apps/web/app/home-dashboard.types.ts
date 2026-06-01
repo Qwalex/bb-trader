@@ -11,6 +11,7 @@ export type DashboardCabinetCard = {
   slug: string;
   name: string;
   isDefault: boolean;
+  isActive: boolean;
   openSignals: number;
   userbotReadMessagesToday: number;
   userbotSignalsPlacedToday: number;

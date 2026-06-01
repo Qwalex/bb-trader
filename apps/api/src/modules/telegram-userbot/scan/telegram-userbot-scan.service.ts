@@ -167,6 +167,20 @@ export class TelegramUserbotScanService {
     includeTodayMetrics = false,
     clientArg?: TelegramClient,
   ) {
+    const cabinetId = this.cabinetContext.getCabinetId();
+    if (cabinetId && !(await this.cabinets.isCabinetActive(cabinetId))) {
+      return {
+        ok: true,
+        skipped: true,
+        reason: 'cabinet_inactive',
+        chatsProcessed: 0,
+        enabledChats: 0,
+        limitPerChat: USERBOT_POLL_FETCH_LIMIT,
+        readMessages: 0,
+        readTextMessages: 0,
+        errors: [] as Array<{ chatId: string; error: string }>,
+      };
+    }
     const client = clientArg ?? (await this.userbotClient.getCurrentUserClient());
     if (!client || !(await this.userbotClient.isClientAuthorized(client))) {
       return { ok: false, error: 'Userbot не подключен.' };
@@ -285,6 +299,9 @@ export class TelegramUserbotScanService {
           continue;
         }
         for (const cab of ownerCabinets) {
+          if (!cab.isActive) {
+            continue;
+          }
           await this.cabinetContext.runWithCabinet(cab.id, () =>
             this.scanTodayMessagesCore(USERBOT_POLL_FETCH_LIMIT, false, client),
           );

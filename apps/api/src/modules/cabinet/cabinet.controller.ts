@@ -58,7 +58,7 @@ export class CabinetController {
   async update(
     @Req() req: { auth?: { userId?: string } },
     @Param('id') id: string,
-    @Body() body: { name?: string; slug?: string },
+    @Body() body: { name?: string; slug?: string; isActive?: boolean },
   ) {
     try {
       return {
@@ -67,6 +67,7 @@ export class CabinetController {
           id,
           name: body.name,
           slug: body.slug,
+          isActive: body.isActive,
         }),
       };
     } catch (e) {

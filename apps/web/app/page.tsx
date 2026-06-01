@@ -1,4 +1,5 @@
 import { DashboardCrossCabinetSection } from './components/DashboardCrossCabinetSection';
+import { DashboardCabinetInactiveBanner } from './components/DashboardCabinetInactiveBanner';
 import { BalanceChart, type BalancePoint } from './components/BalanceChart';
 import { DashboardTodoList, type DashboardTodoItem } from './components/DashboardTodoList';
 import { PnlChart } from './components/PnlChart';
@@ -82,6 +83,7 @@ type CabinetItem = {
   slug: string;
   name: string;
   isDefault: boolean;
+  isActive: boolean;
 };
 
 export default async function Home({
@@ -325,6 +327,14 @@ export default async function Home({
   const activeCabinetDisplay =
     currentCabinet?.name?.trim() ||
     (cabinetId.trim() ? `ID ${cabinetId.trim()}` : 'не выбран');
+  const selectedDashboardCabinet =
+    dashboardCabinetCards.find(
+      (c) => c.cabinetId === (currentCabinet?.id ?? cabinetId.trim()),
+    ) ?? null;
+  const isCurrentCabinetInactive =
+    selectedDashboardCabinet?.isActive === false ||
+    (currentCabinet != null && currentCabinet.isActive === false);
+  const inactiveCabinetCount = dashboardCabinetCards.filter((c) => c.isActive === false).length;
 
   return (
     <>
@@ -338,7 +348,7 @@ export default async function Home({
           {err} — проверьте, что API запущен и NEXT_PUBLIC_API_URL верный.
         </p>
       )}
-      {guard?.paused && (
+      {guard?.paused && !isCurrentCabinetInactive && (
         <div className="msg err" style={{ marginBottom: '1rem' }}>
           <p style={{ margin: 0 }}>
             <strong>
@@ -368,12 +378,19 @@ export default async function Home({
             Краткая сводка по каждому кабинету. Нажмите карточку, чтобы переключить активный кабинет на
             главной. «Исполнение» и «Простой» — средние за период статистики; «Не в работе» — доля
             доступного баланса (не в позициях).
+            {inactiveCabinetCount > 0 ? (
+              <>
+                {' '}
+                Деактивировано кабинетов: {inactiveCabinetCount} — фоновая работа остановлена.
+              </>
+            ) : null}
           </p>
           <div className="dashboardCabinetCards">
             {dashboardCabinetCards.map((c) => {
-              const isActive =
+              const isSelected =
                 (cabinetId && c.cabinetId === cabinetId) ||
                 (!cabinetId && currentCabinet?.id === c.cabinetId);
+              const cabinetInactive = c.isActive === false;
               const hrefBase =
                 source.length > 0
                   ? `/?source=${encodeURIComponent(source)}`
@@ -383,14 +400,24 @@ export default async function Home({
                 <Link
                   key={c.cabinetId}
                   href={href}
-                  className={`dashboardCabinetCard${isActive ? ' dashboardCabinetCardActive' : ''}`}
+                  className={`dashboardCabinetCard${
+                    isSelected ? ' dashboardCabinetCardActive' : ''
+                  }${cabinetInactive ? ' dashboardCabinetCardInactive' : ''}`}
                 >
                   <div className="dashboardCabinetCardHeader">
                     <span className="dashboardCabinetCardName">{c.name}</span>
-                    {c.isDefault ? (
-                      <span className="dashboardCabinetBadge">по умолчанию</span>
-                    ) : null}
+                    <span className="dashboardCabinetCardBadges">
+                      {cabinetInactive ? (
+                        <span className="dashboardCabinetBadge dashboardCabinetBadgeInactive">
+                          неактивен
+                        </span>
+                      ) : null}
+                      {c.isDefault ? (
+                        <span className="dashboardCabinetBadge">по умолчанию</span>
+                      ) : null}
+                    </span>
                   </div>
+                  {cabinetInactive ? <DashboardCabinetInactiveBanner variant="compact" /> : null}
                   {Array.isArray(c.setupWarnings) && c.setupWarnings.length > 0 ? (
                     <div className="dashboardCabinetWarning">
                       <div className="dashboardCabinetWarningTitle">❗ Требуются действия</div>
@@ -566,6 +593,9 @@ export default async function Home({
             </p>
           ) : null}
         </div>
+        {isCurrentCabinetInactive ? (
+          <DashboardCabinetInactiveBanner />
+        ) : null}
         {stats && (
         <>
           <div className="grid dashboardMetricsGrid">

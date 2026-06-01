@@ -9,6 +9,7 @@ type CabinetItem = {
   slug: string;
   name: string;
   isDefault: boolean;
+  isActive: boolean;
 };
 
 export default function CabinetsPage() {
@@ -24,7 +25,14 @@ export default function CabinetsPage() {
     try {
       const res = await fetchApiResponse('/cabinets');
       const json = (await res.json()) as { items?: CabinetItem[] };
-      setItems(Array.isArray(json.items) ? json.items : []);
+      setItems(
+        Array.isArray(json.items)
+          ? json.items.map((item) => ({
+              ...item,
+              isActive: item.isActive !== false,
+            }))
+          : [],
+      );
     } finally {
       setLoading(false);
     }
@@ -88,6 +96,33 @@ export default function CabinetsPage() {
     }
   }
 
+  async function setCabinetActive(item: CabinetItem, nextActive: boolean) {
+    if (item.isDefault && !nextActive) {
+      setMsg({ type: 'err', text: 'Кабинет по умолчанию нельзя деактивировать' });
+      return;
+    }
+    setBusy(`active:${item.id}`);
+    setMsg(null);
+    try {
+      const res = await fetchApiResponse(`/cabinets/${encodeURIComponent(item.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isActive: nextActive }),
+      });
+      const json = (await res.json().catch(() => null)) as { message?: string } | null;
+      if (!res.ok) throw new Error(json?.message ?? `${res.status}`);
+      setMsg({
+        type: 'ok',
+        text: nextActive ? 'Кабинет активирован' : 'Кабинет деактивирован — userbot и poll Bybit остановлены',
+      });
+      await loadAll();
+    } catch (e) {
+      setMsg({ type: 'err', text: e instanceof Error ? e.message : 'Ошибка обновления активности' });
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function removeCabinet(item: CabinetItem) {
     if (item.isDefault) return;
     const ok = window.confirm(`Удалить кабинет "${item.name}"?`);
@@ -114,7 +149,8 @@ export default function CabinetsPage() {
       <h1 className="pageTitle">Управление кабинетами</h1>
       <p style={{ color: 'var(--muted)', marginBottom: '1rem' }}>
         Общие настройки действуют по умолчанию для всех кабинетов. Кабинетные override-настройки
-        задаются на странице `Настройки` в режиме `Кабинет`.
+        задаются на странице `Настройки` в режиме `Кабинет`. Неактивный кабинет не участвует в
+        отслеживании userbot и опросах Bybit; просмотр истории и настроек остаётся доступен.
       </p>
       {msg && <p className={`msg ${msg.type === 'ok' ? 'ok' : 'err'}`}>{msg.text}</p>}
 
@@ -152,11 +188,34 @@ export default function CabinetsPage() {
         ) : (
           <div style={{ display: 'grid', gap: '0.6rem' }}>
             {items.map((item) => (
-              <div key={item.id} className="card" style={{ margin: 0 }}>
+              <div
+                key={item.id}
+                className="card"
+                style={{
+                  margin: 0,
+                  opacity: item.isActive ? 1 : 0.72,
+                  borderColor: item.isActive ? undefined : 'rgba(248, 113, 113, 0.35)',
+                }}
+              >
                 <div className="cabinetListRow">
                   <div>
                     <div style={{ fontWeight: 700 }}>
-                      {item.name} {item.isDefault ? '(default)' : ''}
+                      {item.name}{' '}
+                      {item.isDefault ? '(default)' : ''}
+                      {!item.isActive ? (
+                        <span
+                          style={{
+                            marginLeft: '0.45rem',
+                            fontSize: '0.72rem',
+                            fontWeight: 600,
+                            color: '#f87171',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.04em',
+                          }}
+                        >
+                          неактивен
+                        </span>
+                      ) : null}
                     </div>
                     <div style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>
                       id: <code className="cabinetCode">{item.id}</code>
@@ -164,6 +223,30 @@ export default function CabinetsPage() {
                     <div style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>
                       slug: <code className="cabinetCode">{item.slug}</code>
                     </div>
+                    <label
+                      className="cabinetActivityToggle"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.45rem',
+                        marginTop: '0.55rem',
+                        cursor: item.isDefault ? 'not-allowed' : 'pointer',
+                        fontSize: '0.9rem',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={item.isActive}
+                        disabled={busy !== null || item.isDefault}
+                        onChange={(e) => void setCabinetActive(item, e.target.checked)}
+                      />
+                      <span>Активность</span>
+                      {item.isDefault ? (
+                        <span style={{ color: 'var(--muted)', fontSize: '0.78rem' }}>
+                          (default всегда активен)
+                        </span>
+                      ) : null}
+                    </label>
                   </div>
                   <div className="cabinetActions">
                     <button
@@ -192,4 +275,3 @@ export default function CabinetsPage() {
     </>
   );
 }
-

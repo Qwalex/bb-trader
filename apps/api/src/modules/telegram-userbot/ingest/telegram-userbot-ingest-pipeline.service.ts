@@ -126,6 +126,13 @@ export class TelegramUserbotIngestPipelineService {
       return;
     }
     const effectiveCabinetId = cabinetId ?? (await this.cabinets.getDefaultCabinetId());
+    if (!(await this.cabinets.isCabinetActive(effectiveCabinetId))) {
+      this.appendIngestStageLog('info', 'Userbot: ingest skipped (cabinet inactive)', ingest, {
+        source: options?.source ?? null,
+        cabinetId: effectiveCabinetId,
+      });
+      return;
+    }
     this.appendIngestStageLog('debug', 'Userbot: processing started', ingest, {
       replyToMessageId: meta?.replyToMessageId ?? null,
       textPreview: makeTextPreview(text),
