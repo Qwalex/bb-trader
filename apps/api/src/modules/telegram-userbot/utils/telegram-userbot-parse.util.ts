@@ -1,3 +1,5 @@
+import { startOfAppCalendarDay } from '@repo/shared';
+
 export function readString(value: unknown): string | undefined {
   if (typeof value !== 'string') {
     return undefined;
@@ -115,9 +117,7 @@ export function extractMessageDate(value: unknown): Date | undefined {
 }
 
 export function startOfToday(): Date {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d;
+  return startOfAppCalendarDay();
 }
 
 export function isToday(d: Date): boolean {

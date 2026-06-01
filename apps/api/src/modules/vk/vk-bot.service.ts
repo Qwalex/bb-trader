@@ -11,7 +11,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 
-import type { SignalDto } from '@repo/shared';
+import { startOfAppCalendarDay, type SignalDto } from '@repo/shared';
 
 import type { Order, Signal } from '@prisma/client';
 
@@ -1179,9 +1179,7 @@ export class VkBotService implements OnModuleInit, OnModuleDestroy {
   }
 
   private startOfToday(): Date {
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    return d;
+    return startOfAppCalendarDay();
   }
 
   private todayDateKey(): string {

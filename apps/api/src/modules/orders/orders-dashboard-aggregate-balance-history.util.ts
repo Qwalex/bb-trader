@@ -1,16 +1,19 @@
-/** Строка снимка для построения суммарного equity по дням (UTC). */
+import {
+  addCalendarDaysInTimeZone,
+  endOfCalendarDayInTimeZone,
+  resolveAppTimeZone,
+  startOfCalendarDayInTimeZone,
+} from '@repo/shared';
+
+/** Строка снимка для построения суммарного equity по дням (календарь APP_TIMEZONE). */
 export type BalanceSnapshotRowInput = {
   cabinetId: string | null;
   createdAt: Date;
   totalUsd: number;
 };
 
-function startOfUtcDay(d: Date): Date {
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0));
-}
-
 /**
- * Сумма equity по календарным суткам UTC: на конец каждого дня — последний известный снимок
+ * Сумма equity по календарным суткам APP_TIMEZONE: на конец каждого дня — последний известный снимок
  * по каждому кабинету (carry-forward внутри окна; сиды до `since` передаются отдельно в `rows`).
  */
 export function buildAggregatedBalanceHistoryPoints(
@@ -18,6 +21,7 @@ export function buildAggregatedBalanceHistoryPoints(
   rows: BalanceSnapshotRowInput[],
   days: number,
   now: Date = new Date(),
+  timeZone: string = resolveAppTimeZone(),
 ): { at: string; totalUsd: number }[] {
   const ids = cabinetIds.filter((id) => String(id).trim().length > 0);
   if (ids.length === 0) {
@@ -34,22 +38,19 @@ export function buildAggregatedBalanceHistoryPoints(
     )
     .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
 
-  const endDay = startOfUtcDay(now);
-  const startDay = new Date(endDay);
-  startDay.setUTCDate(startDay.getUTCDate() - (d - 1));
+  const endDayStart = startOfCalendarDayInTimeZone(now, timeZone);
+  const startDayStart = addCalendarDaysInTimeZone(endDayStart, -(d - 1), timeZone);
 
   const lastByCabinet = new Map<string, number>();
   const points: { at: string; totalUsd: number }[] = [];
   let si = 0;
 
   for (
-    let day = new Date(startDay);
-    day.getTime() <= endDay.getTime();
-    day.setUTCDate(day.getUTCDate() + 1)
+    let dayStart = startDayStart;
+    dayStart.getTime() <= endDayStart.getTime();
+    dayStart = addCalendarDaysInTimeZone(dayStart, 1, timeZone)
   ) {
-    const dayEnd = new Date(day);
-    dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
-    dayEnd.setUTCMilliseconds(dayEnd.getUTCMilliseconds() - 1);
+    const dayEnd = endOfCalendarDayInTimeZone(dayStart, timeZone);
 
     while (si < sorted.length) {
       const r = sorted[si];

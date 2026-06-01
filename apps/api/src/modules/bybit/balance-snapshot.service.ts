@@ -5,18 +5,9 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CabinetContextService } from '../cabinet/cabinet-context.service';
 import { CabinetService } from '../cabinet/cabinet.service';
 
-import { BybitService } from './bybit.service';
+import { DEFAULT_APP_TIMEZONE, appCalendarDayRange } from '@repo/shared';
 
-/** Границы текущих суток в UTC (одна запись на календарный день). */
-function utcTodayRange(): { start: Date; end: Date } {
-  const now = new Date();
-  const start = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0),
-  );
-  const end = new Date(start);
-  end.setUTCDate(end.getUTCDate() + 1);
-  return { start, end };
-}
+import { BybitService } from './bybit.service';
 
 @Injectable()
 export class BalanceSnapshotService {
@@ -29,8 +20,8 @@ export class BalanceSnapshotService {
     private readonly cabinetContext: CabinetContextService,
   ) {}
 
-  /** Раз в сутки (00:05 UTC): читаем суммарный баланс с Bybit и сохраняем в БД. */
-  @Cron('0 5 0 * * *')
+  /** Раз в сутки (00:05 по APP_TIMEZONE, по умолчанию МСК). */
+  @Cron('0 5 0 * * *', { timeZone: DEFAULT_APP_TIMEZONE })
   async cronDailyTotalBalance(): Promise<void> {
     try {
       const cabinets = await this.cabinets.listCabinets();
@@ -49,8 +40,7 @@ export class BalanceSnapshotService {
   }
 
   /**
-   * Одна запись на календарный день (UTC): создаёт или обновляет суммарный баланс за сегодня.
-   * Вызывается из cron и при открытии дашборда (userbot status), если нужно зафиксировать день.
+   * Одна запись на календарный день (APP_TIMEZONE): создаёт или обновляет суммарный баланс за сегодня.
    */
   async upsertToday(totalUsd: number, availableUsd?: number | null): Promise<void> {
     if (!Number.isFinite(totalUsd)) {
@@ -59,7 +49,7 @@ export class BalanceSnapshotService {
     const available =
       availableUsd != null && Number.isFinite(availableUsd) ? availableUsd : undefined;
     const cabinetId = this.cabinetContext.getCabinetId();
-    const { start, end } = utcTodayRange();
+    const { start, end } = appCalendarDayRange();
     const existing = await this.prisma.balanceSnapshot.findFirst({
       where: {
         cabinetId,

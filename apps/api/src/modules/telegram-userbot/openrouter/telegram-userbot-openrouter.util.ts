@@ -1,3 +1,10 @@
+import {
+  addCalendarDaysInTimeZone,
+  calendarDayKeyInTimeZone,
+  resolveAppTimeZone,
+  startOfAppCalendarDay,
+} from '@repo/shared';
+
 import type { OpenrouterSpendPeriod } from '../telegram-userbot.types';
 
 export function parseOpenrouterNumberOrNull(value: unknown): number | null {
@@ -79,40 +86,46 @@ export function resolveOpenrouterPeriodStart(
   period: OpenrouterSpendPeriod,
   now = new Date(),
 ): Date {
-  const start = new Date(now);
+  const tz = resolveAppTimeZone();
   if (period === 'day') {
-    start.setHours(0, 0, 0, 0);
-    return start;
+    return startOfAppCalendarDay(now, tz);
   }
   if (period === '3d') {
-    start.setDate(start.getDate() - 2);
-    start.setHours(0, 0, 0, 0);
-    return start;
+    return addCalendarDaysInTimeZone(startOfAppCalendarDay(now, tz), -2, tz);
   }
   if (period === 'week') {
-    start.setDate(start.getDate() - 6);
-    start.setHours(0, 0, 0, 0);
-    return start;
+    return addCalendarDaysInTimeZone(startOfAppCalendarDay(now, tz), -6, tz);
   }
   if (period === 'month') {
-    start.setMonth(start.getMonth() - 1);
-    return start;
+    const start = startOfAppCalendarDay(now, tz);
+    const key = calendarDayKeyInTimeZone(start, tz);
+    const parts = key.split('-').map(Number);
+    const y = parts[0] ?? 1970;
+    const m = parts[1] ?? 1;
+    const d = parts[2] ?? 1;
+    const probe = new Date(Date.UTC(y, m - 2, d, 12, 0, 0, 0));
+    return startOfAppCalendarDay(probe, tz);
   }
-  start.setFullYear(start.getFullYear() - 1);
-  return start;
+  const start = startOfAppCalendarDay(now, tz);
+  const key = calendarDayKeyInTimeZone(start, tz);
+  const parts = key.split('-').map(Number);
+  const y = parts[0] ?? 1970;
+  const m = parts[1] ?? 1;
+  const d = parts[2] ?? 1;
+  const probe = new Date(Date.UTC(y - 1, m - 1, d, 12, 0, 0, 0));
+  return startOfAppCalendarDay(probe, tz);
 }
 
 export function bucketKeyByPeriod(d: Date, period: OpenrouterSpendPeriod): string {
+  const tz = resolveAppTimeZone();
   if (period === 'day') {
-    return new Date(
-      d.getFullYear(),
-      d.getMonth(),
-      d.getDate(),
-      d.getHours(),
-      0,
-      0,
-      0,
-    ).toISOString();
+    const day = calendarDayKeyInTimeZone(d, tz);
+    const hour = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      hour: 'numeric',
+      hourCycle: 'h23',
+    }).format(d);
+    return `${day}T${hour.padStart(2, '0')}:00`;
   }
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).toISOString();
+  return calendarDayKeyInTimeZone(d, tz);
 }

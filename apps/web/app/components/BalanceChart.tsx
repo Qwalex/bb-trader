@@ -10,6 +10,8 @@ import {
   YAxis,
 } from 'recharts';
 
+import { displayTimeZone, displayTimeZoneLabel } from '../../lib/datetime';
+
 export type BalancePoint = {
   at: string;
   totalUsd: number;
@@ -23,6 +25,7 @@ function formatAt(iso: string): string {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',
+      timeZone: displayTimeZone(),
     });
   } catch {
     return iso;
@@ -45,8 +48,8 @@ export function BalanceChart({
     return (
       <p style={{ color: 'var(--muted)', padding: compact ? '0.5rem 0.35rem' : '1rem', fontSize: compact ? '0.78rem' : undefined }}>
         {compact
-          ? 'Нет точек: снимки equity появятся после ежедневного cron (≈00:05 UTC).'
-          : 'Записей пока нет. Точки появятся после ежедневного снимка суммарного баланса (cron API, около 00:05 UTC).'}
+          ? `Нет точек: снимки equity появятся после ежедневного cron (≈00:05 ${displayTimeZoneLabel()}).`
+          : `Записей пока нет. Точки появятся после ежедневного снимка суммарного баланса (cron API, около 00:05 ${displayTimeZoneLabel()}).`}
       </p>
     );
   }

@@ -2163,3 +2163,13 @@
 - Manual verification: `npm run build -w apps/api`, `npm run check-types -w apps/web`; открыть `/`, `/settings` с несколькими кабинетами — заметно быстрее повторная загрузка (кэш 20 с).
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-183
+
+- Status: `done`
+- Scope: Единый часовой пояс `Europe/Moscow` для календарных суток и UI.
+- Files: `packages/shared/src/app-timezone.ts`, `balance-snapshot.service.ts`, `orders.service.ts`, `orders-dashboard-aggregate-balance-history.util.ts`, telegram/userbot utils, `apps/web/lib/datetime.ts`, `BalanceChart.tsx`, `DashboardCrossCabinetSection.tsx`, `.env.example`
+- Changes: `APP_TIMEZONE` / `NEXT_PUBLIC_DISPLAY_TIMEZONE` (default Moscow); «сегодня», снимки баланса, граф equity, счётчики ingest — по МСК; cron снимка 00:05 МСК.
+- Manual verification: `npm run build -w @repo/shared`, `npm run build -w apps/api`, `npm run check-types -w apps/web`.
+- Docs updated: `.env.example`, этот трекер.
+- Linked risks (`SEC-###`): N/A

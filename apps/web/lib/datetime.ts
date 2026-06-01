@@ -1,10 +1,12 @@
-/**
- * Отображение дат в UI. На сервере Node без явного `timeZone` часто используется UTC
- * (из‑за этого время «отстаёт» на 3 ч относительно МСК).
- * Переопределение: NEXT_PUBLIC_DISPLAY_TIMEZONE (IANA), например Europe/Kaliningrad.
- */
-function displayTimeZone(): string {
-  return process.env.NEXT_PUBLIC_DISPLAY_TIMEZONE ?? 'Europe/Moscow';
+import { appTimeZoneShortLabel, resolveAppTimeZone } from '@repo/shared';
+
+/** IANA timezone для отображения в UI (см. `APP_TIMEZONE` / `NEXT_PUBLIC_DISPLAY_TIMEZONE`). */
+export function displayTimeZone(): string {
+  return resolveAppTimeZone(process.env.NEXT_PUBLIC_DISPLAY_TIMEZONE);
+}
+
+export function displayTimeZoneLabel(): string {
+  return appTimeZoneShortLabel(displayTimeZone());
 }
 
 export function formatDateTimeRu(iso: string | Date): string {

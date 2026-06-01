@@ -1,5 +1,6 @@
 import Link from 'next/link';
 
+import { formatDateTimeRu, displayTimeZoneLabel } from '../../lib/datetime';
 import { BalanceChart } from './BalanceChart';
 import { withCabinetPageHref } from '../../lib/cabinet-page-href.util';
 import type {
@@ -10,13 +11,7 @@ import type {
 
 function formatActivityTime(iso: string): string {
   try {
-    const d = new Date(iso);
-    return d.toLocaleString('ru-RU', {
-      day: '2-digit',
-      month: 'short',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+    return formatDateTimeRu(iso);
   } catch {
     return iso;
   }
@@ -195,7 +190,7 @@ export function DashboardCrossCabinetSection({
       </div>
 
       <div className="dashboardCrossChartBlock">
-        <h3 className="dashboardCrossSubheading">Σ Equity по дням (UTC)</h3>
+        <h3 className="dashboardCrossSubheading">Σ Equity по дням ({displayTimeZoneLabel()})</h3>
         <div className="dashboardCrossChartWrap">
           <BalanceChart
             data={aggregatedBalanceHistory}

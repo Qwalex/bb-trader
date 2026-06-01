@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 
-import { normalizeTradingPair, type SignalDto } from '@repo/shared';
+import { appCalendarDayRange, normalizeTradingPair, startOfAppCalendarDay, type SignalDto } from '@repo/shared';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { CabinetService } from '../cabinet/cabinet.service';
@@ -213,9 +213,7 @@ export class OrdersService {
   }
 
   private startOfTodayLocal(): Date {
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    return d;
+    return startOfAppCalendarDay();
   }
 
   /**
@@ -1131,8 +1129,7 @@ export class OrdersService {
     const items = await mapWithConcurrency(cabinets, 3, async (c) =>
       this.cabinetContext.runWithCabinet(c.id, async () => {
         const stats = await this.getDashboardStats();
-        const startOfToday = new Date();
-        startOfToday.setHours(0, 0, 0, 0);
+        const startOfToday = startOfAppCalendarDay();
         let totalBalanceUsd: number | null = null;
         let availableBalanceUsd: number | null = null;
         const [
@@ -1191,10 +1188,7 @@ export class OrdersService {
               availableBalanceUsd = bal.availableUsd;
             }
             if (totalBalanceUsd != null) {
-              const dayStart = new Date();
-              dayStart.setHours(0, 0, 0, 0);
-              const dayEnd = new Date(dayStart);
-              dayEnd.setDate(dayEnd.getDate() + 1);
+              const { start: dayStart, end: dayEnd } = appCalendarDayRange();
               const recentSnapshot = await this.prisma.balanceSnapshot.findFirst({
                 where: {
                   cabinetId: c.id,

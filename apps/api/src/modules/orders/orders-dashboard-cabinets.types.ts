@@ -86,6 +86,6 @@ export type DashboardBalanceHistoryPointDto = {
 export type DashboardCabinetsOverviewDto = {
   items: DashboardCabinetCardDto[];
   summary: DashboardCabinetsSummaryDto;
-  /** Σ equity по календарным дням UTC (снимки BalanceSnapshot по всем кабинетам пользователя). */
+  /** Σ equity по календарным дням APP_TIMEZONE (снимки BalanceSnapshot по всем кабинетам пользователя). */
   aggregatedBalanceHistory: DashboardBalanceHistoryPointDto[];
 };

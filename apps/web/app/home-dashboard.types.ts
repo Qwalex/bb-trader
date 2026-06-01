@@ -67,7 +67,7 @@ export type DashboardCabinetsSummary = {
   crossCabinetEvReturn365dPercent: number | null;
 };
 
-/** Σ equity по дням UTC (поле `aggregatedBalanceHistory` в GET /orders/dashboard-cabinets). */
+/** Σ equity по дням в календаре APP_TIMEZONE (поле `aggregatedBalanceHistory` в GET /orders/dashboard-cabinets). */
 export type DashboardAggregatedBalancePoint = {
   at: string;
   totalUsd: number;

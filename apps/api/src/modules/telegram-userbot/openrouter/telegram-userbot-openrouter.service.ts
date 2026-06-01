@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 
+import { startOfAppCalendarDay } from '@repo/shared';
+
 import { postCriticalNotifyText } from '../../../common/critical-notify.util';
 import { formatError } from '../../../common/format-error';
 import { PrismaService } from '../../../prisma/prisma.service';
@@ -29,8 +31,7 @@ export class TelegramUserbotOpenrouterService {
 
   async getTodayOpenRouterSpendByChatId(): Promise<Record<string, number>> {
     const cabinetId = this.cabinetContext.getCabinetId();
-    const dayStart = new Date();
-    dayStart.setHours(0, 0, 0, 0);
+    const dayStart = startOfAppCalendarDay();
     const rows = await this.prisma.openrouterGenerationCost.findMany({
       where: {
         cabinetId,

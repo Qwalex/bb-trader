@@ -1,4 +1,5 @@
 import type { Context } from 'telegraf';
+import { startOfAppCalendarDay } from '@repo/shared';
 
 /** Экранирование для Telegram HTML parse_mode. */
 export function escapeTelegramHtml(s: string): string {
@@ -49,9 +50,7 @@ export function formatRuDate(d: Date): string {
 }
 
 export function startOfToday(): Date {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d;
+  return startOfAppCalendarDay();
 }
 
 export function todayDateKey(): string {
