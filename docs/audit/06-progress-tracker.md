@@ -2070,6 +2070,17 @@
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
 
+### AUD-182
+
+- Status: `done`
+- Scope: QPulse sync — только 1-й сигнал из серии попадал в приложение.
+- Files: `qpulse-sync.service.ts`, `signal-distribution.service.ts`, `telegram-userbot-mirror.service.ts`, `orders.service.ts`, `telegram-userbot-ingest-pipeline.service.ts`
+- Findings: `createSignalIfLinked` после `await settings.get` терял cabinet context (QPULSE_* не читались); sync требовал mirror `posted` (ошибка TG блокировала QPulse); вызовы через `void` без await.
+- Changes: явный `cabinetId` + `runWithCabinetAsync`; eligibility по linked-группам и `skipped_by_n` (не только posted); await цепочка create→sync; повтор sync после успешного placement в ingest.
+- Manual verification: `npm run build -w apps/api`; 3 сигнала с `linkedToApp` + N=1 → 3 записи в QPulse; при N=3 — каждый 3-й; `/logs` — «QPulse: signal created» / «sync failed».
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
 ### AUD-177
 
 - Status: `done`
@@ -2120,7 +2131,6 @@
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
 
-<<<<<<< Updated upstream
 ### AUD-180 (fix)
 
 - Status: `done`
@@ -2129,7 +2139,9 @@
 - Findings: при большом числе настроек/источников цикл `create()` в `$transaction` превышал дефолтный timeout (~5 с) → «Transaction not found» на `cabinetTelegramSource.create`.
 - Changes: проверка дубликатов unique settings одним запросом до транзакции; `createMany` вместо N×`create`; `{ maxWait: 10_000, timeout: 30_000 }`.
 - Manual verification: `npm run build -w apps/api`; клон кабинета с множеством telegram sources.
-=======
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
 ### AUD-181
 
 - Status: `done`
@@ -2138,6 +2150,5 @@
 - Findings: `GET /orders/dashboard-cabinets` последовательно опрашивал Bybit и userbot на каждый кабинет; главная и `/settings` делали цепочку последовательных HTTP; `settings.list()` вызывал тяжёлый `getMany()` по всем ключам.
 - Changes: in-memory кэш overview 20 с по userId; параллельная обработка до 3 кабинетов; один `userbot.getStatus()` на overview; skip Bybit для inactive; throttle `upsertToday`; sync fallback в `list()` без N×`get()`; параллельный `Promise.allSettled` на главной (auth, cabinets, userbot, dashboard, activity, groups, balance-history); параллельная загрузка settings+cabinets+balance-alerts; invalidate кэша при сбросе статистики.
 - Manual verification: `npm run build -w apps/api`, `npm run check-types -w apps/web`; открыть `/`, `/settings` с несколькими кабинетами — заметно быстрее повторная загрузка (кэш 20 с).
->>>>>>> Stashed changes
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A

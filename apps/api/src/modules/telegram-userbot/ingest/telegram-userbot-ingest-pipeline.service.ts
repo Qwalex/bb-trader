@@ -1039,6 +1039,9 @@ export class TelegramUserbotIngestPipelineService {
       bybitOrderIds: place.bybitOrderIds,
       source: signal.source,
     });
+    if (place.signalId) {
+      await this.userbotMirror.tryCreateQpulseForSignal(place.signalId);
+    }
   } catch (e) {
     const err = formatError(e);
     const isCriticalClassify = err.startsWith('CRITICAL_CLASSIFY:');

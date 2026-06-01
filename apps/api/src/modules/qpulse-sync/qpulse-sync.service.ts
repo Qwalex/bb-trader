@@ -76,14 +76,21 @@ export class QpulseSyncService {
   async createSignalIfLinked(params: {
     signalId: string;
     signalRow: Parameters<typeof mapSignalRowToQpulsePayload>[0];
+    cabinetId?: string | null;
   }): Promise<{ ok: boolean; qpulseId?: string; error?: string }> {
+    const cabinetId =
+      params.cabinetId?.trim() ||
+      (params.signalRow as { cabinetId?: string | null }).cabinetId?.trim() ||
+      this.cabinetContext.getCabinetId()?.trim() ||
+      null;
+    if (!cabinetId) {
+      return { ok: false, error: 'cabinetId missing' };
+    }
+
+    return this.cabinetContext.runWithCabinetAsync(cabinetId, async () => {
     const cfg = await this.getConfig();
     if (!cfg.enabled || !cfg.apiUrl || !cfg.apiKey) {
       return { ok: false, error: 'QPulse sync disabled or not configured' };
-    }
-    const cabinetId = this.cabinetContext.getCabinetId();
-    if (!cabinetId) {
-      return { ok: false, error: 'cabinetId missing' };
     }
     const prismaAny = this.prisma as any;
     const existing = await prismaAny.signalExternalSync.findUnique({
@@ -136,14 +143,21 @@ export class QpulseSyncService {
       this.logger.warn(`createSignalIfLinked ${params.signalId}: ${err}`);
       return { ok: false, error: err };
     }
+    });
   }
 
   async patchSignalIfSynced(signalId: string): Promise<void> {
+    const signalCabinet = await this.prisma.signal.findFirst({
+      where: { id: signalId, deletedAt: null },
+      select: { cabinetId: true },
+    });
+    const cabinetId =
+      signalCabinet?.cabinetId?.trim() || this.cabinetContext.getCabinetId()?.trim() || null;
+    if (!cabinetId) return;
+
+    await this.cabinetContext.runWithCabinetAsync(cabinetId, async () => {
     const cfg = await this.getConfig();
     if (!cfg.enabled || !cfg.apiUrl || !cfg.apiKey) return;
-
-    const cabinetId = this.cabinetContext.getCabinetId();
-    if (!cabinetId) return;
     const prismaAny = this.prisma as any;
     const sync = await prismaAny.signalExternalSync.findUnique({
       where: { cabinetId_signalId: { cabinetId, signalId } },
@@ -186,6 +200,7 @@ export class QpulseSyncService {
       await this.recordSyncError(cabinetId, signalId, err);
       this.logger.warn(`patchSignalIfSynced ${signalId}: ${err}`);
     }
+    });
   }
 
   private async recordSyncError(

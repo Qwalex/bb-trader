@@ -463,7 +463,7 @@ export class OrdersService {
           marketType: options?.marketType ?? 'linear',
         },
       });
-      void this.signalDistribution.onSignalCreated(created.id);
+      await this.signalDistribution.onSignalCreated(created.id);
       return created;
     } catch (e) {
       const msg = formatError(e);

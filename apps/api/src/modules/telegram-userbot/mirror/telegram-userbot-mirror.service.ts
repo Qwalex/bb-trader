@@ -1,4 +1,4 @@
-import { forwardRef, Inject, Injectable } from '@nestjs/common';
+import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 import type { SignalDto } from '@repo/shared';
 
 import { formatError } from '../../../common/format-error';
@@ -14,6 +14,8 @@ import {
 
 @Injectable()
 export class TelegramUserbotMirrorService {
+  private readonly logger = new Logger(TelegramUserbotMirrorService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly cabinetContext: CabinetContextService,
@@ -127,41 +129,55 @@ export class TelegramUserbotMirrorService {
   }
 
   async tryCreateQpulseForSignal(signalId: string): Promise<void> {
-    const cabinetId = this.cabinetContext.getCabinetId();
-    const prismaAny = this.prisma as any;
     const signal = await this.prisma.signal.findFirst({
-      where: { id: signalId, cabinetId, deletedAt: null },
+      where: { id: signalId, deletedAt: null },
       include: { orders: true },
     });
-    if (!signal?.sourceChatId || !signal.sourceMessageId) return;
+    if (!signal?.cabinetId || !signal.sourceChatId || !signal.sourceMessageId) {
+      return;
+    }
+    const cabinetId = signal.cabinetId;
+    const prismaAny = this.prisma as any;
 
-    const mirrorPosts = await prismaAny.tgUserbotMirrorMessage.findMany({
+    const linkedGroups = await prismaAny.tgUserbotPublishGroup.findMany({
+      where: { cabinetId, enabled: true, linkedToApp: true },
+      select: { id: true },
+    });
+    if (linkedGroups.length === 0) {
+      return;
+    }
+
+    const linkedGroupIds = linkedGroups.map((g: { id: string }) => g.id);
+    const mirrorRows = await prismaAny.tgUserbotMirrorMessage.findMany({
       where: {
         cabinetId,
         kind: 'signal',
-        status: 'posted',
         sourceChatId: signal.sourceChatId,
         sourceMessageId: signal.sourceMessageId,
+        publishGroupId: { in: linkedGroupIds },
       },
-      select: { publishGroupId: true },
+      select: { status: true },
     });
-    if (mirrorPosts.length === 0) return;
+    if (
+      mirrorRows.length > 0 &&
+      mirrorRows.every((row: { status: string }) => row.status === 'skipped_by_n')
+    ) {
+      this.logger.debug(
+        `QPulse sync skipped for ${signalId}: publishEveryN filter (skipped_by_n on linked groups)`,
+      );
+      return;
+    }
 
-    const linkedGroup = await prismaAny.tgUserbotPublishGroup.findFirst({
-      where: {
-        id: { in: mirrorPosts.map((m: { publishGroupId: string }) => m.publishGroupId) },
-        linkedToApp: true,
-        enabled: true,
-        cabinetId,
-      },
-      select: { id: true },
-    });
-    if (!linkedGroup) return;
-
-    void this.qpulseSync.createSignalIfLinked({
+    const result = await this.qpulseSync.createSignalIfLinked({
       signalId,
       signalRow: signal as any,
+      cabinetId,
     });
+    if (!result.ok) {
+      this.logger.warn(
+        `QPulse sync failed for ${signalId}: ${result.error ?? 'unknown error'}`,
+      );
+    }
   }
 
   async publishTradeEventToMirrorGroups(params: {

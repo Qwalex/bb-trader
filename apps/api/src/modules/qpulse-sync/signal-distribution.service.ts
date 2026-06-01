@@ -21,7 +21,7 @@ export class SignalDistributionService {
   }
 
   async onSignalCreated(signalId: string): Promise<void> {
-    void this.mirror.tryCreateQpulseForSignal(signalId);
+    await this.mirror.tryCreateQpulseForSignal(signalId);
   }
 
   async onSignalEvent(
