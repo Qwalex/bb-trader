@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import { fetchApiResponse } from '../../lib/api';
 import { readActiveCabinetIdClient } from '../../lib/cabinet-client.util';
 import { formatDateTimeRu } from '../../lib/datetime';
+import { ApplyTpSlButton } from '../trades/apply-tpsl-button';
 
 type LiveExposureOrder = {
   orderId: string;
@@ -279,6 +280,13 @@ function LiveExposurePanelBody() {
                       >
                         {jsonLoadingId === item.signalId ? 'Загрузка JSON...' : 'JSON'}
                       </button>
+                      <ApplyTpSlButton
+                        signalId={item.signalId}
+                        pair={item.pair}
+                        status={item.status}
+                        compact
+                        onDone={() => void load()}
+                      />
                       <button
                         type="button"
                         className="btnDanger"

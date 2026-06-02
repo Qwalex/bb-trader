@@ -3032,6 +3032,93 @@ h1.pageTitle {
   margin-top: 0.5rem;
 }
 
+/* —— Stuck trades (/trades, dashboard) —— */
+.stuckTradesBanner {
+  margin-bottom: 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: 12px;
+  border: 1px solid rgba(251, 191, 36, 0.45);
+  background: rgba(251, 191, 36, 0.08);
+}
+
+.stuckTradesBannerHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.stuckTradesPollWarn {
+  margin: 0.35rem 0 0.65rem;
+  font-size: 0.88rem;
+  color: var(--foreground);
+  line-height: 1.45;
+}
+
+.stuckTradesList {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.stuckTradesListItem {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.stuckTradesListMain {
+  flex: 1;
+  min-width: 0;
+}
+
+.stuckTradesListMeta {
+  display: block;
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin-top: 0.15rem;
+}
+
+.stuckTradesListSummary {
+  display: block;
+  font-size: 0.85rem;
+  margin-top: 0.25rem;
+  color: #fbbf24;
+}
+
+.stuckTradesIssueList {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.tradeCardStuck {
+  border-color: rgba(251, 191, 36, 0.55) !important;
+  box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.15);
+}
+
+.tradeCardStuckBadge {
+  margin-bottom: 0.5rem;
+  padding: 0.35rem 0.55rem;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.12);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+}
+
 /* —— Content editor (/content-editor) —— */
 .contentEditorWorkspace {
   display: grid;

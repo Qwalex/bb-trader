@@ -5,6 +5,8 @@ import { fetchJson } from '../../lib/api';
 import { searchParamFirst } from '../../lib/search-param.util';
 import { DeleteAllTradesButton } from './delete-all-trades-button';
 import { RecalcClosedPnlButton } from './recalc-closed-pnl-button';
+import { StuckTradesBanner } from './stuck-trades-banner';
+import { stuckIssuesBySignalId, type StuckTradesSnapshot } from './stuck-trades.types';
 import { TradesList } from './trades-list';
 import { TradesFilters } from './trades-filters';
 
@@ -117,6 +119,7 @@ export default async function TradesPage({
   q.set('page', page);
 
   let data: TradesRes | null = null;
+  let stuckSnapshot: StuckTradesSnapshot | null = null;
   let err: string | null = null;
   let sourceOptions: string[] = [];
   try {
@@ -171,8 +174,15 @@ export default async function TradesPage({
       sourceOptions = [];
     }
 
-    // 2) Таблица сделок
-    data = await fetchJson<TradesRes>(`/orders/trades?${q.toString()}`, undefined, cabinetId);
+    // 2) Таблица сделок + проверка зависших
+    const [tradesRes, stuckRes] = await Promise.all([
+      fetchJson<TradesRes>(`/orders/trades?${q.toString()}`, undefined, cabinetId),
+      fetchJson<StuckTradesSnapshot>(`/bybit/stuck-trades`, undefined, cabinetId).catch(
+        () => null,
+      ),
+    ]);
+    data = tradesRes;
+    stuckSnapshot = stuckRes;
   } catch (e) {
     err = e instanceof Error ? e.message : 'Ошибка';
   }
@@ -187,6 +197,7 @@ export default async function TradesPage({
     <>
       <h1 className="pageTitle">История сделок</h1>
       {err && <p className="msg err">{err}</p>}
+      <StuckTradesBanner initial={stuckSnapshot} />
       <TradesFilters sourceOptions={sourceOptions} />
       <div style={{ marginBottom: '1rem', display: 'grid', gap: '0.75rem' }}>
         <p style={{ color: 'var(--muted)', fontSize: '0.85rem', marginBottom: '0.5rem' }}>
@@ -202,7 +213,13 @@ export default async function TradesPage({
             Всего: {data.total} (стр. {data.page} из{' '}
             {Math.max(1, Math.ceil(data.total / data.pageSize))})
           </p>
-          <TradesList items={data.items} sourceOptions={sourceOptions} />
+          <TradesList
+            items={data.items}
+            sourceOptions={sourceOptions}
+            stuckBySignalId={
+              stuckSnapshot ? stuckIssuesBySignalId(stuckSnapshot.items) : undefined
+            }
+          />
           <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem' }}>
             {data.page > 1 && (
               <Link href={buildPageLink(data.page - 1)}>← Назад</Link>

@@ -2204,3 +2204,34 @@
 - Manual verification: `npm run check-types -w apps/web` (pass); открыть `/content-editor` — preview, редактирование, удаление поста из списка.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-185
+
+- Status: `done`
+- Scope: Зависший poll кабинета (TP/SL не ставились) + ручная постановка TP/SL из UI.
+- Files: `worker-queue.service.ts`, `bybit.service.ts`, `bybit.controller.ts`, `bybit-apply-tpsl.types.ts`, `apply-tpsl-button.tsx`, `trades-list.tsx`, `LiveExposurePanel.tsx`
+- Findings: `poll-cabinet` завис в `running` >10 ч; followup откладывался каждым interval-sweep; ACE filled на бирже, в БД `Untriggered` → TP/SL не применялись.
+- Changes: периодический `recoverStaleRunningJobs`; `releaseStalePollJobForCabinet`; `mergeRunAfter` для followup; `POST /bybit/apply-tpsl/:signalId`; кнопка «TP / SL» на `/trades` и в Live Exposure; `emitOrderFillEventsIfNew` в fast-apply.
+- Manual verification: `npm run build -w apps/api`, `npm run check-types -w apps/web`; Railway cabinets — сброс зависшего poll job.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-186
+
+- Status: `done`
+- Scope: Обнаружение и отображение «зависших» сделок (расхождение БД/Bybit, нет TP/SL, зависший poll).
+- Files: `bybit-stuck-trades.{types,util,service}.ts`, `bybit.controller.ts`, `worker-queue.service.ts` (`getPollJobStuckState`); web `stuck-trades-banner.tsx`, `stuck-trades.types.ts`, `trades/page.tsx`, `trades-list.tsx`, `page.tsx`, `globals.css`
+- Changes: `GET /bybit/stuck-trades` — скан активных linear-сигналов vs позиция на бирже; issue kinds `entry_db_stale`, `missing_sl`, `missing_tp`; предупреждение poll >2 мин; баннер на `/trades` и дашборде; жёлтый badge на карточках; кнопка TP/SL в баннере.
+- Manual verification: `npm run build -w apps/api`, `npm run check-types -w apps/web`.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-187
+
+- Status: `done`
+- Scope: Фоновое auto-heal «зависших» сделок без перегрузки poll/reconcile.
+- Files: `bybit-stuck-trades-heal.{types,settings.util,service}.ts`, `bybit-stuck-trades-heal-scheduler.service.ts`, `worker-queue.service.ts`, `worker-queue.types.ts`, `bybit.service.ts` (`applyTpSlManually` context), `bybit.module.ts`, `settings.constants.ts`, `settings.service.ts`, `.env.example`, `stuck-trades-banner.tsx`
+- Changes: scheduler каждые ~3 мин → sweep по кабинетам с активными linear-сигналами; job `heal-stuck-trades` в очереди execution (не дублируется pending/running); defer при backlog reconcile и свежем poll; max 2 сделки/run, cooldown 10 мин; сброс зависшего poll перед heal; настройки `STUCK_TRADES_AUTO_HEAL_*`.
+- Manual verification: `npm run build -w apps/api`, `npm run check-types -w apps/web`.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

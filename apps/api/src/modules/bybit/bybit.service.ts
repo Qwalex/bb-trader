@@ -35,6 +35,7 @@ import { BybitOrderExchangeQueryService } from './orders/bybit-order-exchange-qu
 import { BybitPlacementValidationService } from './orders/bybit-placement-validation.service';
 import { BybitOrderLifecyclePollService } from './orders/bybit-order-lifecycle-poll.service';
 import { createLinearPollOrdersPorts } from './orders/bybit-order-lifecycle-poll-orders.util';
+import { emitOrderFillEventsIfNew } from './orders/bybit-order-fill-events.util';
 import {
   applyTpSlForSignal,
   isFastTpSlApplyComplete,
@@ -42,10 +43,14 @@ import {
   type PollSignalRow,
 } from './orders/bybit-order-lifecycle-poll-signal.util';
 import {
+  hasLiveTpOrders,
+  hasOpenEntryOrders,
   isFilledOrderStatus,
   isInsufficientBalanceError,
   isOpenOrderStatus,
 } from './orders/bybit-order-status.util';
+import type { ApplyTpSlManuallyResult } from './types/bybit-apply-tpsl.types';
+import { positionHasStopLoss } from './tpsl/bybit-tpsl.util';
 import { pickPositionRowForSignalDirection } from './position/bybit-position-pick.util';
 import { BybitPollFinalizeService } from './poll/bybit-poll-finalize.service';
 import { BybitPnlService } from './pnl/bybit-pnl.service';
@@ -269,6 +274,8 @@ export class BybitService implements OnApplicationBootstrap {
       return { done: true };
     }
 
+    await emitOrderFillEventsIfNew(ports, sig, fresh);
+
     await applyTpSlForSignal(ports, client, fresh, (label, err) =>
       this.logger.warn(`${label}: ${formatError(err)}`),
     );
@@ -279,6 +286,182 @@ export class BybitService implements OnApplicationBootstrap {
     }
 
     return { done: isFastTpSlApplyComplete(after) };
+  }
+
+  /**
+   * Ручная синхронизация ордеров с Bybit и постановка TP/SL (UI / восстановление после сбоя poll).
+   */
+  async applyTpSlManually(
+    signalId: string,
+    context: 'manual' | 'auto-heal' = 'manual',
+  ): Promise<ApplyTpSlManuallyResult> {
+    const id = signalId.trim();
+    if (!id) {
+      return {
+        ok: false,
+        error: 'signalId обязателен',
+        synced: false,
+        entriesComplete: false,
+        liveTpCount: 0,
+        positionHasSl: false,
+        positionSize: 0,
+        complete: false,
+        message: 'Не указан signalId',
+      };
+    }
+
+    const pollCabinetId = this.currentCabinetId();
+    if (pollCabinetId) {
+      const released = await this.workers.releaseStalePollJobForCabinet(pollCabinetId);
+      if (released) {
+        void this.appLog.append('info', 'bybit', 'applyTpSlManually: сброшен зависший poll-cabinet', {
+          cabinetId: pollCabinetId,
+          signalId: id,
+        });
+      }
+    }
+
+    const before = (await this.orders.getSignalWithOrders(id)) as PollSignalRow | null;
+    if (!before) {
+      return {
+        ok: false,
+        error: 'Сделка не найдена',
+        synced: false,
+        entriesComplete: false,
+        liveTpCount: 0,
+        positionHasSl: false,
+        positionSize: 0,
+        complete: false,
+        message: 'Сделка не найдена',
+      };
+    }
+
+    const activeStatuses = new Set(['ORDERS_PLACED', 'OPEN', 'PARSED']);
+    if (!activeStatuses.has(String(before.status ?? ''))) {
+      return {
+        ok: false,
+        error: 'Сделка не активна',
+        synced: false,
+        entriesComplete: false,
+        liveTpCount: 0,
+        positionHasSl: false,
+        positionSize: 0,
+        complete: false,
+        message: `Статус ${before.status}: TP/SL доступны только для активных сделок`,
+      };
+    }
+
+    if (String((before as { marketType?: string }).marketType ?? 'linear') !== 'linear') {
+      return {
+        ok: false,
+        error: 'Только linear',
+        synced: false,
+        entriesComplete: false,
+        liveTpCount: 0,
+        positionHasSl: false,
+        positionSize: 0,
+        complete: false,
+        message: 'Ручная постановка TP/SL поддерживается только для linear',
+      };
+    }
+
+    void this.appLog.append('info', 'bybit', `applyTpSlManually: старт (${context})`, {
+      signalId: id,
+      pair: before.pair,
+      status: before.status,
+      context,
+    });
+
+    let complete = false;
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      const step = await this.runFastTpSlApplyAttempt(id, context, attempt);
+      complete = step.done;
+      if (complete) {
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 400));
+    }
+
+    const after = (await this.orders.getSignalWithOrders(id)) as PollSignalRow | null;
+    const exposure = await this.buildManualApplyExposure(after);
+
+    let message: string;
+    if (complete) {
+      message = 'TP/SL синхронизированы и установлены (или уже были на месте)';
+    } else if (exposure.positionSize > 0 && exposure.liveTpCount === 0) {
+      message =
+        'Позиция на бирже есть, но TP не выставлены — проверьте minQty лота или логи Bybit';
+    } else if (!exposure.entriesComplete) {
+      message =
+        'Вход ещё не исполнен на бирже — дождитесь fill или проверьте условный ордер входа';
+    } else {
+      message = 'Синхронизация выполнена, но TP/SL могли быть выставлены частично — проверьте Bybit';
+    }
+
+    void this.appLog.append(complete ? 'info' : 'warn', 'bybit', `applyTpSlManually: завершено (${context})`, {
+      signalId: id,
+      complete,
+      context,
+      ...exposure,
+    });
+
+    if (pollCabinetId) {
+      void this.scheduleOpenOrdersPollAsync(`${context}-apply-tpsl`, 100, pollCabinetId);
+    }
+
+    return {
+      ok: complete || exposure.liveTpCount > 0 || exposure.positionHasSl,
+      synced: true,
+      entriesComplete: exposure.entriesComplete,
+      liveTpCount: exposure.liveTpCount,
+      positionHasSl: exposure.positionHasSl,
+      positionSize: exposure.positionSize,
+      complete,
+      message,
+    };
+  }
+
+  private async buildManualApplyExposure(
+    sig: PollSignalRow | null,
+  ): Promise<{
+    entriesComplete: boolean;
+    liveTpCount: number;
+    positionHasSl: boolean;
+    positionSize: number;
+  }> {
+    if (!sig) {
+      return {
+        entriesComplete: false,
+        liveTpCount: 0,
+        positionHasSl: false,
+        positionSize: 0,
+      };
+    }
+
+    const entriesComplete = !hasOpenEntryOrders(sig.orders);
+    const liveTpCount = sig.orders.filter((o) => o.orderKind === 'TP' && hasLiveTpOrders([o])).length;
+
+    let positionSize = 0;
+    let positionHasSl = false;
+    try {
+      const client = await this.balanceInstrument.getClient();
+      if (client) {
+        const symbol = normalizeTradingPair(sig.pair);
+        const dir = sig.direction === 'short' ? 'short' : 'long';
+        const posRes = await this.bybitRateLimit.runBybitCall(() =>
+          client.getPositionInfo({ category: 'linear', symbol }),
+        );
+        if (posRes.retCode === 0) {
+          const row = pickPositionRowForSignalDirection(posRes.result?.list ?? [], dir);
+          positionSize = row?.size ? Math.abs(parseFloat(String(row.size))) : 0;
+          positionHasSl = positionHasStopLoss(row);
+        }
+      }
+    } catch (e) {
+      this.logger.debug(`buildManualApplyExposure: ${formatError(e)}`);
+    }
+
+    return { entriesComplete, liveTpCount, positionHasSl, positionSize };
   }
 
   /**

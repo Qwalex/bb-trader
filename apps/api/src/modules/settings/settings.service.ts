@@ -364,6 +364,25 @@ export class SettingsService {
           }
           normalized = String(n);
         }
+      } else if (key === 'STUCK_TRADES_AUTO_HEAL_ENABLED') {
+        const t = value.trim().toLowerCase();
+        if (t === '' || t === 'true' || t === '1' || t === 'yes' || t === 'on') {
+          normalized = 'true';
+        } else if (t === 'false' || t === '0' || t === 'off' || t === 'no') {
+          normalized = 'false';
+        } else {
+          throw new BadRequestException(
+            'STUCK_TRADES_AUTO_HEAL_ENABLED: ожидается true или false',
+          );
+        }
+      } else if (key === 'STUCK_TRADES_AUTO_HEAL_INTERVAL_MS') {
+        normalized = normalizeBoundedMs(value, 180_000, 60_000, 900_000);
+      } else if (key === 'STUCK_TRADES_AUTO_HEAL_MAX_PER_RUN') {
+        normalized = normalizeBoundedInt(value, 2, 1, 5);
+      } else if (key === 'STUCK_TRADES_AUTO_HEAL_COOLDOWN_MS') {
+        normalized = normalizeBoundedMs(value, 600_000, 60_000, 3_600_000);
+      } else if (key === 'STUCK_TRADES_AUTO_HEAL_DEFER_BACKOFF_MS') {
+        normalized = normalizeBoundedMs(value, 120_000, 30_000, 600_000);
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -728,4 +747,38 @@ export class SettingsService {
       keys: [...SettingsService.COMPROMISED_SECRET_KEYS],
     };
   }
+}
+
+function normalizeBoundedMs(
+  value: string,
+  fallback: number,
+  min: number,
+  max: number,
+): string {
+  const t = value.trim();
+  if (!t) {
+    return String(fallback);
+  }
+  const n = Math.trunc(Number(t.replace(',', '.')));
+  if (!Number.isFinite(n)) {
+    throw new BadRequestException(`ожидается число мс от ${min} до ${max}`);
+  }
+  return String(Math.min(Math.max(n, min), max));
+}
+
+function normalizeBoundedInt(
+  value: string,
+  fallback: number,
+  min: number,
+  max: number,
+): string {
+  const t = value.trim();
+  if (!t) {
+    return String(fallback);
+  }
+  const n = Math.trunc(Number(t.replace(',', '.')));
+  if (!Number.isFinite(n)) {
+    throw new BadRequestException(`ожидается целое от ${min} до ${max}`);
+  }
+  return String(Math.min(Math.max(n, min), max));
 }

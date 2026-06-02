@@ -1,5 +1,7 @@
 import { formatDateTimeRu } from '../../lib/datetime';
+import { ApplyTpSlButton } from './apply-tpsl-button';
 import { DeleteTradeButton } from './delete-trade-button';
+import type { StuckTradeIssue } from './stuck-trades.types';
 import { PnlEditControl } from './pnl-edit-control';
 import { RestoreTradeButton } from './restore-trade-button';
 import { SourceSelect } from './source-select';
@@ -61,6 +63,7 @@ type TradeEvent = {
 type Props = {
   items: TradeListItem[];
   sourceOptions: string[];
+  stuckBySignalId?: Record<string, StuckTradeIssue[]>;
 };
 
 function getTradeOutcomeLabel(status: string, pnl: number | null | undefined): string {
@@ -141,7 +144,7 @@ function DirectionBadge({ direction }: { direction: string }) {
   return <span className={cls}>{direction}</span>;
 }
 
-export function TradesList({ items, sourceOptions }: Props) {
+export function TradesList({ items, sourceOptions, stuckBySignalId = {} }: Props) {
   const renderEvent = (raw: TradeEvent) => {
     let payload: unknown = null;
     if (raw.payload) {
@@ -229,12 +232,20 @@ export function TradesList({ items, sourceOptions }: Props) {
 
   return (
     <ul className="tradesCardsGrid">
-      {items.map((s) => (
+      {items.map((s) => {
+        const stuckIssues = stuckBySignalId[s.id];
+        const isStuck = Boolean(stuckIssues?.length);
+        return (
         <li
           key={s.id}
-          className="tradeCard tradeCardRich"
+          className={`tradeCard tradeCardRich${isStuck ? ' tradeCardStuck' : ''}`}
           style={s.deletedAt ? { opacity: 0.6 } : undefined}
         >
+          {isStuck && (
+            <div className="tradeCardStuckBadge" title={stuckIssues!.map((i) => i.message).join('\n')}>
+              ⚠ {stuckIssues!.map((i) => i.kind === 'entry_db_stale' ? 'вход не синхр.' : i.kind === 'missing_sl' ? 'нет SL' : 'нет TP').join(' · ')}
+            </div>
+          )}
           <div className="tradeCardTop">
             <div>
               <div className="tradeCardPair">{s.pair}</div>
@@ -333,6 +344,14 @@ export function TradesList({ items, sourceOptions }: Props) {
           </div>
 
           <div className="tradeCardActions">
+            {!s.deletedAt && (
+              <ApplyTpSlButton
+                signalId={s.id}
+                pair={s.pair}
+                status={s.status}
+                deletedAt={s.deletedAt}
+              />
+            )}
             {s.deletedAt ? (
               <RestoreTradeButton tradeId={s.id} pair={s.pair} />
             ) : (
@@ -340,7 +359,8 @@ export function TradesList({ items, sourceOptions }: Props) {
             )}
           </div>
         </li>
-      ))}
+        );
+      })}
     </ul>
   );
 }

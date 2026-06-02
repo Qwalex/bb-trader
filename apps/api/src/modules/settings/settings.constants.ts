@@ -34,6 +34,16 @@ export const ENV_FALLBACK: Record<string, string> = {
   TP_SL_FAST_APPLY_ENABLED: 'true',
   TP_SL_FAST_RETRY_DELAYS_MS: '0,300,700,1500,3000,5000',
   WORKER_QUEUE_POLL_CONCURRENCY: '3',
+  /** Фоновое исправление «зависших» сделок (sync + TP/SL). */
+  STUCK_TRADES_AUTO_HEAL_ENABLED: 'true',
+  /** Интервал sweep auto-heal (мс). */
+  STUCK_TRADES_AUTO_HEAL_INTERVAL_MS: '180000',
+  /** Макс. сделок на один heal-job (на кабинет). */
+  STUCK_TRADES_AUTO_HEAL_MAX_PER_RUN: '2',
+  /** Пауза перед повторной попыткой heal для той же сделки после успеха (мс). */
+  STUCK_TRADES_AUTO_HEAL_COOLDOWN_MS: '600000',
+  /** Пауза после неудачной попытки heal (мс). */
+  STUCK_TRADES_AUTO_HEAL_DEFER_BACKOFF_MS: '120000',
 };
 
 /** Ключ глобальной настройки: `AuthUser.id` владельца, под которым сохранена `TELEGRAM_USERBOT_SESSION`. */
@@ -68,6 +78,11 @@ export const GLOBAL_SHARED_SETTING_KEYS = new Set<string>([
   'TP_SL_FAST_APPLY_ENABLED',
   'TP_SL_FAST_RETRY_DELAYS_MS',
   'WORKER_QUEUE_POLL_CONCURRENCY',
+  'STUCK_TRADES_AUTO_HEAL_ENABLED',
+  'STUCK_TRADES_AUTO_HEAL_INTERVAL_MS',
+  'STUCK_TRADES_AUTO_HEAL_MAX_PER_RUN',
+  'STUCK_TRADES_AUTO_HEAL_COOLDOWN_MS',
+  'STUCK_TRADES_AUTO_HEAL_DEFER_BACKOFF_MS',
 ]);
 
 export const ADMIN_ONLY_GLOBAL_KEYS = new Set<string>(GLOBAL_SHARED_SETTING_KEYS);

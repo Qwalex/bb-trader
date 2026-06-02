@@ -38,6 +38,15 @@ export class WorkerQueueService implements OnModuleInit {
       }),
     )
     private readonly bybit: BybitService,
+    @Inject(
+      forwardRef(() => {
+        return require('../bybit/exposure/bybit-stuck-trades-heal.service')
+          .BybitStuckTradesHealService;
+      }),
+    )
+    private readonly stuckTradesHeal: {
+      runAutoHealForCabinet: (cabinetId: string) => Promise<unknown>;
+    },
   ) {}
 
   onModuleInit(): void {
@@ -139,16 +148,93 @@ export class WorkerQueueService implements OnModuleInit {
     return new Date(base);
   }
 
+  /** Не отодвигаем уже «созревшую» pending-задачу (followup при вечно running main). */
+  private static mergeRunAfter(existing: Date | null | undefined, candidate: Date): Date {
+    if (!existing) {
+      return candidate;
+    }
+    const now = Date.now();
+    if (existing.getTime() <= now) {
+      return existing;
+    }
+    return new Date(Math.min(existing.getTime(), candidate.getTime()));
+  }
+
+  async releaseStalePollJobForCabinet(cabinetId: string): Promise<boolean> {
+    const id = cabinetId.trim();
+    if (!id) {
+      return false;
+    }
+    const jobKey = `poll-cabinet:${id}`;
+    const row = await this.prisma.workerQueueJob.findUnique({
+      where: { jobKey },
+      select: { id: true, status: true, lockedAt: true, attempts: true },
+    });
+    if (row?.status !== 'running' || !row.lockedAt) {
+      return false;
+    }
+    if (Date.now() - row.lockedAt.getTime() <= this.staleLockMs) {
+      return false;
+    }
+    const attempts = row.attempts + 1;
+    const finalFailure = attempts >= this.maxAttempts;
+    const lock = await this.prisma.workerQueueJob.updateMany({
+      where: { id: row.id, status: 'running' },
+      data: finalFailure
+        ? {
+            status: 'failed',
+            attempts,
+            error: `Recovered stale poll (lockedAt=${row.lockedAt.toISOString()})`,
+            finishedAt: new Date(),
+            lockedAt: null,
+          }
+        : {
+            status: 'pending',
+            attempts,
+            error: `Recovered stale poll (lockedAt=${row.lockedAt.toISOString()})`,
+            runAfter: new Date(),
+            lockedAt: null,
+          },
+    });
+    if (lock.count > 0) {
+      this.logger.warn(`released stale poll job ${jobKey}`);
+    }
+    return lock.count > 0;
+  }
+
+  /** Для UI: poll-cabinet в running дольше warnMs. */
+  async getPollJobStuckState(
+    cabinetId: string,
+    warnMs = 2 * 60 * 1000,
+  ): Promise<{ stuck: boolean; lockedSince: Date | null }> {
+    const id = cabinetId.trim();
+    if (!id) {
+      return { stuck: false, lockedSince: null };
+    }
+    const row = await this.prisma.workerQueueJob.findUnique({
+      where: { jobKey: `poll-cabinet:${id}` },
+      select: { status: true, lockedAt: true },
+    });
+    if (row?.status !== 'running' || !row.lockedAt) {
+      return { stuck: false, lockedSince: null };
+    }
+    const ageMs = Date.now() - row.lockedAt.getTime();
+    return {
+      stuck: ageMs > warnMs,
+      lockedSince: row.lockedAt,
+    };
+  }
+
   async enqueue(
     queue: WorkQueueName,
     jobKey: string,
     payload: WorkQueuePayload,
     delayMs = 0,
   ): Promise<void> {
-    const runAfter = new Date(Date.now() + Math.max(0, delayMs));
+    const candidateRunAfter = new Date(Date.now() + Math.max(0, delayMs));
     const existing = await this.prisma.workerQueueJob.findUnique({
       where: { jobKey },
-      select: { status: true },
+      select: { status: true, runAfter: true },
     });
     if (!existing) {
       await this.prisma.workerQueueJob.create({
@@ -157,7 +243,7 @@ export class WorkerQueueService implements OnModuleInit {
           jobKey,
           payloadJson: JSON.stringify(payload),
           status: 'pending',
-          runAfter,
+          runAfter: candidateRunAfter,
         },
       });
       return;
@@ -165,6 +251,7 @@ export class WorkerQueueService implements OnModuleInit {
     if (existing.status === 'running') {
       return;
     }
+    const runAfter = WorkerQueueService.mergeRunAfter(existing.runAfter, candidateRunAfter);
     await this.prisma.workerQueueJob.update({
       where: { jobKey },
       data: {
@@ -206,6 +293,112 @@ export class WorkerQueueService implements OnModuleInit {
     }
   }
 
+  /** Планировщик auto-heal: только кабинеты с активными linear-сигналами, с разнесением по времени. */
+  async enqueueStuckTradesHealSweep(reason = 'interval'): Promise<void> {
+    const cabinets = await this.cabinets.listActiveCabinets();
+    const activeCabinetRows = await this.prisma.signal.findMany({
+      where: {
+        deletedAt: null,
+        status: { in: ['PENDING', 'ORDERS_PLACED', 'OPEN', 'PARSED'] },
+        marketType: 'linear',
+      },
+      select: { cabinetId: true },
+      distinct: ['cabinetId'],
+    });
+    const activeIds = new Set(
+      activeCabinetRows
+        .map((row) => row.cabinetId?.trim())
+        .filter((id): id is string => Boolean(id)),
+    );
+    let i = 0;
+    for (const cabinet of cabinets) {
+      if (!activeIds.has(cabinet.id)) {
+        continue;
+      }
+      await this.enqueueStuckTradesHeal(cabinet.id, reason, i * 2_500);
+      i += 1;
+    }
+  }
+
+  /** Не дублируем heal, пока предыдущий job pending/running. */
+  async enqueueStuckTradesHeal(
+    cabinetId: string,
+    reason = 'heal-stuck-trades',
+    delayMs = 0,
+  ): Promise<void> {
+    const id = cabinetId.trim();
+    if (!id) {
+      return;
+    }
+    if (!(await this.cabinets.isCabinetActive(id))) {
+      return;
+    }
+    const jobKey = `heal-stuck-trades:${id}`;
+    const existing = await this.prisma.workerQueueJob.findUnique({
+      where: { jobKey },
+      select: { status: true },
+    });
+    if (existing?.status === 'running' || existing?.status === 'pending') {
+      return;
+    }
+    const payload: WorkQueuePayload = {
+      type: 'heal-stuck-trades',
+      cabinetId: id,
+      reason,
+    };
+    const runAfter = new Date(Date.now() + Math.max(0, delayMs));
+    if (!existing) {
+      await this.prisma.workerQueueJob.create({
+        data: {
+          queue: WORK_QUEUE_EXECUTION,
+          jobKey,
+          payloadJson: JSON.stringify(payload),
+          status: 'pending',
+          runAfter,
+        },
+      });
+      return;
+    }
+    await this.prisma.workerQueueJob.update({
+      where: { jobKey },
+      data: {
+        payloadJson: JSON.stringify(payload),
+        status: 'pending',
+        runAfter,
+        error: null,
+        lockedAt: null,
+        finishedAt: null,
+      },
+    });
+  }
+
+  async isReconcileBacklogHigh(threshold: number): Promise<boolean> {
+    const count = await this.prisma.workerQueueJob.count({
+      where: {
+        queue: WORK_QUEUE_RECONCILE,
+        status: 'pending',
+        runAfter: { lte: new Date() },
+      },
+    });
+    return count >= threshold;
+  }
+
+  /** null — poll не running; иначе возраст lock в мс. */
+  async getPollJobRunningAgeMs(cabinetId: string): Promise<number | null> {
+    const id = cabinetId.trim();
+    if (!id) {
+      return null;
+    }
+    const row = await this.prisma.workerQueueJob.findUnique({
+      where: { jobKey: `poll-cabinet:${id}` },
+      select: { status: true, lockedAt: true },
+    });
+    if (row?.status !== 'running' || !row.lockedAt) {
+      return null;
+    }
+    return Date.now() - row.lockedAt.getTime();
+  }
+
   /**
    * Один кабинет — upsert по `poll-cabinet:{id}` сливает частые триггеры (WS, post-placement).
    * Если основной poll уже running — планируем followup, не сбрасывая running job.
@@ -231,10 +424,28 @@ export class WorkerQueueService implements OnModuleInit {
     };
     const runAfter = WorkerQueueService.resolvePollRunAfter(reason, delayMs);
     const priority = WorkerQueueService.isPriorityPollReason(reason);
-    const existing = await this.prisma.workerQueueJob.findUnique({
+    let existing = await this.prisma.workerQueueJob.findUnique({
       where: { jobKey },
-      select: { status: true, runAfter: true },
+      select: { status: true, runAfter: true, lockedAt: true },
     });
+    if (existing?.status === 'running') {
+      const lockedAt = existing.lockedAt;
+      if (lockedAt && Date.now() - lockedAt.getTime() > this.staleLockMs) {
+        await this.releaseStalePollJobForCabinet(id);
+        existing = await this.prisma.workerQueueJob.findUnique({
+          where: { jobKey },
+          select: { status: true, runAfter: true, lockedAt: true },
+        });
+      } else {
+        await this.enqueue(
+          WORK_QUEUE_RECONCILE,
+          `${jobKey}:followup`,
+          { ...payload, reason: `${reason}-followup` },
+          priority ? Math.max(delayMs, 500) : Math.max(delayMs, 2_000),
+        );
+        return;
+      }
+    }
     if (existing?.status === 'running') {
       await this.enqueue(
         WORK_QUEUE_RECONCILE,
@@ -365,6 +576,9 @@ export class WorkerQueueService implements OnModuleInit {
     while (this.running) {
       try {
         this.loopIteration += 1;
+        if (this.loopIteration % 60 === 0) {
+          void this.recoverStaleRunningJobs();
+        }
         if (this.loopIteration % 40 === 0) {
           void this.logReconcileQueueBacklog();
         }
@@ -467,6 +681,13 @@ export class WorkerQueueService implements OnModuleInit {
         } else if (elapsed > 2_000) {
           this.logger.debug(`worker_queue reconcile ${brief} durationMs=${elapsed}`);
         }
+      } else if (queue === WORK_QUEUE_EXECUTION && payload.type === 'heal-stuck-trades') {
+        const brief = `heal-stuck-trades cabinetId=${payload.cabinetId}`;
+        if (elapsed > 15_000) {
+          this.logger.warn(`worker_queue execution slow ${brief} durationMs=${elapsed}`);
+        } else if (elapsed > 5_000) {
+          this.logger.debug(`worker_queue execution ${brief} durationMs=${elapsed}`);
+        }
       }
       await this.prisma.workerQueueJob.update({
         where: { id: job.id },
@@ -536,6 +757,15 @@ export class WorkerQueueService implements OnModuleInit {
       } else {
         await run();
       }
+      return;
+    }
+    if (payload.type === 'heal-stuck-trades') {
+      if (!(await this.cabinets.isCabinetActive(payload.cabinetId))) {
+        return;
+      }
+      await this.cabinetContext.runWithCabinet(payload.cabinetId, async () => {
+        await this.stuckTradesHeal.runAutoHealForCabinet(payload.cabinetId);
+      });
       return;
     }
     if (payload.type === 'notify-trade-cancelled') {

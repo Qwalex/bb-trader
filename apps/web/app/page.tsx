@@ -4,6 +4,7 @@ import { BalanceChart, type BalancePoint } from './components/BalanceChart';
 import { DashboardTodoList, type DashboardTodoItem } from './components/DashboardTodoList';
 import { PnlChart } from './components/PnlChart';
 import { LiveExposurePanel } from './components/LiveExposurePanel';
+import { StuckTradesBanner } from './trades/stuck-trades-banner';
 import { SessionInfoBar } from './components/SessionInfoBar';
 
 import Link from 'next/link';
@@ -962,6 +963,7 @@ export default async function Home({
           <PnlChart data={pnl} />
         </div>
       </div>
+      <StuckTradesBanner />
       <LiveExposurePanel />
       </section>
     </>

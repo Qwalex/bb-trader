@@ -18,6 +18,9 @@ import { BybitClientService } from './instrument/bybit-client.service';
 import { BybitRateLimitService } from './instrument/bybit-rate-limit.service';
 import { BybitExposureService } from './exposure/bybit-exposure.service';
 import { BybitLiveSnapshotService } from './exposure/bybit-live-snapshot.service';
+import { BybitStuckTradesService } from './exposure/bybit-stuck-trades.service';
+import { BybitStuckTradesHealService } from './exposure/bybit-stuck-trades-heal.service';
+import { BybitStuckTradesHealSchedulerService } from './exposure/bybit-stuck-trades-heal-scheduler.service';
 import { BybitOrderExchangeQueryService } from './orders/bybit-order-exchange-query.service';
 import { BybitOrderLifecyclePollService } from './orders/bybit-order-lifecycle-poll.service';
 import { BybitPlacementValidationService } from './orders/bybit-placement-validation.service';
@@ -55,6 +58,9 @@ import { BybitSpotModule } from '../bybit-spot/bybit-spot.module';
     BybitPlacementValidationService,
     BybitSignalOverridesService,
     BybitLiveSnapshotService,
+    BybitStuckTradesService,
+    BybitStuckTradesHealService,
+    BybitStuckTradesHealSchedulerService,
     BybitPollFinalizeService,
     BybitExchangeCleanupService,
     BybitExposureService,

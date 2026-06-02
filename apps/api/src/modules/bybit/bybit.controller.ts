@@ -10,6 +10,7 @@ import {
 
 import { BalanceSnapshotService } from './balance-snapshot.service';
 import { BybitService } from './bybit.service';
+import { BybitStuckTradesService } from './exposure/bybit-stuck-trades.service';
 import { pickRequestedCabinetId } from '../../common/cabinet-request.util';
 import { CabinetContextService } from '../cabinet/cabinet-context.service';
 import { CabinetService } from '../cabinet/cabinet.service';
@@ -24,6 +25,7 @@ type AuthReq = {
 export class BybitController {
   constructor(
     private readonly bybit: BybitService,
+    private readonly stuckTradesService: BybitStuckTradesService,
     private readonly balanceSnapshots: BalanceSnapshotService,
     private readonly cabinets: CabinetService,
     private readonly cabinetContext: CabinetContextService,
@@ -51,6 +53,15 @@ export class BybitController {
     @Query('cabinetId') cabinetId?: string,
   ) {
     return this.runWithCabinet(req, cabinetId, () => this.bybit.getLiveExposureSnapshot());
+  }
+
+  @ApiOperation({ summary: 'Зависшие сделки — расхождение БД/биржа, нет TP/SL, зависший poll' })
+  @ApiOkResponse({ description: 'Список проблемных активных сделок' })
+  @Get('stuck-trades')
+  async stuckTrades(@Req() req: AuthReq, @Query('cabinetId') cabinetId?: string) {
+    return this.runWithCabinet(req, cabinetId, () =>
+      this.stuckTradesService.getStuckTradesSnapshot(),
+    );
   }
 
   /** Дневные снимки суммарного USDT в SQLite (cron), без запросов к Bybit. Дашборд: график. */
@@ -96,6 +107,18 @@ export class BybitController {
     return this.runWithCabinet(req, cabinetId, () =>
       this.bybit.getTradePnlBreakdown(signalId),
     );
+  }
+
+  @ApiOperation({ summary: 'Синхронизация с Bybit и ручная постановка TP/SL для активной сделки' })
+  @ApiParam({ name: 'signalId', description: 'ID сделки' })
+  @ApiOkResponse({ description: 'TP/SL применены или частично применены' })
+  @Post('apply-tpsl/:signalId')
+  async applyTpSl(
+    @Req() req: AuthReq,
+    @Query('cabinetId') cabinetId: string | undefined,
+    @Param('signalId') signalId: string,
+  ) {
+    return this.runWithCabinet(req, cabinetId, () => this.bybit.applyTpSlManually(signalId));
   }
 
   @ApiOperation({ summary: 'Ручное закрытие сделки на Bybit' })

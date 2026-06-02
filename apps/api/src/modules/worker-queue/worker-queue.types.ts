@@ -30,5 +30,10 @@ export type WorkQueuePayload =
       cabinetId?: string | null;
       signalIds: string[];
       reason: string;
+    }
+  | {
+      type: 'heal-stuck-trades';
+      cabinetId: string;
+      reason?: string;
     };
 
