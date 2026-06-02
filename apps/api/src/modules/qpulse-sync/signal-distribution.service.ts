@@ -2,7 +2,6 @@ import { forwardRef, Inject, Injectable } from '@nestjs/common';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { CabinetContextService } from '../cabinet/cabinet-context.service';
-import { toFixedPrice } from '../telegram-userbot/mirror/telegram-userbot-mirror-format.util';
 import { TelegramUserbotMirrorService } from '../telegram-userbot/mirror/telegram-userbot-mirror.service';
 import { buildMirrorTradeEventText } from './qpulse-signal-mapper.util';
 import { QpulseSyncService } from './qpulse-sync.service';
@@ -63,7 +62,9 @@ export class SignalDistributionService {
 
       const p = (payload ?? {}) as Record<string, unknown>;
       let mirrorKind: MirrorTradeKind | null = null;
-      let detail: string | undefined;
+      let tpNumber: number | undefined;
+      let tpPrice: number | null | undefined;
+      let entryPrice: number | null | undefined;
       let dedupeSuffix: string | undefined;
 
       if (type === 'BYBIT_CLOSE_SUCCESS') {
@@ -75,20 +76,16 @@ export class SignalDistributionService {
         mirrorKind = 'cancel';
         dedupeSuffix = 'cancel';
       } else if (type === 'BYBIT_TP_FILLED') {
-        const tpNumber = Math.max(1, Math.trunc(Number(p.tpNumber) || 1));
+        tpNumber = Math.max(1, Math.trunc(Number(p.tpNumber) || 1));
         const price = Number(p.price);
         mirrorKind = 'tp';
         dedupeSuffix = `tp${tpNumber}`;
-        detail =
-          Number.isFinite(price) && price > 0
-            ? `TP ${tpNumber} ${toFixedPrice(price)} — достигнут`
-            : `TP ${tpNumber} — достигнут`;
+        tpPrice = Number.isFinite(price) && price > 0 ? price : null;
       } else if (type === 'BYBIT_ENTRY_FILLED') {
         const price = Number(p.price);
         mirrorKind = 'entry';
         dedupeSuffix = 'entry';
-        detail =
-          Number.isFinite(price) && price > 0 ? toFixedPrice(price) : undefined;
+        entryPrice = Number.isFinite(price) && price > 0 ? price : null;
       } else if (type === 'TP_SL_STEPPED') {
         await this.qpulseSync.patchSignalIfSynced(signalId);
         return;
@@ -106,7 +103,9 @@ export class SignalDistributionService {
       const text = buildMirrorTradeEventText({
         kind: mirrorKind,
         pair: signal.pair,
-        detail,
+        tpNumber,
+        tpPrice,
+        entryPrice,
         pnl: signal.realizedPnl,
         leverage: signal.leverage,
         orderUsd: signal.orderUsd,

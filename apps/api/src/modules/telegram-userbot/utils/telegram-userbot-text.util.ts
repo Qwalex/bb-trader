@@ -28,6 +28,28 @@ export function extractTokenHint(text: string): string {
 }
 
 /**
+ * Процент прибыли из result-сообщения источника («15.69% profit», «profit: +12%»).
+ */
+export function extractProfitPercentFromResultMessage(text: string): number | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  const patterns = [
+    /([+-]?\d+(?:\.\d+)?)\s*%\s*profit\b/i,
+    /\bprofit\b[^0-9+\-]{0,24}([+-]?\d+(?:\.\d+)?)\s*%/i,
+    /\bpnl\b[^0-9+\-]{0,24}([+-]?\d+(?:\.\d+)?)\s*%/i,
+    /([+-]?\d+(?:\.\d+)?)\s*%/,
+  ];
+  for (const pattern of patterns) {
+    const match = trimmed.match(pattern);
+    const raw = match?.[1];
+    if (raw == null) continue;
+    const value = Number(raw);
+    if (Number.isFinite(value)) return value;
+  }
+  return null;
+}
+
+/**
  * Пара из result-сообщения без цитаты (например «RENDER SCALP TRADE» + «TARGET 1 Hit»).
  * null — не удалось определить токен.
  */

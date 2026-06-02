@@ -2,6 +2,8 @@ import type { SignalDto } from '@repo/shared';
 
 import {
   calculateMovePercent,
+  formatMirrorEntryFilledText,
+  formatMirrorTpFilledText,
   normalizeDirection,
 } from '../telegram-userbot/mirror/telegram-userbot-mirror-format.util';
 
@@ -183,13 +185,25 @@ function computeProfitPercentage(params: {
   return (pnl / notional) * 100 * leverage;
 }
 
-export function formatMirrorPnlPercent(params: {
+export function formatProfitPercentDisplay(percent: number): string {
+  const sign = percent >= 0 ? '+' : '';
+  return `${sign}${percent.toFixed(2)}%`;
+}
+
+export function formatMirrorProfitPercent(params: {
   realizedPnl?: number | null;
   leverage?: number;
   orderUsd?: number;
   capitalPercent?: number;
   isSpot?: boolean;
+  profitPercentOverride?: number | null;
 }): string | null {
+  if (
+    params.profitPercentOverride != null &&
+    Number.isFinite(params.profitPercentOverride)
+  ) {
+    return formatProfitPercentDisplay(params.profitPercentOverride);
+  }
   const pct = computeProfitPercentage({
     realizedPnl: params.realizedPnl,
     leverage: params.leverage ?? 1,
@@ -198,9 +212,11 @@ export function formatMirrorPnlPercent(params: {
     isSpot: params.isSpot === true,
   });
   if (pct == null || !Number.isFinite(pct)) return null;
-  const sign = pct >= 0 ? '+' : '';
-  return `${sign}${pct.toFixed(2)}%`;
+  return formatProfitPercentDisplay(pct);
 }
+
+/** @deprecated alias */
+export const formatMirrorPnlPercent = formatMirrorProfitPercent;
 
 export function mapSignalRowToQpulsePayload(row: SignalRow): Record<string, unknown> {
   const entries = parseNumberArray(row.entries);
@@ -274,35 +290,83 @@ export function buildMirrorTradeEventText(params: {
   kind: 'tp' | 'sl' | 'close' | 'liquidation' | 'cancel' | 'entry';
   pair: string;
   detail?: string;
+  tpNumber?: number;
+  tpPrice?: number | null;
+  entryPrice?: number | null;
   pnl?: number | null;
   leverage?: number;
   orderUsd?: number;
   capitalPercent?: number;
   isSpot?: boolean;
+  profitPercentOverride?: number | null;
 }): string {
   const pair = params.pair.toUpperCase();
-  const pnlPercent = formatMirrorPnlPercent({
+  const profitPercent = formatMirrorProfitPercent({
     realizedPnl: params.pnl,
     leverage: params.leverage,
     orderUsd: params.orderUsd,
     capitalPercent: params.capitalPercent,
     isSpot: params.isSpot,
+    profitPercentOverride: params.profitPercentOverride,
   });
+  const profitSuffix = profitPercent ? ` · Прибыль ${profitPercent}` : '';
   switch (params.kind) {
     case 'entry':
-      return `📥 ${pair}: вход в позицию${params.detail ? ` — ${params.detail}` : ''}`;
+      if (params.entryPrice != null || params.detail) {
+        const price =
+          params.entryPrice ??
+          (params.detail && Number.isFinite(Number(params.detail))
+            ? Number(params.detail)
+            : null);
+        return formatMirrorEntryFilledText({ pair, price });
+      }
+      return formatMirrorEntryFilledText({ pair });
     case 'tp':
-      return `🎯 ${pair}: ${params.detail ?? 'Take profit достигнут'}`;
+      if (params.tpNumber != null) {
+        return formatMirrorTpFilledText({
+          pair,
+          tpNumber: params.tpNumber,
+          price: params.tpPrice,
+        });
+      }
+      return formatMirrorTpFilledText({
+        pair,
+        tpNumber: 1,
+        price: params.tpPrice ?? null,
+      });
     case 'sl':
-      return `🛑 ${pair}: Stop loss сработал${pnlPercent ? ` · PnL ${pnlPercent}` : ''}`;
+      return `🛑 ${pair}: Stop loss сработал${profitSuffix}`;
     case 'liquidation':
-      return `💥 ${pair}: ликвидация${pnlPercent ? ` · PnL ${pnlPercent}` : ''}`;
+      return `💥 ${pair}: ликвидация${profitSuffix}`;
     case 'cancel':
       return `❌ ${pair}: сигнал отменён`;
     case 'close':
-    default: {
-      const pnlSuffix = pnlPercent ? ` · PnL ${pnlPercent}` : '';
-      return `✅ ${pair}: сделка закрыта${pnlSuffix}`;
-    }
+    default:
+      return `✅ ${pair}: сделка закрыта${profitSuffix}`;
   }
+}
+
+export function buildMirrorOutcomeText(params: {
+  pair: string;
+  realizedPnl?: number | null;
+  leverage?: number;
+  orderUsd?: number;
+  capitalPercent?: number;
+  marketType?: string | null;
+  liquidation?: boolean;
+  profitPercentFromSource?: number | null;
+}): string {
+  const isSpot = String(params.marketType ?? 'linear').toLowerCase() === 'spot';
+  const hasRealizedPnl =
+    params.realizedPnl != null && Number.isFinite(params.realizedPnl);
+  return buildMirrorTradeEventText({
+    kind: params.liquidation ? 'liquidation' : 'close',
+    pair: params.pair,
+    pnl: params.realizedPnl,
+    leverage: params.leverage,
+    orderUsd: params.orderUsd,
+    capitalPercent: params.capitalPercent,
+    isSpot,
+    profitPercentOverride: hasRealizedPnl ? undefined : params.profitPercentFromSource,
+  });
 }

@@ -35,8 +35,11 @@ import { TelegramUserbotIngestService } from './telegram-userbot-ingest.service'
 import { TelegramUserbotMirrorService } from '../mirror/telegram-userbot-mirror.service';
 import { TelegramUserbotContentEditorService } from '../content-editor/telegram-userbot-content-editor.service';
 import { TelegramUserbotSettingsService } from '../settings/telegram-userbot-settings.service';
+import { buildMirrorOutcomeText } from '../../qpulse-sync/qpulse-signal-mapper.util';
 import {
   countLockEmojiInText,
+  extractPairFromResultMessage,
+  extractProfitPercentFromResultMessage,
   extractTokenHint,
   makeTextPreview,
   tokenHintForSignalFailure,
@@ -372,6 +375,7 @@ export class TelegramUserbotIngestPipelineService {
       });
       if (closeResult.ok) {
         let rootSourceMessageId: string | undefined;
+        let closeSignalId: string | undefined;
         if (replyToMessageId) {
           try {
             const root = await this.signalLookup.resolveRootSignalSourceMessageId(
@@ -379,14 +383,27 @@ export class TelegramUserbotIngestPipelineService {
               replyToMessageId,
             );
             rootSourceMessageId = root.messageId;
+            const lookup = await this.signalLookup.findActiveSignalFromReply({
+              chatId: ingest.chatId,
+              replyToMessageId,
+              signalExternalId,
+              flowLabel: 'Close',
+            });
+            if (lookup.ok) {
+              closeSignalId = lookup.signal.id;
+            }
           } catch {
             // ignore root lookup errors for mirror publish
           }
         }
+        const mirrorText = await this.resolveMirrorOutcomeText({
+          signalId: closeSignalId,
+          sourceText: text,
+        });
         await this.userbotMirror.publishOutcomeToMirrorGroups({
           ingest: { id: ingest.id, chatId: ingest.chatId, messageId: ingest.messageId },
           kind: 'cancel',
-          text,
+          text: mirrorText,
           rootSourceMessageId,
         });
       }
@@ -431,10 +448,14 @@ export class TelegramUserbotIngestPipelineService {
             // ignore root lookup errors for mirror publish
           }
         }
+        const mirrorText = await this.resolveMirrorOutcomeText({
+          signalId: resultNotify.signalId,
+          sourceText: text,
+        });
         await this.userbotMirror.publishOutcomeToMirrorGroups({
           ingest: { id: ingest.id, chatId: ingest.chatId, messageId: ingest.messageId },
           kind: 'result',
-          text,
+          text: mirrorText,
           rootSourceMessageId,
         });
       }
@@ -1439,6 +1460,47 @@ export class TelegramUserbotIngestPipelineService {
   }
   return Array.from(new Set(parts)).slice(0, 8);
 }
+
+  private async resolveMirrorOutcomeText(params: {
+    signalId?: string;
+    sourceText: string;
+  }): Promise<string> {
+    const profitPercentFromSource = extractProfitPercentFromResultMessage(params.sourceText);
+    if (params.signalId) {
+      const signal = await this.prisma.signal.findFirst({
+        where: { id: params.signalId, deletedAt: null },
+        select: {
+          pair: true,
+          realizedPnl: true,
+          leverage: true,
+          orderUsd: true,
+          capitalPercent: true,
+          marketType: true,
+          liquidation: true,
+        },
+      });
+      if (signal) {
+        return buildMirrorOutcomeText({
+          pair: signal.pair,
+          realizedPnl: signal.realizedPnl,
+          leverage: signal.leverage,
+          orderUsd: signal.orderUsd,
+          capitalPercent: signal.capitalPercent,
+          marketType: signal.marketType,
+          liquidation: signal.liquidation === true,
+          profitPercentFromSource,
+        });
+      }
+    }
+    const pair = extractPairFromResultMessage(params.sourceText);
+    if (pair) {
+      return buildMirrorOutcomeText({
+        pair,
+        profitPercentFromSource,
+      });
+    }
+    return params.sourceText;
+  }
 
   private appendIngestStageLog(
   level: 'debug' | 'info' | 'warn' | 'error',

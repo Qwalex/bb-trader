@@ -2091,6 +2091,17 @@
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
 
+### AUD-186
+
+- Status: `done`
+- Scope: Mirror/QPulse — profit в % во всех исходах (группы + приложение), не USDT.
+- Files: `qpulse-signal-mapper.util.ts`, `signal-distribution.service.ts`, `telegram-userbot-ingest-pipeline.service.ts`, `telegram-userbot-text.util.ts`
+- Findings: старый формат «Trade closed PnL: +0.01 USDT» при закрытии Bybit; result из ingest пересылался как raw text источника.
+- Changes: «сделка закрыта · Прибыль +X.XX%»; расчёт из `realizedPnl`/notional/leverage или парсинг `%` из result-сообщения; ingest mirror через `buildMirrorOutcomeText`; QPulse PATCH по-прежнему шлёт `profitPercentage`.
+- Manual verification: `npm run build -w apps/api`.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
 ### AUD-182
 
 - Status: `done`

@@ -4,6 +4,45 @@ export function toFixedPrice(value: number): string {
   return Number.isFinite(value) ? value.toFixed(2) : '0.00';
 }
 
+/** Цена для mirror-событий (TP/вход): больше знаков для дешёвых монет. */
+export function formatMirrorDisplayPrice(value: number): string {
+  if (!Number.isFinite(value)) return '—';
+  const abs = Math.abs(value);
+  let digits = 2;
+  if (abs < 0.0001) digits = 8;
+  else if (abs < 0.01) digits = 6;
+  else if (abs < 1) digits = 5;
+  else if (abs < 100) digits = 4;
+  const trimmed = value.toFixed(digits).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+  return trimmed.length > 0 ? trimmed : '0';
+}
+
+export function formatMirrorTpFilledText(params: {
+  pair: string;
+  tpNumber: number;
+  price?: number | null;
+}): string {
+  const pair = params.pair.toUpperCase();
+  const tpNumber = Math.max(1, Math.trunc(params.tpNumber));
+  const lines = [`🎯 ${pair} · Take Profit ${tpNumber} достигнут`];
+  if (params.price != null && Number.isFinite(params.price) && params.price > 0) {
+    lines.push(`💰 Цена: ${formatMirrorDisplayPrice(params.price)}`);
+  }
+  return lines.join('\n');
+}
+
+export function formatMirrorEntryFilledText(params: {
+  pair: string;
+  price?: number | null;
+}): string {
+  const pair = params.pair.toUpperCase();
+  const lines = [`📥 ${pair} · Вход в позицию`];
+  if (params.price != null && Number.isFinite(params.price) && params.price > 0) {
+    lines.push(`💰 Цена: ${formatMirrorDisplayPrice(params.price)}`);
+  }
+  return lines.join('\n');
+}
+
 export function normalizeDirection(direction: SignalDto['direction']): 'LONG' | 'SHORT' {
   return direction === 'short' ? 'SHORT' : 'LONG';
 }
@@ -66,26 +105,21 @@ export function formatMirrorSignalText(
     to: signal.stopLoss,
     direction,
   });
-  const targetLines = tps.map(
-    (tp) =>
-      `${toFixedPrice(tp)} (${calculateMovePercent({ from: entryMid, to: tp, direction })})`,
+  const tpLines = tps.map(
+    (tp, index) =>
+      `TP${index + 1}: ${toFixedPrice(tp)} (${calculateMovePercent({ from: entryMid, to: tp, direction })})`,
   );
-  const targetsLine =
-    targetLines.length > 0 ? targetLines.join(', ') : '—';
 
-  return [
+  const lines = [
     `${direction === 'LONG' ? '🟢' : '🔴'} ${direction} ${pair}`,
-    '',
-    `⚡ Leverage: ${signal.leverage}x`,
-    '',
-    entryLabel,
-    entryLine,
-    '',
-    '🛑 Stop Loss:',
-    `${toFixedPrice(signal.stopLoss)} (${slPercent})`,
-    '',
-    `🎯 Targets: ${targetsLine}`,
-  ].join('\n');
+    `⚡️ Leverage: ${signal.leverage}x`,
+    `${entryLabel} ${entryLine}`,
+    `🛑 Stop Loss: ${toFixedPrice(signal.stopLoss)} (${slPercent})`,
+    tpLines.length > 0 ? '🎯 Targets:' : '🎯 Targets: —',
+    ...tpLines,
+  ];
+
+  return lines.join('\n');
 }
 
 export function formatMirrorResultText(text: string): string {
