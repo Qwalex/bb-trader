@@ -50,6 +50,7 @@ import {
   isOpenOrderStatus,
 } from './orders/bybit-order-status.util';
 import type { ApplyTpSlManuallyResult } from './types/bybit-apply-tpsl.types';
+import type { StuckTradesHealResult } from './exposure/bybit-stuck-trades-heal.types';
 import { positionHasStopLoss } from './tpsl/bybit-tpsl.util';
 import { pickPositionRowForSignalDirection } from './position/bybit-position-pick.util';
 import { BybitPollFinalizeService } from './poll/bybit-poll-finalize.service';
@@ -115,6 +116,14 @@ export class BybitService implements OnApplicationBootstrap {
     private readonly bybitSpotInstrument: BybitSpotInstrumentService,
     @Inject(forwardRef(() => BybitTpSlFastApplyService))
     private readonly fastTpSl: BybitTpSlFastApplyService,
+    @Inject(
+      forwardRef(() => {
+        return require('./exposure/bybit-stuck-trades-heal.service').BybitStuckTradesHealService;
+      }),
+    )
+    private readonly stuckTradesHeal: {
+      runAutoHealForCabinet: (cabinetId: string) => Promise<StuckTradesHealResult>;
+    },
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -219,6 +228,10 @@ export class BybitService implements OnApplicationBootstrap {
     const symbol = normalizeTradingPair(signal.pair);
     const direction = signal.direction === 'short' ? 'short' : 'long';
     return this.bybitExposure.hasExchangeExposureForDirection(client, symbol, direction);
+  }
+
+  async runStuckTradesAutoHealForCabinet(cabinetId: string): Promise<StuckTradesHealResult> {
+    return this.stuckTradesHeal.runAutoHealForCabinet(cabinetId);
   }
 
   // --- Notifications ---

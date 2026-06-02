@@ -38,15 +38,6 @@ export class WorkerQueueService implements OnModuleInit {
       }),
     )
     private readonly bybit: BybitService,
-    @Inject(
-      forwardRef(() => {
-        return require('../bybit/exposure/bybit-stuck-trades-heal.service')
-          .BybitStuckTradesHealService;
-      }),
-    )
-    private readonly stuckTradesHeal: {
-      runAutoHealForCabinet: (cabinetId: string) => Promise<unknown>;
-    },
   ) {}
 
   onModuleInit(): void {
@@ -764,7 +755,7 @@ export class WorkerQueueService implements OnModuleInit {
         return;
       }
       await this.cabinetContext.runWithCabinet(payload.cabinetId, async () => {
-        await this.stuckTradesHeal.runAutoHealForCabinet(payload.cabinetId);
+        await this.bybit.runStuckTradesAutoHealForCabinet(payload.cabinetId);
       });
       return;
     }

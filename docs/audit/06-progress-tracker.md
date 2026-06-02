@@ -2245,3 +2245,14 @@
 - Manual verification: `npm run build -w apps/api`.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-189
+
+- Status: `done`
+- Scope: Railway cabinets API 502 — контейнер exited, Nest DI crash.
+- Files: `worker-queue.service.ts`, `bybit.service.ts`
+- Findings: `WorkerQueueService` инжектил `BybitStuckTradesHealService` напрямую → цикл с `WorkerQueueService` в heal → Nest `UndefinedDependencyException` при старте.
+- Changes: heal job делегируется через `BybitService.runStuckTradesAutoHealForCabinet`; прямой inject heal в worker queue убран.
+- Manual verification: `npm run build -w apps/api`; Railway SSH — `node dist/main.js` стартует без DI error.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
