@@ -1471,17 +1471,31 @@ export class TelegramUserbotIngestPipelineService {
         where: { id: params.signalId, deletedAt: null },
         select: {
           pair: true,
+          status: true,
+          direction: true,
+          takeProfits: true,
           realizedPnl: true,
           leverage: true,
           orderUsd: true,
           capitalPercent: true,
           marketType: true,
           liquidation: true,
+          orders: {
+            select: {
+              orderKind: true,
+              status: true,
+              price: true,
+            },
+          },
         },
       });
       if (signal) {
         return buildMirrorOutcomeText({
           pair: signal.pair,
+          status: signal.status,
+          direction: signal.direction,
+          takeProfits: signal.takeProfits,
+          orders: signal.orders,
           realizedPnl: signal.realizedPnl,
           leverage: signal.leverage,
           orderUsd: signal.orderUsd,

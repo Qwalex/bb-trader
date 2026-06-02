@@ -2102,6 +2102,27 @@
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
 
+### AUD-187
+
+- Status: `done`
+- Scope: Mirror — сообщение закрытия: SL vs profit, убыток/прибыль, частичные TP.
+- Files: `qpulse-signal-mapper.util.ts`, `signal-distribution.service.ts`, `telegram-userbot-ingest-pipeline.service.ts`
+- Findings: при SL уходило «✅ сделка закрыта · Прибыль -20%»; не учитывались исполненные TP до SL.
+- Changes: `resolveMirrorCloseContext` / `buildMirrorCloseEventText`; SL → «🛑 Stop loss сработал» + TP1..N + «📉 Убыток»; win → «✅ Сделка закрыта» + «📈 Прибыль»; QPulse `slHit` при `CLOSED_LOSS`.
+- Manual verification: `npm run build -w apps/api`.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-188
+
+- Status: `done`
+- Scope: Mirror group templates — English + profit % on TP hit.
+- Files: `telegram-userbot-mirror-format.util.ts`, `qpulse-signal-mapper.util.ts`, `signal-distribution.service.ts`
+- Changes: all publish-group event texts in English; TP hit shows `Profit: +X.XX%` from entry→TP move; close/SL/entry/cancel translated.
+- Manual verification: `npm run build -w apps/api`.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
 ### AUD-182
 
 - Status: `done`

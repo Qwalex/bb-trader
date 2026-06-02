@@ -4,6 +4,7 @@ import {
   calculateMovePercent,
   formatMirrorEntryFilledText,
   formatMirrorTpFilledText,
+  formatMirrorTpHitsLine,
   normalizeDirection,
 } from '../telegram-userbot/mirror/telegram-userbot-mirror-format.util';
 
@@ -250,8 +251,9 @@ export function mapSignalRowToQpulsePayload(row: SignalRow): Record<string, unkn
   const slHit =
     closed &&
     row.liquidation !== true &&
-    (row.realizedPnl ?? 0) < 0 &&
-    tpHits === 0;
+    (String(row.status ?? '').toUpperCase() === 'CLOSED_LOSS' ||
+      (String(row.status ?? '').toUpperCase() === 'CLOSED_MIXED' &&
+        (row.realizedPnl ?? 0) < 0));
 
   const profitPercentage = computeProfitPercentage({
     realizedPnl: row.realizedPnl,
@@ -286,6 +288,115 @@ export function mapSignalRowToQpulsePayload(row: SignalRow): Record<string, unkn
   };
 }
 
+export type MirrorCloseSignalInput = {
+  pair: string;
+  status: string;
+  direction: string;
+  takeProfits: string;
+  liquidation?: boolean;
+  realizedPnl?: number | null;
+  leverage: number;
+  orderUsd?: number;
+  capitalPercent: number;
+  marketType: string;
+  orders?: SignalRow['orders'];
+  profitPercentOverride?: number | null;
+};
+
+export function resolveMirrorCloseContext(input: MirrorCloseSignalInput): {
+  mirrorKind: 'sl' | 'close' | 'liquidation';
+  tpHits: number;
+  totalTps: number;
+  profitPercent: string | null;
+  isLoss: boolean;
+} {
+  const takeProfits = parseNumberArray(input.takeProfits);
+  const directionRaw = String(input.direction ?? 'long').toLowerCase();
+  const tpHits = countFilledTpOrders(input.orders, takeProfits, directionRaw);
+  const isSpot = String(input.marketType ?? 'linear').toLowerCase() === 'spot';
+  const status = String(input.status ?? '').toUpperCase();
+  const pnl = input.realizedPnl;
+  const hasRealizedPnl = pnl != null && Number.isFinite(pnl);
+  const profitPercent = formatMirrorProfitPercent({
+    realizedPnl: pnl,
+    leverage: input.leverage,
+    orderUsd: input.orderUsd,
+    capitalPercent: input.capitalPercent,
+    isSpot,
+    profitPercentOverride: hasRealizedPnl ? undefined : input.profitPercentOverride,
+  });
+  const isLoss =
+    status === 'CLOSED_LOSS' || (hasRealizedPnl && pnl < 0);
+
+  if (input.liquidation === true) {
+    return {
+      mirrorKind: 'liquidation',
+      tpHits,
+      totalTps: takeProfits.length,
+      profitPercent,
+      isLoss: true,
+    };
+  }
+
+  if (
+    status === 'CLOSED_LOSS' ||
+    (isLoss && tpHits < takeProfits.length)
+  ) {
+    return {
+      mirrorKind: 'sl',
+      tpHits,
+      totalTps: takeProfits.length,
+      profitPercent,
+      isLoss,
+    };
+  }
+
+  return {
+    mirrorKind: 'close',
+    tpHits,
+    totalTps: takeProfits.length,
+    profitPercent,
+    isLoss: false,
+  };
+}
+
+export function buildMirrorCloseEventText(input: MirrorCloseSignalInput): string {
+  const pair = input.pair.toUpperCase();
+  const ctx = resolveMirrorCloseContext(input);
+  const resultLabel = ctx.isLoss ? 'Loss' : 'Profit';
+  const resultEmoji = ctx.isLoss ? '📉' : '📈';
+  const tpHitsLine = formatMirrorTpHitsLine(ctx.tpHits);
+
+  if (ctx.mirrorKind === 'liquidation') {
+    const lines = [`💥 ${pair} · Liquidation`];
+    if (tpHitsLine) lines.push(tpHitsLine);
+    if (ctx.profitPercent) {
+      lines.push(`${resultEmoji} ${resultLabel}: ${ctx.profitPercent}`);
+    }
+    return lines.join('\n');
+  }
+
+  if (ctx.mirrorKind === 'sl') {
+    const lines = [`🛑 ${pair} · Stop loss hit`];
+    if (tpHitsLine) lines.push(tpHitsLine);
+    if (ctx.profitPercent) {
+      lines.push(`${resultEmoji} ${resultLabel}: ${ctx.profitPercent}`);
+    }
+    return lines.join('\n');
+  }
+
+  const lines = [`✅ ${pair} · Trade closed`];
+  if (ctx.totalTps > 0 && ctx.tpHits >= ctx.totalTps) {
+    lines.push('🎯 All take profits hit');
+  } else if (tpHitsLine) {
+    lines.push(tpHitsLine);
+  }
+  if (ctx.profitPercent) {
+    lines.push(`${resultEmoji} ${resultLabel}: ${ctx.profitPercent}`);
+  }
+  return lines.join('\n');
+}
+
 export function buildMirrorTradeEventText(params: {
   kind: 'tp' | 'sl' | 'close' | 'liquidation' | 'cancel' | 'entry';
   pair: string;
@@ -299,17 +410,15 @@ export function buildMirrorTradeEventText(params: {
   capitalPercent?: number;
   isSpot?: boolean;
   profitPercentOverride?: number | null;
+  closeStatus?: string;
+  closeDirection?: string;
+  closeTakeProfits?: string;
+  closeOrders?: SignalRow['orders'];
+  tpDirection?: 'LONG' | 'SHORT';
+  tpEntryPrice?: number | null;
+  tpTakeProfits?: number[];
 }): string {
   const pair = params.pair.toUpperCase();
-  const profitPercent = formatMirrorProfitPercent({
-    realizedPnl: params.pnl,
-    leverage: params.leverage,
-    orderUsd: params.orderUsd,
-    capitalPercent: params.capitalPercent,
-    isSpot: params.isSpot,
-    profitPercentOverride: params.profitPercentOverride,
-  });
-  const profitSuffix = profitPercent ? ` · Прибыль ${profitPercent}` : '';
   switch (params.kind) {
     case 'entry':
       if (params.entryPrice != null || params.detail) {
@@ -327,27 +436,61 @@ export function buildMirrorTradeEventText(params: {
           pair,
           tpNumber: params.tpNumber,
           price: params.tpPrice,
+          direction: params.tpDirection,
+          entryPrice: params.tpEntryPrice,
+          takeProfits: params.tpTakeProfits,
         });
       }
       return formatMirrorTpFilledText({
         pair,
         tpNumber: 1,
         price: params.tpPrice ?? null,
+        direction: params.tpDirection,
+        entryPrice: params.tpEntryPrice,
+        takeProfits: params.tpTakeProfits,
       });
     case 'sl':
-      return `🛑 ${pair}: Stop loss сработал${profitSuffix}`;
     case 'liquidation':
-      return `💥 ${pair}: ликвидация${profitSuffix}`;
-    case 'cancel':
-      return `❌ ${pair}: сигнал отменён`;
     case 'close':
+      return buildMirrorCloseEventText({
+        pair: params.pair,
+        status: params.closeStatus ?? (params.kind === 'sl' ? 'CLOSED_LOSS' : 'CLOSED_WIN'),
+        direction: params.closeDirection ?? 'long',
+        takeProfits: params.closeTakeProfits ?? '[]',
+        liquidation: params.kind === 'liquidation',
+        realizedPnl: params.pnl,
+        leverage: params.leverage ?? 1,
+        orderUsd: params.orderUsd,
+        capitalPercent: params.capitalPercent ?? 0,
+        marketType: params.isSpot ? 'spot' : 'linear',
+        orders: params.closeOrders,
+        profitPercentOverride: params.profitPercentOverride,
+      });
+    case 'cancel':
+      return `❌ ${pair}: Signal cancelled`;
     default:
-      return `✅ ${pair}: сделка закрыта${profitSuffix}`;
+      return buildMirrorCloseEventText({
+        pair: params.pair,
+        status: params.closeStatus ?? 'CLOSED_WIN',
+        direction: params.closeDirection ?? 'long',
+        takeProfits: params.closeTakeProfits ?? '[]',
+        realizedPnl: params.pnl,
+        leverage: params.leverage ?? 1,
+        orderUsd: params.orderUsd,
+        capitalPercent: params.capitalPercent ?? 0,
+        marketType: params.isSpot ? 'spot' : 'linear',
+        orders: params.closeOrders,
+        profitPercentOverride: params.profitPercentOverride,
+      });
   }
 }
 
 export function buildMirrorOutcomeText(params: {
   pair: string;
+  status?: string;
+  direction?: string;
+  takeProfits?: string;
+  orders?: SignalRow['orders'];
   realizedPnl?: number | null;
   leverage?: number;
   orderUsd?: number;
@@ -356,17 +499,21 @@ export function buildMirrorOutcomeText(params: {
   liquidation?: boolean;
   profitPercentFromSource?: number | null;
 }): string {
-  const isSpot = String(params.marketType ?? 'linear').toLowerCase() === 'spot';
-  const hasRealizedPnl =
-    params.realizedPnl != null && Number.isFinite(params.realizedPnl);
-  return buildMirrorTradeEventText({
-    kind: params.liquidation ? 'liquidation' : 'close',
+  return buildMirrorCloseEventText({
     pair: params.pair,
-    pnl: params.realizedPnl,
-    leverage: params.leverage,
+    status: params.status ?? 'CLOSED_WIN',
+    direction: params.direction ?? 'long',
+    takeProfits: params.takeProfits ?? '[]',
+    liquidation: params.liquidation === true,
+    realizedPnl: params.realizedPnl,
+    leverage: params.leverage ?? 1,
     orderUsd: params.orderUsd,
-    capitalPercent: params.capitalPercent,
-    isSpot,
-    profitPercentOverride: hasRealizedPnl ? undefined : params.profitPercentFromSource,
+    capitalPercent: params.capitalPercent ?? 0,
+    marketType: params.marketType ?? 'linear',
+    orders: params.orders,
+    profitPercentOverride:
+      params.realizedPnl != null && Number.isFinite(params.realizedPnl)
+        ? undefined
+        : params.profitPercentFromSource,
   });
 }

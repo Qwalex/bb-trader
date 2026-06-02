@@ -17,34 +17,19 @@ export function formatMirrorDisplayPrice(value: number): string {
   return trimmed.length > 0 ? trimmed : '0';
 }
 
-export function formatMirrorTpFilledText(params: {
-  pair: string;
-  tpNumber: number;
-  price?: number | null;
-}): string {
-  const pair = params.pair.toUpperCase();
-  const tpNumber = Math.max(1, Math.trunc(params.tpNumber));
-  const lines = [`🎯 ${pair} · Take Profit ${tpNumber} достигнут`];
-  if (params.price != null && Number.isFinite(params.price) && params.price > 0) {
-    lines.push(`💰 Цена: ${formatMirrorDisplayPrice(params.price)}`);
-  }
-  return lines.join('\n');
+export function resolveEntryMid(entries: number[]): number {
+  const valid = entries.filter((e) => Number.isFinite(e) && e > 0);
+  if (valid.length === 0) return 0;
+  const low = valid[0] ?? 0;
+  const high = valid[valid.length - 1] ?? low;
+  return (low + high) / 2;
 }
 
-export function formatMirrorEntryFilledText(params: {
-  pair: string;
-  price?: number | null;
-}): string {
-  const pair = params.pair.toUpperCase();
-  const lines = [`📥 ${pair} · Вход в позицию`];
-  if (params.price != null && Number.isFinite(params.price) && params.price > 0) {
-    lines.push(`💰 Цена: ${formatMirrorDisplayPrice(params.price)}`);
-  }
-  return lines.join('\n');
-}
-
-export function normalizeDirection(direction: SignalDto['direction']): 'LONG' | 'SHORT' {
-  return direction === 'short' ? 'SHORT' : 'LONG';
+export function formatMirrorTpHitsLine(tpHits: number): string | null {
+  if (tpHits <= 0) return null;
+  const labels = Array.from({ length: tpHits }, (_, index) => `TP${index + 1}`);
+  const verb = 'hit';
+  return `✅ ${labels.join(', ')} ${verb}`;
 }
 
 export function calculateMovePercent(params: {
@@ -60,6 +45,107 @@ export function calculateMovePercent(params: {
       ? ((params.to - params.from) / params.from) * 100
       : ((params.from - params.to) / params.from) * 100;
   return `${Math.abs(raw).toFixed(2)}%`;
+}
+
+function parseMovePercentValue(pct: string): number {
+  return Number.parseFloat(pct.replace('%', '')) || 0;
+}
+
+/** Cumulative TP progress: each level profit + total (equal split across all targets). */
+export function computeMirrorTpProgress(params: {
+  tpNumber: number;
+  entryPrice: number;
+  direction: 'LONG' | 'SHORT';
+  takeProfits: number[];
+  currentFillPrice?: number | null;
+}): {
+  hitLines: string[];
+  totalProfitPercent: string | null;
+} {
+  const tpNumber = Math.max(1, Math.trunc(params.tpNumber));
+  const levels = params.takeProfits.filter((p) => Number.isFinite(p) && p > 0);
+  const totalLevels = Math.max(levels.length, tpNumber);
+  const hitLines: string[] = [];
+  let totalMove = 0;
+
+  for (let index = 0; index < tpNumber; index += 1) {
+    let tpPrice = levels[index];
+    if (
+      index === tpNumber - 1 &&
+      params.currentFillPrice != null &&
+      Number.isFinite(params.currentFillPrice) &&
+      params.currentFillPrice > 0
+    ) {
+      tpPrice = params.currentFillPrice;
+    }
+    if (tpPrice == null || !Number.isFinite(tpPrice) || tpPrice <= 0) {
+      continue;
+    }
+    const movePct = calculateMovePercent({
+      from: params.entryPrice,
+      to: tpPrice,
+      direction: params.direction,
+    });
+    hitLines.push(`✅ TP${index + 1} hit · +${movePct}`);
+    totalMove += parseMovePercentValue(movePct) / totalLevels;
+  }
+
+  return {
+    hitLines,
+    totalProfitPercent: hitLines.length > 0 ? `+${totalMove.toFixed(2)}%` : null,
+  };
+}
+
+export function formatMirrorTpFilledText(params: {
+  pair: string;
+  tpNumber: number;
+  price?: number | null;
+  direction?: 'LONG' | 'SHORT';
+  entryPrice?: number | null;
+  takeProfits?: number[];
+}): string {
+  const pair = params.pair.toUpperCase();
+  const tpNumber = Math.max(1, Math.trunc(params.tpNumber));
+  const lines = [`🎯 ${pair} · Take Profit ${tpNumber} hit`];
+  if (params.price != null && Number.isFinite(params.price) && params.price > 0) {
+    lines.push(`💰 Price: ${formatMirrorDisplayPrice(params.price)}`);
+  }
+
+  const entry = params.entryPrice;
+  const direction = params.direction;
+  if (entry != null && entry > 0 && direction) {
+    const { hitLines, totalProfitPercent } = computeMirrorTpProgress({
+      tpNumber,
+      entryPrice: entry,
+      direction,
+      takeProfits: params.takeProfits ?? [],
+      currentFillPrice: params.price,
+    });
+    if (hitLines.length > 0) {
+      lines.push(...hitLines);
+    }
+    if (totalProfitPercent) {
+      lines.push(`📈 Total profit: ${totalProfitPercent}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
+export function formatMirrorEntryFilledText(params: {
+  pair: string;
+  price?: number | null;
+}): string {
+  const pair = params.pair.toUpperCase();
+  const lines = [`📥 ${pair} · Entry filled`];
+  if (params.price != null && Number.isFinite(params.price) && params.price > 0) {
+    lines.push(`💰 Price: ${formatMirrorDisplayPrice(params.price)}`);
+  }
+  return lines.join('\n');
+}
+
+export function normalizeDirection(direction: SignalDto['direction']): 'LONG' | 'SHORT' {
+  return direction === 'short' ? 'SHORT' : 'LONG';
 }
 
 export function stripTelegramExportPrefix(text: string): string {
@@ -88,13 +174,13 @@ export function formatMirrorSignalText(
   const tps = [...signal.takeProfits].filter(Number.isFinite);
   const entryLow = entries[0] ?? 0;
   const entryHigh = entries[entries.length - 1] ?? entryLow;
-  const entryMid = (entryLow + entryHigh) / 2;
+  const entryMid = resolveEntryMid(entries);
   const entryLowFmt = toFixedPrice(entryLow);
   const entryHighFmt = toFixedPrice(entryHigh);
   const entryIsSingle = entries.length === 0 || entries.length === 1 || entryLowFmt === entryHighFmt;
   const entryLine =
     entries.length === 0
-      ? '— (цена не получена)'
+      ? '— (price unavailable)'
       : entryIsSingle
         ? entryLowFmt
         : `${entryLowFmt} - ${entryHighFmt}`;

@@ -1,9 +1,15 @@
 import { forwardRef, Inject, Injectable } from '@nestjs/common';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import { parseNumberArrayFromJson } from '../bybit/instrument/bybit-json.util';
+import { isFilledOrderStatus } from '../bybit/orders/bybit-order-status.util';
 import { CabinetContextService } from '../cabinet/cabinet-context.service';
+import {
+  normalizeDirection,
+  resolveEntryMid,
+} from '../telegram-userbot/mirror/telegram-userbot-mirror-format.util';
 import { TelegramUserbotMirrorService } from '../telegram-userbot/mirror/telegram-userbot-mirror.service';
-import { buildMirrorTradeEventText } from './qpulse-signal-mapper.util';
+import { buildMirrorCloseEventText, buildMirrorTradeEventText, resolveMirrorCloseContext } from './qpulse-signal-mapper.util';
 import { QpulseSyncService } from './qpulse-sync.service';
 
 type MirrorTradeKind = 'tp' | 'sl' | 'close' | 'liquidation' | 'cancel' | 'entry';
@@ -39,12 +45,22 @@ export class SignalDistributionService {
         cabinetId: true,
         sourceChatId: true,
         sourceMessageId: true,
+        direction: true,
+        entries: true,
+        takeProfits: true,
         realizedPnl: true,
         liquidation: true,
         leverage: true,
         orderUsd: true,
         capitalPercent: true,
         marketType: true,
+        orders: {
+          select: {
+            orderKind: true,
+            status: true,
+            price: true,
+          },
+        },
       },
     });
     if (!signal?.cabinetId) return;
@@ -100,11 +116,30 @@ export class SignalDistributionService {
 
       if (!signal.sourceChatId || !signal.sourceMessageId) return;
 
+      const tradeDirection = normalizeDirection(
+        signal.direction === 'short' ? 'short' : 'long',
+      );
+      let tpEntryPrice = resolveEntryMid(parseNumberArrayFromJson(signal.entries));
+      if (tpEntryPrice <= 0) {
+        const filledEntry = signal.orders.find(
+          (o) =>
+            (o.orderKind === 'ENTRY' || o.orderKind === 'DCA') &&
+            isFilledOrderStatus(o.status) &&
+            o.price != null &&
+            Number(o.price) > 0,
+        );
+        tpEntryPrice = filledEntry?.price != null ? Number(filledEntry.price) : 0;
+      }
+
       const text = buildMirrorTradeEventText({
         kind: mirrorKind,
         pair: signal.pair,
         tpNumber,
         tpPrice,
+        tpDirection: mirrorKind === 'tp' ? tradeDirection : undefined,
+        tpEntryPrice: mirrorKind === 'tp' && tpEntryPrice > 0 ? tpEntryPrice : null,
+        tpTakeProfits:
+          mirrorKind === 'tp' ? parseNumberArrayFromJson(signal.takeProfits) : undefined,
         entryPrice,
         pnl: signal.realizedPnl,
         leverage: signal.leverage,
@@ -139,11 +174,22 @@ export class SignalDistributionService {
         cabinetId: true,
         sourceChatId: true,
         sourceMessageId: true,
+        status: true,
+        direction: true,
+        takeProfits: true,
         realizedPnl: true,
+        liquidation: true,
         leverage: true,
         orderUsd: true,
         capitalPercent: true,
         marketType: true,
+        orders: {
+          select: {
+            orderKind: true,
+            status: true,
+            price: true,
+          },
+        },
       },
     });
     if (!signal?.cabinetId || !signal.sourceChatId || !signal.sourceMessageId) return;
@@ -152,23 +198,28 @@ export class SignalDistributionService {
     const sourceMessageId = signal.sourceMessageId;
 
     await this.cabinetContext.runWithCabinetAsync(signal.cabinetId, async () => {
-      const kind = params.liquidation ? 'liquidation' : 'close';
-      const text = buildMirrorTradeEventText({
-        kind,
+      const closeInput = {
         pair: signal.pair,
-        pnl: params.realizedPnl ?? signal.realizedPnl,
+        status: signal.status,
+        direction: signal.direction,
+        takeProfits: signal.takeProfits,
+        liquidation: params.liquidation ?? signal.liquidation === true,
+        realizedPnl: params.realizedPnl ?? signal.realizedPnl,
         leverage: signal.leverage,
         orderUsd: signal.orderUsd,
         capitalPercent: signal.capitalPercent,
-        isSpot: String(signal.marketType ?? 'linear').toLowerCase() === 'spot',
-      });
+        marketType: signal.marketType,
+        orders: signal.orders,
+      };
+      const { mirrorKind } = resolveMirrorCloseContext(closeInput);
+      const text = buildMirrorCloseEventText(closeInput);
 
       await this.mirror.publishTradeEventToMirrorGroups({
         signalId: signal.id,
         sourceChatId,
         sourceMessageId,
-        kind,
-        dedupeSuffix: kind,
+        kind: mirrorKind,
+        dedupeSuffix: mirrorKind,
         text,
       });
     });
