@@ -18,6 +18,28 @@ import { TelegramUserbotSettingsService } from '../settings/telegram-userbot-set
 import { TelegramUserbotIngestPairDirectionService } from './telegram-userbot-ingest-pair-direction.service';
 import { TelegramUserbotIngestSignalLookupService } from './telegram-userbot-ingest-signal-lookup.service';
 import { arePriceArraysClose, isNumberClose } from '../utils/telegram-userbot-text-similarity.util';
+import { extractPairFromResultMessage } from '../utils/telegram-userbot-text.util';
+import type { ActiveSignalLookup } from '../telegram-userbot.types';
+import {
+  hasFilledEntryOrders,
+  hasOpenEntryOrders,
+} from '../../bybit/orders/bybit-order-status.util';
+
+type ResultWithoutEntryMode =
+  | 'result_without_entry_notified'
+  | 'result_without_entry_cancelled'
+  | 'result_without_entry_notified_by_pair'
+  | 'result_without_entry_cancelled_by_pair'
+  | 'result_ignored_has_entry'
+  | 'result_ignored_no_stale_orders'
+  | 'result_ignored_duplicate'
+  | 'result_notify_disabled';
+
+type ResultTarget = {
+  signal: ActiveSignalLookup;
+  rootSourceMessageId: string;
+  orders: Array<{ orderKind: string; status: string | null }>;
+};
 
 @Injectable()
 export class TelegramUserbotIngestSignalReplyService {
@@ -432,52 +454,232 @@ export class TelegramUserbotIngestSignalReplyService {
   }): Promise<
     | {
         ok: true;
+        mode: ResultWithoutEntryMode;
+        signalId?: string;
+      }
+    | { ok: false; error: string }
+  > {
+    const resolved = await this.resolveResultTargets(params);
+    if (!resolved.ok) {
+      return resolved;
+    }
+
+    if (resolved.targets.length === 0) {
+      return { ok: true, mode: 'result_ignored_no_stale_orders' };
+    }
+
+    if (resolved.targets.length > 1) {
+      void this.appLog.append(
+        'warn',
+        'telegram',
+        'Result without entry: несколько кандидатов по паре',
+        {
+          sourceChatId: params.chatId,
+          extractedPair: resolved.extractedPair ?? null,
+          resolution: resolved.resolution,
+          signalIds: resolved.targets.map((t) => t.signal.id),
+        },
+      );
+    }
+
+    const suffix = resolved.resolution === 'by_pair' ? '_by_pair' : '';
+    let cancelled = 0;
+    let notified = 0;
+    let lastSignalId: string | undefined;
+    let lastIgnoredMode: ResultWithoutEntryMode | undefined;
+    const errors: string[] = [];
+
+    for (const target of resolved.targets) {
+      const step = await this.processResultWithoutEntryForSignal({
+        ...params,
+        target,
+        resolution: resolved.resolution,
+        extractedPair: resolved.extractedPair,
+      });
+      if (!step.ok) {
+        errors.push(step.error);
+        continue;
+      }
+      lastSignalId = step.signalId;
+      if (step.mode === 'result_without_entry_cancelled') {
+        cancelled += 1;
+      } else if (step.mode === 'result_without_entry_notified') {
+        notified += 1;
+      } else {
+        lastIgnoredMode = step.mode;
+      }
+    }
+
+    if (cancelled === 0 && notified === 0 && errors.length === resolved.targets.length) {
+      return { ok: false, error: errors[0] ?? 'Не удалось обработать result без входа' };
+    }
+
+    if (cancelled > 0) {
+      return {
+        ok: true,
+        mode: `result_without_entry_cancelled${suffix}` as ResultWithoutEntryMode,
+        signalId: lastSignalId,
+      };
+    }
+    if (notified > 0) {
+      return {
+        ok: true,
+        mode: `result_without_entry_notified${suffix}` as ResultWithoutEntryMode,
+        signalId: lastSignalId,
+      };
+    }
+    return {
+      ok: true,
+      mode: lastIgnoredMode ?? 'result_ignored_no_stale_orders',
+      signalId: lastSignalId,
+    };
+  }
+
+  private async resolveResultTargets(params: {
+    chatId: string;
+    messageId: string;
+    text: string;
+    replyToMessageId?: string;
+    signalExternalId?: string;
+  }): Promise<
+    | { ok: false; error: string }
+    | {
+        ok: true;
+        resolution: 'by_reply' | 'by_pair';
+        extractedPair?: string;
+        targets: ResultTarget[];
+      }
+  > {
+    const replyToMessageId = params.replyToMessageId?.trim() || undefined;
+    const signalExternalId = params.signalExternalId?.trim() || undefined;
+
+    if (replyToMessageId || signalExternalId) {
+      const lookup = await this.signalLookup.findActiveSignalFromReply({
+        chatId: params.chatId,
+        replyToMessageId,
+        signalExternalId,
+        flowLabel: 'Result',
+      });
+      if (!lookup.ok) {
+        return { ok: false, error: lookup.error };
+      }
+      const ordersRow = await this.prisma.signal.findUnique({
+        where: { id: lookup.signal.id },
+        select: {
+          orders: {
+            select: { orderKind: true, status: true },
+          },
+        },
+      });
+      return {
+        ok: true,
+        resolution: 'by_reply',
+        targets: [
+          {
+            signal: lookup.signal,
+            rootSourceMessageId: lookup.rootSource.messageId,
+            orders: ordersRow?.orders ?? [],
+          },
+        ],
+      };
+    }
+
+    const extractedPair = extractPairFromResultMessage(params.text);
+    if (!extractedPair) {
+      return {
+        ok: false,
+        error:
+          'Сообщение о результате без цитаты: не удалось определить пару из текста',
+      };
+    }
+
+    const candidates = await this.signalLookup.findActiveSignalsForChatAndPair(
+      params.chatId,
+      extractedPair,
+    );
+    if (candidates.length === 0) {
+      return {
+        ok: false,
+        error: `Сообщение о результате без цитаты: активный сигнал ${extractedPair} в группе не найден`,
+      };
+    }
+
+    const targets: ResultTarget[] = [];
+    for (const signal of candidates) {
+      const ordersRow = await this.prisma.signal.findUnique({
+        where: { id: signal.id },
+        select: {
+          orders: {
+            select: { orderKind: true, status: true },
+          },
+        },
+      });
+      const orders = ordersRow?.orders ?? [];
+      if (await this.isStaleOrdersWithoutEntryCandidate(signal.id, orders)) {
+        targets.push({
+          signal,
+          rootSourceMessageId: signal.sourceMessageId?.trim() ?? '',
+          orders,
+        });
+      }
+    }
+
+    void this.appLog.append('info', 'telegram', 'Result without entry (by pair)', {
+      sourceChatId: params.chatId,
+      resultMessageId: params.messageId,
+      extractedPair,
+      candidateCount: candidates.length,
+      staleTargetCount: targets.length,
+      candidateSignalIds: candidates.map((s) => s.id),
+      staleSignalIds: targets.map((t) => t.signal.id),
+    });
+
+    return {
+      ok: true,
+      resolution: 'by_pair',
+      extractedPair,
+      targets,
+    };
+  }
+
+  private async processResultWithoutEntryForSignal(params: {
+    ingestId: string;
+    chatId: string;
+    messageId: string;
+    text: string;
+    replyToMessageId?: string;
+    quotedText?: string;
+    target: ResultTarget;
+    resolution: 'by_reply' | 'by_pair';
+    extractedPair?: string;
+  }): Promise<
+    | {
+        ok: true;
         mode:
           | 'result_without_entry_notified'
           | 'result_without_entry_cancelled'
           | 'result_ignored_has_entry'
           | 'result_ignored_duplicate'
           | 'result_notify_disabled';
-        signalId?: string;
+        signalId: string;
       }
     | { ok: false; error: string }
   > {
+    const { target, resolution, extractedPair } = params;
+    const signal = target.signal;
     const replyToMessageId = params.replyToMessageId?.trim() || undefined;
-    const signalExternalId = params.signalExternalId?.trim() || undefined;
-    if (!replyToMessageId && !signalExternalId) {
-      return {
-        ok: false,
-        error: 'Сообщение о результате без цитаты исходного сигнала и без SIGNAL ID',
-      };
-    }
-    const lookup = await this.signalLookup.findActiveSignalFromReply({
-      chatId: params.chatId,
-      replyToMessageId,
-      signalExternalId,
-      flowLabel: 'Result',
-    });
-    if (!lookup.ok) {
-      return { ok: false, error: lookup.error };
-    }
-    const signal = await this.prisma.signal.findUnique({
-      where: { id: lookup.signal.id },
-      select: {
-        id: true,
-        pair: true,
-        orders: {
-          select: {
-            orderKind: true,
-            status: true,
-          },
-        },
-      },
-    });
-    if (!signal) {
-      return { ok: false, error: `Сигнал ${lookup.signal.id} не найден` };
-    }
-    if (this.hasFilledEntryOrders(signal.orders)) {
+
+    if (hasFilledEntryOrders(target.orders)) {
       return { ok: true, mode: 'result_ignored_has_entry', signalId: signal.id };
     }
+
+    if (resolution === 'by_pair') {
+      const stale = await this.isStaleOrdersWithoutEntryCandidate(signal.id, target.orders);
+      if (!stale) {
+        return { ok: true, mode: 'result_ignored_has_entry', signalId: signal.id };
+      }
+    }
+
     const priorResultEvents = await this.prisma.signalEvent.findMany({
       where: {
         signalId: signal.id,
@@ -504,6 +706,7 @@ export class TelegramUserbotIngestSignalReplyService {
         // ignore malformed payload
       }
     }
+
     const notifyEnabled = await this.getBoolSetting(
       'TELEGRAM_USERBOT_NOTIFY_RESULT_WITHOUT_ENTRY',
       true,
@@ -537,13 +740,17 @@ export class TelegramUserbotIngestSignalReplyService {
         error: notify.error ?? 'Не удалось отправить уведомление result без входа',
       };
     }
+
     await this.orders.createSignalEvent(signal.id, 'USERBOT_RESULT_WITHOUT_ENTRY', {
       sourceChatId: params.chatId,
-      sourceMessageId: lookup.rootSource.messageId,
+      sourceMessageId: target.rootSourceMessageId,
       resultMessageId: params.messageId,
       replyToMessageId,
       ingestId: params.ingestId,
+      resolution,
+      extractedPair: extractedPair ?? null,
     });
+
     const autoCancel = await this.getBoolSetting(
       'TELEGRAM_USERBOT_CANCEL_STALE_ORDERS_ON_RESULT_WITHOUT_ENTRY',
       false,
@@ -552,8 +759,17 @@ export class TelegramUserbotIngestSignalReplyService {
       return { ok: true, mode: 'result_without_entry_notified', signalId: signal.id };
     }
 
-    const closeSignal = this.signalFromDb(lookup.signal);
-    const pairCabinetId = await this.resolvePairDirectionCabinetId(lookup.signal.cabinetId);
+    if (await this.bybit.hasExchangeExposureForSignal(signal.id)) {
+      void this.appLog.append('warn', 'telegram', 'Result auto-cancel skipped: exchange exposure', {
+        signalId: signal.id,
+        pair: signal.pair,
+        resolution,
+      });
+      return { ok: true, mode: 'result_without_entry_notified', signalId: signal.id };
+    }
+
+    const closeSignal = this.signalFromDb(signal);
+    const pairCabinetId = await this.resolvePairDirectionCabinetId(signal.cabinetId);
     this.pairDirection.beginPairDirectionTransition(
       pairCabinetId,
       closeSignal.pair,
@@ -572,31 +788,36 @@ export class TelegramUserbotIngestSignalReplyService {
         };
       }
       this.pairDirection.setCloseCooldown(pairCabinetId, closeSignal.pair, closeSignal.direction);
-      await this.orders.createSignalEvent(
-        signal.id,
-        'USERBOT_RESULT_WITHOUT_ENTRY_CANCELLED',
-        {
-          sourceChatId: params.chatId,
-          sourceMessageId: lookup.rootSource.messageId,
-          resultMessageId: params.messageId,
-          ingestId: params.ingestId,
-          reason: 'Автоматическая отмена ордеров: result получен без фактического входа',
-        },
-      );
+      await this.orders.createSignalEvent(signal.id, 'USERBOT_RESULT_WITHOUT_ENTRY_CANCELLED', {
+        sourceChatId: params.chatId,
+        sourceMessageId: target.rootSourceMessageId,
+        resultMessageId: params.messageId,
+        ingestId: params.ingestId,
+        resolution,
+        extractedPair: extractedPair ?? null,
+        reason: 'Автоматическая отмена ордеров: result получен без фактического входа',
+      });
       return { ok: true, mode: 'result_without_entry_cancelled', signalId: signal.id };
     } finally {
-      this.pairDirection.endPairDirectionTransition(pairCabinetId, closeSignal.pair, closeSignal.direction);
+      this.pairDirection.endPairDirectionTransition(
+        pairCabinetId,
+        closeSignal.pair,
+        closeSignal.direction,
+      );
     }
   }
 
-  private hasFilledEntryOrders(
+  private async isStaleOrdersWithoutEntryCandidate(
+    signalId: string,
     orders: Array<{ orderKind: string; status: string | null }>,
-  ): boolean {
-    return orders.some((order) => {
-      if (order.orderKind !== 'ENTRY' && order.orderKind !== 'DCA') {
-        return false;
-      }
-      return (order.status ?? '').trim().toLowerCase() === 'filled';
-    });
+  ): Promise<boolean> {
+    if (!hasOpenEntryOrders(orders)) {
+      return false;
+    }
+    if (hasFilledEntryOrders(orders)) {
+      return false;
+    }
+    const hasExposure = await this.bybit.hasExchangeExposureForSignal(signalId);
+    return !hasExposure;
   }
 }

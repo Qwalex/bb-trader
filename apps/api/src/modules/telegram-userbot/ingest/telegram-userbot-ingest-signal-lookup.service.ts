@@ -110,6 +110,40 @@ export class TelegramUserbotIngestSignalLookupService {
     return (hit ?? null) as ActiveSignalLookup | null;
   }
 
+  /** Активные сигналы из группы по паре (для result без цитаты). */
+  async findActiveSignalsForChatAndPair(
+    chatId: string,
+    pair: string,
+  ): Promise<ActiveSignalLookup[]> {
+    const wantPair = normalizeTradingPair(pair);
+    const scope = await this.resolvedCabinetScopeWhere();
+    const rows = await this.prisma.signal.findMany({
+      where: {
+        ...scope,
+        deletedAt: null,
+        sourceChatId: chatId.trim(),
+        status: { in: ['ORDERS_PLACED', 'OPEN', 'PARSED'] },
+      },
+      select: {
+        id: true,
+        cabinetId: true,
+        pair: true,
+        direction: true,
+        entries: true,
+        stopLoss: true,
+        takeProfits: true,
+        leverage: true,
+        orderUsd: true,
+        capitalPercent: true,
+        source: true,
+        sourceChatId: true,
+        sourceMessageId: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return rows.filter((row) => normalizeTradingPair(row.pair) === wantPair) as ActiveSignalLookup[];
+  }
+
   async resolveSourcePriorityForSignal(signal: {
     source: string | null;
     sourceChatId: string | null;

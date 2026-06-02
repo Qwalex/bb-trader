@@ -2235,3 +2235,13 @@
 - Manual verification: `npm run build -w apps/api`, `npm run check-types -w apps/web`.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-188
+
+- Status: `done`
+- Scope: Result без цитаты/SIGNAL ID — определение токена и отмена «висящих» ордеров.
+- Files: `telegram-userbot-text.util.ts`, `telegram-userbot-ingest-signal-lookup.service.ts`, `telegram-userbot-ingest-signal-reply.service.ts`, `bybit.service.ts` (`hasExchangeExposureForSignal`), `settings-page.constants.ts`, `.env.example`
+- Changes: `extractPairFromResultMessage` (RENDER SCALP TRADE → RENDERUSDT); `findActiveSignalsForChatAndPair`; fallback `by_pair` в result-flow; фильтр open entry без filled entry и без позиции на Bybit; те же notify/cancel настройки; exchange-check перед auto-cancel (и для by_reply).
+- Manual verification: `npm run build -w apps/api`.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

@@ -148,12 +148,12 @@ export const KEYS = [
   {
     key: 'TELEGRAM_USERBOT_NOTIFY_RESULT_WITHOUT_ENTRY',
     label:
-      'Userbot: уведомлять о возможно неактуальном ордере (в группе result по сигналу, а входа в позицию ещё не было) (true/false)',
+      'Userbot: уведомлять о возможно неактуальном ордере (result по сигналу или по токену в тексте без цитаты, вход ещё не состоялся) (true/false)',
   },
   {
     key: 'TELEGRAM_USERBOT_CANCEL_STALE_ORDERS_ON_RESULT_WITHOUT_ENTRY',
     label:
-      'Userbot: отменять возможно не актуальные ордера при result без входа (true/false)',
+      'Userbot: отменять неактуальные ордера при result без входа — с цитатой/SIGNAL ID или без (пара из текста, напр. «RENDER SCALP TRADE») (true/false)',
   },
   {
     key: 'TELEGRAM_NOTIFY_API_TRADE_CANCELLED',

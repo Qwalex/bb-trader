@@ -206,6 +206,21 @@ export class BybitService implements OnApplicationBootstrap {
     );
   }
 
+  /** Есть ли на бирже позиция/экспозиция по направлению сигнала (при ошибке API — true, консервативно). */
+  async hasExchangeExposureForSignal(signalId: string): Promise<boolean> {
+    const signal = await this.orders.getSignalWithOrders(signalId);
+    if (!signal) {
+      return false;
+    }
+    const client = await this.balanceInstrument.getClient();
+    if (!client) {
+      return true;
+    }
+    const symbol = normalizeTradingPair(signal.pair);
+    const direction = signal.direction === 'short' ? 'short' : 'long';
+    return this.bybitExposure.hasExchangeExposureForDirection(client, symbol, direction);
+  }
+
   // --- Notifications ---
 
   async processTradeCancelledNotificationJob(params: {
