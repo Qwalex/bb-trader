@@ -2288,3 +2288,14 @@
 - Manual verification: `npm run build -w apps/api`; Railway SSH — `node dist/main.js` стартует без DI error.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-190
+
+- Status: `done`
+- Scope: В publish-группы и QPulse — только успешно размещённые сигналы.
+- Files: `telegram-userbot-ingest-pipeline.service.ts`
+- Findings: `publishSignalToMirrorGroups` вызывался сразу после парса, до размещения на Bybit — при ошибке баланса сигнал уже уходил в группу.
+- Changes: публикация в mirror и `tryCreateQpulseForSignal` только после успешного placement (авто и после подтверждения в боте).
+- Manual verification: `npm run build -w apps/api`.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

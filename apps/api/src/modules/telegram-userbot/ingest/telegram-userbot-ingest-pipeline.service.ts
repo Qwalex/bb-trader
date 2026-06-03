@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
 } from '@nestjs/common';
+import type { SignalDto } from '@repo/shared';
 import { postCriticalNotifyText } from '../../../common/critical-notify.util';
 import { formatError } from '../../../common/format-error';
 import { PrismaService } from '../../../prisma/prisma.service';
@@ -555,12 +556,6 @@ export class TelegramUserbotIngestPipelineService {
 
     const signal = parsed.signal;
     signal.source = chatMeta?.title ?? undefined;
-    const mirrorSignal = await this.bybit.resolveMarketEntryIfMissing(signal, 'linear');
-    await this.userbotMirror.publishSignalToMirrorGroups({
-      ingest: { id: ingest.id, chatId: ingest.chatId, messageId: ingest.messageId },
-      signal: mirrorSignal,
-      sourceChatTitle: chatMeta?.title ?? undefined,
-    });
     this.appendIngestStageLog('info', 'Userbot: parse produced signal', ingest, {
       pair: signal.pair,
       direction: signal.direction,
@@ -919,6 +914,14 @@ export class TelegramUserbotIngestPipelineService {
           status: 'placed',
           error: null,
         });
+        await this.publishPlacedSignalToMirrorGroups({
+          ingest: { id: ingest.id, chatId: ingest.chatId, messageId: ingest.messageId },
+          signal,
+          sourceChatTitle: chatMeta?.title ?? undefined,
+        });
+        if (result.signalId) {
+          await this.userbotMirror.tryCreateQpulseForSignal(result.signalId);
+        }
       };
       const req = await this.telegramBot.requestExternalSignalConfirmation({
         ingestId: ingest.id,
@@ -1059,6 +1062,11 @@ export class TelegramUserbotIngestPipelineService {
       signalId: place.signalId,
       bybitOrderIds: place.bybitOrderIds,
       source: signal.source,
+    });
+    await this.publishPlacedSignalToMirrorGroups({
+      ingest: { id: ingest.id, chatId: ingest.chatId, messageId: ingest.messageId },
+      signal,
+      sourceChatTitle: chatMeta?.title ?? undefined,
     });
     if (place.signalId) {
       await this.userbotMirror.tryCreateQpulseForSignal(place.signalId);
@@ -1726,6 +1734,20 @@ export class TelegramUserbotIngestPipelineService {
   );
   return { kind: ai.kind, aiRequest, aiResponse };
 }
+
+  /** Публикация в publish-группы и QPulse — только после успешного размещения на Bybit. */
+  private async publishPlacedSignalToMirrorGroups(params: {
+    ingest: { id: string; chatId: string; messageId: string };
+    signal: SignalDto;
+    sourceChatTitle?: string;
+  }): Promise<void> {
+    const mirrorSignal = await this.bybit.resolveMarketEntryIfMissing(params.signal, 'linear');
+    await this.userbotMirror.publishSignalToMirrorGroups({
+      ingest: params.ingest,
+      signal: mirrorSignal,
+      sourceChatTitle: params.sourceChatTitle,
+    });
+  }
 
   async getBalanceGuardSnapshot(): Promise<{
   minBalanceUsd: number;
