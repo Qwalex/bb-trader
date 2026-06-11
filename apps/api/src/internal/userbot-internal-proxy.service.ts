@@ -39,6 +39,10 @@ export class UserbotInternalProxyService {
     if (typeof contentType === 'string') {
       headers.set('Content-Type', contentType);
     }
+    const cookie = req.headers.cookie;
+    if (typeof cookie === 'string' && cookie.trim()) {
+      headers.set('Cookie', cookie.trim());
+    }
     let body: string | undefined;
     if (req.method !== 'GET' && req.method !== 'HEAD' && req.body !== undefined) {
       body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);

@@ -10,6 +10,7 @@ import { Reflector } from '@nestjs/core';
 import { extractBearerToken, extractTokenFromCookieHeader } from './auth-token.util';
 import { IS_PUBLIC_ENDPOINT_KEY } from './public.decorator';
 import { verifySharedAuthToken } from './shared-auth-token';
+import { readWorkerInternalToken } from '../internal/worker-http.util';
 
 @Injectable()
 export class ApiAuthGuard implements CanActivate {
@@ -51,8 +52,19 @@ export class ApiAuthGuard implements CanActivate {
     }
     const rawHeader = req.headers?.authorization;
     const authHeader = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
-    const token =
+    const bearer = extractBearerToken(authHeader);
+    const internalToken = readWorkerInternalToken();
+    const forwardedRaw = req.headers?.['x-forwarded-authorization'];
+    const forwardedHeader = Array.isArray(forwardedRaw) ? forwardedRaw[0] : forwardedRaw;
+    let token =
       extractBearerToken(authHeader) ?? extractTokenFromCookieHeader(req.headers?.cookie);
+    if (
+      internalToken &&
+      bearer === internalToken &&
+      extractBearerToken(forwardedHeader)
+    ) {
+      token = extractBearerToken(forwardedHeader);
+    }
     if (!token) {
       throw new UnauthorizedException('Missing auth token');
     }
