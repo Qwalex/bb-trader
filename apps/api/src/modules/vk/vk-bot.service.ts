@@ -30,6 +30,7 @@ import {
 /** До Bybit/Orders: иначе orders → … → vk раньше transcript и TranscriptService в DI = undefined. */
 import { TranscriptService } from '../transcript/transcript.service';
 import { BybitService } from '../bybit/bybit.service';
+import { BybitSpotService } from '../bybit-spot/bybit-spot.service';
 import { OrdersService } from '../orders/orders.service';
 
 import {
@@ -86,6 +87,8 @@ export class VkBotService implements OnModuleInit, OnModuleDestroy {
     private readonly transcript: TranscriptService,
     @Inject(forwardRef(() => BybitService))
     private readonly bybit: BybitService,
+    @Inject(forwardRef(() => BybitSpotService))
+    private readonly bybitSpot: BybitSpotService,
     @Inject(forwardRef(() => OrdersService))
     private readonly orders: OrdersService,
     private readonly appLog: AppLogService,
@@ -1154,10 +1157,25 @@ export class VkBotService implements OnModuleInit, OnModuleDestroy {
     if (chat?.title) {
       parsed.signal.source = chat.title;
     }
-    const place = await this.bybit.placeSignalOrders(parsed.signal, text, {
-      chatId: row?.chatId ?? undefined,
-      messageId: row?.messageId ?? undefined,
+    const routed = await this.bybitSpot.routeUserbotSignalPlacement({
+      signal: parsed.signal,
+      rawMessage: text,
+      origin: {
+        chatId: row?.chatId ?? undefined,
+        messageId: row?.messageId ?? undefined,
+      },
+      ingestId,
     });
+    if (routed.kind === 'spot_prompt') {
+      return {
+        ok: false,
+        error: routed.message ?? 'Ожидает решение по споту в боте',
+      };
+    }
+    if (routed.kind === 'blocked') {
+      return { ok: false, error: formatError(routed.error) };
+    }
+    const place = routed.placement;
     if (!place.ok) {
       return {
         ok: false,

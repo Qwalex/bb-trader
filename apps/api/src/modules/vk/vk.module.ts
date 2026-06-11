@@ -3,6 +3,7 @@ import { forwardRef, Module } from '@nestjs/common';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { AppLogModule } from '../app-log/app-log.module';
 import { BybitModule } from '../bybit/bybit.module';
+import { BybitSpotModule } from '../bybit-spot/bybit-spot.module';
 import { OrdersModule } from '../orders/orders.module';
 import { SettingsModule } from '../settings/settings.module';
 import { TranscriptModule } from '../transcript/transcript.module';
@@ -19,6 +20,7 @@ import { VkNotifyMirrorService } from './vk-notify-mirror.service';
     PrismaModule,
     AppLogModule,
     forwardRef(() => BybitModule),
+    forwardRef(() => BybitSpotModule),
     forwardRef(() => OrdersModule),
   ],
   controllers: [VkCallbackController],

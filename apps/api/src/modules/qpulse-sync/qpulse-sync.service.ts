@@ -87,6 +87,13 @@ export class QpulseSyncService {
       return { ok: false, error: 'cabinetId missing' };
     }
 
+    const marketType = String(
+      (params.signalRow as { marketType?: string | null }).marketType ?? 'linear',
+    ).toLowerCase();
+    if (marketType === 'spot') {
+      return { ok: false, error: 'real spot signal — QPulse sync skipped' };
+    }
+
     return this.cabinetContext.runWithCabinetAsync(cabinetId, async () => {
     const cfg = await this.getConfig();
     if (!cfg.enabled || !cfg.apiUrl || !cfg.apiKey) {

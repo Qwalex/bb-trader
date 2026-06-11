@@ -2330,3 +2330,14 @@
 - Manual verification: навигация по ссылкам из AGENTS.md.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-194
+
+- Status: `done`
+- Scope: Spot-intent в тексте группового сигнала — фьючерс 1x + QPulse SPOT; без linear — спот-флоу без QPulse.
+- Files: `bybit-spot/utils/signal-spot-intent.util.ts`, `bybit-spot.service.ts`, `telegram-userbot-ingest-pipeline.service.ts`, `qpulse-signal-mapper.util.ts`, `qpulse-sync.service.ts`, `telegram-userbot-mirror.service.ts`, `telegram-signal-draft-flow.service.ts`, `vk-bot.service.ts`, `vk.module.ts`
+- Findings: раньше «spot» в сообщении или spot-only пара всегда уводила в spot_prompt; QPulse не различал linear 1x «как спот» и реальный spot.
+- Changes: `detectSpotIntentInMessage` (spot/спот/type spot/#spot и т.п.); при intent + linear — `leverage=1`, linear placement; QPulse payload `marketType=SPOT`; при intent без linear — spot_prompt; `marketType=spot` не синхронизируется в QPulse; confirmFromIngestId (TG/VK) через `routeUserbotSignalPlacement`.
+- Manual verification: `npx tsc -b --force` в `apps/api`; сценарии: «BTCUSDT LONG spot» с linear → ордера linear 1x + POST QPulse SPOT; монета только spot → prompt, без QPulse.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
