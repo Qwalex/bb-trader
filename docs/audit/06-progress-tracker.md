@@ -2369,6 +2369,6 @@
 - Scope: Worker split на Railway (окружение **cabinets**, схема B): Api + Worker-UB + Worker-Bybit через `API_PROCESS_ROLE`, internal HTTP + proxy Bybit/userbot.
 - Files: `apps/api/src/config/process-role.*`, `app-modules.util.ts`, `apps/api/src/internal/*`, `bybit-internal-client.service.ts`, lifecycle gates (telegram/userbot/bybit/vk/worker-queue/crons), `railpack.worker-*.json`, `railway.worker-*.toml`, `apps/api/package.json` start scripts, `.env.example`, `AGENTS.md`, `02-deploy-and-rollback.md`
 - Changes: условный `AppModule`; `/health` с role; internal routes (`/internal/telegram/external-confirm-request`, `/internal/ingest/after-external-confirm`, `/internal/bybit/*`); Api проксирует `/bybit/*` и `/telegram-userbot/*` на workers; confirm flow cross-process (Worker-UB → Api → Worker-UB webhook); placement через Worker-Bybit.
-- Manual verification: `npm run build -w api`; Railway deploy cabinets (Bybit → UB → Api); `GET /health`; admin `GET /health/queues` на Worker-Bybit; SSH логи MTProto/poll; **ручной smoke userbot status + confirm — пользователь**.
+- Manual verification: `npm run build -w api`; Railway deploy cabinets (Bybit → UB → Api); `GET /health` → Api `service:api`; Worker-UB MTProto connected; Worker-Bybit redeploy после export fix (commit `7eb7c78`); Web `/health` ok; **ручной smoke userbot status + confirm — пользователь (~5 мин)**.
 - Docs updated: этот трекер, `02-deploy-and-rollback.md`, `.env.example`, `AGENTS.md`.
 - Linked risks (`SEC-###`): N/A
