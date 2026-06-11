@@ -28,9 +28,17 @@ deployment_status() {
 check_http_health() {
   local url="$1"
   local expect_service="$2"
-  local body code service
-  body="$(curl -sS --max-time "$CURL_TIMEOUT" "$url/health" 2>/dev/null || true)"
-  code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time "$CURL_TIMEOUT" "$url/health" 2>/dev/null || echo '000')"
+  local body code service attempt
+  body=""
+  code="000"
+  for attempt in 1 2 3; do
+    body="$(curl -sS --max-time "$CURL_TIMEOUT" "$url/health" 2>/dev/null || true)"
+    code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time "$CURL_TIMEOUT" "$url/health" 2>/dev/null || echo '000')"
+    if [[ "$code" == "200" ]]; then
+      break
+    fi
+    sleep 2
+  done
   if [[ "$code" != "200" ]]; then
     log "FAIL $url/health http=$code"
     return 1
