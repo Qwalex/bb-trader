@@ -7,6 +7,7 @@ import {
   formatMirrorTpHitsLine,
   normalizeDirection,
 } from '../telegram-userbot/mirror/telegram-userbot-mirror-format.util';
+import { resolveQpulseSpotPresentation } from '../bybit-spot/utils/signal-spot-intent.util';
 
 type SignalRow = {
   id: string;
@@ -20,6 +21,7 @@ type SignalRow = {
   capitalPercent: number;
   orderUsd?: number;
   source?: string | null;
+  rawMessage?: string | null;
   status: string;
   realizedPnl?: number | null;
   liquidation?: boolean;
@@ -29,8 +31,11 @@ type SignalRow = {
     orderKind: string;
     status: string | null;
     price: number | null;
+    qty?: number | null;
   }>;
 };
+
+type OrderNotionalSlice = NonNullable<SignalRow['orders']>[number];
 
 function parseNumberArray(raw: string | undefined | null): number[] {
   try {
@@ -168,22 +173,85 @@ function mapStatus(
   return 'ACTIVE';
 }
 
+/** Фактический номинал: сумма filled ENTRY/DCA (qty×price), иначе orderUsd из сигнала. */
+function resolveEffectiveNotionalUsdt(params: {
+  orderUsd?: number;
+  orders?: OrderNotionalSlice[];
+}): number | null {
+  let fromOrders = 0;
+  let hasFilled = false;
+  for (const o of params.orders ?? []) {
+    if (
+      (o.orderKind === 'ENTRY' || o.orderKind === 'DCA') &&
+      isFilledOrderStatus(o.status)
+    ) {
+      const price = o.price != null ? Number(o.price) : 0;
+      const qty = o.qty != null ? Number(o.qty) : 0;
+      if (price > 0 && qty > 0) {
+        fromOrders += price * qty;
+        hasFilled = true;
+      }
+    }
+  }
+  if (hasFilled && fromOrders > 0) return fromOrders;
+  if (params.orderUsd != null && params.orderUsd > 0) return params.orderUsd;
+  return null;
+}
+
+function computeLossPercentFromStopMove(params: {
+  entries?: string;
+  stopLoss?: number;
+  direction: string;
+  leverage: number;
+  isSpot: boolean;
+}): number | null {
+  if (params.stopLoss == null || !Number.isFinite(params.stopLoss)) return null;
+  const entry = entryMid(parseNumberArray(params.entries));
+  if (entry <= 0) return null;
+  const direction = normalizeDirection(params.direction as SignalDto['direction']);
+  const moveStr = calculateMovePercent({
+    from: entry,
+    to: params.stopLoss,
+    direction,
+  });
+  const move = Number.parseFloat(moveStr.replace('%', ''));
+  if (!Number.isFinite(move) || move <= 0) return null;
+  const leverage = params.isSpot ? 1 : Math.max(1, params.leverage);
+  return -move * leverage;
+}
+
 function computeProfitPercentage(params: {
   realizedPnl?: number | null;
   leverage: number;
   orderUsd?: number;
   capitalPercent: number;
   isSpot: boolean;
+  orders?: OrderNotionalSlice[];
+  entries?: string;
+  stopLoss?: number;
+  direction?: string;
 }): number | null {
-  const pnl = params.realizedPnl;
-  if (pnl == null || !Number.isFinite(pnl)) return null;
-  const notional =
-    params.orderUsd && params.orderUsd > 0
-      ? params.orderUsd
-      : Math.max(1, params.capitalPercent);
-  if (notional <= 0) return null;
   const leverage = params.isSpot ? 1 : Math.max(1, params.leverage);
-  return (pnl / notional) * 100 * leverage;
+  const pnl = params.realizedPnl;
+  if (pnl != null && Number.isFinite(pnl)) {
+    const notional = resolveEffectiveNotionalUsdt({
+      orderUsd: params.orderUsd,
+      orders: params.orders,
+    });
+    if (notional != null && notional > 0) {
+      return (pnl / notional) * 100 * leverage;
+    }
+  }
+  if (pnl != null && pnl < 0 && params.direction) {
+    return computeLossPercentFromStopMove({
+      entries: params.entries,
+      stopLoss: params.stopLoss,
+      direction: params.direction,
+      leverage: params.leverage,
+      isSpot: params.isSpot,
+    });
+  }
+  return null;
 }
 
 export function formatProfitPercentDisplay(percent: number): string {
@@ -198,6 +266,10 @@ export function formatMirrorProfitPercent(params: {
   capitalPercent?: number;
   isSpot?: boolean;
   profitPercentOverride?: number | null;
+  orders?: OrderNotionalSlice[];
+  entries?: string;
+  stopLoss?: number;
+  direction?: string;
 }): string | null {
   if (
     params.profitPercentOverride != null &&
@@ -211,6 +283,10 @@ export function formatMirrorProfitPercent(params: {
     orderUsd: params.orderUsd,
     capitalPercent: params.capitalPercent ?? 0,
     isSpot: params.isSpot === true,
+    orders: params.orders,
+    entries: params.entries,
+    stopLoss: params.stopLoss,
+    direction: params.direction,
   });
   if (pct == null || !Number.isFinite(pct)) return null;
   return formatProfitPercentDisplay(pct);
@@ -226,7 +302,9 @@ export function mapSignalRowToQpulsePayload(row: SignalRow): Record<string, unkn
   const tradeDirection = normalizeDirection(row.direction as SignalDto['direction']);
   const directionRaw = String(row.direction ?? 'long').toLowerCase();
   const marketTypeRaw = String(row.marketType ?? 'linear').toLowerCase();
-  const isSpot = marketTypeRaw === 'spot';
+  const isTradingSpot = marketTypeRaw === 'spot';
+  const qpulseAsSpot = resolveQpulseSpotPresentation(row);
+  const isSpot = isTradingSpot || qpulseAsSpot;
   const hasFilledEntry = hasFilledEntryOrder(row.orders);
   const tpHits = countFilledTpOrders(row.orders, takeProfits, directionRaw);
   const mappedStatus = mapStatus(row.status, {
@@ -235,7 +313,10 @@ export function mapSignalRowToQpulsePayload(row: SignalRow): Record<string, unkn
     hasFilledEntry,
   });
   const closed = mappedStatus === 'CLOSED';
-  const positionSizeUsdt = row.orderUsd && row.orderUsd > 0 ? row.orderUsd : null;
+  const positionSizeUsdt = resolveEffectiveNotionalUsdt({
+    orderUsd: row.orderUsd,
+    orders: row.orders,
+  });
   const realizedPnlUsdt =
     row.realizedPnl != null && Number.isFinite(row.realizedPnl) ? row.realizedPnl : null;
 
@@ -261,6 +342,10 @@ export function mapSignalRowToQpulsePayload(row: SignalRow): Record<string, unkn
     orderUsd: row.orderUsd,
     capitalPercent: row.capitalPercent,
     isSpot,
+    orders: row.orders,
+    entries: row.entries,
+    stopLoss: row.stopLoss,
+    direction: row.direction,
   });
 
   return {
@@ -293,6 +378,8 @@ export type MirrorCloseSignalInput = {
   status: string;
   direction: string;
   takeProfits: string;
+  entries?: string;
+  stopLoss?: number;
   liquidation?: boolean;
   realizedPnl?: number | null;
   leverage: number;
@@ -324,6 +411,10 @@ export function resolveMirrorCloseContext(input: MirrorCloseSignalInput): {
     capitalPercent: input.capitalPercent,
     isSpot,
     profitPercentOverride: hasRealizedPnl ? undefined : input.profitPercentOverride,
+    orders: input.orders,
+    entries: input.entries,
+    stopLoss: input.stopLoss,
+    direction: input.direction,
   });
   const isLoss =
     status === 'CLOSED_LOSS' || (hasRealizedPnl && pnl < 0);
@@ -413,6 +504,8 @@ export function buildMirrorTradeEventText(params: {
   closeStatus?: string;
   closeDirection?: string;
   closeTakeProfits?: string;
+  closeEntries?: string;
+  closeStopLoss?: number;
   closeOrders?: SignalRow['orders'];
   tpDirection?: 'LONG' | 'SHORT';
   tpEntryPrice?: number | null;
@@ -457,6 +550,8 @@ export function buildMirrorTradeEventText(params: {
         status: params.closeStatus ?? (params.kind === 'sl' ? 'CLOSED_LOSS' : 'CLOSED_WIN'),
         direction: params.closeDirection ?? 'long',
         takeProfits: params.closeTakeProfits ?? '[]',
+        entries: params.closeEntries,
+        stopLoss: params.closeStopLoss,
         liquidation: params.kind === 'liquidation',
         realizedPnl: params.pnl,
         leverage: params.leverage ?? 1,
@@ -474,6 +569,8 @@ export function buildMirrorTradeEventText(params: {
         status: params.closeStatus ?? 'CLOSED_WIN',
         direction: params.closeDirection ?? 'long',
         takeProfits: params.closeTakeProfits ?? '[]',
+        entries: params.closeEntries,
+        stopLoss: params.closeStopLoss,
         realizedPnl: params.pnl,
         leverage: params.leverage ?? 1,
         orderUsd: params.orderUsd,
@@ -490,6 +587,8 @@ export function buildMirrorOutcomeText(params: {
   status?: string;
   direction?: string;
   takeProfits?: string;
+  entries?: string;
+  stopLoss?: number;
   orders?: SignalRow['orders'];
   realizedPnl?: number | null;
   leverage?: number;
@@ -504,6 +603,8 @@ export function buildMirrorOutcomeText(params: {
     status: params.status ?? 'CLOSED_WIN',
     direction: params.direction ?? 'long',
     takeProfits: params.takeProfits ?? '[]',
+    entries: params.entries,
+    stopLoss: params.stopLoss,
     liquidation: params.liquidation === true,
     realizedPnl: params.realizedPnl,
     leverage: params.leverage ?? 1,

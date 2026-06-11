@@ -113,6 +113,8 @@ railway ssh -s api 'printenv | grep -E "^TELEGRAM_BOT_" || true'
 
 ## QPulse sync (signalsBot ↔ QPulse)
 
+Полная карта для агентов: **`docs/qpulse-ecosystem.md`**. QPulse admin (seed): `admin@qpulse.app` / `admin123` — см. QPulse `docs/runbooks/deploy-railway.md`.
+
 Кабинетные ключи в БД (`Setting`): `QPULSE_SYNC_ENABLED`, `QPULSE_API_URL`, `QPULSE_API_KEY`. UI: `/my-group`.
 
 На QPulse API (Railway, ветка `master` / production): `INTEGRATIONS_API_KEY` — тот же секрет, что `QPULSE_API_KEY` в кабинете.

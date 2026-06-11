@@ -1,6 +1,6 @@
 import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 
-import { normalizeTradingPair } from '@repo/shared';
+import { normalizeTradingPair, type SignalDto } from '@repo/shared';
 
 import { formatError } from '../../common/format-error';
 import { AppLogService } from '../app-log/app-log.service';
@@ -15,6 +15,10 @@ import type {
   RouteUserbotSignalPlacementParams,
   UserbotPlacementRouteResult,
 } from './types/bybit-spot.types';
+import {
+  applySpotIntentLeverage,
+  detectSpotIntentInMessage,
+} from './utils/signal-spot-intent.util';
 
 @Injectable()
 export class BybitSpotService {
@@ -47,6 +51,7 @@ export class BybitSpotService {
   async resolveUserbotPlacementRoute(params: {
     signal: { pair: string; direction: string };
     ingestId: string;
+    rawMessage?: string;
   }): Promise<
     | { kind: 'linear' }
     | { kind: 'spot_prompt' }
@@ -54,12 +59,26 @@ export class BybitSpotService {
   > {
     const symbol = normalizeTradingPair(params.signal.pair);
     const avail = await this.instrument.resolveAvailability(params.signal.pair);
+    const spotIntent = detectSpotIntentInMessage(params.rawMessage);
     if (!avail.linear && !avail.spot) {
       return {
         kind: 'blocked',
         error: `Пары ${symbol} нет на бирже Bybit`,
         userbotStatus: 'place_error',
       };
+    }
+    if (spotIntent) {
+      if (avail.linear) {
+        return { kind: 'linear' };
+      }
+      if (params.signal.direction !== 'long') {
+        return {
+          kind: 'blocked',
+          error: 'На споте доступна только покупка (long)',
+          userbotStatus: 'place_error',
+        };
+      }
+      return { kind: 'spot_prompt' };
     }
     if (!avail.linear && avail.spot) {
       if (params.signal.direction !== 'long') {
@@ -80,7 +99,9 @@ export class BybitSpotService {
     const resolve = await this.resolveUserbotPlacementRoute({
       signal: params.signal,
       ingestId: params.ingestId,
+      rawMessage: params.rawMessage,
     });
+    const signalForPlacement = applySpotIntentLeverage(params.signal, params.rawMessage);
     if (resolve.kind === 'blocked') {
       return {
         kind: 'blocked',
@@ -91,7 +112,7 @@ export class BybitSpotService {
     if (resolve.kind === 'spot_prompt') {
       const started = await this.spotFlow.startSpotPrompt({
         ingestId: params.ingestId,
-        signal: params.signal,
+        signal: signalForPlacement,
         rawMessage: params.rawMessage,
         origin: params.origin,
       });
@@ -104,14 +125,17 @@ export class BybitSpotService {
     }
 
     const placement = await this.bybit.placeSignalOrders(
-      params.signal,
+      signalForPlacement,
       params.rawMessage,
       params.origin,
     );
-    if (!placement.ok && (await this.shouldFallbackToSpotAfterLinearFailure(params, placement))) {
+    if (
+      !placement.ok &&
+      (await this.shouldFallbackToSpotAfterLinearFailure(params, placement, signalForPlacement))
+    ) {
       const started = await this.spotFlow.startSpotPrompt({
         ingestId: params.ingestId,
-        signal: params.signal,
+        signal: signalForPlacement,
         rawMessage: params.rawMessage,
         origin: params.origin,
       });
@@ -128,8 +152,9 @@ export class BybitSpotService {
   private async shouldFallbackToSpotAfterLinearFailure(
     params: RouteUserbotSignalPlacementParams,
     placement: PlaceOrdersResult,
+    signal: SignalDto = params.signal,
   ): Promise<boolean> {
-    if (placement.ok || params.signal.direction !== 'long') {
+    if (placement.ok || signal.direction !== 'long') {
       return false;
     }
     const err = formatError(placement.error).toLowerCase();

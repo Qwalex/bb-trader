@@ -2299,3 +2299,34 @@
 - Manual verification: `npm run build -w apps/api`.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-191
+
+- Status: `done`
+- Scope: Убрать «Total profit» из уведомлений о достижении TP в publish-группах.
+- Files: `telegram-userbot-mirror-format.util.ts`
+- Changes: строка `📈 Total profit` удалена из `formatMirrorTpFilledText`; `computeMirrorTpProgress` возвращает только hit-lines по уровням.
+- Manual verification: `npm run build -w apps/api`.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-192
+
+- Status: `done`
+- Scope: Завышенный Loss% в mirror/QPulse при SL (пример ONDO −416% вместо ~−73%).
+- Files: `qpulse-signal-mapper.util.ts`, `signal-distribution.service.ts`
+- Findings: `computeProfitPercentage` при `orderUsd=0` брал знаменатель `Math.max(1, capitalPercent)` (проценты, не USDT), тогда как фактический номинал позиции считался при placement от equity/DEFAULT_ORDER_USD; формула `(pnl/notional)×100×leverage` давала сотни % убытка.
+- Changes: `resolveEffectiveNotionalUsdt` — сумма filled ENTRY/DCA (qty×price), иначе `orderUsd`; fallback для убытка — движение entry→SL × leverage; в close-event select добавлены `qty`, `entries`, `stopLoss`.
+- Manual verification: `npm run build -w apps/api`; сценарий ONDO SHORT SL ~3.18% × 23x → Loss ~−73%.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-193
+
+- Status: `done`
+- Scope: Документация QPulse ↔ signalsBot для AI-агентов; учётные данные admin seed.
+- Files: `docs/qpulse-ecosystem.md`, `AGENTS.md`; QPulse `AGENTS.md`, `docs/integrations/signalsbot.md`, `docs/getting-started.md`
+- Changes: кросс-ссылки репозиториев, admin login, integration API key, поток sync, таблицы деплоя и точек правок.
+- Manual verification: навигация по ссылкам из AGENTS.md.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

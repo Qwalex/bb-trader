@@ -136,6 +136,12 @@ export class TelegramUserbotMirrorService {
     if (!signal?.cabinetId || !signal.sourceChatId || !signal.sourceMessageId) {
       return;
     }
+    if (String(signal.marketType ?? 'linear').toLowerCase() === 'spot') {
+      this.logger.debug(
+        `QPulse sync skipped for ${signalId}: реальный спот (marketType=spot)`,
+      );
+      return;
+    }
     const cabinetId = signal.cabinetId;
     const prismaAny = this.prisma as any;
 

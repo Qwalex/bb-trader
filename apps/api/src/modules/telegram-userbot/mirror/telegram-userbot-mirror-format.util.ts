@@ -47,26 +47,17 @@ export function calculateMovePercent(params: {
   return `${Math.abs(raw).toFixed(2)}%`;
 }
 
-function parseMovePercentValue(pct: string): number {
-  return Number.parseFloat(pct.replace('%', '')) || 0;
-}
-
-/** Cumulative TP progress: each level profit + total (equal split across all targets). */
+/** Cumulative TP progress: hit lines per level (move from entry to each TP). */
 export function computeMirrorTpProgress(params: {
   tpNumber: number;
   entryPrice: number;
   direction: 'LONG' | 'SHORT';
   takeProfits: number[];
   currentFillPrice?: number | null;
-}): {
-  hitLines: string[];
-  totalProfitPercent: string | null;
-} {
+}): string[] {
   const tpNumber = Math.max(1, Math.trunc(params.tpNumber));
   const levels = params.takeProfits.filter((p) => Number.isFinite(p) && p > 0);
-  const totalLevels = Math.max(levels.length, tpNumber);
   const hitLines: string[] = [];
-  let totalMove = 0;
 
   for (let index = 0; index < tpNumber; index += 1) {
     let tpPrice = levels[index];
@@ -87,13 +78,9 @@ export function computeMirrorTpProgress(params: {
       direction: params.direction,
     });
     hitLines.push(`✅ TP${index + 1} hit · +${movePct}`);
-    totalMove += parseMovePercentValue(movePct) / totalLevels;
   }
 
-  return {
-    hitLines,
-    totalProfitPercent: hitLines.length > 0 ? `+${totalMove.toFixed(2)}%` : null,
-  };
+  return hitLines;
 }
 
 export function formatMirrorTpFilledText(params: {
@@ -114,7 +101,7 @@ export function formatMirrorTpFilledText(params: {
   const entry = params.entryPrice;
   const direction = params.direction;
   if (entry != null && entry > 0 && direction) {
-    const { hitLines, totalProfitPercent } = computeMirrorTpProgress({
+    const hitLines = computeMirrorTpProgress({
       tpNumber,
       entryPrice: entry,
       direction,
@@ -123,9 +110,6 @@ export function formatMirrorTpFilledText(params: {
     });
     if (hitLines.length > 0) {
       lines.push(...hitLines);
-    }
-    if (totalProfitPercent) {
-      lines.push(`📈 Total profit: ${totalProfitPercent}`);
     }
   }
 

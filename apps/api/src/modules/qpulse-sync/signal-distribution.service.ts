@@ -54,11 +54,14 @@ export class SignalDistributionService {
         orderUsd: true,
         capitalPercent: true,
         marketType: true,
+        stopLoss: true,
+        status: true,
         orders: {
           select: {
             orderKind: true,
             status: true,
             price: true,
+            qty: true,
           },
         },
       },
@@ -146,6 +149,12 @@ export class SignalDistributionService {
         orderUsd: signal.orderUsd,
         capitalPercent: signal.capitalPercent,
         isSpot: String(signal.marketType ?? 'linear').toLowerCase() === 'spot',
+        closeStatus: signal.status,
+        closeDirection: signal.direction,
+        closeTakeProfits: signal.takeProfits,
+        closeEntries: signal.entries,
+        closeStopLoss: signal.stopLoss,
+        closeOrders: signal.orders,
       });
 
       await this.mirror.publishTradeEventToMirrorGroups({
@@ -176,6 +185,8 @@ export class SignalDistributionService {
         sourceMessageId: true,
         status: true,
         direction: true,
+        entries: true,
+        stopLoss: true,
         takeProfits: true,
         realizedPnl: true,
         liquidation: true,
@@ -188,6 +199,7 @@ export class SignalDistributionService {
             orderKind: true,
             status: true,
             price: true,
+            qty: true,
           },
         },
       },
@@ -203,6 +215,8 @@ export class SignalDistributionService {
         status: signal.status,
         direction: signal.direction,
         takeProfits: signal.takeProfits,
+        entries: signal.entries,
+        stopLoss: signal.stopLoss,
         liquidation: params.liquidation ?? signal.liquidation === true,
         realizedPnl: params.realizedPnl ?? signal.realizedPnl,
         leverage: signal.leverage,

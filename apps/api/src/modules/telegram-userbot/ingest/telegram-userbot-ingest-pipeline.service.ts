@@ -796,6 +796,7 @@ export class TelegramUserbotIngestPipelineService {
     const placementResolve = await this.bybitSpot.resolveUserbotPlacementRoute({
       signal,
       ingestId: ingest.id,
+      rawMessage: text,
     });
     if (placementResolve.kind === 'blocked') {
       this.appendIngestStageLog('error', 'Userbot: placement blocked by market availability', ingest, {
