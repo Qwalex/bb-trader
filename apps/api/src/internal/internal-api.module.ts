@@ -1,10 +1,9 @@
 import { forwardRef, Global, Module } from '@nestjs/common';
 
 import {
-  isApiProcessRole,
   isDedicatedApiProcessRole,
-  isWorkerBybitProcessRole,
-  isWorkerUserbotProcessRole,
+  isDedicatedWorkerBybitProcessRole,
+  isDedicatedWorkerUserbotProcessRole,
 } from '../config/process-role.util';
 import { CabinetModule } from '../modules/cabinet/cabinet.module';
 import { BybitModule } from '../modules/bybit/bybit.module';
@@ -19,10 +18,11 @@ import { InternalTelegramController } from './internal-telegram.controller';
 import { TelegramUserbotProxyModule } from './telegram-userbot-proxy.module';
 import { UserbotInternalProxyService } from './userbot-internal-proxy.service';
 
+/** Internal HTTP только на dedicated-ролях; при `all` маршруты не регистрируются. */
 const controllers = [
-  ...(isApiProcessRole() ? [InternalTelegramController] : []),
-  ...(isWorkerUserbotProcessRole() ? [InternalIngestController] : []),
-  ...(isWorkerBybitProcessRole() ? [BybitInternalController] : []),
+  ...(isDedicatedApiProcessRole() ? [InternalTelegramController] : []),
+  ...(isDedicatedWorkerUserbotProcessRole() ? [InternalIngestController] : []),
+  ...(isDedicatedWorkerBybitProcessRole() ? [BybitInternalController] : []),
 ];
 
 @Global()
@@ -30,11 +30,11 @@ const controllers = [
   imports: [
     CabinetModule,
     ...(isDedicatedApiProcessRole() ? [TelegramUserbotProxyModule] : []),
-    ...(isApiProcessRole() ? [forwardRef(() => TelegramModule)] : []),
-    ...(isWorkerUserbotProcessRole()
+    ...(isDedicatedApiProcessRole() ? [forwardRef(() => TelegramModule)] : []),
+    ...(isDedicatedWorkerUserbotProcessRole()
       ? [forwardRef(() => TelegramUserbotModule)]
       : []),
-    ...(isWorkerBybitProcessRole()
+    ...(isDedicatedWorkerBybitProcessRole()
       ? [forwardRef(() => BybitModule), forwardRef(() => BybitSpotModule)]
       : []),
   ],
