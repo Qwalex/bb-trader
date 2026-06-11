@@ -4,10 +4,12 @@ import Link from 'next/link';
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 
-import { NAV_MENU_ITEMS } from '@repo/shared';
+import { NAV_MENU_ITEMS, normalizeCabinetPurpose, type CabinetPurpose } from '@repo/shared';
 
 import { withCabinetPageHref } from '../../lib/cabinet-page-href.util';
+import { filterNavMenuItems, resolveNavHiddenIds } from '../../lib/cabinet-nav.util';
 import { readActiveCabinetIdClient } from '../../lib/cabinet-client.util';
+import { fetchApiResponse } from '../../lib/api';
 import { CabinetSwitcher } from './CabinetSwitcher';
 
 type TopNavProps = {
@@ -27,14 +29,40 @@ function TopNavBody({
   hiddenMenuIds,
   cabinetSyncKey,
 }: TopNavBodyProps) {
-  const hiddenSet = useMemo(() => new Set(hiddenMenuIds), [hiddenMenuIds]);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDetailsElement | null>(null);
   const [linkCabinetId, setLinkCabinetId] = useState(serverCabinetId);
+  const [cabinetPurpose, setCabinetPurpose] = useState<CabinetPurpose>('trading');
 
   useEffect(() => {
     setLinkCabinetId(readActiveCabinetIdClient() || serverCabinetId);
   }, [serverCabinetId, cabinetSyncKey]);
+
+  useEffect(() => {
+    const cabinetId = linkCabinetId?.trim();
+    if (!cabinetId) {
+      setCabinetPurpose('trading');
+      return;
+    }
+    void (async () => {
+      try {
+        const res = await fetchApiResponse('/cabinets');
+        if (!res.ok) return;
+        const json = (await res.json()) as {
+          items?: Array<{ id: string; purpose?: string }>;
+        };
+        const row = (json.items ?? []).find((c) => c.id === cabinetId);
+        setCabinetPurpose(normalizeCabinetPurpose(row?.purpose));
+      } catch {
+        setCabinetPurpose('trading');
+      }
+    })();
+  }, [linkCabinetId, cabinetSyncKey]);
+
+  const hiddenSet = useMemo(
+    () => resolveNavHiddenIds(hiddenMenuIds, cabinetPurpose),
+    [hiddenMenuIds, cabinetPurpose],
+  );
 
   useEffect(() => {
     const handlePointerDown = (event: MouseEvent | TouchEvent) => {
@@ -63,15 +91,28 @@ function TopNavBody({
   const withCabinet = (path: string): string =>
     withCabinetPageHref(path, linkCabinetId);
 
-  const visibleItems = NAV_MENU_ITEMS.filter((item) => {
-    if (item.adminOnly && !isAdmin) return false;
-    return !hiddenSet.has(item.id);
-  });
-  const hiddenItems = NAV_MENU_ITEMS.filter((item) => {
-    if (item.adminOnly && !isAdmin) return false;
-    return hiddenSet.has(item.id);
-  });
-  const allItems = NAV_MENU_ITEMS.filter((item) => !(item.adminOnly && !isAdmin));
+  const visibleItems = useMemo(
+    () => filterNavMenuItems({ isAdmin, hiddenSet, cabinetPurpose }),
+    [isAdmin, hiddenSet, cabinetPurpose],
+  );
+  const hiddenItems = useMemo(
+    () =>
+      NAV_MENU_ITEMS.filter((item) => {
+        if (
+          item.adminOnly &&
+          !isAdmin &&
+          !(cabinetPurpose === 'content' && item.contentCabinetPreferred)
+        ) {
+          return false;
+        }
+        return hiddenSet.has(item.id);
+      }),
+    [isAdmin, hiddenSet, cabinetPurpose],
+  );
+  const allItems = useMemo(
+    () => filterNavMenuItems({ isAdmin: true, hiddenSet: new Set(), cabinetPurpose }),
+    [cabinetPurpose],
+  );
 
   return (
     <header className="nav">

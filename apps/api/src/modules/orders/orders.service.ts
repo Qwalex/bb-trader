@@ -1158,6 +1158,7 @@ export class OrdersService {
         ]);
         const isFilled = (v: string | undefined) => String(v ?? '').trim().length > 0;
         const userbotConnected = userbotConnectedGlobal;
+        const isContentCabinet = c.purpose === 'content';
         const setupWarnings: string[] = [];
         if (!userbotConnected) {
           setupWarnings.push('Подключите Userbot (статус должен быть «подключен»).');
@@ -1165,20 +1166,22 @@ export class OrdersService {
         if (enabledGroupsCount < 1) {
           setupWarnings.push('В Userbot включите подписку минимум на 1 группу.');
         }
-        if (!isFilled(required.BYBIT_API_KEY_MAINNET)) {
-          setupWarnings.push('Заполните: Bybit API key (основной / боевой).');
-        }
-        if (!isFilled(required.BYBIT_API_SECRET_MAINNET)) {
-          setupWarnings.push('Заполните: Bybit API secret (основной / боевой).');
-        }
-        if (!isFilled(required.TELEGRAM_BOT_TOKEN)) {
-          setupWarnings.push('Заполните: Telegram bot token.');
-        }
-        if (!isFilled(required.TELEGRAM_WHITELIST)) {
-          setupWarnings.push('Заполните: Telegram user IDs.');
+        if (!isContentCabinet) {
+          if (!isFilled(required.BYBIT_API_KEY_MAINNET)) {
+            setupWarnings.push('Заполните: Bybit API key (основной / боевой).');
+          }
+          if (!isFilled(required.BYBIT_API_SECRET_MAINNET)) {
+            setupWarnings.push('Заполните: Bybit API secret (основной / боевой).');
+          }
+          if (!isFilled(required.TELEGRAM_BOT_TOKEN)) {
+            setupWarnings.push('Заполните: Telegram bot token.');
+          }
+          if (!isFilled(required.TELEGRAM_WHITELIST)) {
+            setupWarnings.push('Заполните: Telegram user IDs.');
+          }
         }
 
-        if (c.isActive) {
+        if (c.isActive && !isContentCabinet) {
           try {
             const bal = await this.bybit.getUnifiedUsdtBalanceDetails();
             if (bal && Number.isFinite(bal.totalUsd)) {
@@ -1221,19 +1224,30 @@ export class OrdersService {
           minBalanceRaw,
           USERBOT_MIN_BALANCE_USD_DEFAULT,
         );
-        const balanceGuard = buildDashboardCabinetBalanceGuard({
-          minBalanceUsd,
-          balanceUsd: availableBalanceUsd,
-          totalBalanceUsd,
-        });
+        const balanceGuard = isContentCabinet
+          ? undefined
+          : buildDashboardCabinetBalanceGuard({
+              minBalanceUsd,
+              balanceUsd: availableBalanceUsd,
+              totalBalanceUsd,
+            });
 
         const effectiveSetupWarnings = c.isActive ? setupWarnings : [];
-        const effectiveBalanceGuard = c.isActive ? balanceGuard : undefined;
+        const effectiveBalanceGuard =
+          c.isActive && !isContentCabinet ? balanceGuard : undefined;
 
-        const utilization = await this.getCabinetUtilizationMetrics({
-          availableBalanceUsd,
-          totalBalanceUsd,
-        });
+        const utilization = isContentCabinet
+          ? {
+              avgSignalExecutionMs: null,
+              avgIdlePeriodMs: null,
+              unusedBalanceRatio: null,
+              avgUnusedBalanceRatioMonth: null,
+              utilizationPeriodDays: 0,
+            }
+          : await this.getCabinetUtilizationMetrics({
+              availableBalanceUsd,
+              totalBalanceUsd,
+            });
 
         return {
           cabinetId: c.id,
@@ -1241,7 +1255,8 @@ export class OrdersService {
           name: c.name,
           isDefault: c.isDefault,
           isActive: c.isActive,
-          openSignals: stats.openSignals,
+          purpose: c.purpose,
+          openSignals: isContentCabinet ? 0 : stats.openSignals,
           userbotReadMessagesToday,
           userbotSignalsPlacedToday,
           userbotConnected,

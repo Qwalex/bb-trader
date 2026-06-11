@@ -14,6 +14,7 @@ export type DashboardCabinetCardDto = {
   isDefault: boolean;
   /** false — фоновая работа кабинета остановлена. */
   isActive: boolean;
+  purpose: 'trading' | 'content';
   openSignals: number;
   userbotReadMessagesToday: number;
   userbotSignalsPlacedToday: number;

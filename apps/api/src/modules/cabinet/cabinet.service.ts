@@ -1,5 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 
+import { normalizeCabinetPurpose, type CabinetPurpose } from '@repo/shared';
+
 import { PrismaService } from '../../prisma/prisma.service';
 import { CABINET_LIST_SELECT, mapCabinetListRow } from './cabinet-select.util';
 import {
@@ -242,6 +244,22 @@ export class CabinetService implements OnModuleInit {
     return row?.isActive === true;
   }
 
+  async getCabinetPurpose(cabinetIdRaw?: string | null): Promise<CabinetPurpose> {
+    const id = String(cabinetIdRaw ?? '').trim();
+    if (!id) {
+      return 'trading';
+    }
+    const row = await this.prisma.cabinet.findUnique({
+      where: { id },
+      select: { purpose: true },
+    });
+    return normalizeCabinetPurpose(row?.purpose);
+  }
+
+  async isContentCabinet(cabinetIdRaw?: string | null): Promise<boolean> {
+    return (await this.getCabinetPurpose(cabinetIdRaw)) === 'content';
+  }
+
   async listEnabledCabinetIdsForChat(chatId: string): Promise<string[]> {
     const chat = String(chatId ?? '').trim();
     if (!chat) {
@@ -296,6 +314,7 @@ export class CabinetService implements OnModuleInit {
     ownerUserId?: string | null;
     name: string;
     slug?: string;
+    purpose?: CabinetPurpose;
   }): Promise<CabinetListItem> {
     const name = String(params.name ?? '').trim();
     if (!name) {
@@ -306,12 +325,14 @@ export class CabinetService implements OnModuleInit {
       throw new Error('Cabinet slug is invalid');
     }
     const slug = await this.allocateUniqueSlug(baseSlug);
+    const purpose = normalizeCabinetPurpose(params.purpose);
     const row = await this.prisma.cabinet.create({
       data: {
         name,
         slug,
         isDefault: false,
         isActive: true,
+        purpose,
         ownerUserId: String(params.ownerUserId ?? '').trim() || undefined,
       },
       select: CABINET_LIST_SELECT,
@@ -367,6 +388,7 @@ export class CabinetService implements OnModuleInit {
             slug,
             isDefault: false,
             isActive: true,
+            purpose: source.purpose ?? 'trading',
             ownerUserId: ownerUserId ?? undefined,
           },
           select: CABINET_LIST_SELECT,
@@ -461,10 +483,16 @@ export class CabinetService implements OnModuleInit {
     name?: string;
     slug?: string;
     isActive?: boolean;
+    purpose?: CabinetPurpose;
   }): Promise<CabinetListItem> {
     const id = String(params.id ?? '').trim();
     if (!id) throw new Error('Cabinet id is required');
-    const data: { name?: string; slug?: string; isActive?: boolean } = {};
+    const data: {
+      name?: string;
+      slug?: string;
+      isActive?: boolean;
+      purpose?: string;
+    } = {};
     if (params.name != null) {
       const name = String(params.name).trim();
       if (!name) throw new Error('Cabinet name is invalid');
@@ -477,6 +505,9 @@ export class CabinetService implements OnModuleInit {
     }
     if (params.isActive != null) {
       data.isActive = Boolean(params.isActive);
+    }
+    if (params.purpose != null) {
+      data.purpose = normalizeCabinetPurpose(params.purpose);
     }
     const ownerUserId = String(params.ownerUserId ?? '').trim() || null;
     const existing = await this.prisma.cabinet.findFirst({

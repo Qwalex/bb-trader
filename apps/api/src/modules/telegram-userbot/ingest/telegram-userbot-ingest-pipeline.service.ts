@@ -137,6 +137,7 @@ export class TelegramUserbotIngestPipelineService {
       });
       return;
     }
+    const isContentCabinet = await this.cabinets.isContentCabinet(effectiveCabinetId);
     this.appendIngestStageLog('debug', 'Userbot: processing started', ingest, {
       replyToMessageId: meta?.replyToMessageId ?? null,
       textPreview: makeTextPreview(text),
@@ -322,7 +323,25 @@ export class TelegramUserbotIngestPipelineService {
       signalExternalId: signalExternalId ?? null,
       classifiedAt: new Date().toISOString(),
       processingElapsedMs: Date.now() - processingStartedAt.getTime(),
+      cabinetPurpose: isContentCabinet ? 'content' : 'trading',
     });
+
+    if (
+      isContentCabinet &&
+      (kind === 'signal' || kind === 'reentry' || kind === 'close' || kind === 'result')
+    ) {
+      this.appendIngestStageLog('info', 'Userbot: trading kind skipped (content cabinet)', ingest, {
+        kind,
+      });
+      await this.ingest.updateIngest(ingest.id, {
+        classification: kind === 'close' || kind === 'result' ? 'result' : 'signal',
+        status: 'ignored',
+        error: 'Информационный кабинет: торговые сообщения не обрабатываются',
+        aiRequest,
+        aiResponse,
+      });
+      return;
+    }
 
     if (kind === 'reentry') {
       const reentry = await this.signalReply.tryReentryFromReply({

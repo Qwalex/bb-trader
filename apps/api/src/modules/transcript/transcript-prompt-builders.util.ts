@@ -101,7 +101,7 @@ Use all provided parts together.
 
 Return ONLY strict JSON:
 {
-  "kind": "signal" | "close" | "reentry" | "result" | "ad" | "analysis" | "promo" | "content" | "other",
+  "kind": "signal" | "close" | "reentry" | "result" | "ad" | "analysis" | "promo" | "content" | "news" | "other",
   "reason": "short reason in Russian"
 }
 
@@ -116,8 +116,9 @@ Classification rules:
 7. Return "ad" for advertisements and promos of external channels, VIP subscriptions, paid signal groups, Cornix/bot bundles, referral links, "message to buy", combo prices for channel access, TeleFeed promos, and similar commercial offers. No actionable trade setup for our bot.
 8. Return "analysis" for market commentary and technical outlook without a fresh actionable trade setup: price updates, trend/channel/support-resistance narrative, "possible scenarios", "keep an eye", "stay tuned", educational outlook. Usually mentions a pair or market but lacks explicit new entry+SL+TP setup intent.
 9. Return "promo" for contests, giveaways, trader shows, challenge promotions, prize pools, "who will win", promo codes for prop firms/challenges, entertainment/event posts tied to trading community — not a trade signal and not a pure channel subscription ad.
-10. Return "content" for useful non-commercial posts that are NOT "analysis" and NOT "ad": trading tips, education, how-to, risk/money management advice, news digests, tool/platform updates, community announcements with practical value, motivational or informational posts for traders. The message should feel like substantive value for the reader, not a sales pitch and not primarily a pair/market outlook.
-11. Return "other" for generic chat, empty fluff, off-topic noise, or unclear text — but NOT for incomplete setup stubs that already name pair and side (those are "signal"). Do NOT use "other" when "ad", "analysis", "promo", or "content" fits better.
+10. Return "content" for useful non-commercial posts that are NOT "analysis", NOT "news", and NOT "ad": trading tips, education, how-to, risk/money management advice, tool/platform updates, community announcements with practical value, motivational posts for traders. The message should feel like substantive value, not a sales pitch and not primarily a pair/market outlook or breaking news.
+11. Return "news" for factual market/news updates: listings, delistings, regulatory headlines, macro events, exchange announcements, project updates, partnership news, hack/exploit reports, ETF flows, "breaking", digest of events — reporting what happened, not primarily a trade setup or technical outlook scenario.
+12. Return "other" for generic chat, empty fluff, off-topic noise, or unclear text — but NOT for incomplete setup stubs that already name pair and side (those are "signal"). Do NOT use "other" when "ad", "analysis", "promo", "content", or "news" fits better.
 
 Priority:
 - explicit manual close wording > close
@@ -127,10 +128,11 @@ Priority:
 - channel/VIP/subscription ads > ad
 - market outlook without setup > analysis
 - contests/giveaways/show promos > promo
-- useful educational/informational (not ad, not analysis) > content
+- factual event/reporting headlines > news
+- useful educational/informational (not ad, not analysis, not news) > content
 - otherwise > other
 
-Be conservative for close/reentry/result; for pair+side setup stubs prefer "signal" over "other". Prefer "ad"/"analysis"/"promo"/"content" over "other" when the message clearly matches those categories.`;
+Be conservative for close/reentry/result; for pair+side setup stubs prefer "signal" over "other". Prefer "ad"/"analysis"/"promo"/"content"/"news" over "other" when the message clearly matches those categories.`;
 }
 
 export function buildFilterPatternGenerationPrompt(kind: string): string {
@@ -154,11 +156,17 @@ Task:
 - Ensure all patterns are unique.`;
 }
 
-export function buildContentRewritePrompt(classification: 'analysis' | 'content'): string {
+export function buildContentRewritePrompt(
+  classification: 'analysis' | 'content' | 'news' | 'other',
+): string {
   const kindHint =
     classification === 'analysis'
       ? 'аналитический пост о рынке (outlook, уровни, сценарии)'
-      : 'полезный образовательный или информационный пост для трейдеров';
+      : classification === 'news'
+        ? 'новостной пост: факты, события, дайджест без торговых рекомендаций'
+        : classification === 'other'
+          ? 'информационный пост для трейдеров'
+          : 'полезный образовательный или информационный пост для трейдеров';
   return `You rewrite Telegram posts for publication in trading groups.
 
 Return ONLY strict JSON:
@@ -174,4 +182,27 @@ Rules:
 - Do NOT add ads, referral links, or channel promos.
 - Use concise Russian; Telegram-friendly formatting (short paragraphs, optional emoji sparingly).
 - Output only the rewritten message body in the "text" field.`;
+}
+
+export function buildChannelContentGenerationPrompt(params: {
+  outputKind: string;
+  outputStyle?: string | null;
+}): string {
+  const style = params.outputStyle?.trim()
+    ? `\n- Style/tone: ${params.outputStyle.trim()}`
+    : '';
+  return `You compose a single Telegram post for a trading channel from source material.
+
+Return ONLY strict JSON:
+{
+  "text": "final message in Russian"
+}
+
+Rules:
+- Target post kind: ${params.outputKind}${style}
+- Synthesize source posts into one cohesive message; do not copy verbatim.
+- Preserve facts, tickers, numbers, and links from sources — do not invent prices or trade setups.
+- Do NOT add ads, referral links, or channel promos unless present in sources.
+- Use concise Russian; Telegram-friendly formatting.
+- Output only the message body in "text".`;
 }

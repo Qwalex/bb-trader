@@ -9,6 +9,7 @@ export const USERBOT_CLASSIFIER_KINDS = [
   'analysis',
   'promo',
   'content',
+  'news',
   'other',
 ] as const satisfies readonly MessageKind[];
 

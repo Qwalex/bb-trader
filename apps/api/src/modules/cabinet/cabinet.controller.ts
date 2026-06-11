@@ -12,6 +12,7 @@ import {
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 
 import { CabinetService } from './cabinet.service';
+import { normalizeCabinetPurpose } from '@repo/shared';
 
 @ApiTags('Cabinets')
 @Controller('cabinets')
@@ -37,7 +38,7 @@ export class CabinetController {
   @Post()
   async create(
     @Req() req: { auth?: { userId?: string } },
-    @Body() body: { name?: string; slug?: string },
+    @Body() body: { name?: string; slug?: string; purpose?: string },
   ) {
     try {
       return {
@@ -45,6 +46,7 @@ export class CabinetController {
           ownerUserId: this.userIdFromReq(req),
           name: String(body.name ?? ''),
           slug: body.slug,
+          purpose: normalizeCabinetPurpose(body.purpose),
         }),
       };
     } catch (e) {
@@ -75,7 +77,7 @@ export class CabinetController {
   async update(
     @Req() req: { auth?: { userId?: string } },
     @Param('id') id: string,
-    @Body() body: { name?: string; slug?: string; isActive?: boolean },
+    @Body() body: { name?: string; slug?: string; isActive?: boolean; purpose?: string },
   ) {
     try {
       return {
@@ -85,6 +87,7 @@ export class CabinetController {
           name: body.name,
           slug: body.slug,
           isActive: body.isActive,
+          purpose: body.purpose != null ? normalizeCabinetPurpose(body.purpose) : undefined,
         }),
       };
     } catch (e) {

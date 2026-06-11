@@ -32,6 +32,7 @@ export const CABINET_SCOPED_SETTING_KEYS = [
   'QPULSE_SYNC_ENABLED',
   'QPULSE_API_URL',
   'QPULSE_API_KEY',
+  'CONTENT_COLLECT_KINDS',
 ] as const;
 
 export const CABINET_SCOPED_SETTING_KEY_SET = new Set<string>(

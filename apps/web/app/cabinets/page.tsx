@@ -10,6 +10,7 @@ type CabinetItem = {
   name: string;
   isDefault: boolean;
   isActive: boolean;
+  purpose?: 'trading' | 'content';
 };
 
 export default function CabinetsPage() {
@@ -18,6 +19,7 @@ export default function CabinetsPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
+  const [purpose, setPurpose] = useState<'trading' | 'content'>('trading');
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
   async function loadAll() {
@@ -30,6 +32,7 @@ export default function CabinetsPage() {
           ? json.items.map((item) => ({
               ...item,
               isActive: item.isActive !== false,
+              purpose: item.purpose === 'content' ? 'content' : 'trading',
             }))
           : [],
       );
@@ -57,6 +60,7 @@ export default function CabinetsPage() {
         body: JSON.stringify({
           name: trimmedName,
           slug: slug.trim() || undefined,
+          purpose,
         }),
       });
       const json = (await res.json().catch(() => null)) as { message?: string } | null;
@@ -65,6 +69,7 @@ export default function CabinetsPage() {
       }
       setName('');
       setSlug('');
+      setPurpose('trading');
       setMsg({ type: 'ok', text: 'Кабинет создан' });
       await loadAll();
     } catch (e) {
@@ -196,6 +201,17 @@ export default function CabinetsPage() {
             onChange={(e) => setSlug(e.target.value)}
             placeholder="Slug (необязательно)"
           />
+          <select
+            className="settingsAuthInput"
+            value={purpose}
+            onChange={(e) =>
+              setPurpose(e.target.value === 'content' ? 'content' : 'trading')
+            }
+            aria-label="Тип кабинета"
+          >
+            <option value="trading">Торговый</option>
+            <option value="content">Информационный (контент)</option>
+          </select>
           <button
             type="button"
             className="btn"
@@ -229,6 +245,20 @@ export default function CabinetsPage() {
                     <div style={{ fontWeight: 700 }}>
                       {item.name}{' '}
                       {item.isDefault ? '(default)' : ''}
+                      {item.purpose === 'content' ? (
+                        <span
+                          style={{
+                            marginLeft: '0.45rem',
+                            fontSize: '0.72rem',
+                            fontWeight: 600,
+                            color: '#60a5fa',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.04em',
+                          }}
+                        >
+                          контент
+                        </span>
+                      ) : null}
                       {!item.isActive ? (
                         <span
                           style={{

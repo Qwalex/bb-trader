@@ -7,6 +7,7 @@ export type MessageKind =
   | 'analysis'
   | 'promo'
   | 'content'
+  | 'news'
   | 'other';
 export type UserbotFilterKind =
   | 'signal'
@@ -17,6 +18,7 @@ export type UserbotFilterKind =
   | 'analysis'
   | 'promo'
   | 'content'
+  | 'news'
   | 'ignore';
 
 export type UserbotFilterExampleMatch = {

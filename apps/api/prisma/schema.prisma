@@ -268,6 +268,7 @@ model TgUserbotContentPost {
   editedText      String?
   status          String   @default("draft") // draft | published
   publishedAt     DateTime?
+  generationPresetId String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   publications    TgUserbotContentPublication[]
@@ -290,6 +291,46 @@ model TgUserbotContentPublication {
 
   @@index([contentPostId, createdAt])
   @@index([publishGroupId, createdAt])
+}
+
+model ContentGenerationPreset {
+  id                    String   @id @default(cuid())
+  cabinetId             String
+  cabinet               Cabinet  @relation(fields: [cabinetId], references: [id], onDelete: Cascade)
+  name                  String
+  enabled               Boolean  @default(true)
+  /// JSON array: analysis | content | news | other
+  sourceKindsJson       String   @default("[\"analysis\",\"content\",\"news\"]")
+  /// JSON array of publish group ids (optional filter)
+  sourceGroupIdsJson    String   @default("[]")
+  aiInstruction         String   @default("")
+  outputStyle           String?
+  dailyLimit            Int      @default(1)
+  scheduleCron          String?
+  autoPublish           Boolean  @default(false)
+  /// JSON array of TgUserbotPublishGroup ids for publish target
+  targetGroupIdsJson    String   @default("[]")
+  lastRunAt             DateTime?
+  lastPublishedAt       DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  runs                  ContentGenerationRun[]
+
+  @@index([cabinetId, enabled])
+}
+
+model ContentGenerationRun {
+  id              String   @id @default(cuid())
+  presetId        String
+  preset          ContentGenerationPreset @relation(fields: [presetId], references: [id], onDelete: Cascade)
+  status          String   // queued | running | draft | published | failed
+  sourcePostIdsJson String @default("[]")
+  resultPostId    String?
+  error           String?
+  createdAt       DateTime @default(now())
+  finishedAt      DateTime?
+
+  @@index([presetId, createdAt])
 }
 
 model TgUserbotMirrorMessage {
@@ -476,6 +517,8 @@ model Cabinet {
   isDefault        Boolean                @default(false)
   /// false — фоновая работа кабинета остановлена (userbot, poll Bybit).
   isActive         Boolean                @default(true)
+  /// trading — сигналы и Bybit; content — сбор контента без торговли.
+  purpose          String                 @default("trading")
   ownerUserId      String?
   ownerUser        AuthUser?              @relation(fields: [ownerUserId], references: [id], onDelete: SetNull)
   createdAt        DateTime               @default(now())
@@ -490,6 +533,7 @@ model Cabinet {
   openrouterCosts  OpenrouterGenerationCost[]
   publishGroups    TgUserbotPublishGroup[]
   contentPosts     TgUserbotContentPost[]
+  contentGenerationPresets ContentGenerationPreset[]
   mirrorMessages   TgUserbotMirrorMessage[]
   userbotSignalHashes TgUserbotSignalHash[]
   balanceAlertRules   CabinetBalanceAlertRule[]

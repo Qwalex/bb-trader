@@ -123,6 +123,7 @@ export class TelegramUserbotIngestService {
       });
       const cabinetIdsDup = await this.cabinets.listEnabledCabinetIdsForChat(chatId);
       for (const cabinetId of cabinetIdsDup) {
+        const purposeDup = await this.cabinets.getCabinetPurpose(cabinetId);
         const route = await this.prisma.cabinetIngestRoute.upsert({
           where: { cabinetId_ingestId: { cabinetId, ingestId: existing.id } },
           create: {
@@ -154,7 +155,7 @@ export class TelegramUserbotIngestService {
           textLen: nextText.length,
           meta,
           options: {
-            enforceBalanceGuard: true,
+            enforceBalanceGuard: purposeDup !== 'content',
             ...options,
             ingestCreatedAt: existing.createdAt,
           },
@@ -166,6 +167,7 @@ export class TelegramUserbotIngestService {
 
     const cabinetIds = await this.cabinets.listEnabledCabinetIdsForChat(chatId);
     for (const cabinetId of cabinetIds) {
+      const purpose = await this.cabinets.getCabinetPurpose(cabinetId);
       const route = await this.prisma.cabinetIngestRoute.upsert({
         where: { cabinetId_ingestId: { cabinetId, ingestId: ingest.id } },
         create: {
@@ -197,7 +199,7 @@ export class TelegramUserbotIngestService {
         textLen: text.length,
         meta,
         options: {
-          enforceBalanceGuard: true,
+          enforceBalanceGuard: purpose !== 'content',
           ...options,
           ingestCreatedAt: ingest.createdAt,
         },

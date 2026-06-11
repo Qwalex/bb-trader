@@ -41,6 +41,7 @@ import {
   sanitizeSignalSource,
 } from './partial-signal.util';
 import {
+  buildChannelContentGenerationPrompt,
   buildContentRewritePrompt,
   buildFilterPatternGenerationPrompt,
   buildJsonSchemaRules,
@@ -286,7 +287,7 @@ export class TranscriptService {
   }
 
   async rewriteContentPost(params: {
-    classification: 'analysis' | 'content';
+    classification: 'analysis' | 'content' | 'news' | 'other';
     text: string;
     instruction?: string;
     openrouterLogContext?: OpenRouterLogContext;
@@ -360,6 +361,111 @@ export class TranscriptService {
       return {
         ok: true,
         text: rewritten,
+        debug: {
+          model,
+          request: JSON.stringify({ model, messages }),
+          response: responseRaw,
+        },
+      };
+    } catch (e) {
+      return {
+        ok: false,
+        error: formatOpenRouterError(e),
+        debug: {
+          model,
+          request: JSON.stringify({ model, messages }),
+          response: formatOpenRouterError(e),
+        },
+      };
+    }
+  }
+
+  async generateChannelContent(params: {
+    outputKind: string;
+    sources: Array<{ classification: string; text: string }>;
+    instruction?: string;
+    outputStyle?: string | null;
+    openrouterLogContext?: OpenRouterLogContext;
+  }): Promise<{
+    ok: boolean;
+    text?: string;
+    error?: string;
+    debug?: { model?: string; request?: string; response?: string };
+  }> {
+    const sources = params.sources
+      .map((s) => ({
+        classification: String(s.classification ?? '').trim(),
+        text: String(s.text ?? '').trim(),
+      }))
+      .filter((s) => s.text.length >= 6);
+    if (sources.length === 0) {
+      return { ok: false, error: 'Нет исходных текстов для генерации' };
+    }
+
+    const apiKey = await this.settings.get('OPENROUTER_API_KEY');
+    if (!apiKey) {
+      return { ok: false, error: 'OPENROUTER_API_KEY is not configured' };
+    }
+
+    const model =
+      (await this.openRouterModelChain.resolveModelKeyWithDefault('OPENROUTER_MODEL_TEXT')) ??
+      (await this.settings.get('OPENROUTER_MODEL_DEFAULT'));
+    if (!model) {
+      return { ok: false, error: 'OPENROUTER model is not configured' };
+    }
+
+    const prompt = buildChannelContentGenerationPrompt({
+      outputKind: params.outputKind,
+      outputStyle: params.outputStyle,
+    });
+    const extra = params.instruction?.trim();
+    const userInput = [
+      `OUTPUT_KIND: ${params.outputKind}`,
+      extra ? `EDITOR_INSTRUCTION:\n${extra}` : null,
+      ...sources.map(
+        (s, i) => `SOURCE_${i + 1} (${s.classification}):\n${s.text}`,
+      ),
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+    const messages = [
+      { role: 'system', content: prompt },
+      { role: 'user', content: userInput },
+    ];
+    try {
+      const content = await this.openRouterClient.callOpenRouter(apiKey, model, messages, {
+        operation: 'generateChannelContent',
+        logContext: params.openrouterLogContext,
+      });
+      const responseRaw =
+        typeof content === 'string' ? content : JSON.stringify(content);
+      const parsed = tryParseModelContent(content);
+      if (!parsed.ok) {
+        return {
+          ok: false,
+          error: parsed.result.ok === false ? parsed.result.error : 'Не удалось разобрать ответ AI',
+          debug: {
+            model,
+            request: JSON.stringify({ model, messages }),
+            response: responseRaw,
+          },
+        };
+      }
+      const generated = String((parsed.value as { text?: unknown }).text ?? '').trim();
+      if (generated.length < 2) {
+        return {
+          ok: false,
+          error: 'AI вернул пустой текст',
+          debug: {
+            model,
+            request: JSON.stringify({ model, messages }),
+            response: responseRaw,
+          },
+        };
+      }
+      return {
+        ok: true,
+        text: generated,
         debug: {
           model,
           request: JSON.stringify({ model, messages }),
