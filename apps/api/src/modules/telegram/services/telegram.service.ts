@@ -6,6 +6,7 @@ import {
   OnApplicationBootstrap,
   OnModuleDestroy,
 } from '@nestjs/common';
+import { shouldRunTelegramBots } from '../../../config/process-role.util';
 import { Context, Telegraf } from 'telegraf';
 
 import type { SignalDto } from '@repo/shared';
@@ -125,6 +126,10 @@ export class TelegramService implements OnApplicationBootstrap, OnModuleDestroy 
   }
 
   async onApplicationBootstrap(): Promise<void> {
+    if (!shouldRunTelegramBots()) {
+      this.logger.log('Telegram bots skipped for current API_PROCESS_ROLE');
+      return;
+    }
     // После всех onModuleInit (Prisma $connect, дефолтный кабинет, Settings) — иначе первый sync иногда
     // не видит TELEGRAM_BOT_TOKEN и ложно логирует «боты выключены». Не блокируем HTTP listen: сеть в фоне.
     void this.initializeBots().catch((e) => {

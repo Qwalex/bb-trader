@@ -1,4 +1,11 @@
-import { forwardRef, Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import {
+  forwardRef,
+  Inject,
+  Injectable,
+  Logger,
+  OnModuleInit,
+} from '@nestjs/common';
+import { shouldRunWorkerQueue } from '../../config/process-role.util';
 
 import { formatError } from '../../common/format-error';
 import { parseWorkerQueuePollConcurrency } from '../bybit/tpsl/bybit-tpsl-fast-retry.util';
@@ -41,6 +48,10 @@ export class WorkerQueueService implements OnModuleInit {
   ) {}
 
   onModuleInit(): void {
+    if (!shouldRunWorkerQueue()) {
+      this.logger.warn('worker queue disabled for current API_PROCESS_ROLE / WORKER_QUEUE_ENABLED');
+      return;
+    }
     if (process.env.WORKER_QUEUE_ENABLED?.trim() === 'false') {
       this.logger.warn('worker queue disabled via WORKER_QUEUE_ENABLED=false');
       return;

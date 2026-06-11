@@ -1,0 +1,9 @@
+# Config-as-code для Worker-UB (userbot + VK + ingest) на Railway.
+# Variables: API_PROCESS_ROLE=worker-userbot, RAILPACK_CONFIG_FILE=railpack.worker-userbot.json
+
+[build]
+builder = "RAILPACK"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 120

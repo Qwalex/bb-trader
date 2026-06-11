@@ -4,6 +4,8 @@ import {
   Injectable,
   Logger,
 } from '@nestjs/common';
+import { ApiInternalClientService } from '../../../internal/api-internal-client.service';
+import { isDedicatedWorkerUserbotProcessRole } from '../../../config/process-role.util';
 import type { SignalDto } from '@repo/shared';
 import { postCriticalNotifyText } from '../../../common/critical-notify.util';
 import { formatError } from '../../../common/format-error';
@@ -90,6 +92,7 @@ export class TelegramUserbotIngestPipelineService {
     private readonly signalLookup: TelegramUserbotIngestSignalLookupService,
     private readonly pairDirection: TelegramUserbotIngestPairDirectionService,
     private readonly signalReply: TelegramUserbotIngestSignalReplyService,
+    private readonly apiInternal: ApiInternalClientService,
   ) {}
 
   async processIngestRecord(
@@ -945,18 +948,29 @@ export class TelegramUserbotIngestPipelineService {
           await this.userbotMirror.tryCreateQpulseForSignal(result.signalId);
         }
       };
-      const req = await this.telegramBot.requestExternalSignalConfirmation({
-        ingestId: ingest.id,
-        signal,
-        rawMessage: text,
-        onResult: onExternalConfirmResult,
-      });
-      void this.vkNotifyMirror.mirrorRequestExternalSignalConfirmation({
-        ingestId: ingest.id,
-        signal,
-        rawMessage: text,
-        onResult: onExternalConfirmResult,
-      });
+      const cabinetId = this.cabinetContext.getCabinetId() ?? '';
+      const req =
+        isDedicatedWorkerUserbotProcessRole() && this.apiInternal.isEnabled() && cabinetId
+          ? await this.apiInternal.requestExternalConfirm({
+              cabinetId,
+              ingestId: ingest.id,
+              signal,
+              rawMessage: text,
+            })
+          : await this.telegramBot.requestExternalSignalConfirmation({
+              ingestId: ingest.id,
+              signal,
+              rawMessage: text,
+              onResult: onExternalConfirmResult,
+            });
+      if (!isDedicatedWorkerUserbotProcessRole() || !this.apiInternal.isEnabled()) {
+        void this.vkNotifyMirror.mirrorRequestExternalSignalConfirmation({
+          ingestId: ingest.id,
+          signal,
+          rawMessage: text,
+          onResult: onExternalConfirmResult,
+        });
+      }
       if (!req.ok) {
         this.appendIngestStageLog('warn', 'Userbot: failed to send confirmation request', ingest, {
           error: req.error ?? null,

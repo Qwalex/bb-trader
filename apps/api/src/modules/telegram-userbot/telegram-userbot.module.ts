@@ -24,6 +24,7 @@ import { TelegramUserbotMirrorService } from './mirror/telegram-userbot-mirror.s
 import { ContentGenerationPresetService } from './content-editor/content-generation-preset.service';
 import { TelegramUserbotContentEditorService } from './content-editor/telegram-userbot-content-editor.service';
 import { TelegramUserbotOpenrouterService } from './openrouter/telegram-userbot-openrouter.service';
+import { TelegramUserbotIngestAfterConfirmService } from './ingest/telegram-userbot-ingest-after-confirm.service';
 import { TelegramUserbotController } from './telegram-userbot.controller';
 import { TelegramUserbotService } from './telegram-userbot.service';
 import { UserbotSignalHashModule } from './userbot-signal-hash.module';
@@ -53,6 +54,7 @@ import { QpulseSyncModule } from '../qpulse-sync/qpulse-sync.module';
     TelegramUserbotIngestParseRetryService,
     TelegramUserbotIngestSignalReplyService,
     TelegramUserbotIngestPipelineService,
+    TelegramUserbotIngestAfterConfirmService,
     TelegramUserbotPollingService,
     TelegramUserbotScanService,
     TelegramUserbotSettingsService,
@@ -62,6 +64,10 @@ import { QpulseSyncModule } from '../qpulse-sync/qpulse-sync.module';
     ContentGenerationPresetService,
     TelegramUserbotService,
   ],
-  exports: [TelegramUserbotService, TelegramUserbotMirrorService],
+  exports: [
+    TelegramUserbotService,
+    TelegramUserbotMirrorService,
+    TelegramUserbotIngestAfterConfirmService,
+  ],
 })
 export class TelegramUserbotModule {}

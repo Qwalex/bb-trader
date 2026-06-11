@@ -2,9 +2,11 @@ import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 
 import { normalizeTradingPair, type SignalDto } from '@repo/shared';
 
+import { isDedicatedWorkerBybitProcessRole } from '../../config/process-role.util';
 import { formatError } from '../../common/format-error';
 import { AppLogService } from '../app-log/app-log.service';
 import { BybitService } from '../bybit/bybit.service';
+import { BybitInternalClientService } from '../bybit/bybit-internal-client.service';
 import type { PlaceOrdersResult, SignalOrderOrigin } from '../bybit/types/bybit.types';
 import { OrdersService } from '../orders/orders.service';
 import { TelegramSpotFlowService } from '../telegram/services/telegram-spot-flow.service';
@@ -34,6 +36,7 @@ export class BybitSpotService {
     @Inject(forwardRef(() => TelegramSpotFlowService))
     private readonly spotFlow: TelegramSpotFlowService,
     private readonly spotLifecyclePoll: BybitSpotLifecyclePollService,
+    private readonly bybitInternal: BybitInternalClientService,
   ) {}
 
   createSpotLifecyclePollPorts(): BybitSpotLifecyclePollPorts {
@@ -96,6 +99,26 @@ export class BybitSpotService {
   async routeUserbotSignalPlacement(
     params: RouteUserbotSignalPlacementParams,
   ): Promise<UserbotPlacementRouteResult> {
+    if (this.bybitInternal.isRemotePlacementEnabled()) {
+      const remote = (await this.bybitInternal.routeUserbotSignalPlacement(
+        params,
+      )) as UserbotPlacementRouteResult;
+      if (remote.kind === 'spot_prompt') {
+        const started = await this.spotFlow.startSpotPrompt({
+          ingestId: params.ingestId,
+          signal: applySpotIntentLeverage(params.signal, params.rawMessage),
+          rawMessage: params.rawMessage,
+          origin: params.origin,
+        });
+        return {
+          kind: 'spot_prompt',
+          message: started.ok
+            ? 'Ожидает решение по споту'
+            : (started.error ?? 'Ожидает решение по споту'),
+        };
+      }
+      return remote;
+    }
     const resolve = await this.resolveUserbotPlacementRoute({
       signal: params.signal,
       ingestId: params.ingestId,
@@ -110,6 +133,12 @@ export class BybitSpotService {
       };
     }
     if (resolve.kind === 'spot_prompt') {
+      if (isDedicatedWorkerBybitProcessRole()) {
+        return {
+          kind: 'spot_prompt',
+          message: 'Ожидает решение по споту',
+        };
+      }
       const started = await this.spotFlow.startSpotPrompt({
         ingestId: params.ingestId,
         signal: signalForPlacement,
@@ -133,6 +162,12 @@ export class BybitSpotService {
       !placement.ok &&
       (await this.shouldFallbackToSpotAfterLinearFailure(params, placement, signalForPlacement))
     ) {
+      if (isDedicatedWorkerBybitProcessRole()) {
+        return {
+          kind: 'spot_prompt',
+          message: 'Пара доступна только на споте — ожидает решение',
+        };
+      }
       const started = await this.spotFlow.startSpotPrompt({
         ingestId: params.ingestId,
         signal: signalForPlacement,

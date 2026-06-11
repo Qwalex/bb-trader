@@ -1,0 +1,9 @@
+# Config-as-code для Worker-Bybit (poll + WS + REST) на Railway.
+# Variables: API_PROCESS_ROLE=worker-bybit, RAILPACK_CONFIG_FILE=railpack.worker-bybit.json
+
+[build]
+builder = "RAILPACK"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 120

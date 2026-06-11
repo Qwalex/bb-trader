@@ -7,20 +7,8 @@ import { ScheduleModule } from '@nestjs/schedule';
 
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { buildRoleAppImports } from './config/app-modules.util';
 import { CabinetContextMiddleware } from './common/cabinet-context.middleware';
-import { AppLogModule } from './modules/app-log/app-log.module';
-import { AuthModule } from './modules/auth/auth.module';
-import { BybitModule } from './modules/bybit/bybit.module';
-import { CabinetModule } from './modules/cabinet/cabinet.module';
-import { OrdersModule } from './modules/orders/orders.module';
-import { DiagnosticsModule } from './modules/diagnostics/diagnostics.module';
-import { SettingsModule } from './modules/settings/settings.module';
-import { TelegramModule } from './modules/telegram';
-import { TelegramUserbotModule } from './modules/telegram-userbot/telegram-userbot.module';
-import { TranscriptModule } from './modules/transcript/transcript.module';
-import { WorkerQueueModule } from './modules/worker-queue/worker-queue.module';
-import { VkModule } from './modules/vk/vk.module';
-import { PrismaModule } from './prisma/prisma.module';
 
 /**
  * Порядок: сначала корень монорепо (если cwd = apps/api), затем cwd/.env,
@@ -57,19 +45,7 @@ function loadEnvFilePaths(): string[] {
       envFilePath: loadEnvFilePaths(),
     }),
     ScheduleModule.forRoot(),
-    PrismaModule,
-    AuthModule,
-    CabinetModule,
-    AppLogModule,
-    DiagnosticsModule,
-    SettingsModule,
-    OrdersModule,
-    TranscriptModule,
-    BybitModule,
-    WorkerQueueModule,
-    TelegramModule,
-    TelegramUserbotModule,
-    VkModule,
+    ...buildRoleAppImports(),
   ],
   controllers: [AppController],
   providers: [AppService],

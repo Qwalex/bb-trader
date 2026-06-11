@@ -1,0 +1,23 @@
+{
+  "$schema": "https://schema.railpack.com",
+  "packages": {
+    "node": "22"
+  },
+  "steps": {
+    "install": {
+      "inputs": [
+        "...",
+        { "local": true, "include": ["packages", "apps"] }
+      ]
+    },
+    "build": {
+      "inputs": [{ "step": "install" }],
+      "commands": [
+        "npm run build -w @repo/shared && npm run build -w api"
+      ]
+    }
+  },
+  "deploy": {
+    "startCommand": "npm run start:railway:worker-bybit --workspace=api"
+  }
+}

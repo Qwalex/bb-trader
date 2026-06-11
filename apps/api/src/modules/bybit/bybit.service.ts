@@ -5,6 +5,7 @@ import {
   Logger,
   OnApplicationBootstrap,
 } from '@nestjs/common';
+import { shouldRunBybitPrivateWs } from '../../config/process-role.util';
 import { RestClientV5 } from 'bybit-api';
 
 import { normalizeTradingPair, type SignalDto } from '@repo/shared';
@@ -61,6 +62,7 @@ import { BybitSignalOverridesService } from './overrides/bybit-signal-overrides.
 import { BybitSignalPlacementService } from './orders/bybit-signal-placement.service';
 import { BybitTpSlService } from './tpsl/bybit-tpsl.service';
 import { BybitTpSlFastApplyService } from './tpsl/bybit-tpsl-fast-apply.service';
+import { BybitInternalClientService } from './bybit-internal-client.service';
 import type {
   BybitOrderLifecyclePollPorts,
   BybitPositionClosePorts,
@@ -124,9 +126,13 @@ export class BybitService implements OnApplicationBootstrap {
     private readonly stuckTradesHeal: {
       runAutoHealForCabinet: (cabinetId: string) => Promise<StuckTradesHealResult>;
     },
+    private readonly bybitInternal: BybitInternalClientService,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
+    if (!shouldRunBybitPrivateWs()) {
+      return;
+    }
     const tryStart = async (): Promise<boolean> =>
       this.bybitClient.startPrivateWsSync({
         onWsUpdate: () => this.workers.enqueuePollSweep('bybit-ws-update', 100),
@@ -152,6 +158,18 @@ export class BybitService implements OnApplicationBootstrap {
   async getUnifiedUsdtBalanceDetails(): Promise<
     { availableUsd: number; totalUsd: number } | undefined
   > {
+    if (this.bybitInternal.isEnabled()) {
+      const remote = (await this.bybitInternal.getUnifiedUsdtBalanceDetails(
+        this.currentCabinetId(),
+      )) as { availableUsd?: number; totalUsd?: number } | undefined;
+      if (!remote || !Number.isFinite(remote.totalUsd)) {
+        return undefined;
+      }
+      return {
+        availableUsd: Number(remote.availableUsd ?? remote.totalUsd),
+        totalUsd: Number(remote.totalUsd),
+      };
+    }
     return this.balanceInstrument.getUnifiedUsdtBalanceDetails();
   }
 

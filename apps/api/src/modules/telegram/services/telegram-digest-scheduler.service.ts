@@ -5,6 +5,7 @@ import { CronJob } from 'cron';
 import type { Telegraf } from 'telegraf';
 
 import { formatError } from '../../../common/format-error';
+import { shouldRunTelegramBots } from '../../../config/process-role.util';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { BybitService } from '../../bybit/bybit.service';
 import { CabinetContextService } from '../../cabinet/cabinet-context.service';
@@ -33,6 +34,9 @@ export class TelegramDigestSchedulerService implements OnModuleInit, OnModuleDes
   ) {}
 
   onModuleInit(): void {
+    if (!shouldRunTelegramBots()) {
+      return;
+    }
     if (this.isDigestDisabled()) {
       this.logger.log('Ежедневный Telegram-дайджест выключен (TELEGRAM_DAILY_DIGEST_ENABLED=false)');
       return;

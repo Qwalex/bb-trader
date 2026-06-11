@@ -10,6 +10,7 @@ import {
 
 import { BalanceSnapshotService } from './balance-snapshot.service';
 import { BybitService } from './bybit.service';
+import { BybitInternalClientService } from './bybit-internal-client.service';
 import { BybitStuckTradesService } from './exposure/bybit-stuck-trades.service';
 import { pickRequestedCabinetId } from '../../common/cabinet-request.util';
 import { CabinetContextService } from '../cabinet/cabinet-context.service';
@@ -25,6 +26,7 @@ type AuthReq = {
 export class BybitController {
   constructor(
     private readonly bybit: BybitService,
+    private readonly bybitInternal: BybitInternalClientService,
     private readonly stuckTradesService: BybitStuckTradesService,
     private readonly balanceSnapshots: BalanceSnapshotService,
     private readonly cabinets: CabinetService,
@@ -45,6 +47,10 @@ export class BybitController {
     return this.cabinetContext.runWithCabinet(cabinetId, fn);
   }
 
+  private cabinetIdForProxy(): string | null {
+    return this.cabinetContext.getCabinetId();
+  }
+
   @ApiOperation({ summary: 'Live-снимок экспозиции и ордеров Bybit' })
   @ApiOkResponse({ description: 'Снимок получен' })
   @Get('live')
@@ -52,6 +58,11 @@ export class BybitController {
     @Req() req: AuthReq,
     @Query('cabinetId') cabinetId?: string,
   ) {
+    if (this.bybitInternal.isEnabled()) {
+      return this.runWithCabinet(req, cabinetId, () =>
+        this.bybitInternal.getLiveExposureSnapshot(this.cabinetIdForProxy()),
+      );
+    }
     return this.runWithCabinet(req, cabinetId, () => this.bybit.getLiveExposureSnapshot());
   }
 
@@ -59,6 +70,11 @@ export class BybitController {
   @ApiOkResponse({ description: 'Список проблемных активных сделок' })
   @Get('stuck-trades')
   async stuckTrades(@Req() req: AuthReq, @Query('cabinetId') cabinetId?: string) {
+    if (this.bybitInternal.isEnabled()) {
+      return this.runWithCabinet(req, cabinetId, () =>
+        this.bybitInternal.getStuckTradesSnapshot(this.cabinetIdForProxy()),
+      );
+    }
     return this.runWithCabinet(req, cabinetId, () =>
       this.stuckTradesService.getStuckTradesSnapshot(),
     );
@@ -90,6 +106,14 @@ export class BybitController {
     @Query('cabinetId') cabinetId: string | undefined,
     @Param('signalId') signalId: string,
   ) {
+    if (this.bybitInternal.isEnabled()) {
+      return this.runWithCabinet(req, cabinetId, () =>
+        this.bybitInternal.getSignalExecutionDebugSnapshot(
+          signalId,
+          this.cabinetIdForProxy(),
+        ),
+      );
+    }
     return this.runWithCabinet(req, cabinetId, () =>
       this.bybit.getSignalExecutionDebugSnapshot(signalId),
     );
@@ -104,6 +128,11 @@ export class BybitController {
     @Query('cabinetId') cabinetId: string | undefined,
     @Param('signalId') signalId: string,
   ) {
+    if (this.bybitInternal.isEnabled()) {
+      return this.runWithCabinet(req, cabinetId, () =>
+        this.bybitInternal.getTradePnlBreakdown(signalId, this.cabinetIdForProxy()),
+      );
+    }
     return this.runWithCabinet(req, cabinetId, () =>
       this.bybit.getTradePnlBreakdown(signalId),
     );
@@ -118,6 +147,11 @@ export class BybitController {
     @Query('cabinetId') cabinetId: string | undefined,
     @Param('signalId') signalId: string,
   ) {
+    if (this.bybitInternal.isEnabled()) {
+      return this.runWithCabinet(req, cabinetId, () =>
+        this.bybitInternal.applyTpSlManually(signalId, this.cabinetIdForProxy()),
+      );
+    }
     return this.runWithCabinet(req, cabinetId, () => this.bybit.applyTpSlManually(signalId));
   }
 
@@ -132,6 +166,11 @@ export class BybitController {
     @Param('signalId') signalId: string,
     @Body() _body?: Record<string, unknown>,
   ) {
+    if (this.bybitInternal.isEnabled()) {
+      return this.runWithCabinet(req, cabinetId, () =>
+        this.bybitInternal.closeSignalManually(signalId, this.cabinetIdForProxy()),
+      );
+    }
     return this.runWithCabinet(req, cabinetId, () =>
       this.bybit.closeSignalManually(signalId),
     );
@@ -156,6 +195,19 @@ export class BybitController {
     @Body() body?: { limit?: number; dryRun?: boolean; async?: boolean },
   ) {
     return this.runWithCabinet(req, cabinetId, async () => {
+      const cid = this.cabinetIdForProxy();
+      if (this.bybitInternal.isEnabled()) {
+        if (body?.async !== false) {
+          return this.bybitInternal.startRecalcClosedSignalsPnl(
+            { limit: body?.limit, dryRun: body?.dryRun ?? true },
+            cid,
+          );
+        }
+        return this.bybitInternal.recalcClosedSignalsPnl(
+          { limit: body?.limit, dryRun: body?.dryRun ?? true },
+          cid,
+        );
+      }
       if (body?.async !== false) {
         return this.bybit.startRecalcClosedSignalsPnlJob({
           limit: body?.limit,
@@ -178,6 +230,11 @@ export class BybitController {
     @Query('cabinetId') cabinetId: string | undefined,
     @Param('jobId') jobId: string,
   ) {
+    if (this.bybitInternal.isEnabled()) {
+      return this.runWithCabinet(req, cabinetId, () =>
+        this.bybitInternal.getRecalcClosedPnlJobStatus(jobId, this.cabinetIdForProxy()),
+      );
+    }
     return this.runWithCabinet(req, cabinetId, async () => {
       const status = await this.bybit.getRecalcClosedPnlJobStatus(jobId);
       if (!status) {

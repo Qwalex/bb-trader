@@ -1,7 +1,3 @@
-/**
- * VK-бот: параллельная копия сценариев telegram.service.ts (без правок Telegram).
- * При изменении логики в Telegram — синхронизировать вручную.
- */
 import {
   forwardRef,
   Inject,
@@ -10,6 +6,7 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
+import { shouldRunVkBot } from '../../config/process-role.util';
 
 import { startOfAppCalendarDay, type SignalDto } from '@repo/shared';
 
@@ -97,6 +94,10 @@ export class VkBotService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   async onModuleInit(): Promise<void> {
+    if (!shouldRunVkBot()) {
+      this.logger.log('VK bot skipped for current API_PROCESS_ROLE');
+      return;
+    }
     const token = (await this.settings.get('VK_GROUP_ACCESS_TOKEN'))?.trim();
     if (!token) {
       this.logger.warn('VK_GROUP_ACCESS_TOKEN not set — VK callback обрабатывается, рассылка отключена');

@@ -6,6 +6,7 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
+import { shouldRunUserbotMtproto } from '../../config/process-role.util';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import type { Prisma } from '@prisma/client';
 import { normalizeTradingPair, type SignalDto } from '@repo/shared';
@@ -128,6 +129,10 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   async onModuleInit(): Promise<void> {
+    if (!shouldRunUserbotMtproto()) {
+      this.logger.log('Userbot MTProto skipped for current API_PROCESS_ROLE');
+      return;
+    }
     this.userbotClient.setInboundHandler((e) => this.handleIncomingMessage(e));
     this.userbotClient.setAfterAttachHook(() => this.onAfterUserbotAttach());
     this.ingest.setProcessIngestRecord((ingest, text, meta, opts) =>

@@ -36,6 +36,7 @@ import { BybitSignalOverridesService } from './overrides/bybit-signal-overrides.
 import { BybitTpSlService } from './tpsl/bybit-tpsl.service';
 import { BybitTpSlFastApplyService } from './tpsl/bybit-tpsl-fast-apply.service';
 import { BybitSpotModule } from '../bybit-spot/bybit-spot.module';
+import { BybitInternalClientService } from './bybit-internal-client.service';
 
 @Module({
   imports: [
@@ -76,12 +77,14 @@ import { BybitSpotModule } from '../bybit-spot/bybit-spot.module';
     BalanceSnapshotService,
     BalanceAlertService,
     BalanceAlertSchedulerService,
+    BybitInternalClientService,
   ],
   exports: [
     BybitService,
     BalanceSnapshotService,
     BybitClientService,
     BybitRateLimitService,
+    BybitInternalClientService,
   ],
 })
 export class BybitModule {}

@@ -4,6 +4,7 @@ import { SchedulerRegistry } from '@nestjs/schedule';
 import { CronJob } from 'cron';
 
 import { formatError } from '../../../common/format-error';
+import { isWorkerBybitProcessRole } from '../../../config/process-role.util';
 
 import { BalanceAlertService } from './balance-alert.service';
 
@@ -20,6 +21,9 @@ export class BalanceAlertSchedulerService implements OnModuleInit, OnModuleDestr
   ) {}
 
   onModuleInit(): void {
+    if (!isWorkerBybitProcessRole()) {
+      return;
+    }
     if (this.isDisabled()) {
       this.logger.log('Пороговые уведомления о балансе выключены (BALANCE_ALERT_ENABLED=false)');
       return;

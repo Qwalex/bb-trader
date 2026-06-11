@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 
 import { SettingsService } from '../../settings/settings.service';
+import { isWorkerBybitProcessRole } from '../../../config/process-role.util';
 import { WorkerQueueService } from '../../worker-queue/worker-queue.service';
 import { parseStuckTradesAutoHealEnabled } from './bybit-stuck-trades-heal-settings.util';
 
@@ -18,6 +19,9 @@ export class BybitStuckTradesHealSchedulerService {
 
   @Interval(30_000)
   async tick(): Promise<void> {
+    if (!isWorkerBybitProcessRole()) {
+      return;
+    }
     if (this.ticking) {
       return;
     }

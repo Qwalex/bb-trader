@@ -1,9 +1,10 @@
-import { Controller, ForbiddenException, Get, Req } from '@nestjs/common';
+import { Controller, ForbiddenException, Get, Inject, Optional, Req } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 
 import { Public } from './common/public.decorator';
 import { AppService } from './app.service';
 import { WorkerQueueService } from './modules/worker-queue/worker-queue.service';
+import { healthServiceLabel } from './config/process-role.util';
 
 @ApiTags('Health')
 @Controller()
@@ -16,7 +17,7 @@ export class AppController {
 
   constructor(
     private readonly appService: AppService,
-    private readonly workers: WorkerQueueService,
+    @Optional() private readonly workers: WorkerQueueService | null,
   ) {}
 
   @ApiOperation({ summary: 'Проверка доступности API' })
@@ -24,7 +25,7 @@ export class AppController {
   @Public()
   @Get('health')
   health() {
-    return { status: 'ok', service: 'signals-bot-api' };
+    return { status: 'ok', service: healthServiceLabel() };
   }
 
   @ApiOperation({ summary: 'Статус фоновых очередей' })
@@ -32,6 +33,9 @@ export class AppController {
   @Get('health/queues')
   async queueHealth(@Req() req: { auth?: { role?: string } }) {
     this.assertAdmin(req);
+    if (!this.workers) {
+      return { status: 'ok', queues: null, note: 'worker queue not enabled in this process role' };
+    }
     return {
       status: 'ok',
       queues: await this.workers.getStats(),

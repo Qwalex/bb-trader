@@ -7,6 +7,7 @@ import { CabinetService } from '../cabinet/cabinet.service';
 
 import { DEFAULT_APP_TIMEZONE, appCalendarDayRange } from '@repo/shared';
 
+import { isWorkerBybitProcessRole } from '../../config/process-role.util';
 import { BybitService } from './bybit.service';
 
 @Injectable()
@@ -23,6 +24,9 @@ export class BalanceSnapshotService {
   /** Раз в сутки (00:05 по APP_TIMEZONE, по умолчанию МСК). */
   @Cron('0 5 0 * * *', { timeZone: DEFAULT_APP_TIMEZONE })
   async cronDailyTotalBalance(): Promise<void> {
+    if (!isWorkerBybitProcessRole()) {
+      return;
+    }
     try {
       const cabinets = await this.cabinets.listCabinets();
       for (const cabinet of cabinets) {
