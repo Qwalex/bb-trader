@@ -22,6 +22,10 @@ import { pickRequestedCabinetId } from '../../common/cabinet-request.util';
 import { CabinetContextService } from '../cabinet/cabinet-context.service';
 import { CabinetService } from '../cabinet/cabinet.service';
 import { ADMIN_ONLY_GLOBAL_KEYS } from './settings.constants';
+import {
+  NAV_MENU_HIDDEN_SETTING_KEY,
+  parseNavHiddenMenuIds,
+} from './settings-nav-menu.util';
 
 type AuthReq = {
   headers?: Record<string, string | string[] | undefined>;
@@ -105,6 +109,19 @@ export class SettingsController {
       return { settings };
     }
     return { settings: this.filterNonAdminSettings(settings) };
+  }
+
+  @ApiOperation({
+    summary: 'Скрытые пункты меню web (лёгкий ответ для layout)',
+  })
+  @ApiOkResponse({ description: 'ID скрытых пунктов навигации' })
+  @Get('nav-menu')
+  async navMenu(@Req() req: AuthReq, @Query('cabinetId') cabinetId?: string) {
+    const raw = await this.runWithCabinet(req, cabinetId, () =>
+      this.settings.get(NAV_MENU_HIDDEN_SETTING_KEY),
+    );
+    const parsed = parseNavHiddenMenuIds(raw);
+    return { hiddenMenuIds: parsed };
   }
 
   @ApiOperation({ summary: 'Заметки / todo дашборда (из БД)' })

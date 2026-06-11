@@ -1,10 +1,12 @@
 import type { Metadata, Viewport } from 'next';
 import { cookies } from 'next/headers';
 import localFont from 'next/font/local';
-import { NAV_MENU_HIDDEN_SETTING_KEY, NAV_MENU_ITEMS } from '@repo/shared';
 
 import { PwaRegister } from './components/PwaRegister';
 import { TopNav } from './components/TopNav';
+import {
+  defaultNavHiddenMenuIds,
+} from '../lib/cabinet-nav.util';
 
 import './globals.css';
 
@@ -103,47 +105,41 @@ export default async function RootLayout({
   const cabinetId = cookieStore.get('cabinet_id')?.value?.trim() ?? '';
   const authToken = cookieStore.get('sb_auth')?.value?.trim() ?? '';
   let isAdmin = false;
-  let hiddenMenuIds: string[] = NAV_MENU_ITEMS.filter((i) => i.defaultHidden).map((i) => i.id);
+  let hiddenMenuIds: string[] = defaultNavHiddenMenuIds();
   if (authToken) {
     try {
-      const res = await fetch(`${getApiBaseForServer()}/auth/me`, {
-        cache: 'no-store',
-        headers: {
-          Authorization: `Bearer ${authToken}`,
-        },
-      });
-      if (res.ok) {
-        const me = (await res.json()) as { role?: string };
+      const apiBase = getApiBaseForServer();
+      const authHeaders = {
+        Authorization: `Bearer ${authToken}`,
+        ...(cabinetId ? { 'x-cabinet-id': cabinetId } : {}),
+      };
+      const [meRes, navRes] = await Promise.all([
+        fetch(`${apiBase}/auth/me`, {
+          cache: 'no-store',
+          headers: authHeaders,
+        }),
+        fetch(`${apiBase}/settings/nav-menu${cabinetId ? `?cabinetId=${encodeURIComponent(cabinetId)}` : ''}`, {
+          cache: 'no-store',
+          headers: authHeaders,
+        }),
+      ]);
+      if (meRes.ok) {
+        const me = (await meRes.json()) as { role?: string };
         isAdmin = String(me.role ?? '').trim().toLowerCase() === 'admin';
       }
-      const settingsRes = await fetch(`${getApiBaseForServer()}/settings/effective`, {
-        cache: 'no-store',
-        headers: {
-          Authorization: `Bearer ${authToken}`,
-        },
-      });
-      if (settingsRes.ok) {
-        const settingsJson = (await settingsRes.json()) as {
-          settings?: Array<{ key: string; value: string }>;
-        };
-        const raw = settingsJson.settings?.find(
-          (s) => s.key === NAV_MENU_HIDDEN_SETTING_KEY,
-        )?.value;
-        if (raw) {
-          try {
-            const parsed = JSON.parse(raw) as unknown;
-            if (Array.isArray(parsed)) {
-              hiddenMenuIds = parsed
-                .map((v) => String(v).trim())
-                .filter((v) => v.length > 0);
-            }
-          } catch {
-            // keep defaults
-          }
+      if (navRes.ok) {
+        const navJson = (await navRes.json()) as { hiddenMenuIds?: unknown };
+        if (navJson.hiddenMenuIds === null) {
+          // настройка не задана — оставляем defaultHidden
+        } else if (Array.isArray(navJson.hiddenMenuIds)) {
+          hiddenMenuIds = navJson.hiddenMenuIds
+            .map((v) => String(v).trim())
+            .filter((v) => v.length > 0);
         }
       }
     } catch {
       isAdmin = false;
+      hiddenMenuIds = defaultNavHiddenMenuIds();
     }
   }
   return (

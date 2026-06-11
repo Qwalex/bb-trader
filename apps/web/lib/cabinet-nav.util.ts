@@ -4,6 +4,27 @@ import {
   type CabinetPurpose,
 } from '@repo/shared';
 
+export function defaultNavHiddenMenuIds(): string[] {
+  return NAV_MENU_ITEMS.filter((i) => i.defaultHidden).map((i) => i.id);
+}
+
+export function parseNavHiddenMenuIds(raw: string | undefined | null): string[] {
+  if (!raw?.trim()) {
+    return defaultNavHiddenMenuIds();
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map((v) => String(v).trim())
+        .filter((v) => v.length > 0);
+    }
+  } catch {
+    // malformed JSON — defaults
+  }
+  return defaultNavHiddenMenuIds();
+}
+
 export function resolveNavHiddenIds(
   hiddenMenuIds: readonly string[],
   purpose: CabinetPurpose | null | undefined,

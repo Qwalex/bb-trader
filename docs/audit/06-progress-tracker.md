@@ -2351,3 +2351,14 @@
 - Manual verification: `npx prisma generate` в `apps/api`; `npx tsc -b --force apps/api`; `npm run check-types -w apps/web`.
 - Docs updated: этот трекер, `AGENTS.md`.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-196
+
+- Status: `done`
+- Scope: Ускорение SSR web-дашборда — убрать waterfall fetch и тяжёлый `/settings/effective` в layout.
+- Files: `apps/web/app/layout.tsx`, `apps/web/app/page.tsx`, `apps/web/lib/api-server-cache.ts`, `apps/web/lib/cabinet-nav.util.ts`, `apps/web/app/home-dashboard.util.ts`, `apps/api/src/modules/settings/settings.controller.ts`, `apps/api/src/modules/settings/settings-nav-menu.util.ts`
+- Findings: каждая страница ждала layout (`auth/me` + полный `settings/effective` последовательно); главная делала 3 волны fetch (~14 запросов), дубли `auth/me` и `settings/effective`.
+- Changes: layout — параллельно `auth/me` + лёгкий `GET /settings/nav-menu`; главная — один `Promise.all` на 13 endpoint; `fetchJsonCached` (React `cache`) для dedup в RSC; `mergeDashboardSourceOptions` в util.
+- Manual verification: `npm run check-types -w web`; `npm run build -w api`.
+- Docs updated: этот трекер.
+- Linked risks (`SEC-###`): N/A

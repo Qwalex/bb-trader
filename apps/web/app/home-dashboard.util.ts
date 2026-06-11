@@ -35,3 +35,31 @@ export function sortDashboardCabinetCardsForDisplay<T extends { isActive?: boole
     })
     .map(({ item }) => item);
 }
+
+function parseStringListSetting(raw: string | undefined): string[] {
+  if (!raw?.trim()) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((v) => (typeof v === 'string' ? v.trim() : ''))
+      .filter((v) => v.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+/** Источники для фильтра дашборда: БД + settings, минус exclude. */
+export function mergeDashboardSourceOptions(
+  sourcesFromDb: string[],
+  settingsRows: Array<{ key: string; value: string }>,
+): string[] {
+  const raw = settingsRows.find((r) => r.key === 'SOURCE_LIST')?.value;
+  const rawExcluded = settingsRows.find((r) => r.key === 'SOURCE_EXCLUDE_LIST')?.value;
+  const sourcesFromSettings = parseStringListSetting(raw);
+  const excludedSources = parseStringListSetting(rawExcluded);
+  const excludedSet = new Set(excludedSources);
+  return Array.from(new Set([...sourcesFromDb, ...sourcesFromSettings]))
+    .sort((a, b) => a.localeCompare(b, 'ru'))
+    .filter((s) => !excludedSet.has(s));
+}

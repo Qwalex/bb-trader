@@ -11,7 +11,7 @@ import Link from 'next/link';
 import { cookies } from 'next/headers';
 
 import { withCabinetPageHref } from '../lib/cabinet-page-href.util';
-import { fetchJson } from '../lib/api';
+import { fetchJsonCached } from '../lib/api-server-cache';
 import { searchParamFirst } from '../lib/search-param.util';
 import type {
   ConnectedGroupItem,
@@ -20,7 +20,7 @@ import type {
   DashboardCabinetCard,
   DashboardCabinetsSummary,
 } from './home-dashboard.types';
-import { formatDashboardDurationMs, formatDashboardRatioPercent, sortDashboardCabinetCardsForDisplay } from './home-dashboard.util';
+import { formatDashboardDurationMs, formatDashboardRatioPercent, mergeDashboardSourceOptions, sortDashboardCabinetCardsForDisplay } from './home-dashboard.util';
 
 type Stats = {
   source?: string | null;
@@ -114,57 +114,58 @@ export default async function Home({
   const q = new URLSearchParams();
   if (source) q.set('source', source);
   const qs = q.toString();
-  const [statsRes, pnlRes, topRes, sourceOptionsRes] = await Promise.allSettled([
-    fetchJson<Stats>(`/orders/stats${qs ? `?${qs}` : ''}`, undefined, cabinetId),
-    fetchJson<PnlPoint[]>(
+  const [
+    statsRes,
+    pnlRes,
+    topRes,
+    sourcesFromDbRes,
+    settingsEffectiveRes,
+    authMeRes,
+    cabinetsRes,
+    userbotRes,
+    dashboardCabinetsRes,
+    activityRes,
+    connectedGroupsRes,
+    balanceHistoryRes,
+    dashboardTodosRes,
+  ] = await Promise.allSettled([
+    fetchJsonCached<Stats>(`/orders/stats${qs ? `?${qs}` : ''}`, undefined, cabinetId),
+    fetchJsonCached<PnlPoint[]>(
       `/orders/pnl-series?bucket=day${source ? `&source=${encodeURIComponent(source)}` : ''}`,
       undefined,
       cabinetId,
     ),
-    fetchJson<TopSources>('/orders/top-sources?limit=5', undefined, cabinetId),
-    (async () => {
-      try {
-        const [sourcesFromDb, settingsRaw] = await Promise.all([
-          fetchJson<string[]>('/orders/sources', undefined, cabinetId),
-          fetchJson<SettingsRaw>('/settings/effective', undefined, cabinetId),
-        ]);
-        const raw = settingsRaw.settings.find((r) => r.key === 'SOURCE_LIST')?.value;
-        const rawExcluded = settingsRaw.settings.find((r) => r.key === 'SOURCE_EXCLUDE_LIST')
-          ?.value;
-        let sourcesFromSettings: string[] = [];
-        let excludedSources: string[] = [];
-        if (raw && raw.trim()) {
-          try {
-            const parsed = JSON.parse(raw) as unknown;
-            if (Array.isArray(parsed)) {
-              sourcesFromSettings = parsed
-                .map((v) => (typeof v === 'string' ? v.trim() : ''))
-                .filter((v) => v.length > 0);
-            }
-          } catch {
-            // ignore malformed SOURCE_LIST
-          }
-        }
-        if (rawExcluded && rawExcluded.trim()) {
-          try {
-            const parsed = JSON.parse(rawExcluded) as unknown;
-            if (Array.isArray(parsed)) {
-              excludedSources = parsed
-                .map((v) => (typeof v === 'string' ? v.trim() : ''))
-                .filter((v) => v.length > 0);
-            }
-          } catch {
-            // ignore malformed SOURCE_EXCLUDE_LIST
-          }
-        }
-        const excludedSet = new Set(excludedSources);
-        return Array.from(new Set([...sourcesFromDb, ...sourcesFromSettings]))
-          .sort((a, b) => a.localeCompare(b, 'ru'))
-          .filter((s) => !excludedSet.has(s));
-      } catch {
-        return [];
-      }
-    })(),
+    fetchJsonCached<TopSources>('/orders/top-sources?limit=5', undefined, cabinetId),
+    fetchJsonCached<string[]>('/orders/sources', undefined, cabinetId),
+    fetchJsonCached<SettingsRaw>('/settings/effective', undefined, cabinetId),
+    fetchJsonCached<AuthMe>('/auth/me', undefined, cabinetId),
+    fetchJsonCached<{ items?: CabinetItem[] }>('/cabinets', undefined, cabinetId),
+    fetchJsonCached<UserbotStatus>('/telegram-userbot/status', undefined, cabinetId),
+    fetchJsonCached<{
+      items?: DashboardCabinetCard[];
+      summary?: DashboardCabinetsSummary;
+      aggregatedBalanceHistory?: DashboardAggregatedBalancePoint[];
+    }>('/orders/dashboard-cabinets', undefined, cabinetId),
+    fetchJsonCached<{ items?: DashboardActivityItem[] }>(
+      '/orders/dashboard-activity?hours=24&limit=80',
+      undefined,
+      cabinetId,
+    ),
+    fetchJsonCached<{ items?: ConnectedGroupItem[] }>(
+      '/telegram-userbot/dashboard-connected-groups',
+      undefined,
+      cabinetId,
+    ),
+    fetchJsonCached<{ points: BalancePoint[] }>(
+      '/bybit/balance-history?days=30',
+      undefined,
+      cabinetId,
+    ),
+    fetchJsonCached<{ items: DashboardTodoItem[] }>(
+      '/settings/dashboard-todos',
+      undefined,
+      cabinetId,
+    ),
   ]);
   const loadErrors: string[] = [];
   if (statsRes.status === 'fulfilled') {
@@ -182,8 +183,11 @@ export default async function Home({
   } else {
     loadErrors.push('top-sources');
   }
-  if (sourceOptionsRes.status === 'fulfilled') {
-    sourceOptions = sourceOptionsRes.value;
+  if (sourcesFromDbRes.status === 'fulfilled' && settingsEffectiveRes.status === 'fulfilled') {
+    sourceOptions = mergeDashboardSourceOptions(
+      sourcesFromDbRes.value,
+      settingsEffectiveRes.value.settings,
+    );
   } else {
     loadErrors.push('sources');
   }
@@ -191,39 +195,6 @@ export default async function Home({
     err = `Часть данных не загружена: ${loadErrors.join(', ')}`;
   }
   let balanceHistory: BalancePoint[] = [];
-  const [
-    authMeRes,
-    cabinetsRes,
-    userbotRes,
-    dashboardCabinetsRes,
-    activityRes,
-    connectedGroupsRes,
-    balanceHistoryRes,
-  ] = await Promise.allSettled([
-    fetchJson<AuthMe>('/auth/me', undefined, cabinetId),
-    fetchJson<{ items?: CabinetItem[] }>('/cabinets', undefined, cabinetId),
-    fetchJson<UserbotStatus>('/telegram-userbot/status', undefined, cabinetId),
-    fetchJson<{
-      items?: DashboardCabinetCard[];
-      summary?: DashboardCabinetsSummary;
-      aggregatedBalanceHistory?: DashboardAggregatedBalancePoint[];
-    }>('/orders/dashboard-cabinets', undefined, cabinetId),
-    fetchJson<{ items?: DashboardActivityItem[] }>(
-      '/orders/dashboard-activity?hours=24&limit=80',
-      undefined,
-      cabinetId,
-    ),
-    fetchJson<{ items?: ConnectedGroupItem[] }>(
-      '/telegram-userbot/dashboard-connected-groups',
-      undefined,
-      cabinetId,
-    ),
-    fetchJson<{ points: BalancePoint[] }>(
-      '/bybit/balance-history?days=30',
-      undefined,
-      cabinetId,
-    ),
-  ]);
   if (authMeRes.status === 'fulfilled') {
     authMe = authMeRes.value;
   }
@@ -253,6 +224,12 @@ export default async function Home({
   }
   if (balanceHistoryRes.status === 'fulfilled') {
     balanceHistory = balanceHistoryRes.value.points ?? [];
+  }
+  let dashboardTodos: DashboardTodoItem[] = [];
+  if (dashboardTodosRes.status === 'fulfilled') {
+    dashboardTodos = Array.isArray(dashboardTodosRes.value.items)
+      ? dashboardTodosRes.value.items
+      : [];
   }
   const currentCabinet =
     (cabinetId ? cabinetItems.find((c) => c.id === cabinetId) : null) ??
@@ -309,18 +286,6 @@ export default async function Home({
     const apr = (row.totalPnl / equityNum / T) * 365 * 100;
     return Number.isFinite(apr) ? `${apr.toFixed(1)}%` : '—';
   };
-
-  let dashboardTodos: DashboardTodoItem[] = [];
-  try {
-    const d = await fetchJson<{ items: DashboardTodoItem[] }>(
-      '/settings/dashboard-todos',
-      undefined,
-      cabinetId,
-    );
-    dashboardTodos = Array.isArray(d.items) ? d.items : [];
-  } catch {
-    dashboardTodos = [];
-  }
 
   const activeCabinetDisplay =
     currentCabinet?.name?.trim() ||
