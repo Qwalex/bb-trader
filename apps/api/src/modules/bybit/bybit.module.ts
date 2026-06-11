@@ -85,6 +85,7 @@ import { BybitInternalClientService } from './bybit-internal-client.service';
     BybitClientService,
     BybitRateLimitService,
     BybitInternalClientService,
+    BybitStuckTradesService,
   ],
 })
 export class BybitModule {}
