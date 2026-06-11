@@ -2341,3 +2341,13 @@
 - Manual verification: `npx tsc -b --force` в `apps/api`; сценарии: «BTCUSDT LONG spot» с linear → ордера linear 1x + POST QPulse SPOT; монета только spot → prompt, без QPulse.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-195
+
+- Status: `done`
+- Scope: Информационные кабинеты (`Cabinet.purpose=content`), kind `news`, сбор контента `CONTENT_COLLECT_KINDS`, расширенный редактор, AI-пресеты и cron-генерация.
+- Files: `schema.prisma`, migration `20260611120000_cabinet_purpose_content_editor`, `packages/shared` (`cabinet-purpose`, `content-collect`, `nav-menu`), `cabinet.service`, `telegram-userbot-ingest-pipeline`, `telegram-userbot-content-editor.service`, `content-generation-preset.service`, `telegram-userbot.controller`, `apps/web/app/content-editor/*`, `filters-page.constants`, `settings/page.tsx`, `cabinets/page.tsx`
+- Changes: content-кабинет без торговли/balance guard; upsert analysis/content/news/other по `CONTENT_COLLECT_KINDS`; API фильтров постов, collect-settings, presets CRUD/run/generate; UI редактора с фильтрами, пресетами, мультивыбором; доступ owner+admin для content; settings скрывает Bybit/торговые ключи; cron `CONTENT_GENERATION_CRON` + per-preset `scheduleCron`.
+- Manual verification: `npx prisma generate` в `apps/api`; `npx tsc -b --force apps/api`; `npm run check-types -w apps/web`.
+- Docs updated: этот трекер, `AGENTS.md`.
+- Linked risks (`SEC-###`): N/A

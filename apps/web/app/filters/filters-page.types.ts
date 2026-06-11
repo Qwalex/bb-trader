@@ -7,6 +7,7 @@ export type FilterKind =
   | 'analysis'
   | 'promo'
   | 'content'
+  | 'news'
   | 'ignore';
 
 export type FilterItem = {

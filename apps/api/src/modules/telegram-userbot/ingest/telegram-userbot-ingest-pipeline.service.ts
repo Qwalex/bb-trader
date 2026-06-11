@@ -496,16 +496,18 @@ export class TelegramUserbotIngestPipelineService {
         aiRequest,
         aiResponse,
       });
-      if (kind === 'analysis' || kind === 'content') {
+      if (kind === 'analysis' || kind === 'content' || kind === 'news' || kind === 'other') {
         try {
-          await this.contentEditor.upsertFromIngest({
-            ingestId: ingest.id,
-            sourceChatId: ingest.chatId,
-            sourceMessageId: ingest.messageId,
-            sourceTitle: groupName || null,
-            classification: kind,
-            originalText: text,
-          });
+          if (await this.contentEditor.shouldCollectKind(kind)) {
+            await this.contentEditor.upsertFromIngest({
+              ingestId: ingest.id,
+              sourceChatId: ingest.chatId,
+              sourceMessageId: ingest.messageId,
+              sourceTitle: groupName || null,
+              classification: kind,
+              originalText: text,
+            });
+          }
         } catch (e) {
           this.appendIngestStageLog('warn', 'Userbot: content post upsert failed', ingest, {
             error: formatError(e),

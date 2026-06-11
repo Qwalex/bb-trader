@@ -47,6 +47,7 @@ import { TelegramUserbotClientService } from './client/telegram-userbot-client.s
 import { TelegramUserbotIngestService } from './ingest/telegram-userbot-ingest.service';
 import { TelegramUserbotIngestPipelineService } from './ingest/telegram-userbot-ingest-pipeline.service';
 import { TelegramUserbotMirrorService } from './mirror/telegram-userbot-mirror.service';
+import { ContentGenerationPresetService } from './content-editor/content-generation-preset.service';
 import { TelegramUserbotContentEditorService } from './content-editor/telegram-userbot-content-editor.service';
 import { QpulseSyncService } from '../qpulse-sync/qpulse-sync.service';
 import { TelegramUserbotPollingService } from './polling/telegram-userbot-polling.service';
@@ -122,6 +123,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     private readonly userbotFilters: TelegramUserbotFiltersService,
     private readonly userbotMirror: TelegramUserbotMirrorService,
     private readonly contentEditor: TelegramUserbotContentEditorService,
+    private readonly contentPresets: ContentGenerationPresetService,
     private readonly qpulseSync: QpulseSyncService,
   ) {}
 
@@ -448,8 +450,104 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     return this.userbotMirror.deletePublishGroup(id);
   }
 
-  async listContentPosts(options?: { status?: string; classification?: string; limit?: number }) {
+  async listContentPosts(options?: {
+    status?: string;
+    classification?: string | string[];
+    sourceChatId?: string;
+    q?: string;
+    from?: string;
+    to?: string;
+    cursor?: string;
+    limit?: number;
+  }) {
     return this.contentEditor.listPosts(options);
+  }
+
+  async getContentCollectSettings() {
+    return this.contentEditor.getCollectSettings();
+  }
+
+  async saveContentCollectSettings(body: { kinds?: string[] }) {
+    return this.contentEditor.saveCollectSettings(body);
+  }
+
+  async listContentPresets() {
+    return this.contentPresets.listPresets();
+  }
+
+  async createContentPreset(body: Parameters<ContentGenerationPresetService['createPreset']>[0]) {
+    return this.contentPresets.createPreset(body);
+  }
+
+  async updateContentPreset(
+    id: string,
+    body: Parameters<ContentGenerationPresetService['updatePreset']>[1],
+  ) {
+    return this.contentPresets.updatePreset(id, body);
+  }
+
+  async deleteContentPreset(id: string) {
+    return this.contentPresets.deletePreset(id);
+  }
+
+  async listContentPresetRuns(presetId: string, limit?: number) {
+    return this.contentPresets.listRuns(presetId, limit);
+  }
+
+  async runContentPreset(
+    presetId: string,
+    options?: { postIds?: string[]; force?: boolean },
+  ) {
+    return this.contentPresets.runPreset(presetId, options);
+  }
+
+  async generateContent(body: {
+    presetId?: string;
+    postIds?: string[];
+    instruction?: string;
+    outputKind?: string;
+  }) {
+    const postIds = (body.postIds ?? []).map((id) => String(id).trim()).filter(Boolean);
+    if (body.presetId?.trim()) {
+      return this.contentPresets.runPreset(body.presetId.trim(), {
+        postIds: postIds.length > 0 ? postIds : undefined,
+        force: true,
+      });
+    }
+    if (postIds.length === 0) {
+      return { ok: false as const, error: 'Укажите presetId или postIds' };
+    }
+    const posts: Array<{ classification: string; text: string; id: string; sourceChatId: string; sourceMessageId: string }> = [];
+    for (const id of postIds) {
+      const row = await this.contentEditor.getPost(id);
+      if (!row.ok) return { ok: false as const, error: row.error };
+      posts.push({
+        id: row.item.id,
+        classification: row.item.classification,
+        text: row.item.displayText,
+        sourceChatId: row.item.sourceChatId,
+        sourceMessageId: row.item.sourceMessageId,
+      });
+    }
+    const outputKind = body.outputKind?.trim() || posts[0]!.classification;
+    const generated = await this.transcript.generateChannelContent({
+      outputKind,
+      instruction: body.instruction,
+      sources: posts.map((p) => ({ classification: p.classification, text: p.text })),
+      openrouterLogContext: { stage: 'content_generation_manual' },
+    });
+    if (!generated.ok || !generated.text) {
+      return { ok: false as const, error: generated.error ?? 'AI generation failed' };
+    }
+    const created = await this.contentEditor.createGeneratedDraft({
+      text: generated.text,
+      classification: outputKind as 'analysis' | 'content' | 'news' | 'other',
+      sourcePosts: posts,
+    });
+    if (!created.ok) return { ok: false as const, error: created.error };
+    const item = await this.contentEditor.getPost(created.postId);
+    if (!item.ok) return { ok: false as const, error: item.error };
+    return { ok: true as const, postId: created.postId, item: item.item };
   }
 
   async getContentPost(id: string) {
@@ -464,8 +562,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     return this.contentEditor.aiRewritePost(id, body);
   }
 
-  async publishContentPost(id: string) {
-    return this.contentEditor.publishPost(id);
+  async publishContentPost(id: string, targetGroupIds?: string[]) {
+    return this.contentEditor.publishPost(id, targetGroupIds);
   }
 
   async deleteContentPost(id: string) {
@@ -512,7 +610,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
   async createFilterExample(body: {
     groupName?: string;
-    kind?: 'signal' | 'close' | 'result' | 'reentry' | 'ad' | 'analysis' | 'promo' | 'content' | 'ignore';
+    kind?: 'signal' | 'close' | 'result' | 'reentry' | 'ad' | 'analysis' | 'promo' | 'content' | 'news' | 'ignore';
     example?: string;
     requiresQuote?: boolean;
   }) {
@@ -525,7 +623,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
 
   async createFilterPattern(body: {
     groupName?: string;
-    kind?: 'signal' | 'close' | 'result' | 'reentry' | 'ad' | 'analysis' | 'promo' | 'content' | 'ignore';
+    kind?: 'signal' | 'close' | 'result' | 'reentry' | 'ad' | 'analysis' | 'promo' | 'content' | 'news' | 'ignore';
     pattern?: string;
     requiresQuote?: boolean;
   }) {
@@ -537,7 +635,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   }
 
   async generateFilterPatterns(body: {
-    kind?: 'signal' | 'close' | 'result' | 'reentry' | 'ad' | 'analysis' | 'promo' | 'content' | 'ignore';
+    kind?: 'signal' | 'close' | 'result' | 'reentry' | 'ad' | 'analysis' | 'promo' | 'content' | 'news' | 'ignore';
     example?: string;
   }) {
     return this.userbotFilters.generateFilterPatterns(body);

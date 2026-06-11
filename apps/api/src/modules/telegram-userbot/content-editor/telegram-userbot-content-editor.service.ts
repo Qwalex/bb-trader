@@ -1,10 +1,22 @@
 import { Injectable } from '@nestjs/common';
 
+import {
+  CONTENT_COLLECT_KIND_VALUES,
+  type ContentCollectKind,
+} from '@repo/shared';
+
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CabinetContextService } from '../../cabinet/cabinet-context.service';
+import { SettingsService } from '../../settings/settings.service';
 import { TranscriptService } from '../../transcript/transcript.service';
 import { TelegramUserbotMirrorService } from '../mirror/telegram-userbot-mirror.service';
+import {
+  readCollectKinds,
+  saveCollectKinds,
+  shouldCollectContentKind,
+} from './content-collect-settings.util';
 import type {
+  ContentCollectSettingsDto,
   ContentPostClassification,
   ContentPostDto,
 } from './telegram-userbot-content-editor.types';
@@ -14,6 +26,7 @@ export class TelegramUserbotContentEditorService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly cabinetContext: CabinetContextService,
+    private readonly settings: SettingsService,
     private readonly transcript: TranscriptService,
     private readonly userbotMirror: TelegramUserbotMirrorService,
   ) {}
@@ -50,6 +63,23 @@ export class TelegramUserbotContentEditorService {
       updatedAt: row.updatedAt.toISOString(),
       publicationCount: row._count?.publications ?? 0,
     };
+  }
+
+  async getCollectSettings(): Promise<ContentCollectSettingsDto> {
+    const kinds = await readCollectKinds(this.settings);
+    return { kinds };
+  }
+
+  async saveCollectSettings(body: {
+    kinds?: string[];
+  }): Promise<{ ok: true; kinds: string[] }> {
+    const kinds = await saveCollectKinds(this.settings, body.kinds ?? []);
+    return { ok: true, kinds };
+  }
+
+  async shouldCollectKind(kind: string): Promise<boolean> {
+    const collectKinds = await readCollectKinds(this.settings);
+    return shouldCollectContentKind(kind, collectKinds);
   }
 
   async upsertFromIngest(params: {
@@ -93,26 +123,108 @@ export class TelegramUserbotContentEditorService {
 
   async listPosts(options?: {
     status?: string;
-    classification?: string;
+    classification?: string | string[];
+    sourceChatId?: string;
+    q?: string;
+    from?: string;
+    to?: string;
+    cursor?: string;
     limit?: number;
-  }): Promise<{ items: ContentPostDto[] }> {
+  }): Promise<{ items: ContentPostDto[]; nextCursor?: string | null }> {
     const cabinetId = this.cabinetContext.getCabinetId();
     const limit = Math.min(Math.max(Math.trunc(Number(options?.limit ?? 100) || 100), 1), 500);
     const where: Record<string, unknown> = { cabinetId };
     const status = options?.status?.trim();
-    const classification = options?.classification?.trim();
     if (status) where.status = status;
-    if (classification === 'analysis' || classification === 'content') {
-      where.classification = classification;
+    const clsRaw = options?.classification;
+    const clsList = Array.isArray(clsRaw)
+      ? clsRaw.map((c) => String(c).trim()).filter(Boolean)
+      : clsRaw?.trim()
+        ? clsRaw.split(',').map((c) => c.trim()).filter(Boolean)
+        : [];
+    const allowedCls = clsList.filter((c): c is ContentCollectKind =>
+      (CONTENT_COLLECT_KIND_VALUES as readonly string[]).includes(c),
+    );
+    if (allowedCls.length === 1) {
+      where.classification = allowedCls[0];
+    } else if (allowedCls.length > 1) {
+      where.classification = { in: allowedCls };
+    }
+    const sourceChatId = options?.sourceChatId?.trim();
+    if (sourceChatId) where.sourceChatId = sourceChatId;
+    const q = options?.q?.trim();
+    if (q) {
+      where.OR = [
+        { originalText: { contains: q, mode: 'insensitive' } },
+        { editedText: { contains: q, mode: 'insensitive' } },
+        { sourceTitle: { contains: q, mode: 'insensitive' } },
+      ];
+    }
+    const from = options?.from?.trim();
+    const to = options?.to?.trim();
+    if (from || to) {
+      const createdAt: Record<string, Date> = {};
+      if (from) {
+        const d = new Date(from);
+        if (!Number.isNaN(d.getTime())) createdAt.gte = d;
+      }
+      if (to) {
+        const d = new Date(to);
+        if (!Number.isNaN(d.getTime())) createdAt.lte = d;
+      }
+      if (Object.keys(createdAt).length > 0) where.createdAt = createdAt;
+    }
+    const cursor = options?.cursor?.trim();
+    if (cursor) {
+      where.createdAt = {
+        ...(typeof where.createdAt === 'object' ? (where.createdAt as object) : {}),
+        lt: new Date(cursor),
+      };
     }
     const prismaAny = this.prisma as any;
     const rows = await prismaAny.tgUserbotContentPost.findMany({
       where,
       orderBy: { createdAt: 'desc' },
-      take: limit,
+      take: limit + 1,
       include: { _count: { select: { publications: true } } },
     });
-    return { items: rows.map((row: Parameters<typeof this.mapPost>[0]) => this.mapPost(row)) };
+    const hasMore = rows.length > limit;
+    const slice = hasMore ? rows.slice(0, limit) : rows;
+    const items = slice.map((row: Parameters<typeof this.mapPost>[0]) => this.mapPost(row));
+    const nextCursor =
+      hasMore && slice.length > 0
+        ? slice[slice.length - 1]!.createdAt.toISOString()
+        : null;
+    return { items, nextCursor };
+  }
+
+  async createGeneratedDraft(params: {
+    text: string;
+    classification: ContentPostClassification;
+    sourcePosts: Array<{ id: string; sourceChatId?: string; sourceMessageId?: string }>;
+    presetId?: string;
+  }): Promise<{ ok: true; postId: string } | { ok: false; error: string }> {
+    const cabinetId = this.cabinetContext.getCabinetId();
+    const first = params.sourcePosts[0];
+    const sourceChatId = first?.sourceChatId ?? 'generated';
+    const sourceMessageId = first?.sourceMessageId ?? `preset:${Date.now()}`;
+    const ingestKey = `generated:${params.presetId ?? 'manual'}:${Date.now()}`;
+    const prismaAny = this.prisma as any;
+    const row = await prismaAny.tgUserbotContentPost.create({
+      data: {
+        cabinetId,
+        ingestId: ingestKey,
+        sourceChatId,
+        sourceMessageId,
+        sourceTitle: 'AI generated',
+        classification: params.classification,
+        originalText: params.text,
+        editedText: params.text,
+        status: 'draft',
+        generationPresetId: params.presetId ?? null,
+      },
+    });
+    return { ok: true, postId: row.id };
   }
 
   async getPost(id: string): Promise<{ ok: true; item: ContentPostDto } | { ok: false; error: string }> {
@@ -182,6 +294,7 @@ export class TelegramUserbotContentEditorService {
 
   async publishPost(
     id: string,
+    targetGroupIds?: string[],
   ): Promise<
     | {
         ok: true;
@@ -204,8 +317,19 @@ export class TelegramUserbotContentEditorService {
 
     const cabinetId = this.cabinetContext.getCabinetId();
     const prismaAny = this.prisma as any;
+    const groupWhere: Record<string, unknown> = {
+      cabinetId,
+      enabled: true,
+      contentPublishEnabled: true,
+    };
+    const explicitIds = (targetGroupIds ?? [])
+      .map((v) => String(v).trim())
+      .filter(Boolean);
+    if (explicitIds.length > 0) {
+      groupWhere.id = { in: explicitIds };
+    }
     const groups = await prismaAny.tgUserbotPublishGroup.findMany({
-      where: { cabinetId, enabled: true, contentPublishEnabled: true },
+      where: groupWhere,
       orderBy: { title: 'asc' },
     });
     if (groups.length === 0) {

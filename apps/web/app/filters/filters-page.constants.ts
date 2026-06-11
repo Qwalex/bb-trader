@@ -9,6 +9,7 @@ export const FILTER_KINDS: FilterKind[] = [
   'analysis',
   'promo',
   'content',
+  'news',
   'ignore',
 ];
 
@@ -20,7 +21,8 @@ export const KIND_LABEL: Record<FilterKind, string> = {
   ad: 'Реклама (VIP/каналы/подписки)',
   analysis: 'Анализ рынка',
   promo: 'Акции (розыгрыши/шоу/челенджи)',
-  content: 'Контент (полезное/обучение/новости)',
+  content: 'Контент (полезное/обучение)',
+  news: 'Новости (факты/события/дайджесты)',
   ignore: 'Игнорировать (не отправлять в AI)',
 };
 
@@ -117,6 +119,13 @@ Possible scenarios if price pumps from support...`,
 3. Не усредняйтесь против тренда`,
     ],
   },
+  news: {
+    patterns: ['breaking', 'just in', 'сегодня', 'объявил', 'запуск', 'листинг'],
+    examples: [
+      `SEC одобрила спот-ETF на Ethereum.
+Торги начнутся завтра на основных биржах.`,
+    ],
+  },
   ignore: {
     patterns: ['free trial', 'subscribe', 'реклама'],
     examples: [
@@ -136,6 +145,7 @@ export function emptyFilterKindMap(): Record<FilterKind, never[]> {
     analysis: [],
     promo: [],
     content: [],
+    news: [],
     ignore: [],
   };
 }

@@ -321,9 +321,14 @@ export class TelegramUserbotController {
     return this.userbot.deletePublishGroup(id);
   }
 
-  @ApiOperation({ summary: 'Список постов редактора контента (analysis/content)' })
+  @ApiOperation({ summary: 'Список постов редактора контента' })
   @ApiQuery({ name: 'status', required: false })
-  @ApiQuery({ name: 'classification', required: false, enum: ['analysis', 'content'] })
+  @ApiQuery({ name: 'classification', required: false })
+  @ApiQuery({ name: 'sourceChatId', required: false })
+  @ApiQuery({ name: 'q', required: false })
+  @ApiQuery({ name: 'from', required: false })
+  @ApiQuery({ name: 'to', required: false })
+  @ApiQuery({ name: 'cursor', required: false })
   @ApiQuery({ name: 'limit', required: false })
   @Get('content/posts')
   async listContentPosts(
@@ -331,15 +336,156 @@ export class TelegramUserbotController {
     @Query('cabinetId') cabinetId: string | undefined,
     @Query('status') status?: string,
     @Query('classification') classification?: string,
+    @Query('sourceChatId') sourceChatId?: string,
+    @Query('q') q?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('cursor') cursor?: string,
     @Query('limit') limit?: string,
   ) {
     return this.runWithCabinet(req, cabinetId, () =>
       this.userbot.listContentPosts({
         status,
         classification,
+        sourceChatId,
+        q,
+        from,
+        to,
+        cursor,
         limit: this.parseLimit(limit, 100),
       }),
     );
+  }
+
+  @ApiOperation({ summary: 'Настройки сбора контента (kinds)' })
+  @Get('content/collect-settings')
+  async getContentCollectSettings(
+    @Req() req: AuthReq,
+    @Query('cabinetId') cabinetId?: string,
+  ) {
+    return this.runWithCabinet(req, cabinetId, () => this.userbot.getContentCollectSettings());
+  }
+
+  @ApiOperation({ summary: 'Сохранить настройки сбора контента' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        kinds: { type: 'array', items: { type: 'string' } },
+      },
+    },
+  })
+  @Put('content/collect-settings')
+  async saveContentCollectSettings(
+    @Req() req: AuthReq,
+    @Query('cabinetId') cabinetId: string | undefined,
+    @Body() body: { kinds?: string[] },
+  ) {
+    return this.runWithCabinet(req, cabinetId, () => this.userbot.saveContentCollectSettings(body));
+  }
+
+  @ApiOperation({ summary: 'Список пресетов генерации контента' })
+  @Get('content/presets')
+  async listContentPresets(
+    @Req() req: AuthReq,
+    @Query('cabinetId') cabinetId?: string,
+  ) {
+    return this.runWithCabinet(req, cabinetId, () => this.userbot.listContentPresets());
+  }
+
+  @ApiOperation({ summary: 'Создать пресет генерации контента' })
+  @Post('content/presets')
+  async createContentPreset(
+    @Req() req: AuthReq,
+    @Query('cabinetId') cabinetId: string | undefined,
+    @Body()
+    body: {
+      name?: string;
+      enabled?: boolean;
+      sourceKinds?: string[];
+      sourceGroupIds?: string[];
+      aiInstruction?: string;
+      outputStyle?: string | null;
+      dailyLimit?: number;
+      scheduleCron?: string | null;
+      autoPublish?: boolean;
+      targetGroupIds?: string[];
+    },
+  ) {
+    return this.runWithCabinet(req, cabinetId, () => this.userbot.createContentPreset(body));
+  }
+
+  @ApiOperation({ summary: 'Обновить пресет генерации контента' })
+  @Put('content/presets/:id')
+  async updateContentPreset(
+    @Req() req: AuthReq,
+    @Query('cabinetId') cabinetId: string | undefined,
+    @Param('id') id: string,
+    @Body()
+    body: {
+      name?: string;
+      enabled?: boolean;
+      sourceKinds?: string[];
+      sourceGroupIds?: string[];
+      aiInstruction?: string;
+      outputStyle?: string | null;
+      dailyLimit?: number;
+      scheduleCron?: string | null;
+      autoPublish?: boolean;
+      targetGroupIds?: string[];
+    },
+  ) {
+    return this.runWithCabinet(req, cabinetId, () => this.userbot.updateContentPreset(id, body));
+  }
+
+  @ApiOperation({ summary: 'Удалить пресет генерации контента' })
+  @Delete('content/presets/:id')
+  async deleteContentPreset(
+    @Req() req: AuthReq,
+    @Query('cabinetId') cabinetId: string | undefined,
+    @Param('id') id: string,
+  ) {
+    return this.runWithCabinet(req, cabinetId, () => this.userbot.deleteContentPreset(id));
+  }
+
+  @ApiOperation({ summary: 'Журнал запусков пресета' })
+  @Get('content/presets/:id/runs')
+  async listContentPresetRuns(
+    @Req() req: AuthReq,
+    @Query('cabinetId') cabinetId: string | undefined,
+    @Param('id') id: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.runWithCabinet(req, cabinetId, () =>
+      this.userbot.listContentPresetRuns(id, this.parseLimit(limit, 20, 100)),
+    );
+  }
+
+  @ApiOperation({ summary: 'Запустить пресет генерации вручную' })
+  @Post('content/presets/:id/run')
+  async runContentPreset(
+    @Req() req: AuthReq,
+    @Query('cabinetId') cabinetId: string | undefined,
+    @Param('id') id: string,
+    @Body() body: { postIds?: string[]; force?: boolean },
+  ) {
+    return this.runWithCabinet(req, cabinetId, () => this.userbot.runContentPreset(id, body));
+  }
+
+  @ApiOperation({ summary: 'Сгенерировать контент из постов или пресета' })
+  @Post('content/generate')
+  async generateContent(
+    @Req() req: AuthReq,
+    @Query('cabinetId') cabinetId: string | undefined,
+    @Body()
+    body: {
+      presetId?: string;
+      postIds?: string[];
+      instruction?: string;
+      outputKind?: string;
+    },
+  ) {
+    return this.runWithCabinet(req, cabinetId, () => this.userbot.generateContent(body));
   }
 
   @ApiOperation({ summary: 'Получить пост редактора контента' })

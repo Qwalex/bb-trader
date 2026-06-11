@@ -40,7 +40,7 @@ import {
 } from './settings-page.util';
 
 export default function SettingsPage() {
-  type CabinetItem = { id: string; slug: string; name: string; isDefault: boolean };
+  type CabinetItem = { id: string; slug: string; name: string; isDefault: boolean; purpose?: string };
   const searchParams = useSearchParams();
   const cabinetIdFromQuery = searchParams.get('cabinetId')?.trim() ?? '';
   const activeCabinetId = cabinetIdFromQuery || readActiveCabinetIdClient();
@@ -77,6 +77,32 @@ export default function SettingsPage() {
     [scope, activeCabinetId],
   );
 
+  const isContentCabinet = activeCabinet?.purpose === 'content';
+  const contentHiddenSettingKeys = new Set([
+    'TELEGRAM_BOT_TOKEN',
+    'TELEGRAM_WHITELIST',
+    'TELEGRAM_NOTIFY_API_TRADE_CANCELLED',
+    'TELEGRAM_NOTIFY_TRADE_EVENTS',
+    'TELEGRAM_NOTIFY_TRADE_EVENT_TYPES',
+    'BYBIT_TESTNET',
+    'BYBIT_API_KEY_TESTNET',
+    'BYBIT_API_SECRET_TESTNET',
+    'BYBIT_API_KEY_MAINNET',
+    'BYBIT_API_SECRET_MAINNET',
+    'DEFAULT_ORDER_USD',
+    'MIN_CAPITAL_AMOUNT',
+    'DEFAULT_LEVERAGE_ENABLED',
+    'DEFAULT_LEVERAGE',
+    'FORCED_LEVERAGE',
+    'LEVERAGE_RANGE_MODE',
+    'MIN_ALLOWED_LEVERAGE',
+    'MAX_ALLOWED_LEVERAGE',
+    'SOURCE_MARTINGALE_DEFAULT_MULTIPLIER',
+    'BYBIT_ACCOUNT_MAX_CONCURRENCY',
+    'TP_SL_STEP_START',
+    'TP_SL_STEP_RANGE',
+  ]);
+
   const visibleKeys = useMemo(
     () =>
       KEYS.filter(({ key }) => {
@@ -90,12 +116,13 @@ export default function SettingsPage() {
           ) {
             return false;
           }
+          if (isContentCabinet && contentHiddenSettingKeys.has(key)) return false;
           if (!isAdmin && ADMIN_GLOBAL_KEYS.has(key)) return false;
           return true;
         }
         return false;
       }),
-    [scope, isAdmin],
+    [scope, isAdmin, isContentCabinet],
   );
   const visibleKeySet = useMemo(() => new Set<string>(visibleKeys.map(({ key }) => key)), [visibleKeys]);
   const visibleSections = useMemo(
@@ -111,14 +138,23 @@ export default function SettingsPage() {
         ),
       }))
         .filter((section) => section.keys.length > 0)
-        .filter((section) =>
-          isAdmin ? true : !['ui', 'openrouter', 'trading', 'diagnostics'].includes(section.id),
-        ),
-    [scope, isAdmin],
+        .filter((section) => {
+          if (isAdmin) {
+            if (
+              activeCabinet?.purpose === 'content' &&
+              (section.id === 'trading' || section.id === 'bybit')
+            ) {
+              return false;
+            }
+            return true;
+          }
+          return !['ui', 'openrouter', 'trading', 'diagnostics'].includes(section.id);
+        }),
+    [scope, isAdmin, activeCabinet?.purpose],
   );
 
   const refreshBalanceAlerts = useCallback(async () => {
-    if (scope !== 'cabinet') {
+    if (scope !== 'cabinet' || isContentCabinet) {
       setBalanceAlerts([]);
       return;
     }
@@ -130,7 +166,7 @@ export default function SettingsPage() {
     } catch {
       setBalanceAlerts([]);
     }
-  }, [scope, apiFetchScoped]);
+  }, [scope, apiFetchScoped, isContentCabinet]);
 
   const loadSettings = useCallback(async () => {
     try {
@@ -139,7 +175,7 @@ export default function SettingsPage() {
         scope === 'cabinet'
           ? apiFetchScoped('/cabinets')
           : Promise.resolve(null as Response | null),
-        scope === 'cabinet'
+        scope === 'cabinet' && !isContentCabinet
           ? apiFetchScoped('/bybit/balance-alerts')
           : Promise.resolve(null as Response | null),
       ]);

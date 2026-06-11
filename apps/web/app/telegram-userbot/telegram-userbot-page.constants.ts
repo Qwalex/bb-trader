@@ -10,6 +10,7 @@ export const INGEST_CLASSIFICATION_LABEL: Record<string, string> = {
   analysis: 'Анализ',
   promo: 'Акция',
   content: 'Контент',
+  news: 'Новости',
   close: 'Закрытие',
   reentry: 'Перезаход',
   other: 'Другое',
