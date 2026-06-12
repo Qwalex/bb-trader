@@ -10,6 +10,7 @@ import { Reflector } from '@nestjs/core';
 import { extractBearerToken, extractTokenFromCookieHeader } from './auth-token.util';
 import { IS_PUBLIC_ENDPOINT_KEY } from './public.decorator';
 import { verifySharedAuthToken } from './shared-auth-token';
+import { readWorkerUserAttestation } from './worker-user-attestation.util';
 import { readWorkerInternalToken } from '../internal/worker-http.util';
 
 @Injectable()
@@ -60,24 +61,29 @@ export class ApiAuthGuard implements CanActivate {
 
     if (internalToken && bearer === internalToken) {
       const userToken = extractBearerToken(forwardedHeader) ?? cookieToken;
-      if (!userToken) {
-        throw new UnauthorizedException('Missing forwarded auth token');
+      if (userToken) {
+        const payload = verifySharedAuthToken({
+          token: userToken,
+          secret: authSecret,
+        });
+        if (payload) {
+          req.auth = {
+            userId: payload.userId,
+            login: payload.login,
+            role: payload.role,
+            exp: payload.exp,
+            iat: payload.iat,
+          };
+          return true;
+        }
+        throw new UnauthorizedException('Invalid API access token');
       }
-      const payload = verifySharedAuthToken({
-        token: userToken,
-        secret: authSecret,
-      });
-      if (payload) {
-        req.auth = {
-          userId: payload.userId,
-          login: payload.login,
-          role: payload.role,
-          exp: payload.exp,
-          iat: payload.iat,
-        };
+      const attested = readWorkerUserAttestation(req.headers);
+      if (attested) {
+        req.auth = attested;
         return true;
       }
-      throw new UnauthorizedException('Invalid API access token');
+      throw new UnauthorizedException('Missing forwarded auth token');
     }
 
     const token = bearer ?? cookieToken;

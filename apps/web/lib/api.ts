@@ -136,6 +136,7 @@ export async function fetchApiResponse(
   }
   return fetch(`${getApiBase()}${withCabinetQuery(path, effectiveCabinetId)}`, {
     ...init,
+    credentials: typeof window === 'undefined' ? init?.credentials : 'include',
     headers,
     cache: 'no-store',
   });

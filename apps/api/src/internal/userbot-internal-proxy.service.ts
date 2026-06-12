@@ -2,6 +2,10 @@ import { HttpException, Injectable, Logger } from '@nestjs/common';
 import type { Request } from 'express';
 
 import { formatError } from '../common/format-error';
+import {
+  applyWorkerUserAttestationHeaders,
+  type RequestWithAuth,
+} from '../common/worker-user-attestation.util';
 import { applyUserForwardedAuthorizationHeader } from '../common/worker-proxy-auth.util';
 import { shouldProxyUserbotToWorker } from '../config/process-role.util';
 import {
@@ -23,12 +27,14 @@ export class UserbotInternalProxyService {
     if (!base || !token) {
       throw new Error('Worker userbot proxy is not configured');
     }
+    const authReq = req as RequestWithAuth;
     const url = new URL(req.originalUrl || req.url, `${base}/`);
     const headers = new Headers();
     headers.set('X-Internal-Token', token);
     headers.set('Authorization', `Bearer ${token}`);
     headers.set('Accept', 'application/json');
     applyUserForwardedAuthorizationHeader(headers, req);
+    applyWorkerUserAttestationHeaders(headers, authReq);
     const cabinetId = req.headers['x-cabinet-id'];
     if (typeof cabinetId === 'string' && cabinetId.trim()) {
       headers.set('x-cabinet-id', cabinetId.trim());

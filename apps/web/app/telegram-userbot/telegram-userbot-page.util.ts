@@ -8,6 +8,7 @@ export function buildTelegramUserbotApiUrl(path: string): string {
 export function telegramUserbotApiFetch(path: string, init?: RequestInit): Promise<Response> {
   return fetch(buildTelegramUserbotApiUrl(path), {
     ...init,
+    credentials: 'include',
     headers: getApiAuthHeaders(init?.headers),
     cache: 'no-store',
   });

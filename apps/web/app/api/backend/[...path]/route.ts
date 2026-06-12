@@ -1,3 +1,4 @@
+import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 
 import { readCookieValue } from '../../../../lib/api-auth.util';
@@ -38,7 +39,7 @@ function buildTargetUrl(request: Request, path: string[]): string {
   return `${getApiBase()}/${safePath}${source.search}`;
 }
 
-function buildForwardHeaders(request: Request): Headers {
+async function buildForwardHeaders(request: Request): Promise<Headers> {
   const headers = new Headers();
   request.headers.forEach((value, key) => {
     const lower = key.toLowerCase();
@@ -48,10 +49,12 @@ function buildForwardHeaders(request: Request): Headers {
     headers.set(key, value);
   });
 
-  const cookieHeader = request.headers.get('cookie') ?? '';
+  const cookieStore = await cookies();
   const sessionToken =
-    readCookieValue(cookieHeader, AUTH_COOKIE)?.trim() ||
-    readCookieValue(cookieHeader, AUTH_TOKEN_COOKIE)?.trim();
+    cookieStore.get(AUTH_COOKIE)?.value?.trim() ||
+    cookieStore.get(AUTH_TOKEN_COOKIE)?.value?.trim() ||
+    readCookieValue(request.headers.get('cookie') ?? '', AUTH_COOKIE)?.trim() ||
+    readCookieValue(request.headers.get('cookie') ?? '', AUTH_TOKEN_COOKIE)?.trim();
   const fallbackToken = process.env.API_ACCESS_TOKEN?.trim();
   const token = sessionToken || fallbackToken;
   if (token) {
@@ -66,7 +69,7 @@ async function proxyApiRequest(request: Request, context: RouteContext): Promise
   const method = request.method.toUpperCase();
   const init: RequestInit = {
     method,
-    headers: buildForwardHeaders(request),
+    headers: await buildForwardHeaders(request),
     cache: 'no-store',
     redirect: 'manual',
   };

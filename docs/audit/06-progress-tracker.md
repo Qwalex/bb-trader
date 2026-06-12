@@ -2425,3 +2425,12 @@
 - Changes: cookie `sb_auth`+`sb_auth_token` в ApiAuthGuard/proxy; BFF fallback обе cookie; `/health` → `userAuthConfigured`; скрипты env/log scan; Railway env sync Worker-*.
 - Manual verification: `check-cabinets-worker-auth-env.sh`; `railway-cabinets-log-scan.sh`; нет свежих `Auth is not configured` в логах Api после redeploy Worker-UB.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-203
+
+- Status: `done`
+- Scope: 401 на `/api/backend/telegram-userbot/*` при валидной сессии (worker split).
+- Findings: Worker повторно проверял user JWT и отклонял (`Invalid API access token`); Web BFF мог не читать `sb_auth` только из raw Cookie header.
+- Changes: attestation `x-auth-user-id/login/role` с Api после guard; Worker принимает attestation при internal token; Web BFF через `cookies()` + `credentials: include`; `API_INTERNAL_URL` на Web.
+- Manual verification: redeploy Api/Web/Worker-UB; GET status/chats/metrics — не 401.
+- Linked risks (`SEC-###`): N/A
