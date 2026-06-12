@@ -2462,3 +2462,21 @@
 - Files: `api-auth.guard.ts`, `userbot-internal-proxy.service.ts`
 - Manual verification: после деплоя Api+Worker-UB — `GET /api/backend/telegram-userbot/status?cabinetId=…` с сессией → 200.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-207
+
+- Status: `done`
+- Scope: 401 `Invalid API access token` на `/telegram-userbot/metrics/today` после fix AUD-206.
+- Findings: **Worker-UB** оставался на старом Docker image (`sha256:664ee38…`, deploy 18:52 UTC); `railway redeploy` не пересобрал образ — guard attestation-first отсутствовал на worker, Api (commit `5558467`) уже был актуален.
+- Mitigation: `railway up --service Worker-UB` → новый image `sha256:51f3a65e…`; proxy больше не 401 (smoke JWT → 500 только из‑за fake user / FK cabinet).
+- Manual verification: обновить `/telegram-userbot` в браузере — metrics/status/chats не 401; runbook: worker deploy = проверка image digest.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-208
+
+- Status: `done`
+- Scope: Worker-UB crash loop `UnknownDependenciesException: BybitService` в `OrdersModule`.
+- Findings: на `API_PROCESS_ROLE=worker-userbot` `OrdersModule` загружается для ingest, но `BybitModule`/`TelegramModule` не импортируются — Nest не мог создать `OrdersService`.
+- Changes: `BybitService`, `BalanceSnapshotService`, `TelegramService` — `@Optional()` в `OrdersService` с null-guards (ingest использует только `createSignalEvent` → Prisma + QPulse).
+- Manual verification: Worker-UB стартует, `GET /health` → `service: worker-userbot`.
+- Linked risks (`SEC-###`): N/A

@@ -106,21 +106,24 @@ export class OrdersService {
       }),
     )
     private readonly userbot: TelegramUserbotService | null,
+    @Optional()
     @Inject(
       forwardRef(() => {
         // Lazy resolve: избегаем циклического require() bybit.service ↔ orders.service (Nest иначе видит undefined-провайдер).
         return require('../bybit/bybit.service').BybitService;
       }),
     )
-    private readonly bybit: BybitService,
+    private readonly bybit: BybitService | null,
+    @Optional()
     @Inject(
       forwardRef(() => {
         return require('../bybit/balance-snapshot.service').BalanceSnapshotService;
       }),
     )
-    private readonly balanceSnapshots: BalanceSnapshotService,
+    private readonly balanceSnapshots: BalanceSnapshotService | null,
+    @Optional()
     @Inject(forwardRef(() => TelegramService))
-    private readonly telegram: TelegramService,
+    private readonly telegram: TelegramService | null,
     private readonly userbotSignalHash: UserbotSignalHashService,
     @Inject(
       forwardRef(() =>
@@ -442,7 +445,9 @@ export class OrdersService {
 
     try {
       const marketType = options?.marketType ?? 'linear';
-      const signalToStore = await this.bybit.resolveMarketEntryIfMissing(signal, marketType);
+      const signalToStore = this.bybit
+        ? await this.bybit.resolveMarketEntryIfMissing(signal, marketType)
+        : signal;
       const created = await this.prisma.signal.create({
         data: {
           cabinetId,
@@ -757,7 +762,7 @@ export class OrdersService {
           payload === undefined ? null : JSON.stringify(payload),
       },
     });
-    await this.telegram.notifyTradeSignalEvent({ signalId, type, payload }).catch((e) =>
+    await this.telegram?.notifyTradeSignalEvent({ signalId, type, payload }).catch((e) =>
       this.logger.warn(`notifyTradeSignalEvent: ${formatError(e)}`),
     );
     void this.signalDistribution.onSignalEvent(signalId, type, payload);
@@ -809,6 +814,11 @@ export class OrdersService {
       row.status === 'ORDERS_PLACED' ||
       row.status === 'OPEN'
     ) {
+      if (!this.bybit) {
+        throw new BadRequestException(
+          'Снятие ордеров на бирже недоступно на этом процессе (Bybit worker)',
+        );
+      }
       const cleanup = await this.bybit.cleanupExchangeBeforeDeletingPlacedSignal(id);
       if (!cleanup.ok) {
         const tail = cleanup.details ? `: ${cleanup.details}` : '';
@@ -1186,7 +1196,7 @@ export class OrdersService {
           }
         }
 
-        if (c.isActive && !isContentCabinet) {
+        if (c.isActive && !isContentCabinet && this.bybit) {
           try {
             const bal = await this.bybit.getUnifiedUsdtBalanceDetails();
             if (bal && Number.isFinite(bal.totalUsd)) {
@@ -1208,7 +1218,7 @@ export class OrdersService {
               const snapshotFresh =
                 recentSnapshot != null &&
                 Date.now() - recentSnapshot.createdAt.getTime() < 10 * 60_000;
-              if (!snapshotFresh) {
+              if (!snapshotFresh && this.balanceSnapshots) {
                 await this.balanceSnapshots
                   .upsertToday(totalBalanceUsd, availableBalanceUsd)
                   .catch((e) => {
@@ -2268,7 +2278,7 @@ export class OrdersService {
           error?: string;
         } | null = null;
 
-        if (OrdersService.CLOSED_STATUSES.has(item.status)) {
+        if (OrdersService.CLOSED_STATUSES.has(item.status) && this.bybit) {
           const breakdown = await this.bybit.getTradePnlBreakdown(item.id);
           finalPnl = breakdown.finalPnl ?? item.realizedPnl;
           pnlBreakdown = {
