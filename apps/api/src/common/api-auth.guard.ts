@@ -53,21 +53,34 @@ export class ApiAuthGuard implements CanActivate {
     const rawHeader = req.headers?.authorization;
     const authHeader = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
     const bearer = extractBearerToken(authHeader);
+    const cookieToken = extractTokenFromCookieHeader(req.headers?.cookie);
     const internalToken = readWorkerInternalToken();
     const forwardedRaw = req.headers?.['x-forwarded-authorization'];
     const forwardedHeader = Array.isArray(forwardedRaw) ? forwardedRaw[0] : forwardedRaw;
-    let token =
-      extractBearerToken(authHeader) ?? extractTokenFromCookieHeader(req.headers?.cookie);
-    if (
-      internalToken &&
-      bearer === internalToken &&
-      (extractBearerToken(forwardedHeader) ||
-        extractTokenFromCookieHeader(req.headers?.cookie))
-    ) {
-      token =
-        extractBearerToken(forwardedHeader) ??
-        extractTokenFromCookieHeader(req.headers?.cookie);
+
+    if (internalToken && bearer === internalToken) {
+      const userToken = extractBearerToken(forwardedHeader) ?? cookieToken;
+      if (!userToken) {
+        throw new UnauthorizedException('Missing forwarded auth token');
+      }
+      const payload = verifySharedAuthToken({
+        token: userToken,
+        secret: authSecret,
+      });
+      if (payload) {
+        req.auth = {
+          userId: payload.userId,
+          login: payload.login,
+          role: payload.role,
+          exp: payload.exp,
+          iat: payload.iat,
+        };
+        return true;
+      }
+      throw new UnauthorizedException('Invalid API access token');
     }
+
+    const token = bearer ?? cookieToken;
     if (!token) {
       throw new UnauthorizedException('Missing auth token');
     }

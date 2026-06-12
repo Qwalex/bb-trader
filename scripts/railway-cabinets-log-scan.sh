@@ -16,6 +16,8 @@ log() {
 # service|grep pattern|severity label
 PATTERNS=(
   'Api|userbot proxy failed: Auth is not configured|CRITICAL'
+  'Api|userbot proxy failed: Invalid API access token|CRITICAL'
+  'Api|userbot proxy failed: Missing forwarded auth token|CRITICAL'
   'Api|userbot proxy .*: 401|WARN'
   'Worker-UB|Auth is not configured|CRITICAL'
   'Worker-UB|AUTH_KEY_DUPLICATED|WARN'
