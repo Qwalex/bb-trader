@@ -537,30 +537,58 @@ export class BybitService implements OnApplicationBootstrap {
     await this.workers.enqueuePollSweep(reason, delayMs);
   }
 
+  /**
+   * Биржа без ордеров/позиции по паре+направлению.
+   * `true` — flat (не дубликат), `false` — есть exposure, `null` — проверить не удалось.
+   */
+  async isPairDirectionFlatOnExchange(
+    pair: string,
+    direction: 'long' | 'short',
+  ): Promise<boolean | null> {
+    const symbol = normalizeTradingPair(pair);
+    const client = await this.balanceInstrument.getClient();
+    if (!client) {
+      return null;
+    }
+    try {
+      const verdict = await this.bybitExposure.getExchangeExposureVerdict(
+        client,
+        symbol,
+        direction,
+      );
+      if (verdict === 'flat') {
+        await this.clearImmediateStaleDbBlockerIfExchangeFlat(
+          symbol,
+          direction,
+          client,
+          'duplicate-check',
+        );
+        return true;
+      }
+      if (verdict === 'exposed') {
+        return false;
+      }
+      return null;
+    } catch (e) {
+      this.logger.warn(`isPairDirectionFlatOnExchange: ${formatError(e)}`);
+      return null;
+    }
+  }
+
   async wouldDuplicateActivePairDirection(
     pair: string,
     direction: 'long' | 'short',
+    exchangeFlat?: boolean | null,
   ): Promise<boolean> {
-    const symbol = normalizeTradingPair(pair);
-    const client = await this.balanceInstrument.getClient();
-    if (client) {
-      try {
-        const verdict = await this.bybitExposure.getExchangeExposureVerdict(
-          client,
-          symbol,
-          direction,
-        );
-        if (verdict === 'exposed') {
-          return true;
-        }
-        if (verdict === 'unknown') {
-          return this.orders.hasActiveSignalForPairAndDirection(pair, direction);
-        }
-        await this.clearImmediateStaleDbBlockerIfExchangeFlat(symbol, direction, client, 'duplicate-check');
-        return false;
-      } catch (e) {
-        this.logger.warn(`wouldDuplicateActivePairDirection: ${formatError(e)}`);
-      }
+    const flatOnExchange =
+      exchangeFlat !== undefined
+        ? exchangeFlat
+        : await this.isPairDirectionFlatOnExchange(pair, direction);
+    if (flatOnExchange === true) {
+      return false;
+    }
+    if (flatOnExchange === false) {
+      return true;
     }
     return this.orders.hasActiveSignalForPairAndDirection(pair, direction);
   }

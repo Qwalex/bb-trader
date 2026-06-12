@@ -110,10 +110,16 @@ export class TelegramUserbotIngestSignalReplyService {
       base.direction,
     );
     if (closeCooldownMs > 0) {
-      return {
-        ok: false,
-        error: `Перезаход временно заблокирован после close (${Math.ceil(closeCooldownMs / 1000)}s)`,
-      };
+      const exchangeFlat = await this.bybit.isPairDirectionFlatOnExchange(
+        base.pair,
+        base.direction,
+      );
+      if (exchangeFlat !== true) {
+        return {
+          ok: false,
+          error: `Перезаход временно заблокирован после close (${Math.ceil(closeCooldownMs / 1000)}s)`,
+        };
+      }
     }
     await this.bybit.suspendStaleReconcile(
       base.pair,

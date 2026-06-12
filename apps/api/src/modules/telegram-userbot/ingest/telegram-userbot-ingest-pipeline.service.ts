@@ -607,12 +607,16 @@ export class TelegramUserbotIngestPipelineService {
         },
       );
     }
+    const exchangeFlat = await this.bybit.isPairDirectionFlatOnExchange(
+      signal.pair,
+      signal.direction,
+    );
     const closeCooldownMs = this.pairDirection.getCloseCooldownRemainingMs(
       effectiveCabinetId,
       signal.pair,
       signal.direction,
     );
-    if (closeCooldownMs > 0) {
+    if (closeCooldownMs > 0 && exchangeFlat !== true) {
       this.appendIngestStageLog(
         'warn',
         'Userbot: blocked by close cooldown',
@@ -645,10 +649,12 @@ export class TelegramUserbotIngestPipelineService {
     }
 
     if (
-      await this.bybit.wouldDuplicateActivePairDirection(
+      exchangeFlat !== true &&
+      (await this.bybit.wouldDuplicateActivePairDirection(
         signal.pair,
         signal.direction,
-      )
+        exchangeFlat,
+      ))
     ) {
       const incomingSourceName = (chatMeta?.title ?? ingest.chatId).trim();
       const incomingPriority = this.userbotSettings.normalizeSourcePriority(chatMeta?.sourcePriority);
@@ -779,7 +785,7 @@ export class TelegramUserbotIngestPipelineService {
     const signalHash = this.userbotSignalHash.computeHash(signal);
     const manualReread =
       options?.source === 'manual-reread' || options?.source === 'manual-reread-all';
-    if (manualReread) {
+    if (manualReread || exchangeFlat === true) {
       await this.userbotSignalHash.releaseForCabinetAndHash(effectiveCabinetId, signalHash);
     }
     const storedHash = currentIngest?.signalHash ?? ingest.signalHash;
@@ -790,9 +796,12 @@ export class TelegramUserbotIngestPipelineService {
         currentIngest?.status === 'duplicate_signal' ||
         currentIngest?.status === 'parse_incomplete' ||
         currentIngest?.status === 'parse_error');
-    const isNewSignal = canReuseExistingHash
+    let isNewSignal = canReuseExistingHash
       ? true
       : await this.userbotSignalHash.tryCreate(signalHash);
+    if (!isNewSignal && exchangeFlat === true) {
+      isNewSignal = true;
+    }
     if (!isNewSignal) {
       this.appendIngestStageLog('warn', 'Userbot: duplicate signal hash', ingest, {
         signalHash,

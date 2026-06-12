@@ -2545,3 +2545,12 @@
 - Changes: `editableKeySet` = union секций + visibleKeys; дефолт poll 15000 мс (`USERBOT_POLL_INTERVAL_MS`, `ENV_FALLBACK`).
 - Manual verification: account settings → изменить интервал userbot → кнопка «Сохранить» активна; после save userbot status показывает 15с.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-216
+
+- Status: `done`
+- Scope: Дубликат сигнала только при наличии ордера/позиции на Bybit.
+- Findings: hash-dedup и close-cooldown блокировали повтор без проверки биржи; `wouldDuplicateActivePairDirection` при `unknown` опирался только на БД.
+- Changes: `BybitService.isPairDirectionFlatOnExchange`; ingest pipeline — bypass cooldown/hash/duplicate при `flat`; reentry close-cooldown — то же; `wouldDuplicateActivePairDirection` через flat/exposed/null.
+- Manual verification: при чистой бирже по паре+направлению повтор сигнала не `duplicate_signal`; при открытой позиции/ордере — блок сохраняется.
+- Linked risks (`SEC-###`): N/A
