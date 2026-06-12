@@ -2536,3 +2536,12 @@
 - Changes: `releaseSignalHashIfLocked` при всех `place_error` в ingest pipeline и after-confirm.
 - Manual verification: после place_error повтор/новое сообщение с теми же уровнями не duplicate; «Перечитать» на #186 проходит к установке.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-215
+
+- Status: `done`
+- Scope: На `/settings` (account) изменение `TELEGRAM_USERBOT_POLL_INTERVAL_MS` не активировало «Сохранить».
+- Findings: поле в секции `visibleSections`, но не в `ADMIN_GLOBAL_KEYS` / `visibleKeySet` — `collectPendingChanges` отфильтровывал diff.
+- Changes: `editableKeySet` = union секций + visibleKeys; дефолт poll 15000 мс (`USERBOT_POLL_INTERVAL_MS`, `ENV_FALLBACK`).
+- Manual verification: account settings → изменить интервал userbot → кнопка «Сохранить» активна; после save userbot status показывает 15с.
+- Linked risks (`SEC-###`): N/A

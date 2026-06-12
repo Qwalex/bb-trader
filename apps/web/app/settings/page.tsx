@@ -124,7 +124,7 @@ export default function SettingsPage() {
       }),
     [scope, isAdmin, isContentCabinet],
   );
-  const visibleKeySet = useMemo(() => new Set<string>(visibleKeys.map(({ key }) => key)), [visibleKeys]);
+
   const visibleSections = useMemo(
     () =>
       SETTINGS_SECTIONS.map((section) => ({
@@ -152,6 +152,17 @@ export default function SettingsPage() {
         }),
     [scope, isAdmin, activeCabinet?.purpose],
   );
+
+  /** Ключи, которые реально показаны в форме (секции + legacy visibleKeys). */
+  const editableKeySet = useMemo(() => {
+    const set = new Set<string>(visibleKeys.map(({ key }) => key));
+    for (const section of visibleSections) {
+      for (const key of section.keys) {
+        set.add(key);
+      }
+    }
+    return set;
+  }, [visibleKeys, visibleSections]);
 
   const refreshBalanceAlerts = useCallback(async () => {
     if (scope !== 'cabinet' || isContentCabinet) {
@@ -249,7 +260,7 @@ export default function SettingsPage() {
   const pendingChanges = useMemo(() => {
     const all = collectPendingChanges(savedRows, draftRows);
     return all.filter((c) => {
-      if (visibleKeySet.has(c.key)) return true;
+      if (editableKeySet.has(c.key)) return true;
       if (scope === 'account') {
         return c.key === DIAGNOSTIC_MODELS_KEY || c.key === MODEL_HISTORY_KEY;
       }
@@ -258,7 +269,7 @@ export default function SettingsPage() {
       }
       return false;
     });
-  }, [savedRows, draftRows, scope, visibleKeySet]);
+  }, [savedRows, draftRows, scope, editableKeySet]);
   const hasPendingChanges = pendingChanges.length > 0;
 
   const valueForDraft = (key: string) => valueFor(draftRows, key);
@@ -339,7 +350,7 @@ export default function SettingsPage() {
 
   async function saveAll() {
       const ops = buildPutOperations(savedRows, draftRows).filter(({ key }) => {
-        if (visibleKeySet.has(key)) return true;
+        if (editableKeySet.has(key)) return true;
         if (scope === 'account') {
           return key === DIAGNOSTIC_MODELS_KEY || key === MODEL_HISTORY_KEY;
         }
