@@ -12,7 +12,8 @@
 2. Deploy **Worker-Bybit** → `GET /health` → `service: worker-bybit`.
 3. Deploy **Worker-UB** → userbot reconnect.
 4. Deploy **Api** (proxy) → Web `/health`.
-5. Rollback: redeploy предыдущего deployment Api **или** временно `API_PROCESS_ROLE=all` на одном Api и остановить worker-сервисы.
+5. **Worker-сервисы:** после push в `cabinets` проверить, что **Worker-UB** / **Worker-Bybit** получили **новый image digest** (не только `railway redeploy` старого образа). Если digest не меняется — `railway up --service Worker-UB` (и Bybit) из актуального дерева или redeploy из GitHub.
+6. Rollback: redeploy предыдущего deployment Api **или** временно `API_PROCESS_ROLE=all` на одном Api и остановить worker-сервисы.
 
 ## Deploy Safety Checklist
 
