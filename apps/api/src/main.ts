@@ -1,4 +1,4 @@
-import { LogLevel } from '@nestjs/common';
+import { LogLevel, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { Reflector } from '@nestjs/core';
@@ -7,6 +7,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ApiAuthGuard } from './common/api-auth.guard';
 import { parseCorsOrigins } from './common/cors-origins.util';
 import { AppModule } from './app.module';
+import { logProcessRoleBootSummary } from './config/process-role.capabilities.util';
 
 async function bootstrap() {
   const debug =
@@ -56,6 +57,7 @@ async function bootstrap() {
   const portRaw = process.env.PORT ?? process.env.API_PORT ?? '3001';
   const port = parseInt(portRaw, 10);
   const host = process.env.API_HOST ?? '0.0.0.0';
+  logProcessRoleBootSummary(new Logger('Bootstrap'));
   await app.listen(port, host);
 }
 

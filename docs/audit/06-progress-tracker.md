@@ -2382,5 +2382,17 @@
 - Findings: при `API_PROCESS_ROLE=api` через `OrdersModule`/`QpulseSyncModule` регистрировался локальный `TelegramUserbotController` на том же префиксе, что и proxy — UI connect/QR поднимали GramJS на Api; в логах Api — `telegram/client/updates.js TIMEOUT`, Worker-UB — `AUTH_KEY_DUPLICATED` каждые ~15 мин.
 - Changes: `TelegramUserbotController` только при `shouldRunUserbotMtproto()`; gates на connect/QR/disconnect в service+client; cron userbot/content только на Worker-UB; dashboard на Api не дергает локальный `getStatus()`.
 - Manual verification: `npx tsc -b --force apps/api`; redeploy Api → нет GramJS в логах; redeploy Worker-UB → один connect без 406.
+- Follow-up AUD-199: role-aware imports в Orders/Qpulse/Bybit modules; `/health` capabilities; bootstrap log.
 - Docs updated: AUD-197 follow-up в этом трекере.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-199
+
+- Status: `done`
+- Scope: Worker split — каждый процесс грузит только свою логику; устранить транзитивный MTProto userbot на Api.
+- Files: `orders-module.imports.util.ts`, `qpulse-sync-module.imports.util.ts`, `bybit-module.imports.util.ts`, `process-role.capabilities.util.ts`, `signal-distribution.service.ts`, `orders.service.ts`, `app.controller.ts`, `main.ts`, `scripts/check-process-role-health.sh`
+- Findings: `OrdersModule` и `QpulseSyncModule` всегда импортировали `TelegramUserbotModule` → GramJS на Api; `BybitController` регистрировался на Worker-UB.
+- Changes: условные imports по роли; mirror/QPulse optional без userbot; `/health` отдаёт `capabilities`; bootstrap log; скрипт проверки.
+- Manual verification: `npx tsc -b --force apps/api`; `GET /health` на Api/Worker-*; логи Api без `GramJS`, Worker-UB один connect.
+- Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A

@@ -1,5 +1,6 @@
-import { forwardRef, Inject, Injectable } from '@nestjs/common';
+import { forwardRef, Inject, Injectable, Optional } from '@nestjs/common';
 
+import { shouldRunUserbotMtproto } from '../../config/process-role.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { parseNumberArrayFromJson } from '../bybit/instrument/bybit-json.util';
 import { isFilledOrderStatus } from '../bybit/orders/bybit-order-status.util';
@@ -20,16 +21,22 @@ export class SignalDistributionService {
     private readonly prisma: PrismaService,
     private readonly cabinetContext: CabinetContextService,
     private readonly qpulseSync: QpulseSyncService,
+    @Optional()
     @Inject(forwardRef(() => TelegramUserbotMirrorService))
-    private readonly mirror: TelegramUserbotMirrorService,
+    private readonly mirror: TelegramUserbotMirrorService | null,
   ) {}
+
+  private canMirror(): boolean {
+    return shouldRunUserbotMtproto() && this.mirror != null;
+  }
 
   async onLifecycleUpdate(signalId: string): Promise<void> {
     await this.qpulseSync.patchSignalIfSynced(signalId);
   }
 
   async onSignalCreated(signalId: string): Promise<void> {
-    await this.mirror.tryCreateQpulseForSignal(signalId);
+    if (!this.canMirror()) return;
+    await this.mirror!.tryCreateQpulseForSignal(signalId);
   }
 
   async onSignalEvent(
@@ -110,6 +117,11 @@ export class SignalDistributionService {
         return;
       }
 
+      if (!this.canMirror()) {
+        await this.qpulseSync.patchSignalIfSynced(signalId);
+        return;
+      }
+
       if (mirrorKind) {
         await this.qpulseSync.patchSignalIfSynced(signalId);
       } else {
@@ -157,7 +169,7 @@ export class SignalDistributionService {
         closeOrders: signal.orders,
       });
 
-      await this.mirror.publishTradeEventToMirrorGroups({
+      await this.mirror!.publishTradeEventToMirrorGroups({
         signalId: signal.id,
         sourceChatId: signal.sourceChatId,
         sourceMessageId: signal.sourceMessageId,
@@ -205,6 +217,7 @@ export class SignalDistributionService {
       },
     });
     if (!signal?.cabinetId || !signal.sourceChatId || !signal.sourceMessageId) return;
+    if (!this.canMirror()) return;
 
     const sourceChatId = signal.sourceChatId;
     const sourceMessageId = signal.sourceMessageId;
@@ -228,7 +241,7 @@ export class SignalDistributionService {
       const { mirrorKind } = resolveMirrorCloseContext(closeInput);
       const text = buildMirrorCloseEventText(closeInput);
 
-      await this.mirror.publishTradeEventToMirrorGroups({
+      await this.mirror!.publishTradeEventToMirrorGroups({
         signalId: signal.id,
         sourceChatId,
         sourceMessageId,
@@ -248,7 +261,11 @@ export class SignalDistributionService {
     dedupeSuffix?: string;
   }): Promise<void> {
     if (!params.sourceChatId || !params.sourceMessageId) return;
-    await this.mirror.publishTradeEventToMirrorGroups({
+    if (!this.canMirror()) {
+      await this.qpulseSync.patchSignalIfSynced(params.signalId);
+      return;
+    }
+    await this.mirror!.publishTradeEventToMirrorGroups({
       signalId: params.signalId,
       sourceChatId: params.sourceChatId,
       sourceMessageId: params.sourceMessageId,

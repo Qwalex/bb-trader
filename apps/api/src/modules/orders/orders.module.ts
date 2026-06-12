@@ -1,24 +1,12 @@
-import { forwardRef, Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 
-import { BybitModule } from '../bybit/bybit.module';
-import { SettingsModule } from '../settings/settings.module';
-import { TelegramModule } from '../telegram';
-import { TelegramUserbotModule } from '../telegram-userbot/telegram-userbot.module';
-import { UserbotSignalHashModule } from '../telegram-userbot/userbot-signal-hash.module';
-import { QpulseSyncModule } from '../qpulse-sync/qpulse-sync.module';
+import { buildOrdersModuleImports } from './orders-module.imports.util';
 import { OrdersController } from './orders.controller';
 import { LeverageAiAdvisorService } from './leverage-ai-advisor.service';
 import { OrdersService } from './orders.service';
 
 @Module({
-  imports: [
-    SettingsModule,
-    forwardRef(() => BybitModule),
-    forwardRef(() => TelegramModule),
-    forwardRef(() => TelegramUserbotModule),
-    forwardRef(() => QpulseSyncModule),
-    UserbotSignalHashModule,
-  ],
+  imports: buildOrdersModuleImports(),
   controllers: [OrdersController],
   providers: [OrdersService, LeverageAiAdvisorService],
   exports: [OrdersService],

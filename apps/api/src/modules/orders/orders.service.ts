@@ -5,6 +5,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 
@@ -97,13 +98,14 @@ export class OrdersService {
     private readonly settings: SettingsService,
     private readonly cabinets: CabinetService,
     private readonly cabinetContext: CabinetContextService,
+    @Optional()
     @Inject(
       forwardRef(() => {
         // Lazy resolve: избегаем потенциальных циклов DI между userbot и orders.
         return require('../telegram-userbot/telegram-userbot.service').TelegramUserbotService;
       }),
     )
-    private readonly userbot: TelegramUserbotService,
+    private readonly userbot: TelegramUserbotService | null,
     @Inject(
       forwardRef(() => {
         // Lazy resolve: избегаем циклического require() bybit.service ↔ orders.service (Nest иначе видит undefined-провайдер).
@@ -1113,12 +1115,14 @@ export class OrdersService {
     const probeCabinetId =
       cabinets.find((c) => c.isActive)?.id ?? cabinets[0]?.id ?? null;
     let userbotConnectedGlobal = false;
-    if (probeCabinetId && !shouldProxyUserbotToWorker()) {
+    if (probeCabinetId && this.userbot && !shouldProxyUserbotToWorker()) {
       userbotConnectedGlobal = await this.cabinetContext.runWithCabinet(
         probeCabinetId,
         async () => {
+          const userbot = this.userbot;
+          if (!userbot) return false;
           try {
-            const status = await this.userbot.getStatus();
+            const status = await userbot.getStatus();
             return Boolean(status?.connected);
           } catch {
             return false;

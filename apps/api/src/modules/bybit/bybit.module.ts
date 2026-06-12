@@ -1,17 +1,12 @@
-import { forwardRef, Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 
-import { AppLogModule } from '../app-log/app-log.module';
-import { OrdersModule } from '../orders/orders.module';
-import { PrismaModule } from '../../prisma/prisma.module';
-import { SettingsModule } from '../settings/settings.module';
-import { TelegramModule } from '../telegram';
-import { VkModule } from '../vk/vk.module';
-import { WorkerQueueModule } from '../worker-queue/worker-queue.module';
+import {
+  buildBybitModuleControllers,
+  buildBybitModuleImports,
+} from './bybit-module.imports.util';
 import { BalanceSnapshotService } from './balance-snapshot.service';
-import { BalanceAlertController } from './balance-alert/balance-alert.controller';
 import { BalanceAlertSchedulerService } from './balance-alert/balance-alert-scheduler.service';
 import { BalanceAlertService } from './balance-alert/balance-alert.service';
-import { BybitController } from './bybit.controller';
 import { BybitService } from './bybit.service';
 import { BybitBalanceInstrumentService } from './instrument/bybit-balance-instrument.service';
 import { BybitClientService } from './instrument/bybit-client.service';
@@ -35,21 +30,11 @@ import { BybitRecalcService } from './pnl/bybit-recalc.service';
 import { BybitSignalOverridesService } from './overrides/bybit-signal-overrides.service';
 import { BybitTpSlService } from './tpsl/bybit-tpsl.service';
 import { BybitTpSlFastApplyService } from './tpsl/bybit-tpsl-fast-apply.service';
-import { BybitSpotModule } from '../bybit-spot/bybit-spot.module';
 import { BybitInternalClientService } from './bybit-internal-client.service';
 
 @Module({
-  imports: [
-    PrismaModule,
-    SettingsModule,
-    forwardRef(() => OrdersModule),
-    forwardRef(() => TelegramModule),
-    forwardRef(() => VkModule),
-    forwardRef(() => WorkerQueueModule),
-    forwardRef(() => BybitSpotModule),
-    AppLogModule,
-  ],
-  controllers: [BybitController, BalanceAlertController],
+  imports: buildBybitModuleImports(),
+  controllers: buildBybitModuleControllers(),
   providers: [
     BybitService,
     BybitClientService,

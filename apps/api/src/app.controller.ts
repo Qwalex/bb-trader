@@ -4,7 +4,7 @@ import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Public } from './common/public.decorator';
 import { AppService } from './app.service';
 import { WorkerQueueService } from './modules/worker-queue/worker-queue.service';
-import { healthServiceLabel } from './config/process-role.util';
+import { healthPayload } from './config/process-role.capabilities.util';
 
 @ApiTags('Health')
 @Controller()
@@ -25,7 +25,7 @@ export class AppController {
   @Public()
   @Get('health')
   health() {
-    return { status: 'ok', service: healthServiceLabel() };
+    return healthPayload();
   }
 
   @ApiOperation({ summary: 'Статус фоновых очередей' })
