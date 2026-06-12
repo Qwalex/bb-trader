@@ -18,6 +18,7 @@
 
 - Validate env keys for target environment.
 - **Worker split:** на **Api**, **Worker-UB** и **Worker-Bybit** один и тот же `AUTH_JWT_SECRET` **или** `API_ACCESS_TOKEN` (как на Api) — иначе proxy userbot/Bybit на worker даёт `401 Auth is not configured`.
+- **Web `API_INTERNAL_URL`:** `http://${Api.RAILWAY_PRIVATE_DOMAIN}:${PORT}` (не `api.railway.internal`); при ошибке DNS BFF fallback на `NEXT_PUBLIC_API_URL`.
 - Verify healthcheck endpoints after deploy.
 - Confirm DB migration compatibility before restart.
 - Confirm external integrations (Bybit/Telegram/OpenRouter/VK) are reachable.

@@ -1,18 +1,14 @@
 import { NextResponse } from 'next/server';
 import { readCookieValue } from '../../../lib/api-auth.util';
+import { fetchServerApi, getServerApiBase } from '../../../lib/api-base.util';
 import {
   AUTH_COOKIE,
   AUTH_MAX_AGE_SECONDS,
   AUTH_TOKEN_COOKIE,
-  DEFAULT_INTERNAL_API_BASE,
 } from '../../../lib/api.constants';
 
 function getApiBase(): string {
-  return (
-    process.env.API_INTERNAL_URL?.replace(/\/$/, '') ??
-    process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ??
-    DEFAULT_INTERNAL_API_BASE
-  );
+  return getServerApiBase();
 }
 
 function clearAuthCookies(response: NextResponse): void {
@@ -41,7 +37,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ authenticated: false });
   }
   try {
-    const probe = await fetch(`${getApiBase()}/auth/me`, {
+    const probe = await fetchServerApi('/auth/me', {
       cache: 'no-store',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -87,7 +83,7 @@ export async function POST(request: Request) {
   const password = String(payload?.password ?? '');
 
   const callApi = async (path: string, body: unknown) =>
-    fetch(`${getApiBase()}${path}`, {
+    fetchServerApi(path, {
       method: 'POST',
       cache: 'no-store',
       headers: { 'Content-Type': 'application/json' },
@@ -156,7 +152,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: false, message: 'Требуется вход' }, { status: 401 });
       }
       const unlockLogin = String(payload?.unlockLogin ?? '').trim();
-      const res = await fetch(`${getApiBase()}/auth/users/unlock`, {
+      const res = await fetchServerApi('/auth/users/unlock', {
         method: 'POST',
         cache: 'no-store',
         headers: {

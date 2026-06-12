@@ -5,10 +5,10 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 import { readCookieValue } from '../../../../lib/api-auth.util';
+import { getServerApiBaseCandidates } from '../../../../lib/api-base.util';
 import {
   AUTH_COOKIE,
   AUTH_TOKEN_COOKIE,
-  DEFAULT_INTERNAL_API_BASE,
 } from '../../../../lib/api.constants';
 
 type RouteContext = {
@@ -28,18 +28,10 @@ const HOP_BY_HOP_HEADERS = new Set([
   'upgrade',
 ]);
 
-function getApiBase(): string {
-  return (
-    process.env.API_INTERNAL_URL?.replace(/\/$/, '') ??
-    process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ??
-    DEFAULT_INTERNAL_API_BASE
-  );
-}
-
-function buildTargetUrl(request: Request, path: string[]): string {
+function buildTargetUrl(apiBase: string, request: Request, path: string[]): string {
   const source = new URL(request.url);
   const safePath = path.map((part) => encodeURIComponent(part)).join('/');
-  return `${getApiBase()}/${safePath}${source.search}`;
+  return `${apiBase}/${safePath}${source.search}`;
 }
 
 async function buildForwardHeaders(request: Request): Promise<Headers> {
@@ -84,7 +76,36 @@ async function proxyApiRequest(request: Request, context: RouteContext): Promise
     init.body = await request.arrayBuffer();
   }
 
-  const upstream = await fetch(buildTargetUrl(request, path), init);
+  const bases = getServerApiBaseCandidates();
+  let upstream: Response | null = null;
+  let lastError: unknown;
+  for (let i = 0; i < bases.length; i += 1) {
+    const base = bases[i] ?? '';
+    try {
+      upstream = await fetch(buildTargetUrl(base, request, path), init);
+      break;
+    } catch (error) {
+      lastError = error;
+      const code = (error as NodeJS.ErrnoException | undefined)?.code;
+      const retryable =
+        i < bases.length - 1 &&
+        (code === 'ENOTFOUND' || code === 'ECONNREFUSED' || code === 'EAI_AGAIN');
+      if (!retryable) {
+        console.error(`BFF proxy fetch failed (${base}):`, error);
+        return NextResponse.json(
+          { message: 'Upstream API unavailable', error: 'Bad Gateway', statusCode: 502 },
+          { status: 502 },
+        );
+      }
+    }
+  }
+  if (!upstream) {
+    console.error('BFF proxy: no upstream response', lastError);
+    return NextResponse.json(
+      { message: 'Upstream API unavailable', error: 'Bad Gateway', statusCode: 502 },
+      { status: 502 },
+    );
+  }
   const responseHeaders = new Headers();
   upstream.headers.forEach((value, key) => {
     if (!HOP_BY_HOP_HEADERS.has(key.toLowerCase())) {

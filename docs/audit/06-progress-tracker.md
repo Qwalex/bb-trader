@@ -2443,3 +2443,12 @@
 - Changes: все client fetch через `fetchApiResponse` + `credentials:include`; BFF `force-dynamic`; smoke 35+ GET; proxy пробрасывает `cabinetId` из query.
 - Manual verification: `node scripts/smoke-cabinets-api-routes.mjs`; с `SMOKE_LOGIN` — BFF telegram-userbot не 401.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-205
+
+- Status: `done`
+- Scope: 500 на `/api/backend/telegram-userbot/*` (Web BFF).
+- Findings: `API_INTERNAL_URL=http://api.railway.internal:8080` не резолвится; у Api `RAILWAY_PRIVATE_DOMAIN=bb-trader.railway.internal` → `fetch failed ENOTFOUND` → пустой 500.
+- Changes: fallback internal→public в `api-base.util.ts`; BFF retry; Railway `API_INTERNAL_URL` на Web/Worker-UB; null-safe `getTodayMetrics` ingest.
+- Manual verification: BFF metrics/today не 500; Web logs без ENOTFOUND.
+- Linked risks (`SEC-###`): N/A

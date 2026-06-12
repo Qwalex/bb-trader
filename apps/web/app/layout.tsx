@@ -7,6 +7,7 @@ import { TopNav } from './components/TopNav';
 import {
   defaultNavHiddenMenuIds,
 } from '../lib/cabinet-nav.util';
+import { fetchServerApi } from '../lib/api-base.util';
 
 import './globals.css';
 
@@ -20,14 +21,6 @@ const basePath = normalizeBasePath(process.env.NEXT_PUBLIC_BASE_PATH);
 function withBasePath(url: string): string {
   if (!url.startsWith('/')) return url;
   return `${basePath}${url}`;
-}
-
-function getApiBaseForServer(): string {
-  return (
-    process.env.API_INTERNAL_URL?.replace(/\/$/, '') ??
-    process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ??
-    'http://api:3001'
-  );
 }
 
 const geistSans = localFont({
@@ -108,17 +101,17 @@ export default async function RootLayout({
   let hiddenMenuIds: string[] = defaultNavHiddenMenuIds();
   if (authToken) {
     try {
-      const apiBase = getApiBaseForServer();
       const authHeaders = {
         Authorization: `Bearer ${authToken}`,
         ...(cabinetId ? { 'x-cabinet-id': cabinetId } : {}),
       };
+      const navPath = `/settings/nav-menu${cabinetId ? `?cabinetId=${encodeURIComponent(cabinetId)}` : ''}`;
       const [meRes, navRes] = await Promise.all([
-        fetch(`${apiBase}/auth/me`, {
+        fetchServerApi('/auth/me', {
           cache: 'no-store',
           headers: authHeaders,
         }),
-        fetch(`${apiBase}/settings/nav-menu${cabinetId ? `?cabinetId=${encodeURIComponent(cabinetId)}` : ''}`, {
+        fetchServerApi(navPath, {
           cache: 'no-store',
           headers: authHeaders,
         }),

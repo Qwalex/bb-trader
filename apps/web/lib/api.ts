@@ -1,7 +1,7 @@
 import { getClientTokenFromCookie, getServerTokenFromCookies } from './api-auth.util';
 import { readActiveCabinetIdClient } from './cabinet-client.util';
 import { normalizeBasePath } from './base-path';
-import { DEFAULT_INTERNAL_API_BASE } from './api.constants';
+import { getServerApiBase, fetchServerApi } from './api-base.util';
 
 /**
  * Публичный origin веб-приложения (`WEB_APP_ORIGIN`), совпадает с одним из API_CORS_ORIGINS на API.
@@ -20,11 +20,7 @@ function getWebAppOriginForSsr(): string | undefined {
 export function getApiBase(): string {
   const isServer = typeof window === 'undefined';
   if (isServer) {
-    return (
-      process.env.API_INTERNAL_URL?.replace(/\/$/, '') ??
-      process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ??
-      DEFAULT_INTERNAL_API_BASE
-    );
+    return getServerApiBase();
   }
   const basePath = normalizeBasePath(process.env.NEXT_PUBLIC_BASE_PATH);
   return `${window.location.origin}${basePath}/api/backend`;
@@ -110,12 +106,17 @@ export async function fetchJson<T>(
   if (effectiveCabinetId) {
     headers.set('x-cabinet-id', effectiveCabinetId);
   }
-  const res = await fetch(`${getApiBase()}${withCabinetQuery(path, effectiveCabinetId)}`, {
+  const apiPath = withCabinetQuery(path, effectiveCabinetId);
+  const fetchInit: RequestInit = {
     ...init,
     credentials: typeof window === 'undefined' ? init?.credentials : 'include',
     headers,
     cache: 'no-store',
-  });
+  };
+  const res =
+    typeof window === 'undefined'
+      ? await fetchServerApi(apiPath, fetchInit)
+      : await fetch(`${getApiBase()}${apiPath}`, fetchInit);
   if (!res.ok) {
     throw new Error(`${res.status} ${res.statusText}`);
   }
@@ -135,10 +136,15 @@ export async function fetchApiResponse(
   if (effectiveCabinetId) {
     headers.set('x-cabinet-id', effectiveCabinetId);
   }
-  return fetch(`${getApiBase()}${withCabinetQuery(path, effectiveCabinetId)}`, {
+  const apiPath = withCabinetQuery(path, effectiveCabinetId);
+  const fetchInit: RequestInit = {
     ...init,
     credentials: typeof window === 'undefined' ? init?.credentials : 'include',
     headers,
     cache: 'no-store',
-  });
+  };
+  if (typeof window === 'undefined') {
+    return fetchServerApi(apiPath, fetchInit);
+  }
+  return fetch(`${getApiBase()}${apiPath}`, fetchInit);
 }
