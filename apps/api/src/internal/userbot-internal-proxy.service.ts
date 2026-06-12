@@ -1,7 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { HttpException, Injectable, Logger } from '@nestjs/common';
 import type { Request } from 'express';
 
 import { formatError } from '../common/format-error';
+import { applyUserForwardedAuthorizationHeader } from '../common/worker-proxy-auth.util';
 import { shouldProxyUserbotToWorker } from '../config/process-role.util';
 import {
   readWorkerUbInternalBaseUrl,
@@ -27,10 +28,7 @@ export class UserbotInternalProxyService {
     headers.set('X-Internal-Token', token);
     headers.set('Authorization', `Bearer ${token}`);
     headers.set('Accept', 'application/json');
-    const auth = req.headers.authorization;
-    if (typeof auth === 'string' && auth.trim()) {
-      headers.set('X-Forwarded-Authorization', auth);
-    }
+    applyUserForwardedAuthorizationHeader(headers, req);
     const cabinetId = req.headers['x-cabinet-id'];
     if (typeof cabinetId === 'string' && cabinetId.trim()) {
       headers.set('x-cabinet-id', cabinetId.trim());
@@ -57,11 +55,13 @@ export class UserbotInternalProxyService {
       const text = await res.text();
       if (!res.ok) {
         this.logger.warn(`userbot proxy ${req.method} ${url.pathname}: ${res.status}`);
+        let body: unknown;
         try {
-          return JSON.parse(text);
+          body = text.trim() ? JSON.parse(text) : { error: res.statusText };
         } catch {
-          return { ok: false, error: text || res.statusText };
+          body = { error: text || res.statusText };
         }
+        throw new HttpException(body as string | Record<string, unknown>, res.status);
       }
       if (!text.trim()) {
         return { ok: true };

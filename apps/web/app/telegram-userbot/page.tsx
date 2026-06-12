@@ -57,18 +57,18 @@ export default function TelegramUserbotPage() {
 
   const qrVisible = useMemo(
     () =>
-      status?.qr.phase === 'waiting_scan' ||
-      status?.qr.phase === 'starting' ||
-      status?.qr.phase === 'need_password' ||
-      status?.qr.phase === 'completing_login',
-    [status?.qr.phase],
+      status?.qr?.phase === 'waiting_scan' ||
+      status?.qr?.phase === 'starting' ||
+      status?.qr?.phase === 'need_password' ||
+      status?.qr?.phase === 'completing_login',
+    [status?.qr?.phase],
   );
 
   useEffect(() => {
-    if (status?.qr.phase !== 'need_password') {
+    if (status?.qr?.phase !== 'need_password') {
       setQrCloudPassword('');
     }
-  }, [status?.qr.phase]);
+  }, [status?.qr?.phase]);
   const normalizedSearch = search.trim().toLowerCase();
   const filteredChats = useMemo(() => {
     if (!normalizedSearch) {
@@ -262,10 +262,10 @@ export default function TelegramUserbotPage() {
     let inFlight = false;
 
     const qrPhaseNeedsPoll = (s: BotStatus | null) =>
-      s?.qr.phase === 'waiting_scan' ||
-      s?.qr.phase === 'starting' ||
-      s?.qr.phase === 'need_password' ||
-      s?.qr.phase === 'completing_login';
+      s?.qr?.phase === 'waiting_scan' ||
+      s?.qr?.phase === 'starting' ||
+      s?.qr?.phase === 'need_password' ||
+      s?.qr?.phase === 'completing_login';
 
     const tick = async () => {
       if (cancelled || inFlight) return;
@@ -1132,7 +1132,7 @@ export default function TelegramUserbotPage() {
       {qrVisible && (
         <div className="card" style={{ marginBottom: '1rem' }}>
           <h3 style={{ marginBottom: '0.5rem' }}>QR авторизация</h3>
-          {status?.qr.phase === 'waiting_scan' && status.qr.qrDataUrl ? (
+          {status?.qr?.phase === 'waiting_scan' && status.qr.qrDataUrl ? (
             <img
               src={status.qr.qrDataUrl}
               alt="Telegram login QR"
@@ -1142,11 +1142,11 @@ export default function TelegramUserbotPage() {
             />
           ) : (
             <p style={{ color: 'var(--muted)' }}>
-              {status?.qr.phase === 'starting'
+              {status?.qr?.phase === 'starting'
                 ? 'Подготовка QR…'
-                : status?.qr.phase === 'need_password'
+                : status?.qr?.phase === 'need_password'
                   ? 'Введите облачный пароль ниже.'
-                  : status?.qr.phase === 'completing_login'
+                  : status?.qr?.phase === 'completing_login'
                     ? 'Завершение входа…'
                     : 'Генерация QR…'}
             </p>
@@ -1155,12 +1155,12 @@ export default function TelegramUserbotPage() {
             Если QR не сканируется, откройте Telegram на телефоне: Настройки -&gt; Устройства
             -&gt; Подключить устройство.
           </p>
-          {status?.qr.error && (
+          {status?.qr?.error && (
             <p className="msg err" style={{ marginTop: '0.5rem' }}>
               {status.qr.error}
             </p>
           )}
-          {status?.qr.phase === 'need_password' && (
+          {status?.qr?.phase === 'need_password' && (
             <div className="userbotQr2faPanel">
               <p className="userbotQr2faPanelHint">
                 Telegram запросил <strong>облачный пароль</strong> (двухэтапная проверка): в приложении

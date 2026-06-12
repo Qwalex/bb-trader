@@ -61,9 +61,12 @@ export class ApiAuthGuard implements CanActivate {
     if (
       internalToken &&
       bearer === internalToken &&
-      extractBearerToken(forwardedHeader)
+      (extractBearerToken(forwardedHeader) ||
+        extractTokenFromCookieHeader(req.headers?.cookie))
     ) {
-      token = extractBearerToken(forwardedHeader);
+      token =
+        extractBearerToken(forwardedHeader) ??
+        extractTokenFromCookieHeader(req.headers?.cookie);
     }
     if (!token) {
       throw new UnauthorizedException('Missing auth token');

@@ -2394,5 +2394,15 @@
 - Findings: `OrdersModule` и `QpulseSyncModule` всегда импортировали `TelegramUserbotModule` → GramJS на Api; `BybitController` регистрировался на Worker-UB.
 - Changes: условные imports по роли; mirror/QPulse optional без userbot; `/health` отдаёт `capabilities`; bootstrap log; скрипт проверки.
 - Manual verification: `npx tsc -b --force apps/api`; `GET /health` на Api/Worker-*; логи Api без `GramJS`, Worker-UB один connect.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-200
+
+- Status: `done`
+- Scope: Падение `/telegram-userbot` при worker split (proxy 401 + crash на `status.qr.phase`).
+- Files: `worker-proxy-auth.util.ts`, `userbot-internal-proxy.service.ts`, `api-auth.guard.ts`, `apps/web/app/telegram-userbot/page.tsx`
+- Findings: proxy слал только `Authorization` header на Worker; JWT из cookie `sb_auth_token` не попадал в `X-Forwarded-Authorization` → 401; тело ошибки возвращалось как HTTP 200 → React падал на `status?.qr.phase`.
+- Changes: проброс JWT из cookie; `HttpException` с кодом Worker; optional chaining `status?.qr?.phase` на странице.
+- Manual verification: страница `/telegram-userbot` загружается; логи Api без `userbot proxy … 401`.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
