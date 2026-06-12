@@ -44,6 +44,8 @@ export const ENV_FALLBACK: Record<string, string> = {
   STUCK_TRADES_AUTO_HEAL_COOLDOWN_MS: '600000',
   /** Пауза после неудачной попытки heal (мс). */
   STUCK_TRADES_AUTO_HEAL_DEFER_BACKOFF_MS: '120000',
+  /** Интервал poll userbot (мс). */
+  TELEGRAM_USERBOT_POLL_INTERVAL_MS: '15000',
 };
 
 /** Ключ глобальной настройки: `AuthUser.id` владельца, под которым сохранена `TELEGRAM_USERBOT_SESSION`. */
