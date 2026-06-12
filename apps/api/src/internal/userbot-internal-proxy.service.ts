@@ -25,6 +25,51 @@ export class UserbotInternalProxyService {
     return shouldProxyUserbotToWorker() && Boolean(readWorkerUbInternalBaseUrl());
   }
 
+  /** Для dashboard-cabinets на Api: статус MTProto на Worker-UB (глобальная сессия). */
+  async probeUserbotConnected(params: {
+    cabinetId: string;
+    userId: string;
+    login: string;
+    role?: string;
+  }): Promise<boolean> {
+    const base = readWorkerUbInternalBaseUrl();
+    const token = readWorkerInternalToken();
+    const cabinetId = String(params.cabinetId ?? '').trim();
+    const login = String(params.login ?? '').trim();
+    if (!base || !token || !cabinetId || !login) {
+      return false;
+    }
+    const url = new URL('/telegram-userbot/status', `${base}/`);
+    url.searchParams.set('cabinetId', cabinetId);
+    const headers = new Headers({
+      'X-Internal-Token': token,
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+      'x-cabinet-id': cabinetId,
+      [WORKER_AUTH_LOGIN_HEADER]: login,
+      [WORKER_AUTH_USER_ID_HEADER]: String(params.userId ?? '').trim(),
+    });
+    const role = String(params.role ?? '').trim();
+    if (role) {
+      headers.set(WORKER_AUTH_ROLE_HEADER, role);
+    }
+    try {
+      const res = await fetch(url.toString(), { method: 'GET', headers, cache: 'no-store' });
+      const text = await res.text();
+      if (!res.ok) {
+        this.logger.debug(
+          `probeUserbotConnected cabinet=${cabinetId}: ${res.status} ${text.slice(0, 120)}`,
+        );
+        return false;
+      }
+      const json = text.trim() ? (JSON.parse(text) as { connected?: boolean }) : {};
+      return Boolean(json.connected);
+    } catch (e) {
+      this.logger.debug(`probeUserbotConnected failed: ${formatError(e)}`);
+      return false;
+    }
+  }
+
   async forward(req: Request): Promise<unknown> {
     const base = readWorkerUbInternalBaseUrl();
     const token = readWorkerInternalToken();

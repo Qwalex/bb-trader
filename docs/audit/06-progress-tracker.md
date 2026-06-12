@@ -2480,3 +2480,12 @@
 - Changes: `BybitService`, `BalanceSnapshotService`, `TelegramService` — `@Optional()` в `OrdersService` с null-guards (ingest использует только `createSignalEvent` → Prisma + QPulse).
 - Manual verification: Worker-UB стартует, `GET /health` → `service: worker-userbot`.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-209
+
+- Status: `done`
+- Scope: Ложное «Подключите Userbot» на главной для всех кабинетов (cabinets split).
+- Findings: `getDashboardCabinetsOverviewForUser` проверял `userbot.getStatus()` только при `!shouldProxyUserbotToWorker()`; на dedicated Api `userbotConnectedGlobal` всегда `false`.
+- Changes: `UserbotInternalProxyService.probeUserbotConnected` → Worker-UB `/telegram-userbot/status`; `OrdersService.resolveGlobalUserbotConnected`.
+- Manual verification: после redeploy Api главная не показывает userbot warning при connected на `/telegram-userbot`.
+- Linked risks (`SEC-###`): N/A

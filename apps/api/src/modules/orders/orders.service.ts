@@ -24,6 +24,7 @@ import type { SignalDistributionService } from '../qpulse-sync/signal-distributi
 
 import { formatError } from '../../common/format-error';
 import { shouldProxyUserbotToWorker } from '../../config/process-role.util';
+import { UserbotInternalProxyService } from '../../internal/userbot-internal-proxy.service';
 import type {
   DashboardCabinetCardDto,
   DashboardCabinetsOverviewDto,
@@ -131,6 +132,8 @@ export class OrdersService {
       ),
     )
     private readonly signalDistribution: SignalDistributionService,
+    @Optional()
+    private readonly userbotProxy: UserbotInternalProxyService | null,
   ) {}
 
   private static readonly ACTIVE_SIGNAL_STATUSES = new Set([
@@ -1105,6 +1108,45 @@ export class OrdersService {
    * Сводка по всем кабинетам пользователя для дашборда (win/lose/winrate/pnl/balance).
    * Bybit — до 3 кабинетов параллельно (очередь rate limit на кабинет); краткий кэш 20 с.
    */
+  private async resolveGlobalUserbotConnected(
+    userId: string,
+    probeCabinetId: string | null,
+  ): Promise<boolean> {
+    if (!probeCabinetId) {
+      return false;
+    }
+    if (this.userbot && !shouldProxyUserbotToWorker()) {
+      return this.cabinetContext.runWithCabinet(probeCabinetId, async () => {
+        const userbot = this.userbot;
+        if (!userbot) {
+          return false;
+        }
+        try {
+          const status = await userbot.getStatus();
+          return Boolean(status?.connected);
+        } catch {
+          return false;
+        }
+      });
+    }
+    if (this.userbotProxy?.isEnabled()) {
+      const authUser = await this.prisma.authUser.findUnique({
+        where: { id: userId },
+        select: { id: true, login: true, role: true },
+      });
+      if (!authUser?.login?.trim()) {
+        return false;
+      }
+      return this.userbotProxy.probeUserbotConnected({
+        cabinetId: probeCabinetId,
+        userId: authUser.id,
+        login: authUser.login.trim(),
+        role: authUser.role,
+      });
+    }
+    return false;
+  }
+
   async getDashboardCabinetsOverviewForUser(
     userIdRaw: string | null | undefined,
   ): Promise<DashboardCabinetsOverviewDto> {
@@ -1124,22 +1166,10 @@ export class OrdersService {
     const cabinets = await this.cabinets.listCabinetsForUser(userId);
     const probeCabinetId =
       cabinets.find((c) => c.isActive)?.id ?? cabinets[0]?.id ?? null;
-    let userbotConnectedGlobal = false;
-    if (probeCabinetId && this.userbot && !shouldProxyUserbotToWorker()) {
-      userbotConnectedGlobal = await this.cabinetContext.runWithCabinet(
-        probeCabinetId,
-        async () => {
-          const userbot = this.userbot;
-          if (!userbot) return false;
-          try {
-            const status = await userbot.getStatus();
-            return Boolean(status?.connected);
-          } catch {
-            return false;
-          }
-        },
-      );
-    }
+    const userbotConnectedGlobal = await this.resolveGlobalUserbotConnected(
+      userId,
+      probeCabinetId,
+    );
 
     const items = await mapWithConcurrency(cabinets, 3, async (c) =>
       this.cabinetContext.runWithCabinet(c.id, async () => {
