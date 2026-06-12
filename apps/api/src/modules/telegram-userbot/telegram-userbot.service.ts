@@ -7,6 +7,9 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { shouldRunUserbotMtproto } from '../../config/process-role.util';
+import {
+  assertUserbotMtprotoProcessRole,
+} from './utils/telegram-userbot-mtproto-host.util';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import type { Prisma } from '@prisma/client';
 import { normalizeTradingPair, type SignalDto } from '@repo/shared';
@@ -212,26 +215,32 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   }
 
   async connectFromStoredSession() {
+    assertUserbotMtprotoProcessRole();
     return this.userbotClient.connectFromStoredSession();
   }
 
   async disconnect() {
+    assertUserbotMtprotoProcessRole();
     return this.userbotClient.disconnect();
   }
 
   async startQrLogin() {
+    assertUserbotMtprotoProcessRole();
     return this.userbotClient.startQrLogin();
   }
 
   async getQrStatus() {
+    assertUserbotMtprotoProcessRole();
     return this.userbotClient.getQrStatus();
   }
 
   async cancelQrLogin() {
+    assertUserbotMtprotoProcessRole();
     return this.userbotClient.cancelQrLogin();
   }
 
   async submitQrPassword(password: string) {
+    assertUserbotMtprotoProcessRole();
     return this.userbotClient.submitQrPassword(password);
   }
 
@@ -834,6 +843,9 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
    */
   @Cron(CronExpression.EVERY_MINUTE)
   async criticalNotifyIfUserbotDisconnected(): Promise<void> {
+    if (!shouldRunUserbotMtproto()) {
+      return;
+    }
     if (
       String(process.env.TELEGRAM_USERBOT_DISCONNECTED_CRITICAL_CRON ?? '')
         .trim()

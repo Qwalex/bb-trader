@@ -7,6 +7,7 @@ import * as QRCode from 'qrcode';
 
 import { postCriticalNotifyText } from '../../../common/critical-notify.util';
 import { formatError } from '../../../common/format-error';
+import { shouldRunUserbotMtproto } from '../../../config/process-role.util';
 import { PrismaService } from '../../../prisma/prisma.service';
 import {
   formatUserbotQrAuthErrorForUser,
@@ -26,6 +27,7 @@ import {
   TELEGRAM_USERBOT_SESSION_PERSIST_INTERVAL_MS_MIN,
 } from '../telegram-userbot.constants';
 import { isTelegramAuthKeyDuplicatedError } from '../utils/telegram-userbot-mtproto-error.util';
+import { userbotMtprotoHostError } from '../utils/telegram-userbot-mtproto-host.util';
 import type { QrState } from '../telegram-userbot.types';
 
 /** Сброс визуальных полей QR: при `{ ...prev, ...next }` иначе остаются старый data URL и ссылки. */
@@ -291,6 +293,9 @@ export class TelegramUserbotClientService {
   async connectFromStoredSession(opts?: {
     sessionOwnerUserId?: string;
   }): Promise<{ ok: true; connected: true } | { ok: false; error: string }> {
+    if (!shouldRunUserbotMtproto()) {
+      return { ok: false, error: userbotMtprotoHostError() };
+    }
     let client: TelegramClient | undefined;
     try {
       const fromOpt = opts?.sessionOwnerUserId?.trim();
@@ -368,6 +373,9 @@ export class TelegramUserbotClientService {
   }
 
   async disconnect(): Promise<{ ok: true; connected: false }> {
+    if (!shouldRunUserbotMtproto()) {
+      throw new BadRequestException(userbotMtprotoHostError());
+    }
     const sessionOwner =
       (await this.settings.get(TELEGRAM_USERBOT_SESSION_OWNER_USER_ID_KEY))?.trim() || null;
     const cabinetOwner = await this.getOwnerUserId();
@@ -406,6 +414,9 @@ export class TelegramUserbotClientService {
     | { ok: true; message?: string; qr: QrState }
     | { ok: false; error: string; qr?: QrState }
   > {
+    if (!shouldRunUserbotMtproto()) {
+      return { ok: false, error: userbotMtprotoHostError() };
+    }
     const ownerUserId = await this.getOwnerUserId();
     const currentClient = await this.getCurrentUserClient();
     if ((await this.isClientOwnedByCurrentUser()) && (await this.isClientAuthorized(currentClient))) {

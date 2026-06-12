@@ -2370,5 +2370,17 @@
 - Files: `apps/api/src/config/process-role.*`, `app-modules.util.ts`, `apps/api/src/internal/*`, `bybit-internal-client.service.ts`, lifecycle gates (telegram/userbot/bybit/vk/worker-queue/crons), `railpack.worker-*.json`, `railway.worker-*.toml`, `apps/api/package.json` start scripts, `.env.example`, `AGENTS.md`, `02-deploy-and-rollback.md`
 - Changes: условный `AppModule`; `/health` с role; internal routes (`/internal/telegram/external-confirm-request`, `/internal/ingest/after-external-confirm`, `/internal/bybit/*`); Api проксирует `/bybit/*` и `/telegram-userbot/*` на workers; confirm flow cross-process (Worker-UB → Api → Worker-UB webhook); placement через Worker-Bybit.
 - Manual verification: `npm run build -w api`; Railway deploy cabinets; `GET /health` → Api `service:api`; Worker-UB MTProto connected; Worker-Bybit redeploy после export fix; Web `/health` ok; `scripts/railway-cabinets-watch.sh --redeploy-on-fail`; **ручной smoke userbot status + confirm — пользователь (~5 мин)**.
+- Follow-up (AUD-198): на dedicated Api `OrdersModule` тянул полный `TelegramUserbotModule` с локальным `@Controller('telegram-userbot')` — `POST /connect` и QR шли в GramJS на Api → `AUTH_KEY_DUPLICATED` с Worker-UB; контроллер и connect/QR/cron только на `worker-userbot`.
 - Docs updated: этот трекер, `02-deploy-and-rollback.md`, `.env.example`, `AGENTS.md`.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-198
+
+- Status: `done`
+- Scope: Дублирование MTProto userbot на Api + Worker-UB (cabinets split).
+- Files: `telegram-userbot.module.ts`, `telegram-userbot.service.ts`, `telegram-userbot-client.service.ts`, `content-generation-preset.service.ts`, `telegram-userbot-mtproto-host.util.ts`, `orders.service.ts`
+- Findings: при `API_PROCESS_ROLE=api` через `OrdersModule`/`QpulseSyncModule` регистрировался локальный `TelegramUserbotController` на том же префиксе, что и proxy — UI connect/QR поднимали GramJS на Api; в логах Api — `telegram/client/updates.js TIMEOUT`, Worker-UB — `AUTH_KEY_DUPLICATED` каждые ~15 мин.
+- Changes: `TelegramUserbotController` только при `shouldRunUserbotMtproto()`; gates на connect/QR/disconnect в service+client; cron userbot/content только на Worker-UB; dashboard на Api не дергает локальный `getStatus()`.
+- Manual verification: `npx tsc -b --force apps/api`; redeploy Api → нет GramJS в логах; redeploy Worker-UB → один connect без 406.
+- Docs updated: AUD-197 follow-up в этом трекере.
 - Linked risks (`SEC-###`): N/A

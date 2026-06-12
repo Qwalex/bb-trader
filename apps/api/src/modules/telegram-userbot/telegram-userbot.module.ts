@@ -1,5 +1,6 @@
 import { forwardRef, Module } from '@nestjs/common';
 
+import { shouldRunUserbotMtproto } from '../../config/process-role.util';
 import { AppLogModule } from '../app-log/app-log.module';
 import { BybitModule } from '../bybit/bybit.module';
 import { BybitSpotModule } from '../bybit-spot/bybit-spot.module';
@@ -43,7 +44,7 @@ import { QpulseSyncModule } from '../qpulse-sync/qpulse-sync.module';
     UserbotSignalHashModule,
     forwardRef(() => QpulseSyncModule),
   ],
-  controllers: [TelegramUserbotController],
+  controllers: shouldRunUserbotMtproto() ? [TelegramUserbotController] : [],
   providers: [
     TelegramUserbotOpenrouterService,
     TelegramUserbotClientService,

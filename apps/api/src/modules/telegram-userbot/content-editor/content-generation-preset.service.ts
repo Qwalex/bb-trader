@@ -4,6 +4,7 @@ import { Cron } from '@nestjs/schedule';
 import { appCalendarDayRange } from '@repo/shared';
 
 import { PrismaService } from '../../../prisma/prisma.service';
+import { shouldRunUserbotMtproto } from '../../../config/process-role.util';
 import { CabinetContextService } from '../../cabinet/cabinet-context.service';
 import { SettingsService } from '../../settings/settings.service';
 import { parseSettingsBool } from '../../settings/settings-bool.util';
@@ -446,6 +447,9 @@ export class ContentGenerationPresetService {
 
   @Cron(process.env.CONTENT_GENERATION_CRON ?? '0 */1 * * *')
   async scheduledTick(): Promise<void> {
+    if (!shouldRunUserbotMtproto()) {
+      return;
+    }
     const enabledRaw = process.env.CONTENT_GENERATION_ENABLED ?? 'true';
     if (!parseSettingsBool(enabledRaw, true)) {
       return;

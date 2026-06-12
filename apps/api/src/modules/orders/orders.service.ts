@@ -22,6 +22,7 @@ import type { TelegramUserbotService } from '../telegram-userbot/telegram-userbo
 import type { SignalDistributionService } from '../qpulse-sync/signal-distribution.service';
 
 import { formatError } from '../../common/format-error';
+import { shouldProxyUserbotToWorker } from '../../config/process-role.util';
 import type {
   DashboardCabinetCardDto,
   DashboardCabinetsOverviewDto,
@@ -1112,7 +1113,7 @@ export class OrdersService {
     const probeCabinetId =
       cabinets.find((c) => c.isActive)?.id ?? cabinets[0]?.id ?? null;
     let userbotConnectedGlobal = false;
-    if (probeCabinetId) {
+    if (probeCabinetId && !shouldProxyUserbotToWorker()) {
       userbotConnectedGlobal = await this.cabinetContext.runWithCabinet(
         probeCabinetId,
         async () => {
