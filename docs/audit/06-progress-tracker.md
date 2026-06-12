@@ -2434,3 +2434,12 @@
 - Changes: attestation `x-auth-user-id/login/role` с Api после guard; Worker принимает attestation при internal token; Web BFF через `cookies()` + `credentials: include`; `API_INTERNAL_URL` на Web.
 - Manual verification: redeploy Api/Web/Worker-UB; GET status/chats/metrics — не 401.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-204
+
+- Status: `done`
+- Scope: Аудит всех Web→API запросов; smoke GET-маршрутов; унификация client fetch auth.
+- Files: `lib/api.ts`, `api/backend/[...path]/route.ts`, `telegram-userbot-page.util.ts`, `filters-page.util.ts`, `DashboardTodoList.tsx`, `userbot-internal-proxy.service.ts`, `scripts/smoke-cabinets-api-routes.mjs`, `scripts/smoke-cabinets-api-endpoints.constants.mjs`, `railway-cabinets-watch.sh`
+- Changes: все client fetch через `fetchApiResponse` + `credentials:include`; BFF `force-dynamic`; smoke 35+ GET; proxy пробрасывает `cabinetId` из query.
+- Manual verification: `node scripts/smoke-cabinets-api-routes.mjs`; с `SMOKE_LOGIN` — BFF telegram-userbot не 401.
+- Linked risks (`SEC-###`): N/A

@@ -1,6 +1,9 @@
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 import { readCookieValue } from '../../../../lib/api-auth.util';
 import {
   AUTH_COOKIE,
@@ -59,6 +62,9 @@ async function buildForwardHeaders(request: Request): Promise<Headers> {
   const token = sessionToken || fallbackToken;
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
+  } else {
+    headers.delete('authorization');
+    headers.delete('Authorization');
   }
 
   return headers;

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { getApiAuthHeaders, getApiBase } from '../../lib/api';
+import { fetchApiResponse } from '../../lib/api';
 
 export type DashboardTodoItem = {
   id: string;
@@ -17,10 +17,9 @@ function newId(): string {
 }
 
 async function persistDashboardTodos(items: DashboardTodoItem[]): Promise<void> {
-  const headers = getApiAuthHeaders({ 'Content-Type': 'application/json' });
-  const res = await fetch(`${getApiBase()}/settings/dashboard-todos`, {
+  const res = await fetchApiResponse('/settings/dashboard-todos', {
     method: 'PUT',
-    headers,
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ items }),
   });
   if (!res.ok) {

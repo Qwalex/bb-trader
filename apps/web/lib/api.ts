@@ -112,6 +112,7 @@ export async function fetchJson<T>(
   }
   const res = await fetch(`${getApiBase()}${withCabinetQuery(path, effectiveCabinetId)}`, {
     ...init,
+    credentials: typeof window === 'undefined' ? init?.credentials : 'include',
     headers,
     cache: 'no-store',
   });

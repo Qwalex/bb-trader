@@ -35,9 +35,13 @@ export class UserbotInternalProxyService {
     headers.set('Accept', 'application/json');
     applyUserForwardedAuthorizationHeader(headers, req);
     applyWorkerUserAttestationHeaders(headers, authReq);
-    const cabinetId = req.headers['x-cabinet-id'];
-    if (typeof cabinetId === 'string' && cabinetId.trim()) {
-      headers.set('x-cabinet-id', cabinetId.trim());
+    const queryCabinetId =
+      typeof req.query?.cabinetId === 'string' ? req.query.cabinetId.trim() : '';
+    const headerCabinetId =
+      typeof req.headers['x-cabinet-id'] === 'string' ? req.headers['x-cabinet-id'].trim() : '';
+    const cabinetId = headerCabinetId || queryCabinetId;
+    if (cabinetId) {
+      headers.set('x-cabinet-id', cabinetId);
     }
     const contentType = req.headers['content-type'];
     if (typeof contentType === 'string') {

@@ -110,6 +110,11 @@ main() {
     "$(dirname "$0")/railway-cabinets-log-scan.sh" "$ENV_NAME" >>"$LOG_FILE" 2>&1 || failed=1
   fi
 
+  if [[ -f "$(dirname "$0")/smoke-cabinets-api-routes.mjs" ]]; then
+    log "--- running api smoke (public + unauth checks) ---"
+    node "$(dirname "$0")/smoke-cabinets-api-routes.mjs" >>"$LOG_FILE" 2>&1 || failed=1
+  fi
+
   return "$failed"
 }
 
