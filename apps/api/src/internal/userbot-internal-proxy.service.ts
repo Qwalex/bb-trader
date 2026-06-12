@@ -18,6 +18,7 @@ import {
   workerInternalFetchJson,
 } from './worker-http.util';
 import type { UserbotGlobalConnectionState } from './internal-userbot.types';
+import { isUserbotDashboardReady } from './userbot-dashboard-ready.util';
 
 @Injectable()
 export class UserbotInternalProxyService {
@@ -51,18 +52,7 @@ export class UserbotInternalProxyService {
     if (!state) {
       return false;
     }
-    if (state.connected) {
-      return true;
-    }
-    if (!state.sessionConfigured || !state.enabled) {
-      return false;
-    }
-    const ownerId = String(state.sessionOwnerUserId ?? '').trim();
-    const uid = String(userId ?? '').trim();
-    if (!ownerId || !uid) {
-      return false;
-    }
-    return ownerId === uid;
+    return isUserbotDashboardReady({ state, userId });
   }
 
   /** @deprecated use fetchGlobalConnectionState / isUserbotReadyForDashboard */

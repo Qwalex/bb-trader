@@ -256,6 +256,16 @@ export class TelegramUserbotClientService {
     return this.clientsByUserId.size;
   }
 
+  /** Есть ли хотя бы один авторизованный MTProto-клиент (без привязки к owner key). */
+  async isAnyClientAuthorized(): Promise<boolean> {
+    for (const client of this.clientsByUserId.values()) {
+      if (await this.isClientAuthorized(client)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /** Пока действует backoff после AUTH_KEY_DUPLICATED — внешний код не должен считать это «просто offline». */
   isAuthKeyDuplicateBackoffActive(): boolean {
     return Date.now() < this.authKeyDuplicateBackoffUntilMs;

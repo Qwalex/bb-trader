@@ -2498,3 +2498,13 @@
 - Changes: `GET /internal/userbot/connection` на Worker-UB; `getGlobalConnectionState`; dashboard считает ready при `connected` **или** (`sessionConfigured` + `enabled` + owner=userId); content-кабинеты без userbot-warning.
 - Manual verification: redeploy Api+Worker-UB; главная без userbot warning при QR/сессии владельца.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-211
+
+- Status: `done`
+- Scope: Предупреждения на главной не исчезли после AUD-210 (worker split, cabinets).
+- Findings: `isUserbotReadyForDashboard` требовал непустой `sessionOwnerUserId` (legacy-сессии без owner key → always false); `getGlobalConnectionState` не ставил `connected` без owner key; при сбое Worker internal fetch не было fallback по глобальным `Setting` на Api; предупреждение «минимум 1 группу» показывалось даже без подключённого userbot.
+- Changes: `userbot-dashboard-ready.util.ts` (единая логика ready); Api fallback читает `TELEGRAM_USERBOT_*` из БД; `isAnyClientAuthorized` на Worker; groups-warning только при `userbotConnected`.
+- Files: `userbot-dashboard-ready.util.ts`, `orders.service.ts`, `userbot-internal-proxy.service.ts`, `telegram-userbot.service.ts`, `telegram-userbot-client.service.ts`
+- Manual verification: redeploy Api+Worker-UB; главная без «Подключите Userbot» при сессии/connected; группы — только если userbot ready.
+- Linked risks (`SEC-###`): N/A

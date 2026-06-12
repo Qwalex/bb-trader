@@ -25,6 +25,11 @@ import type { SignalDistributionService } from '../qpulse-sync/signal-distributi
 import { formatError } from '../../common/format-error';
 import { shouldProxyUserbotToWorker } from '../../config/process-role.util';
 import { UserbotInternalProxyService } from '../../internal/userbot-internal-proxy.service';
+import {
+  isUserbotDashboardReady,
+  parseSettingsBool,
+} from '../../internal/userbot-dashboard-ready.util';
+import { TELEGRAM_USERBOT_SESSION_OWNER_USER_ID_KEY } from '../settings/settings.constants';
 import type {
   DashboardCabinetCardDto,
   DashboardCabinetsOverviewDto,
@@ -1108,30 +1113,53 @@ export class OrdersService {
    * Сводка по всем кабинетам пользователя для дашборда (win/lose/winrate/pnl/balance).
    * Bybit — до 3 кабинетов параллельно (очередь rate limit на кабинет); краткий кэш 20 с.
    */
-  private async resolveGlobalUserbotConnected(
-    userId: string,
-    probeCabinetId: string | null,
-  ): Promise<boolean> {
-    if (!probeCabinetId || !userId.trim()) {
+  private async resolveGlobalUserbotConnected(userId: string): Promise<boolean> {
+    const uid = String(userId ?? '').trim();
+    if (!uid) {
       return false;
     }
     if (this.userbot && !shouldProxyUserbotToWorker()) {
       try {
         const state = await this.userbot.getGlobalConnectionState();
-        if (state.connected) {
-          return true;
-        }
-        if (state.sessionConfigured && state.enabled) {
-          const ownerId = String(state.sessionOwnerUserId ?? '').trim();
-          return Boolean(ownerId && ownerId === userId.trim());
-        }
-      } catch {
+        return isUserbotDashboardReady({ state, userId: uid });
+      } catch (e) {
+        this.logger.debug(`resolveGlobalUserbotConnected local failed: ${formatError(e)}`);
         return false;
       }
-      return false;
     }
     if (this.userbotProxy?.isEnabled()) {
-      return this.userbotProxy.isUserbotReadyForDashboard(userId);
+      const workerState = await this.userbotProxy.fetchGlobalConnectionState();
+      if (workerState && isUserbotDashboardReady({ state: workerState, userId: uid })) {
+        return true;
+      }
+      const settingsMap = await this.settings.getMany([
+        'TELEGRAM_USERBOT_SESSION',
+        'TELEGRAM_USERBOT_ENABLED',
+        TELEGRAM_USERBOT_SESSION_OWNER_USER_ID_KEY,
+      ]);
+      const session = settingsMap['TELEGRAM_USERBOT_SESSION'];
+      const enabledRaw = settingsMap['TELEGRAM_USERBOT_ENABLED'];
+      const ownerRaw = settingsMap[TELEGRAM_USERBOT_SESSION_OWNER_USER_ID_KEY];
+      const sessionConfigured = Boolean(String(session ?? '').trim());
+      if (!sessionConfigured) {
+        this.logger.debug(
+          `resolveGlobalUserbotConnected: no session (worker=${workerState ? 'ok' : 'unreachable'})`,
+        );
+        return false;
+      }
+      const dbState = {
+        connected: workerState?.connected ?? false,
+        sessionConfigured: true,
+        enabled: parseSettingsBool(enabledRaw, sessionConfigured),
+        sessionOwnerUserId: String(ownerRaw ?? '').trim() || null,
+      };
+      const ready = isUserbotDashboardReady({ state: dbState, userId: uid });
+      if (!ready) {
+        this.logger.debug(
+          `resolveGlobalUserbotConnected: not ready connected=${dbState.connected} enabled=${dbState.enabled} owner=${dbState.sessionOwnerUserId ?? '—'} user=${uid}`,
+        );
+      }
+      return ready;
     }
     return false;
   }
@@ -1153,12 +1181,7 @@ export class OrdersService {
     }
 
     const cabinets = await this.cabinets.listCabinetsForUser(userId);
-    const probeCabinetId =
-      cabinets.find((c) => c.isActive)?.id ?? cabinets[0]?.id ?? null;
-    const userbotConnectedGlobal = await this.resolveGlobalUserbotConnected(
-      userId,
-      probeCabinetId,
-    );
+    const userbotConnectedGlobal = await this.resolveGlobalUserbotConnected(userId);
 
     const items = await mapWithConcurrency(cabinets, 3, async (c) =>
       this.cabinetContext.runWithCabinet(c.id, async () => {
@@ -1197,7 +1220,7 @@ export class OrdersService {
         if (!userbotConnected && !isContentCabinet) {
           setupWarnings.push('Подключите Userbot (статус должен быть «подключен»).');
         }
-        if (enabledGroupsCount < 1) {
+        if (userbotConnected && enabledGroupsCount < 1 && !isContentCabinet) {
           setupWarnings.push('В Userbot включите подписку минимум на 1 группу.');
         }
         if (!isContentCabinet) {

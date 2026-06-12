@@ -227,6 +227,8 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     if (ownerId) {
       const client = this.userbotClient.getClientForOwnerUserId(ownerId);
       connected = Boolean(client && (await this.userbotClient.isClientAuthorized(client)));
+    } else {
+      connected = await this.userbotClient.isAnyClientAuthorized();
     }
     return {
       connected,
