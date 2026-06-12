@@ -5,7 +5,7 @@ import {
   extractTokenFromCookieHeader,
 } from './auth-token.util';
 
-/** JWT пользователя из Authorization или cookie `sb_auth_token` (как в ApiAuthGuard). */
+/** JWT пользователя из Authorization или cookie sb_auth / sb_auth_token (как в ApiAuthGuard). */
 export function resolveUserAuthTokenFromRequest(req: Request): string | null {
   const rawHeader = req.headers?.authorization;
   const authHeader = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;

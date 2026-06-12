@@ -17,6 +17,7 @@
 ## Deploy Safety Checklist
 
 - Validate env keys for target environment.
+- **Worker split:** на **Api**, **Worker-UB** и **Worker-Bybit** один и тот же `AUTH_JWT_SECRET` **или** `API_ACCESS_TOKEN` (как на Api) — иначе proxy userbot/Bybit на worker даёт `401 Auth is not configured`.
 - Verify healthcheck endpoints after deploy.
 - Confirm DB migration compatibility before restart.
 - Confirm external integrations (Bybit/Telegram/OpenRouter/VK) are reachable.

@@ -2406,3 +2406,22 @@
 - Manual verification: страница `/telegram-userbot` загружается; логи Api без `userbot proxy … 401`.
 - Docs updated: этот трекер.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-201
+
+- Status: `done`
+- Scope: 401 `Auth is not configured` на `POST /telegram-userbot/qr/start` (cabinets worker split).
+- Findings: на **Worker-UB** и **Worker-Bybit** не был задан `API_ACCESS_TOKEN` (на Api — был); `ApiAuthGuard` на worker не мог проверить JWT из `X-Forwarded-Authorization`.
+- Changes: Railway — скопирован `API_ACCESS_TOKEN` с Api на Worker-UB и Worker-Bybit; bootstrap warn при отсутствии секрета; checklist в `02-deploy-and-rollback.md`.
+- Manual verification: redeploy Worker-UB; повтор `POST …/qr/start` из UI — не 401; QR/connect при необходимости после снятия `AUTH_KEY_DUPLICATED`.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-202
+
+- Status: `done`
+- Scope: Аудит auth/proxy цепочки worker split — единое чтение cookie, health `userAuthConfigured`, log scan.
+- Files: `auth-cookies.constants.ts`, `auth-token.util.ts`, `worker-proxy-auth.util.ts`, `process-role.capabilities.util.ts`, `apps/web/app/api/backend/[...path]/route.ts`, `scripts/check-cabinets-worker-auth-env.sh`, `scripts/railway-cabinets-log-scan.sh`, `scripts/railway-cabinets-watch.sh`, `scripts/check-process-role-health.sh`, `.env.example`, `02-deploy-and-rollback.md`
+- Findings: API читал только `sb_auth_token`, prod Web шлёт `sb_auth`; workers без `API_ACCESS_TOKEN` → 401 на все proxied `/telegram-userbot/*`.
+- Changes: cookie `sb_auth`+`sb_auth_token` в ApiAuthGuard/proxy; BFF fallback обе cookie; `/health` → `userAuthConfigured`; скрипты env/log scan; Railway env sync Worker-*.
+- Manual verification: `check-cabinets-worker-auth-env.sh`; `railway-cabinets-log-scan.sh`; нет свежих `Auth is not configured` в логах Api после redeploy Worker-UB.
+- Linked risks (`SEC-###`): N/A

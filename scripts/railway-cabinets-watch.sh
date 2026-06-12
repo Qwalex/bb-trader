@@ -104,6 +104,12 @@ main() {
   else
     log "=== checks FAILED (see above) ==="
   fi
+
+  if [[ -x "$(dirname "$0")/railway-cabinets-log-scan.sh" ]]; then
+    log "--- running log scan ---"
+    "$(dirname "$0")/railway-cabinets-log-scan.sh" "$ENV_NAME" >>"$LOG_FILE" 2>&1 || failed=1
+  fi
+
   return "$failed"
 }
 

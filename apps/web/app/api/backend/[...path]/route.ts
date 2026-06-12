@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { readCookieValue } from '../../../../lib/api-auth.util';
 import {
   AUTH_COOKIE,
+  AUTH_TOKEN_COOKIE,
   DEFAULT_INTERNAL_API_BASE,
 } from '../../../../lib/api.constants';
 
@@ -48,7 +49,9 @@ function buildForwardHeaders(request: Request): Headers {
   });
 
   const cookieHeader = request.headers.get('cookie') ?? '';
-  const sessionToken = readCookieValue(cookieHeader, AUTH_COOKIE)?.trim();
+  const sessionToken =
+    readCookieValue(cookieHeader, AUTH_COOKIE)?.trim() ||
+    readCookieValue(cookieHeader, AUTH_TOKEN_COOKIE)?.trim();
   const fallbackToken = process.env.API_ACCESS_TOKEN?.trim();
   const token = sessionToken || fallbackToken;
   if (token) {
