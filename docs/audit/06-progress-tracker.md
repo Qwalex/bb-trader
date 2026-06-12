@@ -2508,3 +2508,13 @@
 - Files: `userbot-dashboard-ready.util.ts`, `orders.service.ts`, `userbot-internal-proxy.service.ts`, `telegram-userbot.service.ts`, `telegram-userbot-client.service.ts`
 - Manual verification: redeploy Api+Worker-UB; главная без «Подключите Userbot» при сессии/connected; группы — только если userbot ready.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-212
+
+- Status: `done`
+- Scope: «Подключите Userbot» на главной не исчезало после AUD-211.
+- Findings: дашборд опирался на internal `/connection` и owner-match; страница userbot уже грузит `/telegram-userbot/status` (proxy) с другой логикой; сессия только в PostgreSQL `Setting`, не в env Api/Worker.
+- Changes: `resolveGlobalUserbotConnected` — probe `/telegram-userbot/status`, Prisma-read глобальных ключей, без owner-match; `isUserbotDashboardReady` = connected или sessionConfigured; Web главная фильтрует userbot-warning если status.connected/sessionConfigured; guard userId fallback sub.
+- Files: `orders.service.ts`, `orders.controller.ts`, `userbot-dashboard-ready.util.ts`, `api-auth.guard.ts`, `apps/web/app/page.tsx`
+- Manual verification: redeploy Api+Web; главная без userbot-warning при «Сессия: есть» или connected на `/telegram-userbot`.
+- Linked risks (`SEC-###`): N/A

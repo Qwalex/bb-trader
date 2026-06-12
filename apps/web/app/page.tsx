@@ -63,6 +63,10 @@ type SettingsRaw = {
   settings: { key: string; value: string }[];
 };
 type UserbotStatus = {
+  connected?: boolean;
+  credentials?: {
+    sessionConfigured?: boolean;
+  };
   balanceGuard?: {
     minBalanceUsd: number;
     balanceUsd: number | null;
@@ -237,6 +241,10 @@ export default async function Home({
     cabinetItems[0] ??
     null;
   const guard = userbotStatus?.balanceGuard;
+  /** Тот же источник, что /telegram-userbot/status на этой странице — не дублируем ложное «подключите». */
+  const userbotReadyOnDashboard = Boolean(
+    userbotStatus?.connected || userbotStatus?.credentials?.sessionConfigured,
+  );
   const equity = guard?.totalBalanceUsd ?? null;
   const wr = stats?.winrate ?? 0;
   const avgProfit = stats?.avgProfitPnl ?? 0;
@@ -382,14 +390,20 @@ export default async function Home({
                     </span>
                   </div>
                   {cabinetInactive ? <DashboardCabinetInactiveBanner variant="compact" /> : null}
-                  {Array.isArray(c.setupWarnings) && c.setupWarnings.length > 0 ? (
+                  {(() => {
+                    const setupWarnings = (c.setupWarnings ?? []).filter((w) => {
+                      if (!userbotReadyOnDashboard) return true;
+                      return !w.includes('Подключите Userbot');
+                    });
+                    return setupWarnings.length > 0 ? (
                     <div className="dashboardCabinetWarning">
                       <div className="dashboardCabinetWarningTitle">❗ Требуются действия</div>
                       <div className="dashboardCabinetWarningList">
-                        {c.setupWarnings.join(' ')}
+                        {setupWarnings.join(' ')}
                       </div>
                     </div>
-                  ) : null}
+                    ) : null;
+                  })()}
                   {c.balanceGuard?.paused ? (
                     <div className="dashboardCabinetWarning">
                       <div className="dashboardCabinetWarningTitle">

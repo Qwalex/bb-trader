@@ -28,7 +28,7 @@ import { CabinetService } from '../cabinet/cabinet.service';
 
 type AuthReq = {
   headers?: Record<string, string | string[] | undefined>;
-  auth?: { userId?: string };
+  auth?: { userId?: string; login?: string; role?: string };
 };
 
 @ApiTags('Orders')
@@ -72,7 +72,10 @@ export class OrdersController {
   @Get('dashboard-cabinets')
   async dashboardCabinets(@Req() req: AuthReq) {
     const userId = String(req.auth?.userId ?? '').trim() || null;
-    return this.orders.getDashboardCabinetsOverviewForUser(userId);
+    return this.orders.getDashboardCabinetsOverviewForUser(userId, {
+      login: String(req.auth?.login ?? '').trim() || null,
+      role: String(req.auth?.role ?? '').trim() || undefined,
+    });
   }
 
   @ApiOperation({

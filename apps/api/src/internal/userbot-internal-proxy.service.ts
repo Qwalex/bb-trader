@@ -47,12 +47,12 @@ export class UserbotInternalProxyService {
   }
 
   /** Достаточно ли userbot для дашборда (live MTProto или завершённая настройка QR/сессии). */
-  async isUserbotReadyForDashboard(userId: string): Promise<boolean> {
+  async isUserbotReadyForDashboard(_userId: string): Promise<boolean> {
     const state = await this.fetchGlobalConnectionState();
     if (!state) {
       return false;
     }
-    return isUserbotDashboardReady({ state, userId });
+    return isUserbotDashboardReady(state);
   }
 
   /** @deprecated use fetchGlobalConnectionState / isUserbotReadyForDashboard */

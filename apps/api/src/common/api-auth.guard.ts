@@ -72,8 +72,13 @@ export class ApiAuthGuard implements CanActivate {
           secret: authSecret,
         });
         if (payload) {
+          const userId =
+            String(payload.userId ?? '').trim() ||
+            (payload.sub && payload.sub !== 'shared-account'
+              ? String(payload.sub).trim()
+              : '');
           req.auth = {
-            userId: payload.userId,
+            userId: userId || undefined,
             login: payload.login,
             role: payload.role,
             exp: payload.exp,
@@ -94,8 +99,11 @@ export class ApiAuthGuard implements CanActivate {
       secret: authSecret,
     });
     if (payload) {
+      const userId =
+        String(payload.userId ?? '').trim() ||
+        (payload.sub && payload.sub !== 'shared-account' ? String(payload.sub).trim() : '');
       req.auth = {
-        userId: payload.userId,
+        userId: userId || undefined,
         login: payload.login,
         role: payload.role,
         exp: payload.exp,

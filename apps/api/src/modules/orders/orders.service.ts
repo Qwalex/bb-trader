@@ -25,9 +25,10 @@ import type { SignalDistributionService } from '../qpulse-sync/signal-distributi
 import { formatError } from '../../common/format-error';
 import { shouldProxyUserbotToWorker } from '../../config/process-role.util';
 import { UserbotInternalProxyService } from '../../internal/userbot-internal-proxy.service';
+import type { UserbotGlobalConnectionState } from '../../internal/internal-userbot.types';
 import {
+  buildUserbotGlobalConnectionState,
   isUserbotDashboardReady,
-  parseSettingsBool,
 } from '../../internal/userbot-dashboard-ready.util';
 import { TELEGRAM_USERBOT_SESSION_OWNER_USER_ID_KEY } from '../settings/settings.constants';
 import type {
@@ -1113,7 +1114,38 @@ export class OrdersService {
    * Сводка по всем кабинетам пользователя для дашборда (win/lose/winrate/pnl/balance).
    * Bybit — до 3 кабинетов параллельно (очередь rate limit на кабинет); краткий кэш 20 с.
    */
-  private async resolveGlobalUserbotConnected(userId: string): Promise<boolean> {
+  private async readGlobalUserbotStateFromDb(): Promise<UserbotGlobalConnectionState> {
+    const keys = [
+      'TELEGRAM_USERBOT_SESSION',
+      'TELEGRAM_USERBOT_ENABLED',
+      TELEGRAM_USERBOT_SESSION_OWNER_USER_ID_KEY,
+    ] as const;
+    const rows = await this.prisma.setting.findMany({
+      where: { key: { in: [...keys] } },
+      select: { key: true, value: true },
+    });
+    const map = new Map(rows.map((row) => [row.key, row.value]));
+    const session =
+      String(map.get('TELEGRAM_USERBOT_SESSION') ?? process.env.TELEGRAM_USERBOT_SESSION ?? '').trim() ||
+      null;
+    const enabledRaw =
+      map.get('TELEGRAM_USERBOT_ENABLED') ?? process.env.TELEGRAM_USERBOT_ENABLED ?? null;
+    const sessionOwnerUserId =
+      map.get(TELEGRAM_USERBOT_SESSION_OWNER_USER_ID_KEY) ??
+      process.env.TELEGRAM_USERBOT_SESSION_OWNER_USER_ID ??
+      null;
+    return buildUserbotGlobalConnectionState({
+      session,
+      enabledRaw,
+      sessionOwnerUserId,
+    });
+  }
+
+  private async resolveGlobalUserbotConnected(
+    userId: string,
+    probeCabinetId: string | null,
+    auth?: { login: string | null; role?: string },
+  ): Promise<boolean> {
     const uid = String(userId ?? '').trim();
     if (!uid) {
       return false;
@@ -1121,51 +1153,52 @@ export class OrdersService {
     if (this.userbot && !shouldProxyUserbotToWorker()) {
       try {
         const state = await this.userbot.getGlobalConnectionState();
-        return isUserbotDashboardReady({ state, userId: uid });
+        return isUserbotDashboardReady(state);
       } catch (e) {
         this.logger.debug(`resolveGlobalUserbotConnected local failed: ${formatError(e)}`);
-        return false;
+        return isUserbotDashboardReady(await this.readGlobalUserbotStateFromDb());
       }
     }
+
+    let workerState: UserbotGlobalConnectionState | null = null;
     if (this.userbotProxy?.isEnabled()) {
-      const workerState = await this.userbotProxy.fetchGlobalConnectionState();
-      if (workerState && isUserbotDashboardReady({ state: workerState, userId: uid })) {
+      const login = String(auth?.login ?? '').trim();
+      if (probeCabinetId && login) {
+        const connectedViaStatus = await this.userbotProxy.probeUserbotConnected({
+          cabinetId: probeCabinetId,
+          userId: uid,
+          login,
+          role: auth?.role,
+        });
+        if (connectedViaStatus) {
+          return true;
+        }
+      }
+      workerState = await this.userbotProxy.fetchGlobalConnectionState();
+      if (workerState && isUserbotDashboardReady(workerState)) {
         return true;
       }
-      const settingsMap = await this.settings.getMany([
-        'TELEGRAM_USERBOT_SESSION',
-        'TELEGRAM_USERBOT_ENABLED',
-        TELEGRAM_USERBOT_SESSION_OWNER_USER_ID_KEY,
-      ]);
-      const session = settingsMap['TELEGRAM_USERBOT_SESSION'];
-      const enabledRaw = settingsMap['TELEGRAM_USERBOT_ENABLED'];
-      const ownerRaw = settingsMap[TELEGRAM_USERBOT_SESSION_OWNER_USER_ID_KEY];
-      const sessionConfigured = Boolean(String(session ?? '').trim());
-      if (!sessionConfigured) {
-        this.logger.debug(
-          `resolveGlobalUserbotConnected: no session (worker=${workerState ? 'ok' : 'unreachable'})`,
-        );
-        return false;
-      }
-      const dbState = {
-        connected: workerState?.connected ?? false,
-        sessionConfigured: true,
-        enabled: parseSettingsBool(enabledRaw, sessionConfigured),
-        sessionOwnerUserId: String(ownerRaw ?? '').trim() || null,
-      };
-      const ready = isUserbotDashboardReady({ state: dbState, userId: uid });
-      if (!ready) {
-        this.logger.debug(
-          `resolveGlobalUserbotConnected: not ready connected=${dbState.connected} enabled=${dbState.enabled} owner=${dbState.sessionOwnerUserId ?? '—'} user=${uid}`,
-        );
-      }
-      return ready;
     }
-    return false;
+
+    const fromDb = await this.readGlobalUserbotStateFromDb();
+    const merged: UserbotGlobalConnectionState = {
+      connected: workerState?.connected ?? false,
+      sessionConfigured: fromDb.sessionConfigured,
+      enabled: fromDb.enabled,
+      sessionOwnerUserId: fromDb.sessionOwnerUserId,
+    };
+    const ready = isUserbotDashboardReady(merged);
+    if (!ready) {
+      this.logger.warn(
+        `resolveGlobalUserbotConnected: not ready connected=${merged.connected} session=${merged.sessionConfigured} enabled=${merged.enabled} worker=${workerState ? 'ok' : 'miss'} user=${uid}`,
+      );
+    }
+    return ready;
   }
 
   async getDashboardCabinetsOverviewForUser(
     userIdRaw: string | null | undefined,
+    auth?: { login: string | null; role?: string },
   ): Promise<DashboardCabinetsOverviewDto> {
     const userId = String(userIdRaw ?? '').trim();
     if (!userId) {
@@ -1181,7 +1214,13 @@ export class OrdersService {
     }
 
     const cabinets = await this.cabinets.listCabinetsForUser(userId);
-    const userbotConnectedGlobal = await this.resolveGlobalUserbotConnected(userId);
+    const probeCabinetId =
+      cabinets.find((c) => c.isActive)?.id ?? cabinets[0]?.id ?? null;
+    const userbotConnectedGlobal = await this.resolveGlobalUserbotConnected(
+      userId,
+      probeCabinetId,
+      auth,
+    );
 
     const items = await mapWithConcurrency(cabinets, 3, async (c) =>
       this.cabinetContext.runWithCabinet(c.id, async () => {

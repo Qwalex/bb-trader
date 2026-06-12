@@ -10,27 +10,34 @@ export function parseSettingsBool(raw: string | undefined, fallback: boolean): b
 
 /**
  * Достаточно ли глобального userbot для снятия предупреждения на дашборде.
- * Live MTProto или завершённая настройка сессии (QR / сохранённая строка).
+ * Совпадает с ожиданием UI: live MTProto или сохранённая сессия (QR / строка в Setting).
  */
-export function isUserbotDashboardReady(params: {
-  state: UserbotGlobalConnectionState;
-  userId: string;
-}): boolean {
-  const uid = String(params.userId ?? '').trim();
-  if (!uid) {
-    return false;
-  }
-  const state = params.state;
+export function isUserbotDashboardReady(state: UserbotGlobalConnectionState): boolean {
   if (state.connected) {
     return true;
   }
-  if (!state.sessionConfigured || !state.enabled) {
+  if (!state.sessionConfigured) {
     return false;
   }
-  const ownerId = String(state.sessionOwnerUserId ?? '').trim();
-  if (ownerId) {
-    return ownerId === uid;
-  }
-  // Legacy: сессия есть, владелец не записан (один AuthUser / старые деплои).
-  return true;
+  // Явно выключен в настройках — предупреждение остаётся.
+  return state.enabled !== false;
+}
+
+/** Собирает глобальный снимок userbot из map key→value (Prisma Setting + env). */
+export function buildUserbotGlobalConnectionState(params: {
+  session?: string | null;
+  enabledRaw?: string | null;
+  sessionOwnerUserId?: string | null;
+  connected?: boolean;
+}): UserbotGlobalConnectionState {
+  const sessionConfigured = Boolean(String(params.session ?? '').trim());
+  return {
+    connected: Boolean(params.connected),
+    sessionConfigured,
+    enabled: parseSettingsBool(
+      params.enabledRaw ?? undefined,
+      sessionConfigured,
+    ),
+    sessionOwnerUserId: String(params.sessionOwnerUserId ?? '').trim() || null,
+  };
 }
