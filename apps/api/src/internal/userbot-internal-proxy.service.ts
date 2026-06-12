@@ -2,11 +2,15 @@ import { HttpException, Injectable, Logger } from '@nestjs/common';
 import type { Request } from 'express';
 
 import { formatError } from '../common/format-error';
+import { verifySharedAuthToken } from '../common/shared-auth-token';
+import { applyUserForwardedAuthorizationHeader, resolveUserAuthTokenFromRequest } from '../common/worker-proxy-auth.util';
 import {
   applyWorkerUserAttestationHeaders,
+  WORKER_AUTH_LOGIN_HEADER,
+  WORKER_AUTH_ROLE_HEADER,
+  WORKER_AUTH_USER_ID_HEADER,
   type RequestWithAuth,
 } from '../common/worker-user-attestation.util';
-import { applyUserForwardedAuthorizationHeader } from '../common/worker-proxy-auth.util';
 import { shouldProxyUserbotToWorker } from '../config/process-role.util';
 import {
   readWorkerUbInternalBaseUrl,
@@ -35,6 +39,26 @@ export class UserbotInternalProxyService {
     headers.set('Accept', 'application/json');
     applyUserForwardedAuthorizationHeader(headers, req);
     applyWorkerUserAttestationHeaders(headers, authReq);
+    if (!headers.has(WORKER_AUTH_LOGIN_HEADER)) {
+      const authSecret =
+        process.env.AUTH_JWT_SECRET?.trim() || process.env.API_ACCESS_TOKEN?.trim() || '';
+      const userToken = resolveUserAuthTokenFromRequest(req);
+      const payload =
+        userToken && authSecret
+          ? verifySharedAuthToken({ token: userToken, secret: authSecret })
+          : null;
+      if (payload?.login?.trim()) {
+        headers.set(WORKER_AUTH_LOGIN_HEADER, payload.login.trim());
+        const userId = String(payload.userId ?? '').trim();
+        if (userId) {
+          headers.set(WORKER_AUTH_USER_ID_HEADER, userId);
+        }
+        const role = String(payload.role ?? '').trim();
+        if (role) {
+          headers.set(WORKER_AUTH_ROLE_HEADER, role);
+        }
+      }
+    }
     const queryCabinetId =
       typeof req.query?.cabinetId === 'string' ? req.query.cabinetId.trim() : '';
     const headerCabinetId =

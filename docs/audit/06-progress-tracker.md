@@ -2452,3 +2452,13 @@
 - Changes: fallback internal→public в `api-base.util.ts`; BFF retry; Railway `API_INTERNAL_URL` на Web/Worker-UB; null-safe `getTodayMetrics` ingest.
 - Manual verification: BFF metrics/today не 500; Web logs без ENOTFOUND.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-206
+
+- Status: `done`
+- Scope: 401 на `/telegram-userbot/status` при worker split (Api→Worker-UB).
+- Findings: Worker получал `Authorization: Bearer WORKER_INTERNAL_TOKEN` + forwarded user JWT; guard проверял JWT как API token и падал до attestation headers.
+- Changes: `ApiAuthGuard` — на internal token сначала `x-auth-*` attestation, затем forwarded JWT; `UserbotInternalProxyService` — fallback attestation из user JWT если `req.auth` пуст.
+- Files: `api-auth.guard.ts`, `userbot-internal-proxy.service.ts`
+- Manual verification: после деплоя Api+Worker-UB — `GET /api/backend/telegram-userbot/status?cabinetId=…` с сессией → 200.
+- Linked risks (`SEC-###`): N/A

@@ -60,6 +60,11 @@ export class ApiAuthGuard implements CanActivate {
     const forwardedHeader = Array.isArray(forwardedRaw) ? forwardedRaw[0] : forwardedRaw;
 
     if (internalToken && bearer === internalToken) {
+      const attested = readWorkerUserAttestation(req.headers);
+      if (attested?.login) {
+        req.auth = attested;
+        return true;
+      }
       const userToken = extractBearerToken(forwardedHeader) ?? cookieToken;
       if (userToken) {
         const payload = verifySharedAuthToken({
@@ -76,12 +81,6 @@ export class ApiAuthGuard implements CanActivate {
           };
           return true;
         }
-        throw new UnauthorizedException('Invalid API access token');
-      }
-      const attested = readWorkerUserAttestation(req.headers);
-      if (attested) {
-        req.auth = attested;
-        return true;
       }
       throw new UnauthorizedException('Missing forwarded auth token');
     }
