@@ -13,6 +13,7 @@ import { TelegramUserbotModule } from '../modules/telegram-userbot/telegram-user
 import { ApiInternalClientService } from './api-internal-client.service';
 import { BybitInternalController } from './bybit-internal.controller';
 import { InternalIngestController } from './internal-ingest.controller';
+import { InternalUserbotController } from './internal-userbot.controller';
 import { InternalServiceGuard } from './internal-service.guard';
 import { InternalTelegramController } from './internal-telegram.controller';
 import { TelegramUserbotProxyModule } from './telegram-userbot-proxy.module';
@@ -21,7 +22,7 @@ import { UserbotInternalProxyService } from './userbot-internal-proxy.service';
 /** Internal HTTP только на dedicated-ролях; при `all` маршруты не регистрируются. */
 const controllers = [
   ...(isDedicatedApiProcessRole() ? [InternalTelegramController] : []),
-  ...(isDedicatedWorkerUserbotProcessRole() ? [InternalIngestController] : []),
+  ...(isDedicatedWorkerUserbotProcessRole() ? [InternalIngestController, InternalUserbotController] : []),
   ...(isDedicatedWorkerBybitProcessRole() ? [BybitInternalController] : []),
 ];
 

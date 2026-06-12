@@ -2489,3 +2489,12 @@
 - Changes: `UserbotInternalProxyService.probeUserbotConnected` → Worker-UB `/telegram-userbot/status`; `OrdersService.resolveGlobalUserbotConnected`.
 - Manual verification: после redeploy Api главная не показывает userbot warning при connected на `/telegram-userbot`.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-210
+
+- Status: `done`
+- Scope: Ложное «Подключите Userbot» сохранялось после AUD-209.
+- Findings: probe через `/telegram-userbot/status` + attestation ненадёжен; `connected` false при сохранённой сессии (AUTH_KEY/offline); предупреждение дублировалось на content-кабинеты.
+- Changes: `GET /internal/userbot/connection` на Worker-UB; `getGlobalConnectionState`; dashboard считает ready при `connected` **или** (`sessionConfigured` + `enabled` + owner=userId); content-кабинеты без userbot-warning.
+- Manual verification: redeploy Api+Worker-UB; главная без userbot warning при QR/сессии владельца.
+- Linked risks (`SEC-###`): N/A

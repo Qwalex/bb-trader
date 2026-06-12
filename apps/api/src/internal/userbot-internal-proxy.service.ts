@@ -15,7 +15,9 @@ import { shouldProxyUserbotToWorker } from '../config/process-role.util';
 import {
   readWorkerUbInternalBaseUrl,
   readWorkerInternalToken,
+  workerInternalFetchJson,
 } from './worker-http.util';
+import type { UserbotGlobalConnectionState } from './internal-userbot.types';
 
 @Injectable()
 export class UserbotInternalProxyService {
@@ -25,7 +27,45 @@ export class UserbotInternalProxyService {
     return shouldProxyUserbotToWorker() && Boolean(readWorkerUbInternalBaseUrl());
   }
 
-  /** Для dashboard-cabinets на Api: статус MTProto на Worker-UB (глобальная сессия). */
+  /** Для dashboard-cabinets на Api: глобальный MTProto-статус с Worker-UB. */
+  async fetchGlobalConnectionState(): Promise<UserbotGlobalConnectionState | null> {
+    const base = readWorkerUbInternalBaseUrl();
+    const token = readWorkerInternalToken();
+    if (!this.isEnabled() || !base || !token) {
+      return null;
+    }
+    try {
+      return await workerInternalFetchJson<UserbotGlobalConnectionState>(
+        base,
+        '/internal/userbot/connection',
+      );
+    } catch (e) {
+      this.logger.warn(`fetchGlobalConnectionState failed: ${formatError(e)}`);
+      return null;
+    }
+  }
+
+  /** Достаточно ли userbot для дашборда (live MTProto или завершённая настройка QR/сессии). */
+  async isUserbotReadyForDashboard(userId: string): Promise<boolean> {
+    const state = await this.fetchGlobalConnectionState();
+    if (!state) {
+      return false;
+    }
+    if (state.connected) {
+      return true;
+    }
+    if (!state.sessionConfigured || !state.enabled) {
+      return false;
+    }
+    const ownerId = String(state.sessionOwnerUserId ?? '').trim();
+    const uid = String(userId ?? '').trim();
+    if (!ownerId || !uid) {
+      return false;
+    }
+    return ownerId === uid;
+  }
+
+  /** @deprecated use fetchGlobalConnectionState / isUserbotReadyForDashboard */
   async probeUserbotConnected(params: {
     cabinetId: string;
     userId: string;

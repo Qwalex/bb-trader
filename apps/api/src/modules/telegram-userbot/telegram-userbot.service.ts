@@ -210,6 +210,32 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  /** Глобальный MTProto-статус без контекста кабинета (internal Api→Worker, dashboard). */
+  async getGlobalConnectionState(): Promise<{
+    connected: boolean;
+    sessionConfigured: boolean;
+    enabled: boolean;
+    sessionOwnerUserId: string | null;
+  }> {
+    const [enabled, session, sessionOwner] = await Promise.all([
+      this.getBoolSetting('TELEGRAM_USERBOT_ENABLED', false),
+      this.settings.get('TELEGRAM_USERBOT_SESSION'),
+      this.settings.get(TELEGRAM_USERBOT_SESSION_OWNER_USER_ID_KEY),
+    ]);
+    const ownerId = String(sessionOwner ?? '').trim() || null;
+    let connected = false;
+    if (ownerId) {
+      const client = this.userbotClient.getClientForOwnerUserId(ownerId);
+      connected = Boolean(client && (await this.userbotClient.isClientAuthorized(client)));
+    }
+    return {
+      connected,
+      sessionConfigured: Boolean(String(session ?? '').trim()),
+      enabled,
+      sessionOwnerUserId: ownerId,
+    };
+  }
+
   async getTodayMetrics() {
     return this.userbotScan.getTodayMetrics();
   }

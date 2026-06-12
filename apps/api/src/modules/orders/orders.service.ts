@@ -1112,37 +1112,26 @@ export class OrdersService {
     userId: string,
     probeCabinetId: string | null,
   ): Promise<boolean> {
-    if (!probeCabinetId) {
+    if (!probeCabinetId || !userId.trim()) {
       return false;
     }
     if (this.userbot && !shouldProxyUserbotToWorker()) {
-      return this.cabinetContext.runWithCabinet(probeCabinetId, async () => {
-        const userbot = this.userbot;
-        if (!userbot) {
-          return false;
+      try {
+        const state = await this.userbot.getGlobalConnectionState();
+        if (state.connected) {
+          return true;
         }
-        try {
-          const status = await userbot.getStatus();
-          return Boolean(status?.connected);
-        } catch {
-          return false;
+        if (state.sessionConfigured && state.enabled) {
+          const ownerId = String(state.sessionOwnerUserId ?? '').trim();
+          return Boolean(ownerId && ownerId === userId.trim());
         }
-      });
-    }
-    if (this.userbotProxy?.isEnabled()) {
-      const authUser = await this.prisma.authUser.findUnique({
-        where: { id: userId },
-        select: { id: true, login: true, role: true },
-      });
-      if (!authUser?.login?.trim()) {
+      } catch {
         return false;
       }
-      return this.userbotProxy.probeUserbotConnected({
-        cabinetId: probeCabinetId,
-        userId: authUser.id,
-        login: authUser.login.trim(),
-        role: authUser.role,
-      });
+      return false;
+    }
+    if (this.userbotProxy?.isEnabled()) {
+      return this.userbotProxy.isUserbotReadyForDashboard(userId);
     }
     return false;
   }
@@ -1205,7 +1194,7 @@ export class OrdersService {
         const userbotConnected = userbotConnectedGlobal;
         const isContentCabinet = c.purpose === 'content';
         const setupWarnings: string[] = [];
-        if (!userbotConnected) {
+        if (!userbotConnected && !isContentCabinet) {
           setupWarnings.push('Подключите Userbot (статус должен быть «подключен»).');
         }
         if (enabledGroupsCount < 1) {
