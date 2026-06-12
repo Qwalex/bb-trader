@@ -2518,3 +2518,21 @@
 - Files: `orders.service.ts`, `orders.controller.ts`, `userbot-dashboard-ready.util.ts`, `api-auth.guard.ts`, `apps/web/app/page.tsx`
 - Manual verification: redeploy Api+Web; главная без userbot-warning при «Сессия: есть» или connected на `/telegram-userbot`.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-213
+
+- Status: `done`
+- Scope: Userbot ingest `place_error` на кабинете Self (DOGEUSDT #184): сигнал распознан, ордер не выставлен.
+- Findings: Worker-UB → Worker-Bybit `routeUserbotSignalPlacement` не передавал `cabinetId`; internal Bybit fallback на **глобальный default-кабинет** → ключи/настройки не Self.
+- Changes: `BybitSpotService` передаёт `cabinetContext.getCabinetId()` в `bybitInternal.routeUserbotSignalPlacement`; `BybitSpotModule` импортирует `CabinetModule`.
+- Manual verification: redeploy Worker-UB+Worker-Bybit; «Перечитать» на #184 или новый сигнал → `placed` при валидных ключах Self.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-214
+
+- Status: `done`
+- Scope: #186 DOGEUSDT «отменен (дубликат)» после #184 `place_error` без сделок на Bybit.
+- Findings: дедуп по `TgUserbotSignalHash` (pair+direction+entries+SL+TP) не снимался при `place_error`; повтор того же сигнала → «Сигнал уже обрабатывался ранее» (UI: дубликат). Не связано с открытой позицией на бирже.
+- Changes: `releaseSignalHashIfLocked` при всех `place_error` в ingest pipeline и after-confirm.
+- Manual verification: после place_error повтор/новое сообщение с теми же уровнями не duplicate; «Перечитать» на #186 проходит к установке.
+- Linked risks (`SEC-###`): N/A

@@ -5,6 +5,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { TelegramUserbotIngestEditWatchService } from './telegram-userbot-ingest-edit-watch.service';
 import { TelegramUserbotIngestService } from './telegram-userbot-ingest.service';
 import { TelegramUserbotMirrorService } from '../mirror/telegram-userbot-mirror.service';
+import { UserbotSignalHashService } from '../userbot-signal-hash.service';
 import { mapPrismaSignalToDto } from '../../orders/signal-prisma-mapper.util';
 import type { ExternalConfirmResultPayload } from './telegram-userbot-ingest-after-confirm.types';
 
@@ -18,6 +19,7 @@ export class TelegramUserbotIngestAfterConfirmService {
     private readonly editWatch: TelegramUserbotIngestEditWatchService,
     private readonly userbotMirror: TelegramUserbotMirrorService,
     private readonly cabinetContext: CabinetContextService,
+    private readonly userbotSignalHash: UserbotSignalHashService,
   ) {}
 
   async handleAfterExternalConfirm(params: {
@@ -34,7 +36,7 @@ export class TelegramUserbotIngestAfterConfirmService {
     return this.cabinetContext.runWithCabinetAsync(cabinetId, async () => {
       const row = await this.prisma.tgUserbotIngest.findUnique({
         where: { id: ingestId },
-        select: { id: true, chatId: true, messageId: true },
+        select: { id: true, chatId: true, messageId: true, signalHash: true },
       });
       if (!row) {
         this.logger.warn(`after-external-confirm: ingest not found ${ingestId}`);
@@ -53,6 +55,10 @@ export class TelegramUserbotIngestAfterConfirmService {
           status: 'place_error',
           error: result.error ?? 'Подтверждение получено, но ордер не удалось выставить',
         });
+        const hash = String(row.signalHash ?? '').trim();
+        if (hash) {
+          await this.userbotSignalHash.releaseForCabinetAndHash(cabinetId, hash);
+        }
         void this.editWatch.scheduleEditWatch(ingest.id);
         return { ok: true };
       }

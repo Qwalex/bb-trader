@@ -834,6 +834,7 @@ export class TelegramUserbotIngestPipelineService {
         aiRequest,
         aiResponse,
       });
+      await this.releaseSignalHashIfLocked(effectiveCabinetId, signalHash);
       await this.notifySignalFailureToBot({
         ingestId: ingest.id,
         chatId: ingest.chatId,
@@ -929,6 +930,7 @@ export class TelegramUserbotIngestPipelineService {
               result.error ??
               'Подтверждение получено, но ордер не удалось выставить',
           });
+          await this.releaseSignalHashIfLocked(effectiveCabinetId, signalHash);
           void this.editWatch.scheduleEditWatch(ingest.id);
           return;
         }
@@ -1026,6 +1028,7 @@ export class TelegramUserbotIngestPipelineService {
         aiRequest,
         aiResponse,
       });
+      await this.releaseSignalHashIfLocked(effectiveCabinetId, signalHash);
       await this.notifySignalFailureToBot({
         ingestId: ingest.id,
         chatId: ingest.chatId,
@@ -1053,6 +1056,7 @@ export class TelegramUserbotIngestPipelineService {
         aiRequest,
         aiResponse,
       });
+      await this.releaseSignalHashIfLocked(effectiveCabinetId, signalHash);
       const suppressNotify =
         options?.suppressPlacementFailureExternalNotify === true &&
         place.errorCode === 'signal_levels_validation';
@@ -1770,6 +1774,17 @@ export class TelegramUserbotIngestPipelineService {
   );
   return { kind: ai.kind, aiRequest, aiResponse };
 }
+
+  private async releaseSignalHashIfLocked(
+    cabinetId: string,
+    signalHash: string | null | undefined,
+  ): Promise<void> {
+    const hash = String(signalHash ?? '').trim();
+    if (!hash) {
+      return;
+    }
+    await this.userbotSignalHash.releaseForCabinetAndHash(cabinetId, hash);
+  }
 
   /** Публикация в publish-группы и QPulse — только после успешного размещения на Bybit. */
   private async publishPlacedSignalToMirrorGroups(params: {

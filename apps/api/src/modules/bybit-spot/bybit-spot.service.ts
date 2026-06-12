@@ -5,6 +5,7 @@ import { normalizeTradingPair, type SignalDto } from '@repo/shared';
 import { isDedicatedWorkerBybitProcessRole } from '../../config/process-role.util';
 import { formatError } from '../../common/format-error';
 import { AppLogService } from '../app-log/app-log.service';
+import { CabinetContextService } from '../cabinet/cabinet-context.service';
 import { BybitService } from '../bybit/bybit.service';
 import { BybitInternalClientService } from '../bybit/bybit-internal-client.service';
 import type { PlaceOrdersResult, SignalOrderOrigin } from '../bybit/types/bybit.types';
@@ -29,6 +30,7 @@ export class BybitSpotService {
   constructor(
     private readonly instrument: BybitSpotInstrumentService,
     private readonly appLog: AppLogService,
+    private readonly cabinetContext: CabinetContextService,
     @Inject(forwardRef(() => BybitService))
     private readonly bybit: BybitService,
     @Inject(forwardRef(() => OrdersService))
@@ -102,6 +104,7 @@ export class BybitSpotService {
     if (this.bybitInternal.isRemotePlacementEnabled()) {
       const remote = (await this.bybitInternal.routeUserbotSignalPlacement(
         params,
+        this.cabinetContext.getCabinetId(),
       )) as UserbotPlacementRouteResult;
       if (remote.kind === 'spot_prompt') {
         const started = await this.spotFlow.startSpotPrompt({

@@ -1,6 +1,7 @@
 import { forwardRef, Module } from '@nestjs/common';
 
 import { AppLogModule } from '../app-log/app-log.module';
+import { CabinetModule } from '../cabinet/cabinet.module';
 import { BybitModule } from '../bybit/bybit.module';
 import { OrdersModule } from '../orders/orders.module';
 import { TelegramModule } from '../telegram';
@@ -14,6 +15,7 @@ import { BybitSpotPriceWatchService } from './watch/bybit-spot-price-watch.servi
 @Module({
   imports: [
     AppLogModule,
+    CabinetModule,
     forwardRef(() => OrdersModule),
     forwardRef(() => BybitModule),
     forwardRef(() => TelegramModule),
