@@ -58,15 +58,6 @@ export class BybitStuckTradesHealService {
       return empty({ skipReason: 'reconcile backlog' });
     }
 
-    const pollFresh = await this.workers.getPollJobRunningAgeMs(cabinetId);
-    if (pollFresh !== null && pollFresh < POLL_RUNNING_DEFER_MS) {
-      return empty({ skipReason: 'poll active' });
-    }
-
-    if (pollFresh !== null && pollFresh >= POLL_RUNNING_DEFER_MS) {
-      await this.workers.releaseStalePollJobForCabinet(cabinetId);
-    }
-
     const snapshot = await this.stuckTrades.getStuckTradesSnapshot();
     if (!snapshot.bybitConnected) {
       return empty({ skipReason: 'bybit disconnected' });
@@ -75,6 +66,22 @@ export class BybitStuckTradesHealService {
     const candidates = snapshot.items;
     if (candidates.length === 0) {
       return empty({ skipped: false, ok: true });
+    }
+
+    const pollFresh = await this.workers.getPollJobRunningAgeMs(cabinetId);
+    const urgentMissingTp = candidates.some((item) =>
+      item.issues.some((i) => i.kind === 'missing_tp'),
+    );
+    if (
+      !urgentMissingTp &&
+      pollFresh !== null &&
+      pollFresh < POLL_RUNNING_DEFER_MS
+    ) {
+      return empty({ skipReason: 'poll active' });
+    }
+
+    if (pollFresh !== null && pollFresh >= POLL_RUNNING_DEFER_MS) {
+      await this.workers.releaseStalePollJobForCabinet(cabinetId);
     }
 
     const now = Date.now();
@@ -102,7 +109,7 @@ export class BybitStuckTradesHealService {
           complete: result.complete,
           message: result.message,
         });
-        if (result.complete || result.ok) {
+        if (result.complete) {
           healed += 1;
           this.cooldownUntil.set(cdKey, now + cfg.cooldownMs);
         } else {

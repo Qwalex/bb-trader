@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 
 import { SettingsService } from '../../settings/settings.service';
+import { isWorkerBybitProcessRole } from '../../../config/process-role.util';
 import { WorkerQueueService } from '../../worker-queue/worker-queue.service';
 
 @Injectable()
@@ -21,6 +22,9 @@ export class BybitPollService {
 
   @Interval(1_000)
   async tick(): Promise<void> {
+    if (!isWorkerBybitProcessRole()) {
+      return;
+    }
     const msRaw = await this.settings.get('POLLING_INTERVAL_MS');
     const trimmed = (msRaw ?? '').trim();
     if (trimmed === '0') {

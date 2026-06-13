@@ -40,6 +40,7 @@ import { emitOrderFillEventsIfNew } from './orders/bybit-order-fill-events.util'
 import {
   applyTpSlForSignal,
   isFastTpSlApplyComplete,
+  parseTakeProfitsJson,
   syncSignalOrderStatusesFromExchange,
   type PollSignalRow,
 } from './orders/bybit-order-lifecycle-poll-signal.util';
@@ -418,6 +419,12 @@ export class BybitService implements OnApplicationBootstrap {
       context,
     });
 
+    try {
+      await this.pollOpenOrders();
+    } catch (e) {
+      this.logger.warn(`applyTpSlManually: pollOpenOrders before apply: ${formatError(e)}`);
+    }
+
     let complete = false;
     for (let attempt = 1; attempt <= 5; attempt += 1) {
       const step = await this.runFastTpSlApplyAttempt(id, context, attempt);
@@ -455,8 +462,13 @@ export class BybitService implements OnApplicationBootstrap {
       void this.scheduleOpenOrdersPollAsync(`${context}-apply-tpsl`, 100, pollCabinetId);
     }
 
+    const needsTp = parseTakeProfitsJson(after?.takeProfits).length > 0;
+    const ok = needsTp
+      ? complete || exposure.liveTpCount > 0
+      : complete || exposure.positionHasSl || exposure.liveTpCount > 0;
+
     return {
-      ok: complete || exposure.liveTpCount > 0 || exposure.positionHasSl,
+      ok,
       synced: true,
       entriesComplete: exposure.entriesComplete,
       liveTpCount: exposure.liveTpCount,

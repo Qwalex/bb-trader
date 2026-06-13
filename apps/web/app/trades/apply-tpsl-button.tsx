@@ -62,6 +62,9 @@ export function ApplyTpSlButton(props: {
       } else if (typeof json?.positionSize === 'number' && json.positionSize > 0) {
         parts.push('SL на позиции: нет');
       }
+      if (!json?.complete && typeof json?.liveTpCount === 'number' && json.liveTpCount === 0) {
+        parts.unshift('⚠ TP не выставлены полностью');
+      }
       window.alert(parts.join('\n'));
       props.onDone?.();
       router.refresh();

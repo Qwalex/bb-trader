@@ -514,8 +514,28 @@ export class BybitTpSlService {
       return;
     }
 
-    if (hasOpenEntryOrders(fresh.orders)) {
+    const posResEarly = await this.rateLimit.runBybitCall(() =>
+      client.getPositionInfo({ category: 'linear', symbol }),
+    );
+    let posSizeEarly = 0;
+    if (posResEarly.retCode === 0) {
+      const posRowEarly = pickPositionRowForSignalDirection(
+        posResEarly.result?.list ?? [],
+        direction,
+      );
+      posSizeEarly = posRowEarly?.size ? Math.abs(parseFloat(String(posRowEarly.size))) : 0;
+    }
+
+    if (hasOpenEntryOrders(fresh.orders) && !(posSizeEarly > 1e-12)) {
       return;
+    }
+    if (hasOpenEntryOrders(fresh.orders) && posSizeEarly > 1e-12) {
+      void this.appLog.append(
+        'info',
+        'bybit',
+        'placeTpSplit: позиция на бирже есть — ставим TP несмотря на «открытый» entry в БД',
+        { signalId: fresh.id, symbol, direction, posSize: posSizeEarly },
+      );
     }
 
     const deadTp = new Set(['cancelled', 'rejected', 'failed', 'deactivated']);

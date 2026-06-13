@@ -2554,3 +2554,12 @@
 - Changes: `BybitService.isPairDirectionFlatOnExchange`; ingest pipeline — bypass cooldown/hash/duplicate при `flat`; reentry close-cooldown — то же; `wouldDuplicateActivePairDirection` через flat/exposed/null.
 - Manual verification: при чистой бирже по паре+направлению повтор сигнала не `duplicate_signal`; при открытой позиции/ордере — блок сохраняется.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-217
+
+- Status: `done`
+- Scope: DOGEUSDT ORDERS_PLACED — позиция без TP; кнопка «TP/SL» и auto-heal не восстанавливают защиту.
+- Findings: (1) `placeTpSplitIfNeeded` выходил, если entry в БД «открыт», даже при уже открытой позиции на бирже; (2) auto-heal считал успехом `ok=true` при SL без TP → cooldown 10 мин; (3) heal откладывался, пока poll running (<90 с); (4) `applyTpSlManually` не делал полный poll перед apply; (5) poll scheduler на Api без worker-bybit role создавал лишние jobs.
+- Changes: placeTpSplit при позиции на бирже; applyTpSlManually — poll + корректный `ok`; auto-heal — heal только при `complete`, bypass poll-defer для missing_tp; BybitPollService только на worker-bybit; UI предупреждение при incomplete.
+- Manual verification: DOGE Self — «TP/SL» выставляет лимитки; auto-heal повторяет до complete; `/logs` placeTpSplit / STUCK_TRADES_AUTO_HEAL.
+- Linked risks (`SEC-###`): N/A
