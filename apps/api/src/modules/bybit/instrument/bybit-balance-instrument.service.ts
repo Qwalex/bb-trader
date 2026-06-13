@@ -141,7 +141,7 @@ export class BybitBalanceInstrumentService {
   async getLinearInstrumentFilters(
     client: RestClientV5,
     symbol: string,
-  ): Promise<{ qtyStep: string; minQty: string; tickSize: string }> {
+  ): Promise<{ qtyStep: string; minQty: string; tickSize: string; minNotionalValue: string }> {
     const res = await this.rateLimit.runBybitCall(() =>
       client.getInstrumentsInfo({
         category: 'linear',
@@ -151,10 +151,12 @@ export class BybitBalanceInstrumentService {
     const info = res.result?.list?.[0];
     const lot = info?.lotSizeFilter;
     const price = info?.priceFilter;
+    const minNotionalRaw = lot?.minNotionalValue ?? '0';
     return {
       qtyStep: lot?.qtyStep ?? '0.001',
       minQty: lot?.minOrderQty ?? '0.001',
       tickSize: price?.tickSize ?? '0.0001',
+      minNotionalValue: String(minNotionalRaw ?? '0'),
     };
   }
 

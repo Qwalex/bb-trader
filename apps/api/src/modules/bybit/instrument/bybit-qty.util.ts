@@ -60,6 +60,39 @@ export function splitPositionQtyForTps(params: {
   return outUnits.map((u) => formatQtyToStep(u * stepNum, qtyStep));
 }
 
+/** Подбор числа TP с учётом minQty и мин. номинала ордера (USDT). */
+export function resolveTpSplitPlan(params: {
+  posSize: number;
+  tpPrices: number[];
+  qtyStep: string;
+  minQty: string;
+  minNotionalUsd: number;
+}): { levelCount: number; qtyParts: string[]; prices: number[] } | null {
+  const minNotional = params.minNotionalUsd > 0 ? params.minNotionalUsd : 0;
+  for (let levelCount = params.tpPrices.length; levelCount >= 1; levelCount -= 1) {
+    const prices = params.tpPrices.slice(0, levelCount);
+    const qtyParts = splitPositionQtyForTps({
+      totalQtyBase: params.posSize,
+      tpCount: levelCount,
+      qtyStep: params.qtyStep,
+      minQty: params.minQty,
+    });
+    if (qtyParts.length !== levelCount || !qtyParts.every((q) => parseFloat(q) > 0)) {
+      continue;
+    }
+    if (minNotional > 0) {
+      const meetsNotional = qtyParts.every(
+        (q, i) => parseFloat(q) * prices[i]! >= minNotional - 1e-8,
+      );
+      if (!meetsNotional) {
+        continue;
+      }
+    }
+    return { levelCount, qtyParts, prices };
+  }
+  return null;
+}
+
 export function splitQtyForChildOrders(params: {
   totalQtyBase: number;
   childCount: number;
@@ -89,6 +122,8 @@ export function buildTpSplitDiagnostics(params: {
   requestedLevels: number;
   qtyStep: string;
   minQty: string;
+  minNotionalUsd?: number;
+  tpPrices?: number[];
 }): {
   posSizeRounded: string;
   totalUnits: number;
@@ -115,6 +150,21 @@ export function buildTpSplitDiagnostics(params: {
     if (!Number.isFinite(qtyPerLevel) || qtyPerLevel < minQtyNum) {
       reasons.push('per_tp_qty_below_min_qty');
     }
+  }
+  const minNotional = params.minNotionalUsd ?? 0;
+  if (minNotional > 0 && params.requestedLevels > 0 && params.tpPrices?.length) {
+    const plan = resolveTpSplitPlan({
+      posSize: params.posSize,
+      tpPrices: params.tpPrices,
+      qtyStep: params.qtyStep,
+      minQty: params.minQty,
+      minNotionalUsd: minNotional,
+    });
+    if (!plan) {
+      reasons.push('per_tp_notional_below_min');
+    }
+  } else if (minNotional > 0 && params.requestedLevels > 1) {
+    reasons.push('per_tp_notional_below_min');
   }
   return {
     posSizeRounded,

@@ -443,7 +443,7 @@ export class BybitService implements OnApplicationBootstrap {
       message = 'TP/SL синхронизированы и установлены (или уже были на месте)';
     } else if (exposure.positionSize > 0 && exposure.liveTpCount === 0) {
       message =
-        'Позиция на бирже есть, но TP не выставлены — проверьте minQty лота или логи Bybit';
+        'Позиция есть, SL установлен, но TP-лимитки не приняты. Частая причина: объём позиции мал для 3 TP (мин. номинал ордера Bybit ~5 USDT) — после обновления ставится 1 TP на весь объём; см. /logs placeTpSplit';
     } else if (!exposure.entriesComplete) {
       message =
         'Вход ещё не исполнен на бирже — дождитесь fill или проверьте условный ордер входа';

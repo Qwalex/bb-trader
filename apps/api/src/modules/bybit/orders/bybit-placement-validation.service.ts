@@ -282,6 +282,8 @@ export class BybitPlacementValidationService {
     requestedLevels: number;
     qtyStep: string;
     minQty: string;
+    minNotionalUsd?: number;
+    tpPrices?: number[];
   }): {
     posSizeRounded: string;
     totalUnits: number;

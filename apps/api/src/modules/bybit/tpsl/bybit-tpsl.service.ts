@@ -18,7 +18,7 @@ import {
   BYBIT_LADDER_SOURCE_FALLBACK_LOG_CAP,
   BYBIT_SOURCE_MAP_SKIP_LOG_CAP,
 } from '../bybit.constants';
-import { splitPositionQtyForTps } from '../instrument/bybit-qty.util';
+import { formatQtyToStep, resolveTpSplitPlan } from '../instrument/bybit-qty.util';
 import { hasLiveTpOrders, hasOpenEntryOrders } from '../orders/bybit-order-status.util';
 import { pickPositionRowForSignalDirection } from '../position/bybit-position-pick.util';
 import { positionHasStopLoss } from './bybit-tpsl.util';
@@ -497,7 +497,9 @@ export class BybitTpSlService {
       return;
     }
     const symbol = normalizeTradingPair(fresh.pair);
-    const { qtyStep, minQty, tickSize } = await ports.getLinearInstrumentFilters(client, symbol);
+    const { qtyStep, minQty, tickSize, minNotionalValue } =
+      await ports.getLinearInstrumentFilters(client, symbol);
+    const minNotionalUsd = parseFloat(minNotionalValue) || 0;
 
     const seenTick = new Set<string>();
     const sorted: number[] = [];
@@ -572,34 +574,67 @@ export class BybitTpSlService {
     const closeSide: 'Buy' | 'Sell' = direction === 'long' ? 'Sell' : 'Buy';
     const positionIdx = await ports.resolveEntryPositionIdx(client, symbol, closeSide);
 
-    let levelCount = sorted.length;
-    let qtyParts: string[] = [];
-    let pricesSlice: number[] = [];
-    while (levelCount >= 1) {
-      pricesSlice = sorted.slice(0, levelCount);
-      qtyParts = splitPositionQtyForTps({
-        totalQtyBase: posSize,
-        tpCount: levelCount,
-        qtyStep,
-        minQty,
-      });
-      if (qtyParts.length === levelCount && qtyParts.every((q) => parseFloat(q) > 0)) {
-        break;
+    let levelCount: number;
+    let qtyParts: string[];
+    let pricesSlice: number[];
+
+    const plan = resolveTpSplitPlan({
+      posSize,
+      tpPrices: sorted,
+      qtyStep,
+      minQty,
+      minNotionalUsd,
+    });
+    if (plan) {
+      levelCount = plan.levelCount;
+      qtyParts = plan.qtyParts;
+      pricesSlice = plan.prices;
+    } else {
+      const fullQty = formatQtyToStep(posSize, qtyStep);
+      const firstPrice = sorted[0]!;
+      const fullNotional = parseFloat(fullQty) * firstPrice;
+      if (
+        parseFloat(fullQty) >= parseFloat(minQty) &&
+        (minNotionalUsd <= 0 || fullNotional >= minNotionalUsd - 1e-8)
+      ) {
+        levelCount = 1;
+        qtyParts = [fullQty];
+        pricesSlice = [firstPrice];
+        void this.appLog.append(
+          'info',
+          'bybit',
+          'placeTpSplit: один TP на весь объём (номинал мал для нескольких уровней)',
+          {
+            signalId: fresh.id,
+            symbol,
+            posSize,
+            minNotionalUsd,
+            fullNotional,
+            requestedLevels: sorted.length,
+          },
+        );
+      } else {
+        levelCount = 0;
+        qtyParts = [];
+        pricesSlice = [];
       }
-      levelCount -= 1;
     }
+
     if (levelCount < 1 || qtyParts.length === 0) {
       const diag = ports.buildTpSplitDiagnostics({
         posSize,
         requestedLevels: sorted.length,
         qtyStep,
         minQty,
+        minNotionalUsd,
+        tpPrices: sorted,
       });
       void this.appLog.append('warn', 'bybit', 'placeTpSplit: не удалось разбить qty по TP', {
         signalId: fresh.id,
         symbol,
         direction,
         posSizeRounded: diag.posSizeRounded,
+        minNotionalUsd,
         reasons: diag.reasons,
       });
       return;
@@ -679,6 +714,15 @@ export class BybitTpSlService {
         bybitOrderIds: placedIds,
         levels: levelCount,
         errors: errors.length > 0 ? errors : undefined,
+      });
+    } else if (errors.length > 0) {
+      void this.appLog.append('warn', 'bybit', 'placeTpSplit: ни один TP не принят биржей', {
+        signalId: fresh.id,
+        symbol,
+        direction,
+        errors,
+        minNotionalUsd,
+        posSize,
       });
     }
   }

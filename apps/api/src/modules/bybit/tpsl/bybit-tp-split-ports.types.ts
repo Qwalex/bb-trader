@@ -10,7 +10,7 @@ export type BybitTpSplitPlacementPorts = {
   getLinearInstrumentFilters: (
     client: RestClientV5,
     symbol: string,
-  ) => Promise<{ qtyStep: string; minQty: string; tickSize: string }>;
+  ) => Promise<{ qtyStep: string; minQty: string; tickSize: string; minNotionalValue: string }>;
   resolveEntryPositionIdx: (
     client: RestClientV5,
     symbol: string,
@@ -22,6 +22,8 @@ export type BybitTpSplitPlacementPorts = {
     requestedLevels: number;
     qtyStep: string;
     minQty: string;
+    minNotionalUsd?: number;
+    tpPrices?: number[];
   }) => {
     posSizeRounded: string;
     totalUnits: number;

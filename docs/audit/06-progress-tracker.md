@@ -2563,3 +2563,12 @@
 - Changes: placeTpSplit при позиции на бирже; applyTpSlManually — poll + корректный `ok`; auto-heal — heal только при `complete`, bypass poll-defer для missing_tp; BybitPollService только на worker-bybit; UI предупреждение при incomplete.
 - Manual verification: DOGE Self — «TP/SL» выставляет лимитки; auto-heal повторяет до complete; `/logs` placeTpSplit / STUCK_TRADES_AUTO_HEAL.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-218
+
+- Status: `done`
+- Scope: TP/SL alert — SL есть, TP-ордеров 0 (DOGEUSDT, малый номинал).
+- Findings: split по 3 TP проходил minQty в монетах, но каждый reduce-only limit < minNotionalValue Bybit (~5 USDT); SL через setTradingStop ставился, лимитки отклонялись.
+- Changes: `minNotionalValue` из instruments; `resolveTpSplitPlan`; fallback 1 TP на весь объём; лог `ни один TP не принят биржей`.
+- Manual verification: после deploy Worker-Bybit — «TP/SL» на DOGE → ≥1 TP или явная ошибка в /logs.
+- Linked risks (`SEC-###`): N/A
