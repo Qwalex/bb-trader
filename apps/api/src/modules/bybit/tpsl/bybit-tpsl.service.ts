@@ -21,7 +21,7 @@ import {
 import { formatQtyToStep, resolveTpSplitPlan } from '../instrument/bybit-qty.util';
 import { hasLiveTpOrders, hasOpenEntryOrders } from '../orders/bybit-order-status.util';
 import { pickPositionRowForSignalDirection } from '../position/bybit-position-pick.util';
-import { positionHasStopLoss } from './bybit-tpsl.util';
+import { positionHasStopLoss, positionHasTakeProfit } from './bybit-tpsl.util';
 import type { BybitTpSplitPlacementPorts } from './bybit-tp-split-ports.types';
 import { BybitRateLimitService } from '../instrument/bybit-rate-limit.service';
 
@@ -131,6 +131,91 @@ export class BybitTpSlService {
       const failReason = formatError(e);
       this.logger.warn(`setTradingStop SL (${context}) ${symbol}: ${failReason}`);
       void this.appLog.append('warn', 'bybit', 'setTradingStop SL исключение', {
+        symbol,
+        context,
+        error: failReason,
+      });
+      return { ok: false, failReason };
+    }
+  }
+
+  /** TP на позицию (setTradingStop Full) — fallback, когда reduce-only лимитки не проходят min notional. */
+  async applyPositionTakeProfitFull(
+    client: RestClientV5,
+    symbol: string,
+    takeProfit: number,
+    context: string,
+    positionIdx: 0 | 1 | 2 = 0,
+    preserveStopLoss?: string,
+  ): Promise<{ ok: boolean; failReason?: string }> {
+    try {
+      try {
+        const pos = await this.rateLimit.runBybitCall(() =>
+          client.getPositionInfo({ category: 'linear', symbol }),
+        );
+        if (pos.retCode === 0) {
+          const rows = pos.result?.list ?? [];
+          const row =
+            rows.find((r) => {
+              const idx = Number(r.positionIdx ?? 0);
+              const sz = r?.size ? Math.abs(parseFloat(String(r.size))) : 0;
+              return idx === positionIdx && sz > 1e-12;
+            }) ??
+            rows.find((r) => {
+              const sz = r?.size ? Math.abs(parseFloat(String(r.size))) : 0;
+              return sz > 1e-12;
+            });
+          const side = String(row?.side ?? '');
+          const ref = parseFloat(String(row?.markPrice ?? ''));
+          if (Number.isFinite(ref) && ref > 0) {
+            const invalidForShort = side === 'Sell' && !(takeProfit < ref);
+            const invalidForLong = side === 'Buy' && !(takeProfit > ref);
+            if (invalidForShort || invalidForLong) {
+              const failReason = `precheck: TP=${takeProfit} invalid for side=${side} mark=${ref}`;
+              this.logger.debug(`skip setTradingStop TP (${context}) ${symbol}: ${failReason}`);
+              return { ok: false, failReason };
+            }
+          }
+        }
+      } catch (e) {
+        if (this.rateLimit.isRateLimitError(e)) {
+          throw e;
+        }
+      }
+
+      const slKeep = String(preserveStopLoss ?? '').trim();
+      const res = await this.rateLimit.runBybitCall(() =>
+        client.setTradingStop({
+          category: 'linear',
+          symbol,
+          positionIdx,
+          tpslMode: 'Full',
+          takeProfit: String(takeProfit),
+          tpTriggerBy: 'LastPrice',
+          tpOrderType: 'Market',
+          ...(slKeep && parseFloat(slKeep) > 0 ? { stopLoss: slKeep } : {}),
+        }),
+      );
+      if (res.retCode === 34040) {
+        return { ok: true };
+      }
+      if (res.retCode !== 0) {
+        const failReason = `retCode=${res.retCode} retMsg=${String(res.retMsg ?? '')}`;
+        void this.appLog.append('warn', 'bybit', 'setTradingStop TP отклонён', {
+          symbol,
+          context,
+          retCode: res.retCode,
+          retMsg: String(res.retMsg ?? ''),
+        });
+        return { ok: false, failReason };
+      }
+      return { ok: true };
+    } catch (e) {
+      if (this.rateLimit.isRateLimitError(e)) {
+        throw e;
+      }
+      const failReason = formatError(e);
+      void this.appLog.append('warn', 'bybit', 'setTradingStop TP исключение', {
         symbol,
         context,
         error: failReason,
@@ -572,7 +657,56 @@ export class BybitTpSlService {
     }
 
     const closeSide: 'Buy' | 'Sell' = direction === 'long' ? 'Sell' : 'Buy';
-    const positionIdx = await ports.resolveEntryPositionIdx(client, symbol, closeSide);
+    const positionIdx = (posRow.positionIdx ?? 0) as 0 | 1 | 2;
+
+    const tryPositionTakeProfitFallback = async (
+      tpPrice: number,
+      reason: string,
+    ): Promise<boolean> => {
+      const priceStr = ports.formatPriceToTick(tpPrice, tickSize);
+      const tpNum = parseFloat(priceStr);
+      const applied = await this.applyPositionTakeProfitFull(
+        client,
+        symbol,
+        tpNum,
+        reason,
+        positionIdx,
+        posRow.stopLoss,
+      );
+      if (!applied.ok) {
+        void this.appLog.append('warn', 'bybit', 'placeTpSplit: position TP fallback не применён', {
+          signalId: fresh.id,
+          symbol,
+          direction,
+          reason,
+          failReason: applied.failReason,
+        });
+        return false;
+      }
+      await ports.orders.createOrderRecord({
+        signalId: fresh.id,
+        orderKind: 'TP',
+        side: closeSide,
+        price: tpNum,
+        qty: posSize,
+        status: 'NEW',
+      });
+      await ports.orders.createSignalEvent(fresh.id, 'BYBIT_TP_POSITION_SET', {
+        symbol,
+        direction,
+        takeProfit: tpNum,
+        positionIdx,
+        fallbackReason: reason,
+      });
+      void this.appLog.append('info', 'bybit', 'placeTpSplit: TP на позицию (setTradingStop)', {
+        signalId: fresh.id,
+        symbol,
+        direction,
+        takeProfit: tpNum,
+        reason,
+      });
+      return true;
+    };
 
     let levelCount: number;
     let qtyParts: string[];
@@ -621,6 +755,9 @@ export class BybitTpSlService {
     }
 
     if (levelCount < 1 || qtyParts.length === 0) {
+      if (await tryPositionTakeProfitFallback(sorted[0]!, 'min_notional_no_limit_split')) {
+        return;
+      }
       const diag = ports.buildTpSplitDiagnostics({
         posSize,
         requestedLevels: sorted.length,
@@ -716,6 +853,9 @@ export class BybitTpSlService {
         errors: errors.length > 0 ? errors : undefined,
       });
     } else if (errors.length > 0) {
+      if (await tryPositionTakeProfitFallback(pricesSlice[0]!, 'limit_orders_rejected')) {
+        return;
+      }
       void this.appLog.append('warn', 'bybit', 'placeTpSplit: ни один TP не принят биржей', {
         signalId: fresh.id,
         symbol,

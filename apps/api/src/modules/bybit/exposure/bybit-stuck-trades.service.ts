@@ -54,7 +54,7 @@ export class BybitStuckTradesService {
     const openSignals = await this.orders.listOpenLinearSignals();
     const positionCache = new Map<
       string,
-      { size: number; stopLoss?: string } | 'error'
+      { size: number; stopLoss?: string; takeProfit?: string } | 'error'
     >();
 
     const items: StuckTradesSnapshotDto['items'] = [];
@@ -84,6 +84,7 @@ export class BybitStuckTradesService {
 
       const positionSize = pos === 'error' ? 0 : pos.size;
       const positionStopLoss = pos === 'error' ? undefined : pos.stopLoss;
+      const positionTakeProfit = pos === 'error' ? undefined : pos.takeProfit;
 
       const issues = classifyStuckLinearSignal({
         takeProfits: sig.takeProfits,
@@ -92,6 +93,7 @@ export class BybitStuckTradesService {
         orders: sig.orders,
         positionSize,
         positionStopLoss,
+        positionTakeProfit,
       });
 
       if (issues.length === 0) {

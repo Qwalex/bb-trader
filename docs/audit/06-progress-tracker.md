@@ -2572,3 +2572,12 @@
 - Changes: `minNotionalValue` из instruments; `resolveTpSplitPlan`; fallback 1 TP на весь объём; лог `ни один TP не принят биржей`.
 - Manual verification: после deploy Worker-Bybit — «TP/SL» на DOGE → ≥1 TP или явная ошибка в /logs.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-219
+
+- Status: `done`
+- Scope: Даже 1 TP limit не выставлялся при малой позиции (DOGEUSDT).
+- Findings: reduce-only limit TP отклоняются Bybit (min notional / positionIdx); SL через setTradingStop работал; лимитки использовали resolveEntryPositionIdx вместо idx позиции.
+- Changes: positionIdx из строки позиции; fallback TP через setTradingStop (takeProfit) с сохранением SL; учёт takeProfit на позиции в stuck-trades и applyTpSlManually.
+- Manual verification: «TP/SL» на DOGE → TP на позиции или 1 limit; баннер missing_tp снимается.
+- Linked risks (`SEC-###`): N/A

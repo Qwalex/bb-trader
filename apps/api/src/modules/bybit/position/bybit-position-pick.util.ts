@@ -10,6 +10,7 @@ export function pickPositionRowForSignalDirection(
     side?: string;
     positionIdx?: number;
     stopLoss?: string;
+    takeProfit?: string;
     avgPrice?: string;
     markPrice?: string;
   }>,
@@ -20,6 +21,7 @@ export function pickPositionRowForSignalDirection(
       side?: string;
       positionIdx?: number;
       stopLoss?: string;
+      takeProfit?: string;
       avgPrice?: string;
       markPrice?: string;
     }

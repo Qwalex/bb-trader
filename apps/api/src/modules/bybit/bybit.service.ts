@@ -53,7 +53,7 @@ import {
 } from './orders/bybit-order-status.util';
 import type { ApplyTpSlManuallyResult } from './types/bybit-apply-tpsl.types';
 import type { StuckTradesHealResult } from './exposure/bybit-stuck-trades-heal.types';
-import { positionHasStopLoss } from './tpsl/bybit-tpsl.util';
+import { positionHasStopLoss, positionHasTakeProfit } from './tpsl/bybit-tpsl.util';
 import { pickPositionRowForSignalDirection } from './position/bybit-position-pick.util';
 import { BybitPollFinalizeService } from './poll/bybit-poll-finalize.service';
 import { BybitPnlService } from './pnl/bybit-pnl.service';
@@ -501,6 +501,7 @@ export class BybitService implements OnApplicationBootstrap {
 
     let positionSize = 0;
     let positionHasSl = false;
+    let liveTpEffective = liveTpCount;
     try {
       const client = await this.balanceInstrument.getClient();
       if (client) {
@@ -513,13 +514,21 @@ export class BybitService implements OnApplicationBootstrap {
           const row = pickPositionRowForSignalDirection(posRes.result?.list ?? [], dir);
           positionSize = row?.size ? Math.abs(parseFloat(String(row.size))) : 0;
           positionHasSl = positionHasStopLoss(row);
+          if (liveTpEffective === 0 && positionHasTakeProfit(row)) {
+            liveTpEffective = 1;
+          }
         }
       }
     } catch (e) {
       this.logger.debug(`buildManualApplyExposure: ${formatError(e)}`);
     }
 
-    return { entriesComplete, liveTpCount, positionHasSl, positionSize };
+    return {
+      entriesComplete,
+      liveTpCount: liveTpEffective,
+      positionHasSl,
+      positionSize,
+    };
   }
 
   /**
