@@ -2581,3 +2581,13 @@
 - Changes: positionIdx из строки позиции; fallback TP через setTradingStop (takeProfit) с сохранением SL; учёт takeProfit на позиции в stuck-trades и applyTpSlManually.
 - Manual verification: «TP/SL» на DOGE → TP на позиции или 1 limit; баннер missing_tp снимается.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-220
+
+- Status: `done`
+- Scope: Result Binance Killers (SIGNAL ID `#2157`, `$UNI/USDT`) — не срабатывала отмена ордеров без входа.
+- Findings: `extractSignalExternalId` не парсил `SIGNAL ID: #2157` (символ `#` после двоеточия); `extractPairFromResultMessage` не распознавал `$UNI/USDT` — result-flow не находил сигнал.
+- Files: `telegram-userbot-parse.util.ts`, `telegram-userbot-text.util.ts`
+- Changes: optional `#` перед id в regex SIGNAL ID; fallback `$TOKEN/USDT` → `TOKENUSDT`.
+- Manual verification: `npm run build -w apps/api`; sample message → id `2157`, pair `UNIUSDT`.
+- Linked risks (`SEC-###`): N/A

@@ -81,7 +81,7 @@ export function extractSignalExternalId(text: unknown): string | undefined {
   }
   const normalized = raw.replace(/\u00a0/g, ' ');
   const match = normalized.match(
-    /(?:^|[^\p{L}\p{N}_])signal\s*id\s*[:#-]?\s*([A-Za-z0-9][A-Za-z0-9._/-]{0,127})/iu,
+    /(?:^|[^\p{L}\p{N}_])signal\s*id\s*[:#]?\s*#?\s*([A-Za-z0-9][A-Za-z0-9._/-]{0,127})/iu,
   );
   return match?.[1]?.trim();
 }

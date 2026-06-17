@@ -59,6 +59,11 @@ export function extractPairFromResultMessage(text: string): string | null {
     return null;
   }
 
+  const slashUsdtMatch = trimmed.match(/\$?([A-Z0-9]{2,15})\s*\/\s*USDT\b/i);
+  if (slashUsdtMatch?.[1]) {
+    return normalizeTradingPair(`${slashUsdtMatch[1]}USDT`);
+  }
+
   const usdtMatch = trimmed.match(/\b([A-Z0-9]{2,20}USDT)\b/i);
   if (usdtMatch?.[1]) {
     return normalizeTradingPair(usdtMatch[1]);
