@@ -243,7 +243,19 @@ export class TelegramUserbotScanService {
         const enforceRecentWindow = !includeTodayMetrics;
         for (const m of candidates) {
           if (enforceRecentWindow && !(await this.isMessageRecent(m.createdAt!))) {
-            continue;
+            const dedupMessageKey = `${chat.chatId}:${m.messageId}`;
+            const existingIngest = await this.prisma.tgUserbotIngest.findUnique({
+              where: { dedupMessageKey },
+              select: { id: true },
+            });
+            if (!existingIngest) {
+              this.logger.log(
+                `Userbot poll backfill: chat=${chat.chatId} msg=${m.messageId} — ingest ещё не создан, сообщение за сегодня вне окна recency`,
+              );
+            } else {
+              this.noteLastSeenMessageId(chat.chatId, m.messageIdNum);
+              continue;
+            }
           }
           readMessages += 1;
           readTextMessages += 1;

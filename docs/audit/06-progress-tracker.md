@@ -2599,3 +2599,13 @@
 - Changes: cookie `sb_locale` (default `en`), переключатель Lang в nav/login; словари en/ru; dashboard переведён; заголовки страниц через `PageTitle`; tutorial — 9 шагов userbot→Bybit + 3 video placeholder; крупная CTA на главной.
 - Manual verification: `npm run check-types -w web`, `npm run build -w web`; переключение EN/RU; `/tutorial?cabinetId=…`.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-222
+
+- Status: `done`
+- Scope: Userbot — пропуск авто-ingest при «старом» сообщении; неясный duplicate при двух кабинетах на одной группе.
+- Findings: poll/realtime фильтруют `TELEGRAM_USERBOT_MAX_MESSAGE_AGE_MINUTES` (default 10); если userbot offline или чат не в `enabledChatIds`, сообщение за сегодня не попадает в ingest; poll при recency-skip не двигал `lastSeen` → бесконечный retry без ingest; ручной «Сканировать за сегодня» обходит оба фильтра. Одна группа в двух trading-кабинетах → два `CabinetIngestRoute`, независимый LLM-classify на каждый маршрут; duplicate/hash per-cabinet, но при общих Bybit-ключах второй кабинет получает duplicate по бирже.
+- Changes: poll backfill — сообщения за сегодня без строки `TgUserbotIngest` ingest-ятся даже вне recency; при skip stale с существующим ingest — advance `lastSeen`; duplicate errors дополняются подсказкой «уже установлен в кабинете …» если sibling route `placed`.
+- Files: `apps/api/src/modules/telegram-userbot/scan/telegram-userbot-scan.service.ts`, `apps/api/src/modules/telegram-userbot/ingest/telegram-userbot-ingest-pipeline.service.ts`, `docs/audit/06-progress-tracker.md`
+- Manual verification: `npm run build -w apps/api` (pass); на стенде — сообщение >10 мин без ingest подхватывается poll; duplicate в кабинете B после placed в A показывает имя кабинета A.
+- Linked risks (`SEC-###`): N/A

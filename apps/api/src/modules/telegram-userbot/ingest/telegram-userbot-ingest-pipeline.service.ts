@@ -760,14 +760,20 @@ export class TelegramUserbotIngestPipelineService {
           return;
         }
       } else {
+        const otherCabinetHint = await this.formatOtherCabinetPlacedHint(
+          ingest.id,
+          effectiveCabinetId,
+        );
+        const duplicatePairError = `Активная позиция/сигнал по паре ${signal.pair} (${signal.direction})${otherCabinetHint}`;
         this.appendIngestStageLog('warn', 'Userbot: duplicate active pair/direction', ingest, {
           pair: signal.pair,
           direction: signal.direction,
+          otherCabinetHint: otherCabinetHint.trim() || null,
         });
         await this.ingest.updateIngest(ingest.id, {
           classification: 'signal',
           status: 'duplicate_signal',
-          error: `Активная позиция/сигнал по паре ${signal.pair} (${signal.direction})`,
+          error: duplicatePairError,
           aiRequest,
           aiResponse,
         });
@@ -776,7 +782,7 @@ export class TelegramUserbotIngestPipelineService {
           chatId: ingest.chatId,
           token: tokenHintForSignalFailure(text, signal.pair),
           stage: 'ingest',
-          error: `Активная позиция/сигнал по паре ${signal.pair} (${signal.direction})`,
+          error: duplicatePairError,
         });
         return;
       }
@@ -803,16 +809,22 @@ export class TelegramUserbotIngestPipelineService {
       isNewSignal = true;
     }
     if (!isNewSignal) {
+      const otherCabinetHint = await this.formatOtherCabinetPlacedHint(
+        ingest.id,
+        effectiveCabinetId,
+      );
+      const duplicateError = `Сигнал уже обрабатывался ранее${otherCabinetHint}`;
       this.appendIngestStageLog('warn', 'Userbot: duplicate signal hash', ingest, {
         signalHash,
         pair: signal.pair,
         direction: signal.direction,
+        otherCabinetHint: otherCabinetHint.trim() || null,
       });
       await this.ingest.updateIngest(ingest.id, {
         classification: 'signal',
         status: 'duplicate_signal',
         signalHash,
-        error: 'Сигнал уже обрабатывался ранее',
+        error: duplicateError,
         aiRequest,
         aiResponse,
       });
@@ -821,7 +833,7 @@ export class TelegramUserbotIngestPipelineService {
         chatId: ingest.chatId,
         token: tokenHintForSignalFailure(text, signal.pair),
         stage: 'ingest',
-        error: 'Сигнал уже обрабатывался ранее',
+        error: duplicateError,
       });
       return;
     }
@@ -1650,6 +1662,25 @@ export class TelegramUserbotIngestPipelineService {
   /** telegram: только сетевые/HTTP-сбои Bot API; не CRITICAL: «бот не запущен», пустой whitelist и т.п. */
   return common;
 }
+
+  private async formatOtherCabinetPlacedHint(
+    ingestId: string,
+    excludeCabinetId: string,
+  ): Promise<string> {
+    const sibling = await this.prisma.cabinetIngestRoute.findFirst({
+      where: {
+        ingestId,
+        status: 'placed',
+        cabinetId: { not: excludeCabinetId },
+      },
+      select: { cabinetId: true },
+    });
+    if (!sibling) {
+      return '';
+    }
+    const label = await this.cabinets.getCabinetDisplayLabel(sibling.cabinetId);
+    return ` Сигнал уже установлен в кабинете «${label}».`;
+  }
 
   private async notifyCriticalExternalApiUnavailable(
   api: 'openrouter' | 'bybit' | 'telegram',
