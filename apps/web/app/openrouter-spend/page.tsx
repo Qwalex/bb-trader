@@ -1,5 +1,6 @@
 'use client';
 
+import { PageTitle } from '../components/PageTitle';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
@@ -145,7 +146,7 @@ export default function OpenrouterSpendPage() {
 
   return (
     <>
-      <h1 className="pageTitle">OpenRouter: затраты по источникам</h1>
+      <PageTitle titleKey="pages.openrouterSpend" />
       <p style={{ color: 'var(--muted)', marginBottom: '1rem' }}>
         Аналитика расходов в долларах по источникам userbot. Период можно переключать.
       </p>

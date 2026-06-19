@@ -1,5 +1,7 @@
 import type { PendingChange, Row } from './settings.types';
 import { normalizeBasePath } from '../../lib/base-path';
+import type { Locale } from '../../lib/i18n/constants';
+import { resolveSettingLabel } from '../../lib/i18n/settings-labels.util';
 import {
   DIAGNOSTIC_MODELS_KEY,
   EXTRA_LABELS,
@@ -16,7 +18,10 @@ export function withAppBasePath(url: string): string {
   return `${appBasePath}${url}`;
 }
 
-export function labelForKey(key: string): string {
+export function labelForKey(key: string, locale?: Locale): string {
+  if (locale) {
+    return resolveSettingLabel(key, locale);
+  }
   return LABEL_BY_KEY[key] ?? EXTRA_LABELS[key] ?? key;
 }
 

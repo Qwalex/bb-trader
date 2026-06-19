@@ -1,5 +1,6 @@
 'use client';
 
+import { PageTitle } from '../components/PageTitle';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
@@ -464,7 +465,7 @@ export default function ContentEditorPage() {
 
   return (
     <>
-      <h1 className="pageTitle">Редактор контента</h1>
+      <PageTitle titleKey="pages.contentEditor" />
       <p style={{ color: 'var(--muted)', marginBottom: '1rem', fontSize: '0.9rem' }}>
         Сбор analysis, content, news и other из userbot. Редактируйте вручную или через AI-пресеты,
         затем публикуйте в выбранные группы.

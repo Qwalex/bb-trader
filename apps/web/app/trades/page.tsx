@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 
 import { fetchJson } from '../../lib/api';
 import { searchParamFirst } from '../../lib/search-param.util';
+import { getServerI18n } from '../../lib/i18n/server';
 import { DeleteAllTradesButton } from './delete-all-trades-button';
 import { RecalcClosedPnlButton } from './recalc-closed-pnl-button';
 import { StuckTradesBanner } from './stuck-trades-banner';
@@ -85,6 +86,7 @@ export default async function TradesPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const { t } = await getServerI18n();
   const cookieStore = await cookies();
   const cabinetIdFromCookie = cookieStore.get('cabinet_id')?.value?.trim() ?? '';
   const sp = await searchParams;
@@ -195,7 +197,7 @@ export default async function TradesPage({
 
   return (
     <>
-      <h1 className="pageTitle">История сделок</h1>
+      <h1 className="pageTitle">{t('pages.trades')}</h1>
       {err && <p className="msg err">{err}</p>}
       <StuckTradesBanner initial={stuckSnapshot} />
       <TradesFilters sourceOptions={sourceOptions} />

@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 
+import { useI18n } from '../../lib/i18n/client';
+
 function normalizeBasePath(raw: string | undefined): string {
   const t = (raw ?? '').trim();
   if (!t || t === '/') return '';
@@ -21,6 +23,7 @@ type SessionInfoBarProps = {
 };
 
 export function SessionInfoBar({ login, userId, cabinetName }: SessionInfoBarProps) {
+  const { t } = useI18n();
   const [busy, setBusy] = useState(false);
 
   async function logout() {
@@ -52,7 +55,7 @@ export function SessionInfoBar({ login, userId, cabinetName }: SessionInfoBarPro
     >
       <div style={{ display: 'grid', gap: '0.25rem' }}>
         <div style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>
-          Логин: <strong style={{ color: 'var(--foreground)' }}>{login ?? '—'}</strong>
+          {t('common.loginLabel')}: <strong style={{ color: 'var(--foreground)' }}>{login ?? '—'}</strong>
         </div>
         {userId ? (
           <div style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>
@@ -61,7 +64,7 @@ export function SessionInfoBar({ login, userId, cabinetName }: SessionInfoBarPro
         ) : null}
       </div>
       <button type="button" className="btn btnSecondary" disabled={busy} onClick={() => void logout()}>
-        {busy ? 'Выход…' : 'Выйти'}
+        {busy ? `${t('common.logout')}…` : t('common.logout')}
       </button>
     </div>
   );

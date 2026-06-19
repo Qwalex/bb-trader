@@ -1,5 +1,6 @@
 import { DashboardCrossCabinetSection } from './components/DashboardCrossCabinetSection';
 import { DashboardCabinetInactiveBanner } from './components/DashboardCabinetInactiveBanner';
+import { DashboardTutorialCta } from './components/DashboardTutorialCta';
 import { BalanceChart, type BalancePoint } from './components/BalanceChart';
 import { DashboardTodoList, type DashboardTodoItem } from './components/DashboardTodoList';
 import { PnlChart } from './components/PnlChart';
@@ -12,6 +13,7 @@ import { cookies } from 'next/headers';
 
 import { withCabinetPageHref } from '../lib/cabinet-page-href.util';
 import { fetchJsonCached } from '../lib/api-server-cache';
+import { getServerI18n } from '../lib/i18n/server';
 import { searchParamFirst } from '../lib/search-param.util';
 import type {
   ConnectedGroupItem,
@@ -96,6 +98,7 @@ export default async function Home({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const { t } = await getServerI18n();
   const cookieStore = await cookies();
   const cabinetIdFromCookie = cookieStore.get('cabinet_id')?.value?.trim() ?? '';
   const sp = await searchParams;
@@ -196,7 +199,7 @@ export default async function Home({
     loadErrors.push('sources');
   }
   if (loadErrors.length > 0) {
-    err = `Часть данных не загружена: ${loadErrors.join(', ')}`;
+    err = `${t('dashboard.partialLoad', { parts: loadErrors.join(', ') })} — ${t('dashboard.apiHint')}`;
   }
   let balanceHistory: BalancePoint[] = [];
   if (authMeRes.status === 'fulfilled') {
@@ -297,7 +300,7 @@ export default async function Home({
 
   const activeCabinetDisplay =
     currentCabinet?.name?.trim() ||
-    (cabinetId.trim() ? `ID ${cabinetId.trim()}` : 'не выбран');
+    (cabinetId.trim() ? `ID ${cabinetId.trim()}` : t('common.notSelected'));
   const selectedDashboardCabinet =
     dashboardCabinetCards.find(
       (c) => c.cabinetId === (currentCabinet?.id ?? cabinetId.trim()),
@@ -315,23 +318,27 @@ export default async function Home({
         userId={authMe?.userId ?? null}
         cabinetName={currentCabinet?.name ?? null}
       />
+      <DashboardTutorialCta cabinetId={currentCabinet?.id ?? cabinetId} />
       {err && (
         <p className="msg err" style={{ marginBottom: '1rem' }}>
-          {err} — проверьте, что API запущен и NEXT_PUBLIC_API_URL верный.
+          {err}
         </p>
       )}
       {guard?.paused && !isCurrentCabinetInactive && (
         <div className="msg err" style={{ marginBottom: '1rem' }}>
           <p style={{ margin: 0 }}>
             <strong>
-              Кабинет «{currentCabinet?.name?.trim() ? currentCabinet.name : 'текущий'}»:
+              {t('dashboard.balancePausedTitle', {
+                name: currentCabinet?.name?.trim() ? currentCabinet.name : t('common.current'),
+              })}
             </strong>{' '}
             {guard.reason ??
-              `Автоматическая установка ордеров приостановлена: доступный баланс ниже порога ${guard.minBalanceUsd.toFixed(2)}$`}
+              t('dashboard.balancePausedDefault', {
+                threshold: guard.minBalanceUsd.toFixed(2),
+              })}
           </p>
           <p style={{ margin: '0.5rem 0 0', fontSize: '0.95em', opacity: 0.95 }}>
-            Порог и баланс считаются только для выбранного кабинета (его ключи Bybit). Остальные
-            кабинеты не блокируются этим сообщением — статус по каждому см. в карточках ниже.
+            {t('dashboard.balancePausedNote')}
           </p>
         </div>
       )}
@@ -345,15 +352,13 @@ export default async function Home({
 
       {dashboardCabinetCards.length > 0 && (
         <section className="dashboardSection" style={{ marginBottom: '1.5rem' }}>
-          <h2 className="pageTitle dashboardSectionTitle">Кабинеты</h2>
+          <h2 className="pageTitle dashboardSectionTitle">{t('dashboard.cabinetsTitle')}</h2>
           <p className="dashboardSectionHint">
-            Краткая сводка по каждому кабинету. Нажмите карточку, чтобы переключить активный кабинет на
-            главной. «Исполнение» и «Простой» — средние за период статистики; «Не в работе» — доля
-            доступного баланса (не в позициях).
+            {t('dashboard.cabinetsHint')}
             {inactiveCabinetCount > 0 ? (
               <>
                 {' '}
-                Деактивировано кабинетов: {inactiveCabinetCount} — фоновая работа остановлена.
+                {t('dashboard.cabinetsInactive', { count: inactiveCabinetCount })}
               </>
             ) : null}
           </p>
@@ -381,11 +386,11 @@ export default async function Home({
                     <span className="dashboardCabinetCardBadges">
                       {cabinetInactive ? (
                         <span className="dashboardCabinetBadge dashboardCabinetBadgeInactive">
-                          неактивен
+                          {t('common.inactive')}
                         </span>
                       ) : null}
                       {c.isDefault ? (
-                        <span className="dashboardCabinetBadge">по умолчанию</span>
+                        <span className="dashboardCabinetBadge">{t('common.defaultBadge')}</span>
                       ) : null}
                     </span>
                   </div>
@@ -393,11 +398,11 @@ export default async function Home({
                   {(() => {
                     const setupWarnings = (c.setupWarnings ?? []).filter((w) => {
                       if (!userbotReadyOnDashboard) return true;
-                      return !w.includes('Подключите Userbot');
+                      return !w.includes(t('dashboard.connectUserbotFilter'));
                     });
                     return setupWarnings.length > 0 ? (
                     <div className="dashboardCabinetWarning">
-                      <div className="dashboardCabinetWarningTitle">❗ Требуются действия</div>
+                      <div className="dashboardCabinetWarningTitle">❗ {t('dashboard.actionsRequired')}</div>
                       <div className="dashboardCabinetWarningList">
                         {setupWarnings.join(' ')}
                       </div>
@@ -407,11 +412,13 @@ export default async function Home({
                   {c.balanceGuard?.paused ? (
                     <div className="dashboardCabinetWarning">
                       <div className="dashboardCabinetWarningTitle">
-                        ❗ Автоторговля из userbot приостановлена
+                        ❗ {t('dashboard.autotradePaused')}
                       </div>
                       <div className="dashboardCabinetWarningList">
                         {c.balanceGuard.reason ??
-                          `Доступный баланс ниже порога ${c.balanceGuard.minBalanceUsd.toFixed(2)}$`}
+                          t('dashboard.balanceBelow', {
+                            threshold: c.balanceGuard.minBalanceUsd.toFixed(2),
+                          })}
                       </div>
                     </div>
                   ) : null}
@@ -421,7 +428,7 @@ export default async function Home({
                       <span className="dashboardCabinetMetricValue">{c.winrate.toFixed(1)}%</span>
                     </div>
                     <div>
-                      <span className="dashboardCabinetMetricLabel">Открыто</span>
+                      <span className="dashboardCabinetMetricLabel">{t('dashboard.open')}</span>
                       <span className="dashboardCabinetMetricValue">{c.openSignals ?? 0}</span>
                     </div>
                     <div>
@@ -441,7 +448,7 @@ export default async function Home({
                       </span>
                     </div>
                     <div>
-                      <span className="dashboardCabinetMetricLabel">Баланс (equity)</span>
+                      <span className="dashboardCabinetMetricLabel">{t('dashboard.balanceEquity')}</span>
                       <span className="dashboardCabinetMetricValue">
                         {c.totalBalanceUsd != null && Number.isFinite(c.totalBalanceUsd)
                           ? `${c.totalBalanceUsd.toFixed(2)} $`
@@ -449,7 +456,7 @@ export default async function Home({
                       </span>
                     </div>
                     <div>
-                      <span className="dashboardCabinetMetricLabel">Доступно</span>
+                      <span className="dashboardCabinetMetricLabel">{t('dashboard.available')}</span>
                       <span className="dashboardCabinetMetricValue">
                         {c.availableBalanceUsd != null && Number.isFinite(c.availableBalanceUsd)
                           ? `${c.availableBalanceUsd.toFixed(2)} $`
@@ -457,25 +464,25 @@ export default async function Home({
                       </span>
                     </div>
                     <div>
-                      <span className="dashboardCabinetMetricLabel">Исполнение (сред.)</span>
+                      <span className="dashboardCabinetMetricLabel">{t('dashboard.avgExecution')}</span>
                       <span className="dashboardCabinetMetricValue">
                         {formatDashboardDurationMs(c.avgSignalExecutionMs)}
                       </span>
                     </div>
                     <div>
-                      <span className="dashboardCabinetMetricLabel">Простой (сред.)</span>
+                      <span className="dashboardCabinetMetricLabel">{t('dashboard.avgIdle')}</span>
                       <span className="dashboardCabinetMetricValue">
                         {formatDashboardDurationMs(c.avgIdlePeriodMs)}
                       </span>
                     </div>
                     <div>
-                      <span className="dashboardCabinetMetricLabel">Не в работе</span>
+                      <span className="dashboardCabinetMetricLabel">{t('dashboard.unused')}</span>
                       <span className="dashboardCabinetMetricValue">
                         {formatDashboardRatioPercent(c.unusedBalanceRatio)}
                       </span>
                     </div>
                     <div>
-                      <span className="dashboardCabinetMetricLabel">Не в работе (30д)</span>
+                      <span className="dashboardCabinetMetricLabel">{t('dashboard.unused30d')}</span>
                       <span className="dashboardCabinetMetricValue">
                         {formatDashboardRatioPercent(c.avgUnusedBalanceRatioMonth)}
                       </span>
@@ -491,9 +498,9 @@ export default async function Home({
 
       {connectedGroups.length > 0 && (
         <section className="dashboardSection" style={{ marginBottom: '1.5rem' }}>
-          <h2 className="pageTitle dashboardSectionTitle">Подключённые группы Telegram</h2>
+          <h2 className="pageTitle dashboardSectionTitle">{t('dashboard.connectedGroupsTitle')}</h2>
           <p className="dashboardSectionHint">
-            Источники с включённым приёмом для текущего кабинета. Управление — в разделе Userbot.
+            {t('dashboard.connectedGroupsHint')}
           </p>
           <ul className="dashboardConnectedGroups">
             {connectedGroups.map((g) => (
@@ -513,21 +520,20 @@ export default async function Home({
       <section className="dashboardSection dashboardActiveCabinetSection">
         <div className="dashboardActiveCabinetHeader">
           <h2 className="pageTitle dashboardSectionTitle dashboardActiveCabinetTitle">
-            Текущий кабинет: {activeCabinetDisplay}
+            {t('dashboard.activeCabinetTitle', { name: activeCabinetDisplay })}
           </h2>
           <p className="dashboardSectionHint dashboardActiveCabinetHint">
-            Ниже — показатели, графики и экспозиция для активного кабинета (тот же, что в шапке и в
-            выбранной карточке «Кабинеты»).
+            {t('dashboard.activeCabinetHint')}
           </p>
           <form className="filters" method="get" action="/">
             {cabinetId ? <input type="hidden" name="cabinetId" value={cabinetId} /> : null}
             <label>
-              Источник
+              {t('common.source')}
               <select
                 name="source"
                 defaultValue={source}
               >
-                <option value="">все</option>
+                <option value="">{t('common.all')}</option>
                 {sourceOptions.map((s) => (
                   <option key={s} value={s}>
                     {s}
@@ -546,7 +552,7 @@ export default async function Home({
                 cursor: 'pointer',
               }}
             >
-              Показать
+              {t('common.show')}
             </button>
             {source && (
               <Link
@@ -560,14 +566,13 @@ export default async function Home({
                   textDecoration: 'none',
                 }}
               >
-                Сброс
+                {t('common.reset')}
               </Link>
             )}
           </form>
           {source ? (
             <p className="dashboardSectionHint dashboardActiveCabinetSourceHint">
-              Фильтр по источнику: <strong>{source}</strong> — метрики и ряды ниже учитывают только этот
-              источник.
+              {t('dashboard.sourceFilter', { source })}
             </p>
           ) : null}
         </div>
@@ -578,12 +583,12 @@ export default async function Home({
         <>
           <div className="grid dashboardMetricsGrid">
           <div className="card">
-            <h3>Winrate{source ? ' (источник)' : ''}</h3>
+            <h3>Winrate{source ? ` (${t('common.source').toLowerCase()})` : ''}</h3>
             <div className="value">{stats.winrate.toFixed(1)}%</div>
           </div>
           {top?.worstWinrate && (
             <div className="card">
-              <h3>Худший winrate</h3>
+              <h3>{t('dashboard.worstWinrate')}</h3>
               <div className="value">{top.worstWinrate.winrate.toFixed(1)}%</div>
               <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
                 {top.worstWinrate.source ?? '—'} | W/L: {top.worstWinrate.wL} | APR:{' '}
@@ -593,7 +598,7 @@ export default async function Home({
           )}
           {top?.bestWinrate && (
             <div className="card">
-              <h3>Лучший winrate</h3>
+              <h3>{t('dashboard.bestWinrate')}</h3>
               <div className="value">{top.bestWinrate.winrate.toFixed(1)}%</div>
               <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
                 {top.bestWinrate.source ?? '—'} | W/L: {top.bestWinrate.wL} | APR:{' '}
@@ -602,11 +607,11 @@ export default async function Home({
             </div>
           )}
           <div className="card">
-            <h3>Всего PnL{source ? ' (источник)' : ''}</h3>
+            <h3>{source ? t('dashboard.totalPnlSource') : t('dashboard.totalPnl')}</h3>
             <div className="value">{stats.totalPnl.toFixed(2)}</div>
           </div>
           <div className="card">
-            <h3>APR{source ? ' (источник)' : ''}</h3>
+            <h3>{source ? t('dashboard.aprSource') : 'APR'}</h3>
             <div className="value">
               {aprRealized != null && Number.isFinite(aprRealized)
                 ? `${aprRealized.toFixed(1)}%`
@@ -618,7 +623,7 @@ export default async function Home({
             </p> */}
           </div>
           <div className="card">
-            <h3>APY{source ? ' (источник)' : ''}</h3>
+            <h3>{source ? t('dashboard.apySource') : 'APY'}</h3>
             <div className="value">
               {apyRealized != null && Number.isFinite(apyRealized)
                 ? `${apyRealized.toFixed(1)}%`
@@ -629,7 +634,7 @@ export default async function Home({
             </p> */}
           </div>
           <div className="card">
-            <h3>Закрыто{source ? ' (источник)' : ''}</h3>
+            <h3>{source ? t('dashboard.closedSource') : t('dashboard.closed')}</h3>
             <div className="value">{stats.totalClosed}</div>
           </div>
           <div className="card">
@@ -639,29 +644,33 @@ export default async function Home({
             </div>
           </div>
           <div className="card">
-            <h3>Открытые сигналы{source ? ' (источник)' : ''}</h3>
+            <h3>{source ? t('dashboard.openSignalsSource') : t('dashboard.openSignals')}</h3>
             <div className="value">{stats.openSignals}</div>
           </div>
           <div className="card">
-            <h3>Средний доход (сделка)</h3>
+            <h3>{t('dashboard.avgProfit')}</h3>
             <div className="value">{stats.avgProfitPnl.toFixed(2)}</div>
             <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
-              {avgProfitPct != null ? `${avgProfitPct.toFixed(2)}% от equity` : 'процент недоступен (нет equity)'}
+              {avgProfitPct != null
+                ? t('dashboard.pctOfEquity', { pct: avgProfitPct.toFixed(2) })
+                : t('dashboard.pctUnavailable')}
             </p>
           </div>
           <div className="card">
-            <h3>Средний убыток (сделка)</h3>
+            <h3>{t('dashboard.avgLoss')}</h3>
             <div className="value">{stats.avgLossPnl.toFixed(2)}</div>
             <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
-              {avgLossPct != null ? `${avgLossPct.toFixed(2)}% от equity` : 'процент недоступен (нет equity)'}
+              {avgLossPct != null
+                ? t('dashboard.pctOfEquity', { pct: avgLossPct.toFixed(2) })
+                : t('dashboard.pctUnavailable')}
             </p>
           </div>
           <div className="card">
-            <h3>Сделок в сутки (среднее)</h3>
+            <h3>{t('dashboard.tradesPerDay')}</h3>
             <div className="value">{stats.closedPerDayAvg.toFixed(2)}</div>
           </div>
           <div className="card">
-            <h3>1 день</h3>
+            <h3>{t('dashboard.day1')}</h3>
             <div className="value">
               {balanceDay != null && Number.isFinite(balanceDay)
                 ? `${balanceDay.toFixed(2)}$`
@@ -673,7 +682,7 @@ export default async function Home({
             </p> */}
           </div>
           <div className="card">
-            <h3>7 дней</h3>
+            <h3>{t('dashboard.day7')}</h3>
             <div className="value">
               {balanceWeek != null && Number.isFinite(balanceWeek)
                 ? `${balanceWeek.toFixed(2)}$`
@@ -684,7 +693,7 @@ export default async function Home({
             </p> */}
           </div>
           <div className="card">
-            <h3>30 дней</h3>
+            <h3>{t('dashboard.day30')}</h3>
             <div className="value">
               {balanceMonth != null && Number.isFinite(balanceMonth)
                 ? `${balanceMonth.toFixed(2)}$`
@@ -692,7 +701,7 @@ export default async function Home({
             </div>
           </div>
           <div className="card">
-            <h3>365 дней</h3>
+            <h3>{t('dashboard.day365')}</h3>
             <div className="value">
               {balanceYear != null && Number.isFinite(balanceYear)
                 ? `${balanceYear.toFixed(2)}$`
@@ -700,21 +709,21 @@ export default async function Home({
             </div>
           </div>
           <div className="card">
-            <h3>Баланс</h3>
+            <h3>{t('dashboard.balance')}</h3>
             <div className="value">
               {guard?.totalBalanceUsd != null ? `${guard.totalBalanceUsd.toFixed(2)}$` : '—'}
             </div>
             <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
-              Суммарный USDT (equity)
+              {t('dashboard.totalUsdtEquity')}
             </p>
           </div>
           <div className="card">
-            <h3>Доступный баланс</h3>
+            <h3>{t('dashboard.availableBalance')}</h3>
             <div className="value">
               {guard?.balanceUsd != null ? `${guard.balanceUsd.toFixed(2)}$` : '—'}
             </div>
             <p style={{ color: 'var(--muted)', marginTop: '0.35rem', fontSize: '0.8rem' }}>
-              Порог: {(guard?.minBalanceUsd ?? 3).toFixed(2)}$
+              {t('dashboard.threshold', { value: (guard?.minBalanceUsd ?? 3).toFixed(2) })}
             </p>
           </div>
           </div>
@@ -723,7 +732,7 @@ export default async function Home({
       )}
       {!stats && <DashboardTodoList initialItems={dashboardTodos} layout="full" />}
       <div className="dashboardActiveChartBlock">
-        <h2 className="pageTitle dashboardActiveSubheading">Суммарный баланс USDT</h2>
+        <h2 className="pageTitle dashboardActiveSubheading">{t('dashboard.aggregateBalanceTitle')}</h2>
         <div className="chartWrap">
           <BalanceChart data={balanceHistory} />
         </div>
@@ -731,23 +740,22 @@ export default async function Home({
       {top && (
         <>
           <p className="dashboardActiveFootnote">
-            APR по источникам: (PnL источника ÷ суммарный equity Bybit) × (365 / T); T — календарных
-            дней от первого закрытия источника в окне статистики (включая сброс на странице настроек).
+            {t('dashboard.aprSourcesHint')}
           </p>
           <div className="grid topSources" style={{ marginTop: '0.5rem' }}>
             <div className="card" style={{ gridColumn: 'span 5' }}>
-              <h3>Топ источников по PnL</h3>
+              <h3>{t('dashboard.topPnl')}</h3>
               <div className="tableWrap" style={{ marginTop: '0.5rem' }}>
                 <table className="topSourcesTable">
                   <thead>
                     <tr>
-                      <th className="sourceNameCell">Источник</th>
+                      <th className="sourceNameCell">{t('dashboard.sourceCol')}</th>
                       <th>PnL</th>
                       <th>APR</th>
                       <th>Winrate</th>
                       <th>W / L</th>
-                      <th>Закрыто</th>
-                      <th>Открыто</th>
+                      <th>{t('dashboard.closed')}</th>
+                      <th>{t('dashboard.open')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -769,18 +777,18 @@ export default async function Home({
               </div>
             </div>
             <div className="card" style={{ gridColumn: 'span 5' }}>
-              <h3>Топ источников по Winrate</h3>
+              <h3>{t('dashboard.topWinrate')}</h3>
               <div className="tableWrap" style={{ marginTop: '0.5rem' }}>
                 <table className="topSourcesTable">
                   <thead>
                     <tr>
-                      <th className="sourceNameCell">Источник</th>
+                      <th className="sourceNameCell">{t('dashboard.sourceCol')}</th>
                       <th>Winrate</th>
                       <th>W / L</th>
                       <th>PnL</th>
                       <th>APR</th>
-                      <th>Закрыто</th>
-                      <th>Открыто</th>
+                      <th>{t('dashboard.closed')}</th>
+                      <th>{t('dashboard.open')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -802,18 +810,18 @@ export default async function Home({
               </div>
             </div>
             <div className="card" style={{ gridColumn: 'span 5' }}>
-              <h3>Топ источников по худшему PnL</h3>
+              <h3>{t('dashboard.topWorstPnl')}</h3>
               <div className="tableWrap" style={{ marginTop: '0.5rem' }}>
                 <table className="topSourcesTable">
                   <thead>
                     <tr>
-                      <th className="sourceNameCell">Источник</th>
+                      <th className="sourceNameCell">{t('dashboard.sourceCol')}</th>
                       <th>PnL</th>
                       <th>APR</th>
                       <th>Winrate</th>
                       <th>W / L</th>
-                      <th>Закрыто</th>
-                      <th>Открыто</th>
+                      <th>{t('dashboard.closed')}</th>
+                      <th>{t('dashboard.open')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -835,18 +843,18 @@ export default async function Home({
               </div>
             </div>
             <div className="card" style={{ gridColumn: 'span 5' }}>
-              <h3>Топ источников по худшему Winrate</h3>
+              <h3>{t('dashboard.topWorstWinrate')}</h3>
               <div className="tableWrap" style={{ marginTop: '0.5rem' }}>
                 <table className="topSourcesTable">
                   <thead>
                     <tr>
-                      <th className="sourceNameCell">Источник</th>
+                      <th className="sourceNameCell">{t('dashboard.sourceCol')}</th>
                       <th>Winrate</th>
                       <th>W / L</th>
                       <th>PnL</th>
                       <th>APR</th>
-                      <th>Закрыто</th>
-                      <th>Открыто</th>
+                      <th>{t('dashboard.closed')}</th>
+                      <th>{t('dashboard.open')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -874,14 +882,17 @@ export default async function Home({
         <div className="grid topSources" style={{ marginTop: '1rem' }}>
           <div className="card" style={{ gridColumn: 'span 5' }}>
             <h3>
-              Ликвидации{source ? ` — ${source}` : ''} (всего: {stats.liquidationTotal})
+              {t('dashboard.liquidationsCount', {
+                suffix: source ? ` — ${source}` : '',
+                count: stats.liquidationTotal,
+              })}
             </h3>
             <div className="tableWrap" style={{ marginTop: '0.5rem' }}>
               <table className="topSourcesTable">
                 <thead>
                   <tr>
-                    <th className="sourceNameCell">Источник</th>
-                    <th>Ликвидации</th>
+                    <th className="sourceNameCell">{t('dashboard.sourceCol')}</th>
+                    <th>{t('dashboard.liquidations')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -905,13 +916,13 @@ export default async function Home({
             </div>
           </div>
           <div className="card" style={{ gridColumn: 'span 5' }}>
-            <h3>Ликвидации по плечу</h3>
-            <div className="tableWrap" style={{ marginTop: '0.5rem' }}>
-              <table className="topSourcesTable">
-                <thead>
-                  <tr>
-                    <th>Плечо</th>
-                    <th>Ликвидации</th>
+            <h3>{t('dashboard.liquidationsByLeverage')}</h3>
+              <div className="tableWrap" style={{ marginTop: '0.5rem' }}>
+                <table className="topSourcesTable">
+                  <thead>
+                    <tr>
+                    <th>{t('dashboard.leverage')}</th>
+                    <th>{t('dashboard.liquidations')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -936,7 +947,7 @@ export default async function Home({
       )}
       <div className="dashboardActiveChartBlock">
         <h2 className="pageTitle dashboardActiveSubheading">
-          PnL по дням{source ? ` — ${source}` : ''}
+          {t('dashboard.pnlByDay')}{source ? ` — ${source}` : ''}
         </h2>
         <div className="chartWrap">
           <PnlChart data={pnl} />

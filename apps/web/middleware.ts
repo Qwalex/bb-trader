@@ -33,6 +33,7 @@ function stripBasePath(pathname: string): string {
 }
 
 function isPublicPath(pathname: string): boolean {
+  if (pathname.startsWith('/api/locale')) return true;
   if (pathname === '/login') return true;
   if (pathname.startsWith('/api/auth')) return true;
   if (pathname.startsWith('/api/backend')) return true;

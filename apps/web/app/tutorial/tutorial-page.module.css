@@ -1,0 +1,136 @@
+.root {
+  display: grid;
+  gap: 1.5rem;
+  max-width: 920px;
+}
+
+.header {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.subtitle {
+  color: var(--muted);
+  line-height: 1.5;
+  max-width: 72ch;
+}
+
+.sectionTitle {
+  font-size: 1.15rem;
+  margin-bottom: 0.75rem;
+}
+
+.bodyText {
+  line-height: 1.55;
+  color: var(--foreground);
+}
+
+.overview {
+  padding: 1.25rem;
+}
+
+.videoSection {
+  display: grid;
+  gap: 1rem;
+}
+
+.videoGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+}
+
+.videoSlot {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.videoPlaceholder {
+  aspect-ratio: 16 / 9;
+  border-radius: 10px;
+  border: 1px dashed var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+  color: var(--muted);
+}
+
+.videoCaption {
+  font-size: 0.85rem;
+  color: var(--muted);
+  text-align: center;
+}
+
+.stepsSection {
+  display: grid;
+  gap: 1rem;
+}
+
+.stepsList {
+  list-style: none;
+  display: grid;
+  gap: 1rem;
+  padding: 0;
+  margin: 0;
+}
+
+.stepCard {
+  padding: 1.25rem;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.stepTitle {
+  font-size: 1.05rem;
+}
+
+.meta,
+.settingsHint {
+  font-size: 0.92rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.settingsHint {
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  color: var(--foreground);
+}
+
+.stepLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.stepLink {
+  display: inline-flex;
+  padding: 0.4rem 0.85rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.stepLink:hover {
+  border-color: var(--accent);
+  text-decoration: none;
+}
+
+.checklist {
+  padding: 1.25rem;
+}
+
+.checklistList {
+  margin: 0;
+  padding-left: 1.25rem;
+  display: grid;
+  gap: 0.45rem;
+  line-height: 1.45;
+}

@@ -1,0 +1,43 @@
+.wrap {
+  margin-bottom: 1.25rem;
+}
+
+.cta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  min-height: 5.5rem;
+  padding: 1.25rem 1.5rem;
+  border-radius: 12px;
+  border: 2px solid rgba(59, 130, 246, 0.45);
+  background: linear-gradient(
+    135deg,
+    rgba(59, 130, 246, 0.18) 0%,
+    rgba(59, 130, 246, 0.06) 100%
+  );
+  text-decoration: none;
+  transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.cta:hover {
+  text-decoration: none;
+  border-color: var(--accent);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px rgba(59, 130, 246, 0.15);
+}
+
+.ctaLabel {
+  font-size: clamp(1.35rem, 4vw, 1.85rem);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: #fff;
+}
+
+.ctaHint {
+  font-size: 0.92rem;
+  color: var(--muted);
+  text-align: center;
+  max-width: 42ch;
+}

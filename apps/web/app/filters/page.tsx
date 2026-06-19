@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
+import { PageTitle } from '../components/PageTitle';
 import {
   emptyFilterKindMap,
   FILTER_KINDS,
@@ -326,7 +327,7 @@ export default function FiltersPage() {
 
   return (
     <>
-      <h1 className="pageTitle">Правила распознавания</h1>
+      <PageTitle titleKey="pages.filters" />
       <p style={{ color: 'var(--muted)', marginBottom: '1rem' }}>
         <code>Фильтры</code> проверяются первыми и, если сообщение попало под паттерн, до AI
         оно не доходит. <code>Примеры</code> используются как подсказки для AI-классификации

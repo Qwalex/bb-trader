@@ -3322,3 +3322,24 @@ h1.pageTitle {
   max-height: 240px;
   overflow-y: auto;
 }
+
+.langSwitcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.langSwitcherLabel {
+  white-space: nowrap;
+}
+
+.langSwitcherSelect {
+  background: var(--card);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.25rem 0.45rem;
+  font-size: 0.85rem;
+}

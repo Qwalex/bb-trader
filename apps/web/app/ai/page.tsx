@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 
+import { PageTitle } from '../components/PageTitle';
+
 import { fetchApiResponse } from '../../lib/api';
 import { formatDateTimeRu } from '../../lib/datetime';
 
@@ -80,7 +82,7 @@ export default function AiPage() {
 
   return (
     <>
-      <h1 className="pageTitle">AI рекомендации</h1>
+      <PageTitle titleKey="pages.ai" />
       <p style={{ color: 'var(--muted)', marginBottom: '1rem' }}>
         AI анализирует торговую историю, метрики, глобальные настройки и настройки по группам, после
         чего предлагает корректировки по входам, плечу и риск-менеджменту.

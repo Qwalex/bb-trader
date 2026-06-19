@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 
+import { PageTitle } from '../components/PageTitle';
 import { fetchApiResponse } from '../../lib/api';
 
 type CabinetItem = {
@@ -177,7 +178,7 @@ export default function CabinetsPage() {
 
   return (
     <>
-      <h1 className="pageTitle">Управление кабинетами</h1>
+      <PageTitle titleKey="pages.cabinets" />
       <p style={{ color: 'var(--muted)', marginBottom: '1rem' }}>
         Общие настройки действуют по умолчанию для всех кабинетов. Кабинетные override-настройки
         задаются на странице `Настройки` в режиме `Кабинет`. Клонирование копирует настройки и группы

@@ -10,6 +10,8 @@ import { withCabinetPageHref } from '../../lib/cabinet-page-href.util';
 import { filterNavMenuItems, resolveNavHiddenIds } from '../../lib/cabinet-nav.util';
 import { readActiveCabinetIdClient } from '../../lib/cabinet-client.util';
 import { fetchApiResponse } from '../../lib/api';
+import { LanguageSwitcher, useI18n } from '../../lib/i18n/client';
+import { navItemLabel } from '../../lib/i18n/nav.util';
 import { CabinetSwitcher } from './CabinetSwitcher';
 
 type TopNavProps = {
@@ -29,6 +31,7 @@ function TopNavBody({
   hiddenMenuIds,
   cabinetSyncKey,
 }: TopNavBodyProps) {
+  const { t } = useI18n();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDetailsElement | null>(null);
   const [linkCabinetId, setLinkCabinetId] = useState(serverCabinetId);
@@ -125,9 +128,10 @@ function TopNavBody({
             key={item.id}
             href={item.cabinetAware ? withCabinet(item.href) : item.href}
           >
-            {item.label}
+            {navItemLabel(t, item)}
           </Link>
         ))}
+        <LanguageSwitcher />
       </nav>
       <details
         className="navBurger"
@@ -135,12 +139,12 @@ function TopNavBody({
         open={menuOpen}
         onToggle={(e) => setMenuOpen((e.currentTarget as HTMLDetailsElement).open)}
       >
-        <summary className="navBurgerBtn" aria-label="Открыть меню">
+        <summary className="navBurgerBtn" aria-label={t('nav.openMenu')}>
           ☰
         </summary>
         <div className="navBurgerMenu card">
           <div className="navBurgerSection">
-            <span className="navBurgerCaption">Активный кабинет</span>
+            <span className="navBurgerCaption">{t('nav.activeCabinet')}</span>
             <CabinetSwitcher compact cabinetSyncKey={cabinetSyncKey} />
           </div>
           <div className="navBurgerLinks navBurgerLinksDesktop">
@@ -150,7 +154,7 @@ function TopNavBody({
                 href={item.cabinetAware ? withCabinet(item.href) : item.href}
                 onClick={() => setMenuOpen(false)}
               >
-                {item.label}
+                {navItemLabel(t, item)}
               </Link>
             ))}
           </div>
@@ -161,7 +165,7 @@ function TopNavBody({
                 href={item.cabinetAware ? withCabinet(item.href) : item.href}
                 onClick={() => setMenuOpen(false)}
               >
-                {item.label}
+                {navItemLabel(t, item)}
               </Link>
             ))}
           </div>

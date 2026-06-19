@@ -1,5 +1,6 @@
 'use client';
 
+import { PageTitle } from '../components/PageTitle';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
@@ -105,7 +106,7 @@ export default function MyGroupPage() {
 
   return (
     <>
-      <h1 className="pageTitle">Моя группа</h1>
+      <PageTitle titleKey="pages.myGroup" />
       {msg && <div className={`msg ${msg.type === 'ok' ? 'ok' : 'err'}`}>{msg.text}</div>}
 
       <div className="card" style={{ marginBottom: '1rem' }}>

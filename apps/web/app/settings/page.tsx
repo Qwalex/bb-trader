@@ -14,6 +14,8 @@ import { EntrySizingControl } from '../components/EntrySizingControl';
 import { fetchApiResponse } from '../../lib/api';
 import { readActiveCabinetIdClient } from '../../lib/cabinet-client.util';
 import { parseStoredEntry, serializeEntry } from '../../lib/entry-sizing';
+import { useI18n } from '../../lib/i18n/client';
+import { resolveSettingsSectionTitle } from '../../lib/i18n/settings-labels.util';
 import { CabinetsOverviewSection } from './CabinetsOverviewSection';
 import type { BalanceAlertRuleRow, PendingChange, Row } from './settings.types';
 import {
@@ -21,7 +23,6 @@ import {
   BOOLEAN_KEYS,
   DIAGNOSTIC_MODELS_KEY,
   KEYS,
-  LABEL_BY_KEY,
   MODEL_HISTORY_KEY,
   MODEL_KEYS,
   SETTINGS_SECTIONS,
@@ -41,6 +42,7 @@ import {
 
 export default function SettingsPage() {
   type CabinetItem = { id: string; slug: string; name: string; isDefault: boolean; purpose?: string };
+  const { t, locale } = useI18n();
   const searchParams = useSearchParams();
   const cabinetIdFromQuery = searchParams.get('cabinetId')?.trim() ?? '';
   const activeCabinetId = cabinetIdFromQuery || readActiveCabinetIdClient();
@@ -622,7 +624,7 @@ export default function SettingsPage() {
   if (!authenticated) {
     return (
       <>
-        <h1 className="pageTitle">Настройки</h1>
+        <h1 className="pageTitle">{t('pages.settings')}</h1>
         <div className="card settingsAuthCard">
           <p style={{ color: 'var(--muted)', marginBottom: '0.75rem' }}>
             Войдите в общий аккаунт.
@@ -694,7 +696,7 @@ export default function SettingsPage() {
       };
       return (
         <div key={key} style={{ gridColumn: '1 / -1' }}>
-          <span style={{ display: 'block', marginBottom: '0.35rem' }}>{LABEL_BY_KEY[key] ?? key}</span>
+          <span style={{ display: 'block', marginBottom: '0.35rem' }}>{labelForKey(key, locale)}</span>
           <p style={{ color: 'var(--muted)', fontSize: '0.88rem', margin: '0 0 0.6rem' }}>
             Отмеченные пункты будут скрыты из верхней панели и показаны только в бургер-меню.
           </p>
@@ -730,7 +732,7 @@ export default function SettingsPage() {
       const raw = valueForDraft(key).trim().toLowerCase();
       const on =
         raw === '' || raw === 'true' || raw === '1' || raw === 'yes';
-      const label = LABEL_BY_KEY[key] ?? key;
+      const label = labelForKey(key, locale);
       return (
         <label key={key} className="settingRowSwitch">
           <span>{label}</span>
@@ -751,7 +753,7 @@ export default function SettingsPage() {
       );
     }
     if (key === 'TELEGRAM_NOTIFY_TRADE_EVENT_TYPES') {
-      const label = LABEL_BY_KEY[key] ?? key;
+      const label = labelForKey(key, locale);
       const raw = valueForDraft(key);
       const selected = tradeEventSelectionFromDraft(raw);
       const catalogIds = TRADE_SIGNAL_NOTIFY_EVENT_OPTIONS.map(
@@ -855,7 +857,7 @@ export default function SettingsPage() {
         valueForDraft(key),
         legacyOn,
       );
-      const label = LABEL_BY_KEY[key] ?? key;
+      const label = labelForKey(key, locale);
       return (
         <label key={key} style={{ gridColumn: '1 / -1' }}>
           <span>{label}</span>
@@ -906,7 +908,7 @@ export default function SettingsPage() {
       const raw = valueForDraft(key).trim();
       const v =
         raw === '' || !['1', '2', '3', '4', '5'].includes(raw) ? '' : raw;
-      const label = LABEL_BY_KEY[key] ?? key;
+      const label = labelForKey(key, locale);
       return (
         <label key={key} style={{ gridColumn: '1 / -1' }}>
           <span>{label}</span>
@@ -955,7 +957,7 @@ export default function SettingsPage() {
       return (
         <div key={key} style={{ gridColumn: '1 / -1' }}>
           <label style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            <span>{LABEL_BY_KEY[key] ?? key}</span>
+            <span>{labelForKey(key, locale)}</span>
             <p style={{ color: 'var(--muted)', fontSize: '0.88rem', margin: 0 }}>
               Переключатель: номинал в USDT или доля в процентах от суммарного баланса Bybit. В поле —
               только число.
@@ -970,7 +972,7 @@ export default function SettingsPage() {
         </div>
       );
     }
-    const label = LABEL_BY_KEY[key] ?? key;
+    const label = labelForKey(key, locale);
     const isBoolean = BOOLEAN_KEYS.has(key);
     const isModel = MODEL_KEYS.has(key);
     return (
@@ -1044,28 +1046,28 @@ export default function SettingsPage() {
   return (
     <>
       <h1 className="pageTitle">
-        {scope === 'account' ? 'Настройки аккаунта (глобальные)' : 'Настройки кабинета'}
+        {scope === 'account' ? t('settings.accountTitle') : t('settings.cabinetTitle')}
       </h1>
       {scope === 'cabinet' && (
         <p style={{ color: 'var(--muted)', marginBottom: '0.5rem' }}>
-          Активный кабинет:{' '}
+          {t('settings.activeCabinet')}{' '}
           <strong>
-            {activeCabinet ? `${activeCabinet.name} (${activeCabinet.slug})` : 'не определён'}
+            {activeCabinet
+              ? `${activeCabinet.name} (${activeCabinet.slug})`
+              : t('settings.cabinetUndefined')}
           </strong>
         </p>
       )}
       <p style={{ color: 'var(--muted)', marginBottom: '1rem' }}>
-        Значения хранятся в PostgreSQL на сервере API. Глобальные настройки работают как
-        значения по умолчанию для всех кабинетов, а в режиме кабинета меняются только
-        cabinet-scoped override-поля.
+        {t('settings.storageHint')}
       </p>
       <div style={{ display: 'flex', gap: '0.6rem', marginBottom: '0.9rem' }}>
         <a className={`btn ${scope === 'cabinet' ? '' : 'btnSecondary'}`} href={withAppBasePath('/settings?scope=cabinet')}>
-          Режим: Кабинет
+          {t('settings.scopeCabinetMode')}
         </a>
         {isAdmin ? (
           <a className={`btn ${scope === 'account' ? '' : 'btnSecondary'}`} href={withAppBasePath('/settings?scope=account')}>
-            Режим: Аккаунт (глобально)
+          {t('settings.scopeAccountMode')}
           </a>
         ) : null}
       </div>
@@ -1082,7 +1084,9 @@ export default function SettingsPage() {
       <div className="settingsAccordion" style={{ marginTop: '0.75rem' }}>
         {visibleSections.map((section) => (
           <details key={section.id} className="card">
-            <summary className="settingsSectionSummary">{section.title}</summary>
+            <summary className="settingsSectionSummary">
+              {resolveSettingsSectionTitle(section.id, locale)}
+            </summary>
             <div className="settingsForm" style={{ marginTop: '0.9rem' }}>
               {section.keys.map((key) => renderSettingField(key))}
             </div>

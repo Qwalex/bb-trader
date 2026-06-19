@@ -1,5 +1,6 @@
 'use client';
 
+import { PageTitle } from '../components/PageTitle';
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useRouter } from 'next/navigation';
 
@@ -281,7 +282,7 @@ export default function DiagnosticsPage() {
 
   return (
     <>
-      <h1 className="pageTitle">Диагностика workflow</h1>
+      <PageTitle titleKey="pages.diagnostics" />
       <p style={{ color: 'var(--muted)', marginBottom: '1rem' }}>
         Прогоняет последние кейсы userbot-пайплайна (из БД + Bybit), проверяет этапы моделями из
         `OPENROUTER_DIAGNOSTIC_MODELS`, сохраняет детальные логи и пошаговые комментарии.

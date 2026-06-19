@@ -2,6 +2,8 @@
 
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 
+import { PageTitle } from '../components/PageTitle';
+
 import { EntrySizingControl } from '../components/EntrySizingControl';
 import { UserbotMessageCard } from '../components/UserbotMessageCard';
 import {
@@ -474,7 +476,7 @@ export default function TelegramUserbotPage() {
 
   return (
     <>
-      <h1 className="pageTitle">Telegram Userbot</h1>
+      <PageTitle titleKey="pages.userbot" />
       {msg && (
         <p className={`msg ${msg.type === 'ok' ? 'ok' : 'err'}`} style={{ marginBottom: '1rem' }}>
           {msg.text}

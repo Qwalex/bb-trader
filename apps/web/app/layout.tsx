@@ -8,6 +8,8 @@ import {
   defaultNavHiddenMenuIds,
 } from '../lib/cabinet-nav.util';
 import { fetchServerApi } from '../lib/api-base.util';
+import { I18nProvider } from '../lib/i18n/client';
+import { getServerI18n, getServerLocale } from '../lib/i18n/server';
 
 import './globals.css';
 
@@ -32,56 +34,59 @@ const geistMono = localFont({
   variable: '--font-geist-mono',
 });
 
-export const metadata: Metadata = {
-  title: 'SignalsBot',
-  description: 'Полуавтоматическая торговля по сигналам',
-  robots: {
-    index: false,
-    follow: false,
-    nocache: true,
-    googleBot: {
+export async function generateMetadata(): Promise<Metadata> {
+  const { t } = await getServerI18n();
+  return {
+    title: 'SignalsBot',
+    description: t('meta.description'),
+    robots: {
       index: false,
       follow: false,
-      noimageindex: true,
-      'max-image-preview': 'none',
-      'max-snippet': -1,
-      'max-video-preview': -1,
+      nocache: true,
+      googleBot: {
+        index: false,
+        follow: false,
+        noimageindex: true,
+        'max-image-preview': 'none',
+        'max-snippet': -1,
+        'max-video-preview': -1,
+      },
     },
-  },
-  applicationName: 'SignalsBot',
-  manifest: withBasePath('/manifest.webmanifest'),
-  appleWebApp: {
-    capable: true,
-    statusBarStyle: 'black-translucent',
-    title: 'SignalsBot',
-  },
-  icons: {
-    icon: [
-      {
-        url: withBasePath('/icons/icons/icon-192x192.png'),
-        type: 'image/png',
-        sizes: '192x192',
-      },
-      {
-        url: withBasePath('/icons/icons/icon-512x512.png'),
-        type: 'image/png',
-        sizes: '512x512',
-      },
-    ],
-    apple: [
-      {
-        url: withBasePath('/icons/icons/icon-152x152.png'),
-        type: 'image/png',
-        sizes: '152x152',
-      },
-      {
-        url: withBasePath('/icons/icons/icon-192x192.png'),
-        type: 'image/png',
-        sizes: '192x192',
-      },
-    ],
-  },
-};
+    applicationName: 'SignalsBot',
+    manifest: withBasePath('/manifest.webmanifest'),
+    appleWebApp: {
+      capable: true,
+      statusBarStyle: 'black-translucent',
+      title: 'SignalsBot',
+    },
+    icons: {
+      icon: [
+        {
+          url: withBasePath('/icons/icons/icon-192x192.png'),
+          type: 'image/png',
+          sizes: '192x192',
+        },
+        {
+          url: withBasePath('/icons/icons/icon-512x512.png'),
+          type: 'image/png',
+          sizes: '512x512',
+        },
+      ],
+      apple: [
+        {
+          url: withBasePath('/icons/icons/icon-152x152.png'),
+          type: 'image/png',
+          sizes: '152x152',
+        },
+        {
+          url: withBasePath('/icons/icons/icon-192x192.png'),
+          type: 'image/png',
+          sizes: '192x192',
+        },
+      ],
+    },
+  };
+}
 
 export const viewport: Viewport = {
   width: 'device-width',
@@ -135,12 +140,15 @@ export default async function RootLayout({
       hiddenMenuIds = defaultNavHiddenMenuIds();
     }
   }
+  const locale = await getServerLocale();
   return (
-    <html lang="ru">
+    <html lang={locale}>
       <body className={`${geistSans.variable} ${geistMono.variable}`}>
-        <PwaRegister />
-        <TopNav isAdmin={isAdmin} cabinetId={cabinetId} hiddenMenuIds={hiddenMenuIds} />
-        <main className="main">{children}</main>
+        <I18nProvider locale={locale}>
+          <PwaRegister />
+          <TopNav isAdmin={isAdmin} cabinetId={cabinetId} hiddenMenuIds={hiddenMenuIds} />
+          <main className="main">{children}</main>
+        </I18nProvider>
       </body>
     </html>
   );

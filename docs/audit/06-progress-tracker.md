@@ -2589,5 +2589,13 @@
 - Findings: `extractSignalExternalId` не парсил `SIGNAL ID: #2157` (символ `#` после двоеточия); `extractPairFromResultMessage` не распознавал `$UNI/USDT` — result-flow не находил сигнал.
 - Files: `telegram-userbot-parse.util.ts`, `telegram-userbot-text.util.ts`
 - Changes: optional `#` перед id в regex SIGNAL ID; fallback `$TOKEN/USDT` → `TOKENUSDT`.
-- Manual verification: `npm run build -w apps/api`; sample message → id `2157`, pair `UNIUSDT`.
+- Linked risks (`SEC-###`): N/A
+
+### AUD-221
+
+- Status: `done`
+- Scope: Web i18n (EN default + RU), страница `/tutorial`, кнопка TUTORIAL на dashboard.
+- Files: `apps/web/lib/i18n/**`, `app/tutorial/*`, `DashboardTutorialCta.tsx`, `layout.tsx`, `TopNav.tsx`, `login/page.tsx`, `page.tsx`, `PageTitle.tsx`, `settings/page.tsx`, `packages/shared/src/nav-menu.ts`, `middleware.ts`, `globals.css`
+- Changes: cookie `sb_locale` (default `en`), переключатель Lang в nav/login; словари en/ru; dashboard переведён; заголовки страниц через `PageTitle`; tutorial — 9 шагов userbot→Bybit + 3 video placeholder; крупная CTA на главной.
+- Manual verification: `npm run check-types -w web`, `npm run build -w web`; переключение EN/RU; `/tutorial?cabinetId=…`.
 - Linked risks (`SEC-###`): N/A
