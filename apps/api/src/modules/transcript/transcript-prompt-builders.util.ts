@@ -107,7 +107,7 @@ Return ONLY strict JSON:
 
 Classification rules:
 1. Return "signal" for a fresh trade setup when pair and side (long/short) are clearly named — including incomplete stubs without entry, stop-loss, or take-profit yet (e.g. "INJUSDT SWING LONG"). The parse stage will handle missing levels. Entry is optional when present later. If BOTH market and limit entry are described, treat as limit entry. Leverage and size are optional. Do NOT require SL/TP at classification time.
-1.1. Distinguish labels "SIGNAL" and "SIGNAL ID": a plain "SIGNAL" label is a weak hint of a new setup; "SIGNAL ID" usually references an existing setup and can be close/reentry/result. Do NOT classify as "signal" by "SIGNAL ID" label alone.
+1.1. Distinguish labels "SIGNAL" and "SIGNAL ID": a plain "SIGNAL" label is a weak hint of a new setup; "SIGNAL ID" alone (without entry/SL/targets) usually references an existing setup. If the message also contains a fresh actionable setup (pair + direction + entry + stop + targets), return "signal" — the ID is metadata, not a disqualifier.
 2. Return "close" when the current message explicitly says close/closed/cancel/закрыт/отмена for a trade and it is not a TP/SL result report. Quoted/replied context strongly indicates "close", but even without a quote explicit close wording should still be classified as "close" rather than "result".
 3. Return "reentry" ONLY when the current message is a re-entry / add-entry / update instruction for a previously quoted/replied signal. A quoted/replied context is required.
 4. Return "result" for outcome/performance messages about an existing or past trade: TP hit, SL hit, closed trade report, profit/loss, PNL, percentages, duration, period, recap, statistics, performance summary.

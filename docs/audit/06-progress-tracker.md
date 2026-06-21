@@ -2609,3 +2609,13 @@
 - Files: `apps/api/src/modules/telegram-userbot/scan/telegram-userbot-scan.service.ts`, `apps/api/src/modules/telegram-userbot/ingest/telegram-userbot-ingest-pipeline.service.ts`, `docs/audit/06-progress-tracker.md`
 - Manual verification: `npm run build -w apps/api` (pass); на стенде — сообщение >10 мин без ingest подхватывается poll; duplicate в кабинете B после placed в A показывает имя кабинета A.
 - Linked risks (`SEC-###`): N/A
+
+### AUD-223
+
+- Status: `done`
+- Scope: RENDER #2164 Binance Killers VIP Premium Leak — сигнал не прочитан ни в QSBinanceKillers, ни в Bk journey (05:39).
+- Findings: (1) `pollTick` сканировал только чаты кабинетов **владельца MTProto-сессии** — ingest включён в кабинете другого `ownerUserId` → poll не видел чат; (2) `enabledChatIds` in-memory без периодического refresh и без DB-fallback в realtime → пропуск после enable ingest; (3) poll skip при `enabledChatIds.size===0`; (4) LLM/classifier мог отнести полный сетап с `SIGNAL ID` + TeleFeed footer к `ad`/`other` (правило 1.1).
+- Changes: poll — один проход по **всем** globally enabled ingest-чатам; realtime `isChatIngestEnabled` с fallback в `CabinetTelegramSource`; cron refresh кэша; `hasExplicitTradeSetupStructure` override → `signal`; уточнён prompt classify 1.1; (AUD-222) poll backfill для сообщений за сегодня без ingest.
+- Files: `scan/telegram-userbot-scan.service.ts`, `telegram-userbot.service.ts`, `ingest/telegram-userbot-ingest-pipeline.service.ts`, `utils/telegram-userbot-text.util.ts`, `transcript/transcript-prompt-builders.util.ts`, `docs/audit/06-progress-tracker.md`
+- Manual verification: `npm run build -w apps/api` (pass); после деплoy Worker-UB — poll подхватывает чат из любого кабинета; RENDER #2164 classify → signal; оба route обрабатываются.
+- Linked risks (`SEC-###`): N/A

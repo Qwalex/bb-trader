@@ -44,6 +44,7 @@ import {
   extractPairFromResultMessage,
   extractProfitPercentFromResultMessage,
   extractTokenHint,
+  hasExplicitTradeSetupStructure,
   makeTextPreview,
   tokenHintForSignalFailure,
 } from '../utils/telegram-userbot-text.util';
@@ -290,6 +291,29 @@ export class TelegramUserbotIngestPipelineService {
     let kind = cls.kind;
     const aiRequest = cls.aiRequest;
     let aiResponse = cls.aiResponse;
+    if (
+      kind !== 'signal' &&
+      kind !== 'close' &&
+      kind !== 'reentry' &&
+      kind !== 'result' &&
+      hasExplicitTradeSetupStructure(text)
+    ) {
+      const previousKind = kind;
+      kind = 'signal';
+      const note = limitTrace(
+        JSON.stringify({
+          note: 'structured trade setup heuristic overrides classifier',
+          previousKind,
+        }),
+      );
+      aiResponse = aiResponse ? `${aiResponse}\n${note}` : note;
+      this.appendIngestStageLog(
+        'info',
+        'Userbot: structured setup heuristic → signal',
+        ingest,
+        { previousKind, groupName },
+      );
+    }
     let ignoredOtherError: string | null = null;
     if (!hasQuotedSource && !signalExternalId && (kind === 'close' || kind === 'reentry')) {
       const previousKind = kind;

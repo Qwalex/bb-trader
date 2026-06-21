@@ -162,13 +162,37 @@ export class TelegramUserbotScanService {
     };
   }
 
+  private async listGloballyEnabledIngestChats(): Promise<
+    Array<{ chatId: string; chat: { title: string | null } | null }>
+  > {
+    const rows = await this.prisma.cabinetTelegramSource.findMany({
+      where: {
+        enabled: true,
+        cabinet: { isActive: true },
+      },
+      select: { chatId: true, chat: { select: { title: true } } },
+    });
+    const byChatId = new Map<
+      string,
+      { chatId: string; chat: { title: string | null } | null }
+    >();
+    for (const row of rows) {
+      if (!byChatId.has(row.chatId)) {
+        byChatId.set(row.chatId, row);
+      }
+    }
+    return Array.from(byChatId.values());
+  }
+
   async scanTodayMessagesCore(
     limitPerChatRaw?: number,
     includeTodayMetrics = false,
     clientArg?: TelegramClient,
+    options?: { allEnabledCabinets?: boolean },
   ) {
-    const cabinetId = this.cabinetContext.getCabinetId();
-    if (cabinetId && !(await this.cabinets.isCabinetActive(cabinetId))) {
+    const allEnabledCabinets = options?.allEnabledCabinets === true;
+    const cabinetId = allEnabledCabinets ? null : this.cabinetContext.getCabinetId();
+    if (!allEnabledCabinets && cabinetId && !(await this.cabinets.isCabinetActive(cabinetId))) {
       return {
         ok: true,
         skipped: true,
@@ -185,13 +209,15 @@ export class TelegramUserbotScanService {
     if (!client || !(await this.userbotClient.isClientAuthorized(client))) {
       return { ok: false, error: 'Userbot не подключен.' };
     }
-    const enabledChats = await this.prisma.cabinetTelegramSource.findMany({
-      where: {
-        cabinetId: this.cabinetContext.getCabinetId() ?? undefined,
-        enabled: true,
-      },
-      select: { chatId: true, chat: { select: { title: true } } },
-    });
+    const enabledChats = allEnabledCabinets
+      ? await this.listGloballyEnabledIngestChats()
+      : await this.prisma.cabinetTelegramSource.findMany({
+          where: {
+            cabinetId: this.cabinetContext.getCabinetId() ?? undefined,
+            enabled: true,
+          },
+          select: { chatId: true, chat: { select: { title: true } } },
+        });
     const limitPerChat =
       typeof limitPerChatRaw === 'number' && Number.isFinite(limitPerChatRaw)
         ? Math.max(20, Math.min(500, Math.floor(limitPerChatRaw)))
@@ -292,7 +318,7 @@ export class TelegramUserbotScanService {
     };
   }
 
-  /** Опрос по всем подключённым клиентам (кабинет по owner user id). */
+  /** Опрос по всем подключённым MTProto-клиентам; все globally enabled ingest-чаты (любой кабинет). */
   async pollTick(shouldSkip: () => boolean): Promise<void> {
     if (this.pollInFlight) {
       return;
@@ -302,22 +328,13 @@ export class TelegramUserbotScanService {
     }
     this.pollInFlight = true;
     try {
-      for (const [userId, client] of this.userbotClient.clientsEntries()) {
+      for (const [, client] of this.userbotClient.clientsEntries()) {
         if (!(await this.userbotClient.isClientAuthorized(client))) {
           continue;
         }
-        const ownerCabinets = await this.cabinets.listCabinetsForUser(userId);
-        if (ownerCabinets.length === 0) {
-          continue;
-        }
-        for (const cab of ownerCabinets) {
-          if (!cab.isActive) {
-            continue;
-          }
-          await this.cabinetContext.runWithCabinet(cab.id, () =>
-            this.scanTodayMessagesCore(USERBOT_POLL_FETCH_LIMIT, false, client),
-          );
-        }
+        await this.scanTodayMessagesCore(USERBOT_POLL_FETCH_LIMIT, false, client, {
+          allEnabledCabinets: true,
+        });
       }
     } catch (e) {
       this.logger.warn(`Userbot pollTick failed: ${formatError(e)}`);

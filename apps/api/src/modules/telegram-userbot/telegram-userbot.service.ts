@@ -700,9 +700,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       getPollIntervalMs: () => this.getUserbotPollIntervalMs(),
       pollTick: () =>
         this.userbotScan.pollTick(
-          () =>
-            this.enabledChatIds.size === 0 ||
-            this.userbotClient.getConnectedClientsCount() === 0,
+          () => this.userbotClient.getConnectedClientsCount() === 0,
         ),
     });
   }
@@ -865,6 +863,16 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
     return { reason: 'MTProto-клиент не поднят или не авторизован в этом процессе API' };
   }
 
+  @Cron(CronExpression.EVERY_MINUTE)
+  async refreshEnabledChatsCacheCron(): Promise<void> {
+    if (!shouldRunUserbotMtproto()) {
+      return;
+    }
+    await this.refreshEnabledChatsCache().catch((e) => {
+      this.logger.debug(`refreshEnabledChatsCache cron failed: ${formatError(e)}`);
+    });
+  }
+
   /**
    * Пока userbot ожидаемо должен быть онлайн, но GramJS не подключён — каждую минуту POST на CRITICAL_NOTIFY_URL.
    * Выкл.: `TELEGRAM_USERBOT_DISCONNECTED_CRITICAL_CRON=false`.
@@ -944,7 +952,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       if (!skipRecencyFilter && !(await this.userbotScan.isMessageRecent(createdAt))) {
         return;
       }
-      if (!this.enabledChatIds.has(chatId)) {
+      if (!(await this.isChatIngestEnabled(chatId))) {
         return;
       }
       this.userbotScan.noteLastSeenMessageId(chatId, messageId);
@@ -1019,7 +1027,7 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
   private async refreshEnabledChatsCache() {
     const [scopedRows, legacyRows] = await Promise.all([
       this.prisma.cabinetTelegramSource.findMany({
-        where: { enabled: true },
+        where: { enabled: true, cabinet: { isActive: true } },
         select: { chatId: true },
       }),
       this.prisma.tgUserbotChat.findMany({
@@ -1031,6 +1039,30 @@ export class TelegramUserbotService implements OnModuleInit, OnModuleDestroy {
       ...scopedRows.map((r) => r.chatId),
       ...legacyRows.map((r) => r.chatId),
     ]);
+  }
+
+  /** In-memory кэш + fallback в БД (важно при Worker split и после enable ingest без рестарта). */
+  private async isChatIngestEnabled(chatId: string): Promise<boolean> {
+    const id = String(chatId ?? '').trim();
+    if (!id) {
+      return false;
+    }
+    if (this.enabledChatIds.has(id)) {
+      return true;
+    }
+    const row = await this.prisma.cabinetTelegramSource.findFirst({
+      where: {
+        chatId: id,
+        enabled: true,
+        cabinet: { isActive: true },
+      },
+      select: { chatId: true },
+    });
+    if (row) {
+      this.enabledChatIds.add(id);
+      return true;
+    }
+    return false;
   }
 
   private async isClientAuthorized(client: TelegramClient | null): Promise<boolean> {

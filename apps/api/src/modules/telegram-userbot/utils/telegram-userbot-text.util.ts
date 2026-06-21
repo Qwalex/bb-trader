@@ -91,6 +91,26 @@ export function extractPairFromResultMessage(text: string): string | null {
   return normalizeTradingPair(`${normalized}USDT`);
 }
 
+/**
+ * Явная структура торгового сетапа (Binance Killers / Cornix и аналоги):
+ * пара + direction + entry + stop + targets — независимо от метки SIGNAL ID или TeleFeed footer.
+ */
+export function hasExplicitTradeSetupStructure(text: string): boolean {
+  const raw = String(text ?? '').replace(/\u00a0/g, ' ');
+  if (!raw.trim()) {
+    return false;
+  }
+  const hasDirection = /\bdirection\s*:\s*(long|short)\b/i.test(raw);
+  const hasEntry = /\bentry\s*:/i.test(raw);
+  const hasStop = /\bstop\s*loss\s*:/i.test(raw) || /\bsl\s*:/i.test(raw);
+  const hasTargets = /\btargets?\s*:/i.test(raw) || /\btake\s*profit/i.test(raw);
+  const hasPair =
+    /\$?[A-Za-z0-9]{2,15}\s*\/\s*USDT\b/i.test(raw) ||
+    /\bcoin\s*:\s*\$?[A-Za-z0-9]{2,15}/i.test(raw) ||
+    /\b[A-Za-z0-9]{2,15}USDT\b/i.test(raw);
+  return hasDirection && hasEntry && hasStop && hasTargets && hasPair;
+}
+
 /** Для уведомлений об ошибке после парса — показывать пару из `SignalDto`, если есть, иначе эвристика по тексту. */
 export function tokenHintForSignalFailure(text: string, pair?: string | null): string {
   const p = String(pair ?? '').trim().toUpperCase();
